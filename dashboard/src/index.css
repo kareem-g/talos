@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 7%;
+    --surface: 0 0% 10%;
+    --surface-hover: 0 0% 13%;
+    --surface-active: 0 0% 15%;
+    --border: 0 0% 18%;
+    --border-hover: 0 0% 25%;
+    --text: 0 0% 90%;
+    --text-muted: 0 0% 60%;
+    --text-dim: 0 0% 40%;
+    --accent: 220 90% 56%;
+    --accent-hover: 220 90% 62%;
+    --success: 142 76% 36%;
+    --warning: 38 92% 50%;
+    --error: 0 84% 60%;
+    --info: 199 89% 48%;
+    --terminal-bg: 0 0% 5%;
+    --terminal-fg: 0 0% 85%;
+    --terminal-green: 142 70% 45%;
+    --terminal-yellow: 38 92% 50%;
+    --terminal-red: 0 84% 60%;
+    --terminal-blue: 217 91% 60%;
+    --terminal-magenta: 291 70% 50%;
+    --terminal-cyan: 187 85% 43%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-text antialiased;
+    font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  }
+}

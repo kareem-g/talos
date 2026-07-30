@@ -1,0 +1,28 @@
+/* Component utility classes */
+.card {
+  @apply rounded-lg border border-border bg-surface;
+}
+
+.card-hover {
+  @apply card hover:border-border-hover hover:bg-surface-hover transition-colors cursor-pointer;
+}
+
+.btn-primary {
+  @apply px-4 py-2 rounded-md bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors;
+}
+
+.btn-secondary {
+  @apply px-4 py-2 rounded-md bg-surface-hover hover:bg-surface-active text-text text-sm transition-colors;
+}
+
+.btn-ghost {
+  @apply px-3 py-1.5 rounded-md hover:bg-surface-hover text-text-muted hover:text-text text-sm transition-colors;
+}
+
+.input {
+  @apply px-3 py-2 rounded-md bg-terminal-bg border border-border text-sm text-text outline-none focus:border-accent transition-colors;
+}
+
+.badge {
+  @apply px-1.5 py-0.5 rounded text-[10px] font-medium;
+}

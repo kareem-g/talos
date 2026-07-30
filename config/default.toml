@@ -1,0 +1,51 @@
+[server]
+host = "0.0.0.0"
+port = 9120
+# bind_interface = "tailscale0"
+
+[security]
+auto_pair = true
+# auth_token = ""
+tls_enabled = true
+# tls_cert_path = ""
+# tls_key_path = ""
+
+[tunnel.tailscale]
+enabled = false
+hostname = "agentdeck"
+
+[tunnel.cloudflare]
+enabled = false
+# token = ""
+# hostname = ""
+
+[agents.claude]
+path = "claude"
+args = []
+
+[agents.codex]
+path = "codex"
+args = []
+
+[agents.opencode]
+path = "opencode"
+args = []
+
+[worktree]
+enabled = true
+base_dir = "~/.agentdeck/worktrees"
+auto_merge = false
+
+[mcp]
+servers = []
+socket_pool_enabled = true
+
+[notifications.telegram]
+# bot_token = ""
+# chat_id = ""
+
+[notifications.slack]
+# webhook_url = ""
+
+[theme]
+default = "tokyo-night"

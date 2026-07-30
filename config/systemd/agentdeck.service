@@ -1,0 +1,14 @@
+[Unit]
+Description=AgentDeck Linux Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=%I
+ExecStart=/usr/local/bin/agentdeck-backend
+Restart=always
+RestartSec=5
+Environment="RUST_LOG=info"
+
+[Install]
+WantedBy=multi-user.target

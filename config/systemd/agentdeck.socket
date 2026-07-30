@@ -1,0 +1,9 @@
+[Unit]
+Description=AgentDeck Linux Socket
+
+[Socket]
+ListenStream=9120
+Accept=no
+
+[Install]
+WantedBy=sockets.target
