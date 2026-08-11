@@ -20,7 +20,7 @@ interface SessionItem {
   name: string
   agent: string
   agentName: string
-  status: 'running' | 'waiting' | 'idle' | 'error' | 'archived'
+  status: 'running' | 'waiting' | 'idle' | 'error' | 'archived' | 'starting' | 'exited'
   project?: string
   branch?: string
   updatedAt: string
@@ -42,6 +42,8 @@ const statusConfig = {
   idle: { color: 'text-text-muted', bg: 'bg-surface-hover', icon: Terminal, label: 'Idle' },
   error: { color: 'text-error', bg: 'bg-error/10', icon: Square, label: 'Error' },
   archived: { color: 'text-text-dim', bg: 'bg-surface-hover', icon: Terminal, label: 'Archived' },
+  starting: { color: 'text-accent', bg: 'bg-accent/10', icon: Play, label: 'Starting' },
+  exited: { color: 'text-text-dim', bg: 'bg-surface-active', icon: Square, label: 'Exited' },
 }
 
 export function SessionList() {
@@ -62,46 +64,32 @@ export function SessionList() {
   const fetchData = async () => {
     try {
       // Fetch sessions
+      console.log('[AgentDeck][Session] Fetching sessions...')
       const sessionsRes = await fetch('/api/sessions')
       const sessionsData = await sessionsRes.json()
-      setSessions(sessionsData.sessions || [])
+      const sessionList = (sessionsData.sessions || []).map((s: any) => ({
+        id: s.id,
+        name: s.name || 'Unnamed',
+        agent: s.agent || '',
+        agentName: s.agent ? (s.agent === 'claude' ? 'Claude Code' : s.agent === 'codex' ? 'Codex CLI' : s.agent === 'opencode' ? 'OpenCode' : s.agent) : '',
+        status: s.status || 'idle',
+        project: s.project || undefined,
+        branch: s.branch || undefined,
+        updatedAt: s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '-',
+        cost: s.cost || undefined,
+        tokensUsed: s.tokens_used || undefined,
+      }))
+      console.log(`[AgentDeck][Session] Loaded ${sessionList.length} session(s)`)
+      setSessions(sessionList)
 
       // Fetch agents
       const agentsRes = await fetch('/api/agents')
       const agentsData = await agentsRes.json()
       setAgents(agentsData.agents || [])
-    } catch {
-      // Demo data
-      setAgents([
-        { id: 'claude', name: 'Claude Code', available: true, path: '/usr/local/bin/claude', features: ['plan', 'diff', 'tool_use'] },
-        { id: 'codex', name: 'Codex CLI', available: true, path: '/usr/local/bin/codex', features: ['code_generation', 'shell'] },
-        { id: 'opencode', name: 'OpenCode', available: false, path: 'opencode', features: ['chat', 'code'] },
-      ])
-      setSessions([
-        {
-          id: 'demo-1',
-          name: 'Feature Implementation',
-          agent: 'claude',
-          agentName: 'Claude Code',
-          status: 'running',
-          project: '~/projects/myapp',
-          branch: 'agentdeck/abc123',
-          updatedAt: '2 min ago',
-          cost: 0.0234,
-          tokensUsed: 15420,
-        },
-        {
-          id: 'demo-2',
-          name: 'Bug Fix Session',
-          agent: 'codex',
-          agentName: 'Codex CLI',
-          status: 'waiting',
-          project: '~/projects/api',
-          updatedAt: '15 min ago',
-          cost: 0.0156,
-          tokensUsed: 8930,
-        },
-      ])
+    } catch (err) {
+      console.error('[AgentDeck][Session] Failed to fetch data:', err)
+      setAgents([])
+      setSessions([])
     } finally {
       setIsLoading(false)
     }
@@ -109,15 +97,21 @@ export function SessionList() {
 
   const createSession = async (agentId: string) => {
     try {
+      console.log(`[AgentDeck][Session] Creating session with agent=${agentId}`)
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent: agentId }),
       })
       const data = await res.json()
-      navigate(`/session/${data.id}`)
-    } catch {
-      navigate(`/session/demo-${Date.now()}`)
+      if (data.id) {
+        console.log(`[AgentDeck][Session] Created session id=${data.id}`)
+        navigate(`/session/${data.id}`)
+      } else {
+        console.error('[AgentDeck][Session] Create session failed:', data)
+      }
+    } catch (err) {
+      console.error('[AgentDeck][Session] Create session error:', err)
     }
     setShowNewSession(false)
   }
@@ -265,7 +259,7 @@ export function SessionList() {
                           {(session.tokensUsed / 1000).toFixed(1)}k tokens
                         </span>
                       )}
-                      {session.cost !== undefined && (
+                      {session.cost != null && (
                         <span className="text-[11px] text-text-dim">
                           ${session.cost.toFixed(4)}
                         </span>

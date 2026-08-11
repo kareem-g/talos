@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use tracing::{info, error};
+use tracing::info;
 
 #[derive(Parser)]
 #[command(name = "agentdeck")]
@@ -144,7 +144,7 @@ enum ConfigAction {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     let level = if cli.verbose { "debug" } else { "info" };
@@ -328,10 +328,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Config { action } => match action {
             ConfigAction::Edit => {
-                let config_path = dirs::config_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("agentdeck")
-                    .join("config.toml");
+                let config_path = config_path();
                 let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
                 tokio::process::Command::new(&editor)
                     .arg(config_path)
@@ -343,10 +340,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Resetting configuration to defaults...");
             }
             ConfigAction::Show => {
-                let config_path = dirs::config_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("agentdeck")
-                    .join("config.toml");
+                let config_path = config_path();
                 if config_path.exists() {
                     let content = tokio::fs::read_to_string(config_path).await?;
                     println!("{}", content);
@@ -369,4 +363,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn config_path() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    base.join("agentdeck").join("config.toml")
 }

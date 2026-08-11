@@ -7,7 +7,8 @@ import {
   Settings,
   Wifi,
   WifiOff,
-  Command
+  Command,
+  Smartphone
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useCommandPalette } from '../hooks/useCommands'
@@ -63,6 +64,14 @@ export function Header() {
           title="Settings"
         >
           <Settings className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={() => navigate('/pairing')}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border hover:border-border-hover hover:bg-surface-hover text-text-muted text-xs transition-colors"
+        >
+          <Smartphone className="w-3.5 h-3.5" />
+          <span>Connect mobile</span>
         </button>
 
         <button

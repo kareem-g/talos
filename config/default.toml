@@ -9,43 +9,81 @@ auto_pair = true
 tls_enabled = true
 # tls_cert_path = ""
 # tls_key_path = ""
+project_allowlist = []
+require_approval_for = ["rm", "sudo"]
 
 [tunnel.tailscale]
 enabled = false
 hostname = "agentdeck"
+auto_connect = false
 
 [tunnel.cloudflare]
 enabled = false
 # token = ""
 # hostname = ""
 
+[agents]
+auto_detect = true
+
 [agents.claude]
 path = "claude"
 args = []
+env = {}
 
 [agents.codex]
 path = "codex"
 args = []
+env = {}
 
 [agents.opencode]
 path = "opencode"
 args = []
+env = {}
 
 [worktree]
 enabled = true
 base_dir = "~/.agentdeck/worktrees"
 auto_merge = false
+auto_create_on_session = true
 
 [mcp]
 servers = []
 socket_pool_enabled = true
+auto_start = false
+
+[notifications]
+notify_on = ["session_completed", "approval_required", "error"]
 
 [notifications.telegram]
+enabled = false
 # bot_token = ""
 # chat_id = ""
 
 [notifications.slack]
+enabled = false
 # webhook_url = ""
+# channel = ""
+
+[notifications.discord]
+enabled = false
+# webhook_url = ""
+
+[notifications.email]
+enabled = false
+smtp_port = 587
+# smtp_host = ""
+# smtp_user = ""
+# smtp_pass = ""
+# from = ""
+to = []
 
 [theme]
 default = "tokyo-night"
+# [theme.custom]
+# mytheme.background = "#000000"
+# mytheme.surface = "#111111"
+# mytheme.accent = "#00ff00"
+# mytheme.text = "#ffffff"
+# mytheme.success = "#00ff00"
+# mytheme.warning = "#ffff00"
+# mytheme.error = "#ff0000"

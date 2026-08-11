@@ -4,7 +4,6 @@ pub mod opencode;
 
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::process::Stdio;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
@@ -21,6 +20,16 @@ pub struct AgentConfig {
     pub binary: String,
     pub args: Vec<String>,
     pub env: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCapabilities {
+    pub structured_output: bool,
+    pub hooks: bool,
+    pub streaming: bool,
+    pub approvals: bool,
+    pub file_events: bool,
+    pub terminal: bool,
 }
 
 /// Detect if an agent CLI is installed and get its version
@@ -81,4 +90,44 @@ pub trait AgentAdapter: Send + Sync {
     fn detect_state(&self, output: &str) -> crate::pty::PtyState;
     fn supports_hooks(&self) -> bool;
     fn hook_events(&self) -> Vec<String>;
+
+    fn capabilities(&self) -> AgentCapabilities {
+        AgentCapabilities {
+            structured_output: false,
+            hooks: self.supports_hooks(),
+            streaming: true,
+            approvals: false,
+            file_events: false,
+            terminal: true,
+        }
+    }
+
+    fn parse_structured_event(&self, _payload: &serde_json::Value) -> Option<crate::agent_events::AgentEvent> {
+        None
+    }
+
+    fn supports_questions(&self) -> bool {
+        false
+    }
+
+    fn answer_question(
+        &self,
+        _question: &crate::questions::Question,
+        _answer: &crate::questions::QuestionAnswer,
+    ) -> Result<Vec<String>> {
+        Err(crate::AgentDeckError::Unknown("This agent does not support structured questions".to_string()))
+    }
+}
+
+pub fn question_input(
+    agent: &str,
+    question: &crate::questions::Question,
+    answer: &crate::questions::QuestionAnswer,
+) -> Result<Vec<String>> {
+    match agent {
+        "claude" => claude::answer_question_input(question, answer),
+        _ => Err(crate::AgentDeckError::Unknown(
+            "This agent does not support structured question answers".to_string(),
+        )),
+    }
 }

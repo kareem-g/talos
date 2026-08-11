@@ -13,6 +13,8 @@ pub mod tunnel;
 pub mod websocket;
 pub mod worktree;
 pub mod agents;
+pub mod agent_events;
+pub mod questions;
 
 use thiserror::Error;
 
@@ -41,6 +43,9 @@ pub enum AgentDeckError {
 
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
+
+    #[error("Migration error: {0}")]
+    Migration(String),
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

@@ -11,6 +11,9 @@ import { Settings } from './components/Settings'
 import { MCPManager } from './components/MCPManager'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
+import { MobileApp } from './components/MobileApp'
+import { MobilePairingPage } from './components/MobilePairingPage'
+import { PairingPage } from './components/PairingPage'
 
 function AppContent() {
   const { connected } = useWebSocket()
@@ -31,6 +34,7 @@ function AppContent() {
             <Route path="/session/:id" element={<SessionDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/mcp" element={<MCPManager />} />
+            <Route path="/pairing" element={<PairingPage />} />
           </Routes>
         </main>
       </div>
@@ -44,7 +48,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <ThemeProvider>
-        <AppContent />
+        <Routes>
+          <Route path="/mobile/pair" element={<MobilePairingPage />} />
+          <Route path="/mobile/*" element={<MobileApp />} />
+          <Route path="*" element={<AppContent />} />
+        </Routes>
       </ThemeProvider>
     </BrowserRouter>
   )

@@ -1,5 +1,6 @@
 pub mod pairing;
 pub mod crypto;
+pub mod devices;
 
 use serde::{Deserialize, Serialize};
 

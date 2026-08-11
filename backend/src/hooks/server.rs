@@ -1,11 +1,413 @@
 use axum::{
-    extract::Json,
-    response::IntoResponse,
+    extract::{Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
 };
-use serde_json::Value;
+use chrono::Utc;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::sync::Arc;
 
-pub async fn handle_claude_hook(Json(body): Json<Value>) -> impl IntoResponse {
-    tracing::info!("Claude hook received: {:?}", body);
-    // Process hook event and broadcast to WebSocket clients
-    axum::Json(serde_json::json!({ "received": true }))
+use crate::{
+    agent_events::{AgentEvent, AgentMessage},
+    config::AppState,
+    pty::manager::PendingApproval,
+    questions::{Question, QuestionOption},
+};
+
+#[derive(Debug, Deserialize)]
+pub struct HookQuery {
+    pub session_id: String,
+    pub token: String,
 }
+
+pub async fn handle_claude_hook(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HookQuery>,
+    Json(body): Json<Value>,
+) -> Response {
+    let authorized = state
+        .hook_tokens
+        .read()
+        .await
+        .get(&query.session_id)
+        .map(|token| token == &query.token)
+        .unwrap_or(false);
+    if !authorized {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid hook token" })))
+            .into_response();
+    }
+
+    let event_name = body
+        .get("hook_event_name")
+        .or_else(|| body.get("event"))
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown");
+    let session_id = body
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| query.session_id.clone());
+
+    match event_name {
+        "SessionStart" => {
+            state.pty_manager.mark_waiting_for_input(&session_id);
+            emit(&state, &session_id, "agent_ready", json!({ "provider": "claude" }));
+            state.broadcast.broadcast(WsMessage::StateChange {
+                session_id: session_id.clone(),
+                state: "waiting_for_input".to_string(),
+            });
+        }
+        "PreToolUse" => {
+            state.broadcast.broadcast(WsMessage::StateChange {
+                session_id: session_id.clone(),
+                state: "running".to_string(),
+            });
+            if string_field(&body, "tool_name")
+                .map(|tool| tool.eq_ignore_ascii_case("AskUserQuestion"))
+                .unwrap_or(false)
+            {
+                handle_questions(&state, &session_id, &body).await;
+            } else {
+                handle_tool_started(&state, &session_id, &body).await;
+            }
+        }
+        "PostToolUse" => handle_tool_finished(&state, &session_id, &body, true).await,
+        "PostToolUseFailure" => handle_tool_finished(&state, &session_id, &body, false).await,
+        "PermissionRequest" => handle_permission(&state, &session_id, &body).await,
+        "Stop" => handle_stop(&state, &session_id, &body).await,
+        "Notification" => {
+            emit(
+                &state,
+                &session_id,
+                "agent_waiting",
+                json!({
+                    "message": body.get("message").cloned().unwrap_or(Value::Null),
+                    "notification_type": body.get("notification_type").cloned().unwrap_or(Value::Null),
+                }),
+            );
+            state.pty_manager.mark_waiting_for_input(&session_id);
+        }
+        _ => emit(&state, &session_id, "hook_received", body),
+    }
+
+    Json(json!({})).into_response()
+}
+
+async fn handle_tool_started(state: &AppState, session_id: &str, body: &Value) {
+    let tool_id = string_field(body, "tool_use_id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let tool_name = string_field(body, "tool_name").unwrap_or_else(|| "Tool".to_string());
+    state
+        .hook_starts
+        .write()
+        .await
+        .insert(tool_id.clone(), Utc::now());
+
+    emit(
+        state,
+        session_id,
+        "tool_started",
+        json!({
+            "tool_id": tool_id.clone(),
+            "tool_name": tool_name,
+            "input": body.get("tool_input").cloned().unwrap_or(Value::Null),
+        }),
+    );
+
+    let lower = tool_name.to_lowercase();
+    if lower == "bash" || lower == "shell" {
+        emit(
+            state,
+            session_id,
+            "command_started",
+            json!({ "command": body.get("tool_input").and_then(|input| input.get("command")).cloned().unwrap_or(Value::Null), "tool_id": tool_id.clone() }),
+        );
+    } else if lower == "grep" || lower == "glob" || lower.contains("search") {
+        emit(
+            state,
+            session_id,
+            "search_started",
+            json!({ "query": body.get("tool_input").and_then(|input| input.get("pattern").or_else(|| input.get("query"))).cloned().unwrap_or(Value::Null), "tool_id": tool_id.clone() }),
+        );
+    } else if lower == "read" {
+        emit(
+            state,
+            session_id,
+            "file_read",
+            json!({ "path": body.get("tool_input").and_then(|input| input.get("file_path").or_else(|| input.get("path"))).cloned().unwrap_or(Value::Null), "tool_id": tool_id.clone() }),
+        );
+    }
+}
+
+async fn handle_questions(state: &AppState, session_id: &str, body: &Value) {
+    let _ = state.session_manager.cancel_pending_approvals(session_id).await;
+    let Some(raw_questions) = body
+        .get("tool_input")
+        .and_then(|input| input.get("questions"))
+        .and_then(Value::as_array)
+    else {
+        emit(state, session_id, "agent_error", json!({ "message": "Question tool returned no questions" }));
+        return;
+    };
+
+    let tool_id = string_field(body, "tool_use_id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    for (index, raw) in raw_questions.iter().enumerate() {
+        let title = raw
+            .get("header")
+            .and_then(Value::as_str)
+            .unwrap_or("Question")
+            .to_string();
+        let question_text = raw
+            .get("question")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let options = raw
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|options| {
+                options
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(option_index, option)| {
+                        let label = option.get("label").and_then(Value::as_str)?.to_string();
+                        let id = option
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .unwrap_or_else(|| option_id(&label, option_index));
+                        Some(QuestionOption {
+                            id,
+                            allows_custom_text: label.to_lowercase().contains("type something")
+                                || label.to_lowercase().contains("custom"),
+                            label,
+                            description: option
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let question = Question {
+            question_id: format!("{}-{}", tool_id, index),
+            session_id: session_id.to_string(),
+            title,
+            question: question_text,
+            options,
+            selection_mode: if raw.get("multiSelect").and_then(Value::as_bool).unwrap_or(false) {
+                "multiple".to_string()
+            } else {
+                "single".to_string()
+            },
+            status: "pending".to_string(),
+            created_at: Utc::now(),
+            answered_at: None,
+            selected_options: vec![],
+            custom_text: None,
+        };
+        if let Err(error) = state.session_manager.create_question(&question).await {
+            tracing::error!("[AgentDeck][Question] Failed to persist question: {}", error);
+        }
+        emit(
+            state,
+            session_id,
+            "question_started",
+            serde_json::to_value(&question).unwrap_or_default(),
+        );
+    }
+    state.broadcast.broadcast(WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "waiting_for_input".to_string(),
+    });
+}
+
+fn option_id(label: &str, index: usize) -> String {
+    let slug = label
+        .to_lowercase()
+        .chars()
+        .map(|character| if character.is_ascii_alphanumeric() { character } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        format!("option-{}", index + 1)
+    } else {
+        slug
+    }
+}
+
+async fn handle_tool_finished(state: &AppState, session_id: &str, body: &Value, success: bool) {
+    let tool_id = string_field(body, "tool_use_id").unwrap_or_default();
+    let tool_name = string_field(body, "tool_name").unwrap_or_else(|| "Tool".to_string());
+    let duration_ms = state
+        .hook_starts
+        .write()
+        .await
+        .remove(&tool_id)
+        .map(|started| Utc::now().signed_duration_since(started).num_milliseconds().max(0) as u64);
+
+    emit_with_duration(
+        state,
+        session_id,
+        "tool_finished",
+        json!({
+            "tool_id": tool_id.clone(),
+            "tool_name": tool_name,
+            "success": success,
+            "output": body.get("tool_response").cloned().unwrap_or(Value::Null),
+        }),
+        duration_ms,
+    );
+
+    let lower = tool_name.to_lowercase();
+    if lower == "bash" || lower == "shell" {
+        emit_with_duration(
+            state,
+            session_id,
+            "command_finished",
+            json!({ "command": body.get("tool_input").and_then(|input| input.get("command")).cloned().unwrap_or(Value::Null), "exit_code": if success { 0 } else { 1 }, "tool_id": tool_id.clone() }),
+            duration_ms,
+        );
+    } else if lower == "grep" || lower == "glob" || lower.contains("search") {
+        emit_with_duration(
+            state,
+            session_id,
+            "search_finished",
+            json!({ "query": body.get("tool_input").and_then(|input| input.get("pattern").or_else(|| input.get("query"))).cloned().unwrap_or(Value::Null), "result_count": body.get("tool_response").and_then(|response| response.get("result_count")).cloned().unwrap_or(Value::Null), "tool_id": tool_id.clone() }),
+            duration_ms,
+        );
+    }
+
+    if is_file_tool(&tool_name) {
+        if let Some(path) = body
+            .get("tool_input")
+            .and_then(|input| input.get("file_path").or_else(|| input.get("path")))
+            .and_then(Value::as_str)
+        {
+            emit(
+                state,
+                session_id,
+                "file_edited",
+                json!({ "path": path, "success": success }),
+            );
+        }
+    }
+}
+
+async fn handle_permission(state: &AppState, session_id: &str, body: &Value) {
+    if string_field(body, "tool_name")
+        .map(|tool| tool.eq_ignore_ascii_case("AskUserQuestion"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let id = string_field(body, "tool_use_id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let prompt = string_field(body, "message")
+        .or_else(|| string_field(body, "reason"))
+        .unwrap_or_else(|| "Claude requested permission".to_string());
+    state.pty_manager.register_approval(PendingApproval {
+        id: id.clone(),
+        session_id: session_id.to_string(),
+        prompt: prompt.clone(),
+    });
+    let options = vec!["allow".to_string(), "always".to_string(), "deny".to_string()];
+    if let Err(error) = state
+        .session_manager
+        .create_approval(&id, session_id, &prompt, &options, "medium")
+        .await
+    {
+        tracing::error!("[AgentDeck][Approval] Failed to persist request: {}", error);
+    }
+    state.broadcast.broadcast(WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "waiting_for_approval".to_string(),
+    });
+    emit(
+        state,
+        session_id,
+        "permission_required",
+        json!({
+            "id": id,
+            "prompt": prompt,
+            "command": body.get("tool_input").cloned().unwrap_or(Value::Null),
+            "cwd": body.get("cwd").cloned().unwrap_or(Value::Null),
+            "options": options,
+        }),
+    );
+}
+
+async fn handle_stop(state: &AppState, session_id: &str, body: &Value) {
+    if let Some(text) = body.get("last_assistant_message").and_then(Value::as_str) {
+        state.broadcast.broadcast(WsMessage::Message {
+            message: AgentMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                role: "assistant".to_string(),
+                content: text.to_string(),
+                timestamp: Utc::now(),
+            },
+        });
+    }
+
+    let duration_ms = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|session| Utc::now().signed_duration_since(session.created_at).num_milliseconds().max(0) as u64);
+    emit_with_duration(
+        state,
+        session_id,
+        "agent_completed",
+        json!({ "source": "claude_stop" }),
+        duration_ms,
+    );
+    if let Ok(question_ids) = state.session_manager.cancel_questions(session_id).await {
+        for question_id in question_ids {
+            emit(
+                state,
+                session_id,
+                "question_cancelled",
+                json!({ "question_id": question_id, "reason": "agent_stopped" }),
+            );
+        }
+    }
+    state.broadcast.broadcast(WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "waiting_for_input".to_string(),
+    });
+    state.pty_manager.mark_waiting_for_input(session_id);
+}
+
+fn emit(state: &AppState, session_id: &str, kind: &str, payload: Value) {
+    emit_with_duration(state, session_id, kind, payload, None);
+}
+
+fn emit_with_duration(
+    state: &AppState,
+    session_id: &str,
+    kind: &str,
+    payload: Value,
+    duration_ms: Option<u64>,
+) {
+    let mut event = AgentEvent::new(session_id, kind, payload);
+    event.duration_ms = duration_ms;
+    state.broadcast.broadcast_agent_event(event);
+}
+
+fn string_field(body: &Value, field: &str) -> Option<String> {
+    body.get(field).and_then(Value::as_str).map(str::to_string)
+}
+
+fn is_file_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name.to_lowercase().as_str(),
+        "edit" | "write" | "multiedit" | "notebookedit"
+    )
+}
+
+use crate::websocket::WsMessage;

@@ -1,30 +1,41 @@
-use crate::{config::settings::ServerConfig, Result};
+use crate::{config::AppState, config::settings::ServerConfig, Result};
 use axum::{
     extract::{ws::WebSocketUpgrade, State},
+    middleware,
     response::IntoResponse,
     routing::{get, post, put, delete},
     Router,
 };
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
 pub async fn start(
-    config: Arc<RwLock<crate::config::Config>>,
+    state: Arc<AppState>,
     server_config: ServerConfig,
 ) -> Result<tokio::task::JoinHandle<()>> {
+    let mobile_api = Router::new()
+        .route("/me", get(crate::api::routes::mobile_me))
+        .route("/snapshot", get(crate::api::routes::mobile_snapshot))
+        .route("/agents", get(crate::api::routes::mobile_agents))
+        .route("/sessions", post(crate::api::routes::mobile_create_session))
+        .route("/sessions/{id}", get(crate::api::routes::mobile_session))
+        .route("/sessions/{id}/kill", post(crate::api::routes::mobile_kill_session))
+        .layer(middleware::from_fn_with_state(state.clone(), crate::api::middleware::auth_middleware));
+
     let app = Router::new()
         // Health
         .route("/health", get(crate::api::routes::health_handler))
 
         // WebSocket
         .route("/ws", get(ws_handler))
+        .route("/ws/mobile", get(mobile_ws_handler))
 
         // Sessions
         .route("/api/sessions", get(crate::api::routes::list_sessions))
         .route("/api/sessions", post(crate::api::routes::create_session))
         .route("/api/sessions/{id}", get(crate::api::routes::get_session))
+        .route("/api/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
         .route("/api/sessions/{id}/attach", post(crate::api::routes::attach_session))
         .route("/api/sessions/{id}/kill", post(crate::api::routes::kill_session))
         .route("/api/sessions/{id}/fork", post(crate::api::routes::fork_session))
@@ -56,6 +67,11 @@ pub async fn start(
         // Notifications
         .route("/api/notifications/test", post(crate::api::routes::send_test_notification))
 
+        // Local provider hook ingestion. Hook tokens are validated by the handler.
+        .route("/api/hooks/claude", post(crate::hooks::server::handle_claude_hook))
+
+        .nest("/api/mobile", mobile_api)
+
         // Static files (dashboard SPA)
         .fallback_service(
             ServeDir::new("dashboard/dist").fallback(
@@ -63,7 +79,7 @@ pub async fn start(
             )
         )
         .layer(CorsLayer::permissive())
-        .with_state(config);
+        .with_state(state);
 
     let addr = format!("{}:{}", server_config.host, server_config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -79,7 +95,14 @@ pub async fn start(
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    State(config): State<Arc<RwLock<crate::config::Config>>>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| crate::websocket::handler::handle_socket(socket, config))
+    ws.on_upgrade(|socket| crate::websocket::handler::handle_socket(socket, state))
+}
+
+async fn mobile_ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| crate::websocket::handler::handle_mobile_socket(socket, state))
 }

@@ -1,0 +1,9 @@
+{
+  "name": "AgentDeck Remote Control",
+  "short_name": "AgentDeck",
+  "start_url": "/mobile",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "description": "Remote control for AgentDeck tasks and workspaces"
+}

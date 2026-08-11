@@ -1,5 +1,11 @@
 use crate::sessions::SessionStatus;
 
+impl Default for SessionStatus {
+    fn default() -> Self {
+        SessionStatus::Idle
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionStateMachine {
     current: SessionStatus,

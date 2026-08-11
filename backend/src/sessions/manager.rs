@@ -1,5 +1,5 @@
 use crate::sessions::{Session, SessionStatus};
-use crate::Result;
+use crate::{agent_events::{AgentEvent, AgentMessage}, questions::{Question, QuestionOption}, Result};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 pub struct SessionManager {
     pool: SqlitePool,
     active_sessions: Arc<RwLock<std::collections::HashMap<String, Session>>>,
+    session_pids: Arc<RwLock<std::collections::HashMap<String, u32>>>,
 }
 
 impl SessionManager {
@@ -14,7 +15,17 @@ impl SessionManager {
         Ok(Self {
             pool,
             active_sessions: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            session_pids: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
+    }
+
+    pub async fn set_session_pid(&self, session_id: &str, pid: u32) {
+        tracing::info!("[AgentDeck][Session] PID tracking: session={} pid={}", session_id, pid);
+        self.session_pids.write().await.insert(session_id.to_string(), pid);
+    }
+
+    pub async fn get_session_pid(&self, session_id: &str) -> Option<u32> {
+        self.session_pids.read().await.get(session_id).copied()
     }
 
     pub async fn create_session(
@@ -126,6 +137,404 @@ impl SessionManager {
         self.active_sessions.write().await.remove(id);
         Ok(())
     }
+
+    pub async fn insert_transcript(
+        &self,
+        session_id: &str,
+        kind: &str,
+        content: &str,
+    ) -> Result<i64> {
+        tracing::debug!("[AgentDeck][Persistence] Inserting transcript: session={} kind={} len={}", session_id, kind, content.len());
+        sqlx::query(
+            "INSERT INTO transcripts (session_id, kind, content) VALUES (?1, ?2, ?3)"
+        )
+        .bind(session_id)
+        .bind(kind)
+        .bind(content)
+        .execute(&self.pool)
+        .await?;
+        let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+            .fetch_one(&self.pool)
+            .await?;
+        tracing::debug!("[AgentDeck][Persistence] Inserted transcript id={}", id);
+        Ok(id)
+    }
+
+    pub async fn get_transcripts(&self, session_id: &str) -> Result<Vec<TranscriptRow>> {
+        let rows = sqlx::query_as::<_, TranscriptRow>(
+            "SELECT id, session_id, kind, content, timestamp FROM transcripts WHERE session_id = ?1 ORDER BY id ASC"
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn delete_transcripts(&self, session_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM transcripts WHERE session_id = ?1")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn insert_message(&self, message: &AgentMessage) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO messages (id, session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(&message.id)
+        .bind(&message.session_id)
+        .bind(&message.role)
+        .bind(&message.content)
+        .bind(message.timestamp)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_messages(&self, session_id: &str) -> Result<Vec<AgentMessage>> {
+        Ok(sqlx::query_as::<_, AgentMessageRow>(
+            "SELECT id, session_id, role, content, timestamp FROM messages WHERE session_id = ?1 ORDER BY timestamp ASC, id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+    }
+
+    pub async fn insert_agent_event(&self, event: &AgentEvent) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO agent_events (event_id, session_id, sequence, timestamp, kind, payload, duration_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind(&event.event_id)
+        .bind(&event.session_id)
+        .bind(event.sequence as i64)
+        .bind(event.timestamp)
+        .bind(&event.kind)
+        .bind(serde_json::to_string(&event.payload)?)
+        .bind(event.duration_ms.map(|duration| duration as i64))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_agent_events(&self, session_id: &str) -> Result<Vec<AgentEvent>> {
+        Ok(sqlx::query_as::<_, AgentEventRow>(
+            "SELECT event_id, session_id, sequence, timestamp, kind, payload, duration_ms FROM agent_events WHERE session_id = ?1 ORDER BY sequence ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(|row| row.try_into().ok())
+        .collect())
+    }
+
+    pub async fn insert_terminal_output(&self, session_id: &str, sequence: u64, data: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO terminal_output (session_id, sequence, data) VALUES (?1, ?2, ?3)",
+        )
+        .bind(session_id)
+        .bind(sequence as i64)
+        .bind(data)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_terminal_output(&self, session_id: &str) -> Result<Vec<TerminalOutputRow>> {
+        Ok(sqlx::query_as::<_, TerminalOutputRow>(
+            "SELECT id, session_id, sequence, CAST(data AS TEXT) AS data, timestamp FROM terminal_output WHERE session_id = ?1 ORDER BY sequence ASC, id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    pub async fn create_approval(
+        &self,
+        id: &str,
+        session_id: &str,
+        prompt: &str,
+        options: &[String],
+        risk_level: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO approvals (id, session_id, prompt, options, risk_level, response, responded_at) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL)",
+        )
+        .bind(id)
+        .bind(session_id)
+        .bind(prompt)
+        .bind(serde_json::to_string(options)?)
+        .bind(risk_level)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_pending_approvals(&self, session_id: &str) -> Result<Vec<StoredApproval>> {
+        let rows = sqlx::query_as::<_, StoredApprovalRow>(
+            "SELECT id, session_id, prompt, options, risk_level, created_at FROM approvals WHERE session_id = ?1 AND response IS NULL ORDER BY created_at ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().filter_map(|row| row.try_into().ok()).collect())
+    }
+
+    pub async fn get_approval(&self, id: &str) -> Result<Option<StoredApproval>> {
+        let row = sqlx::query_as::<_, StoredApprovalRow>(
+            "SELECT id, session_id, prompt, options, risk_level, created_at FROM approvals WHERE id = ?1 AND response IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| row.try_into().ok()))
+    }
+
+    pub async fn resolve_approval(&self, id: &str, response: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE approvals SET response = ?1, responded_at = ?2 WHERE id = ?3 AND response IS NULL",
+        )
+        .bind(response)
+        .bind(chrono::Utc::now())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn cancel_pending_approvals(&self, session_id: &str) -> Result<()> {
+        sqlx::query("UPDATE approvals SET response = 'cancelled:question', responded_at = ?1 WHERE session_id = ?2 AND response IS NULL")
+            .bind(chrono::Utc::now())
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn create_question(&self, question: &Question) -> Result<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO questions (question_id, session_id, title, question, options, selection_mode, status, created_at, answered_at, selected_options, custom_text) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, NULL, NULL, NULL)",
+        )
+        .bind(&question.question_id)
+        .bind(&question.session_id)
+        .bind(&question.title)
+        .bind(&question.question)
+        .bind(serde_json::to_string(&question.options)?)
+        .bind(&question.selection_mode)
+        .bind(question.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_pending_questions(&self, session_id: &str) -> Result<Vec<Question>> {
+        let rows = sqlx::query_as::<_, QuestionRow>(
+            "SELECT question_id, session_id, title, question, options, selection_mode, status, created_at, answered_at, selected_options, custom_text FROM questions WHERE session_id = ?1 AND status = 'pending' ORDER BY created_at ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().filter_map(|row| row.try_into().ok()).collect())
+    }
+
+    pub async fn get_pending_question(&self, question_id: &str) -> Result<Option<Question>> {
+        let row = sqlx::query_as::<_, QuestionRow>(
+            "SELECT question_id, session_id, title, question, options, selection_mode, status, created_at, answered_at, selected_options, custom_text FROM questions WHERE question_id = ?1 AND status = 'pending'",
+        )
+        .bind(question_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| row.try_into().ok()))
+    }
+
+    pub async fn answer_question(
+        &self,
+        answer: &crate::questions::QuestionAnswer,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE questions SET status = 'answered', answered_at = ?1, selected_options = ?2, custom_text = ?3 WHERE question_id = ?4 AND status = 'pending'",
+        )
+        .bind(chrono::Utc::now())
+        .bind(serde_json::to_string(&answer.selected_options)?)
+        .bind(&answer.custom_text)
+        .bind(&answer.question_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn reopen_question(&self, question_id: &str) -> Result<()> {
+        sqlx::query("UPDATE questions SET status = 'pending', answered_at = NULL, selected_options = NULL, custom_text = NULL WHERE question_id = ?1")
+            .bind(question_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn cancel_questions(&self, session_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query_as::<_, (String,)>(
+            "SELECT question_id FROM questions WHERE session_id = ?1 AND status = 'pending'",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+        sqlx::query("UPDATE questions SET status = 'cancelled', answered_at = ?1 WHERE session_id = ?2 AND status = 'pending'")
+            .bind(chrono::Utc::now())
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|row| row.0).collect())
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct TranscriptRow {
+    pub id: i64,
+    pub session_id: String,
+    pub kind: String,
+    pub content: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct TerminalOutputRow {
+    pub id: i64,
+    pub session_id: String,
+    pub sequence: i64,
+    pub data: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredApproval {
+    pub id: String,
+    pub session_id: String,
+    pub prompt: String,
+    pub options: Vec<String>,
+    pub risk_level: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct StoredApprovalRow {
+    id: String,
+    session_id: String,
+    prompt: String,
+    options: Option<String>,
+    risk_level: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct QuestionRow {
+    question_id: String,
+    session_id: String,
+    title: String,
+    question: String,
+    options: String,
+    selection_mode: String,
+    status: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    answered_at: Option<chrono::DateTime<chrono::Utc>>,
+    selected_options: Option<String>,
+    custom_text: Option<String>,
+}
+
+impl TryFrom<QuestionRow> for Question {
+    type Error = serde_json::Error;
+
+    fn try_from(row: QuestionRow) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            question_id: row.question_id,
+            session_id: row.session_id,
+            title: row.title,
+            question: row.question,
+            options: serde_json::from_str::<Vec<QuestionOption>>(&row.options)?,
+            selection_mode: row.selection_mode,
+            status: row.status,
+            created_at: row.created_at,
+            answered_at: row.answered_at,
+            selected_options: row
+                .selected_options
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_default(),
+            custom_text: row.custom_text,
+        })
+    }
+}
+
+impl TryFrom<StoredApprovalRow> for StoredApproval {
+    type Error = serde_json::Error;
+
+    fn try_from(row: StoredApprovalRow) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            prompt: row.prompt,
+            options: row
+                .options
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_else(|| vec!["allow".to_string(), "always".to_string(), "deny".to_string()]),
+            risk_level: row.risk_level,
+            created_at: row.created_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct AgentMessageRow {
+    id: String,
+    session_id: String,
+    role: String,
+    content: String,
+    timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<AgentMessageRow> for AgentMessage {
+    fn from(row: AgentMessageRow) -> Self {
+        Self {
+            id: row.id,
+            session_id: row.session_id,
+            role: row.role,
+            content: row.content,
+            timestamp: row.timestamp,
+        }
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct AgentEventRow {
+    event_id: String,
+    session_id: String,
+    sequence: i64,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    kind: String,
+    payload: String,
+    duration_ms: Option<i64>,
+}
+
+impl TryFrom<AgentEventRow> for AgentEvent {
+    type Error = serde_json::Error;
+
+    fn try_from(row: AgentEventRow) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            event_id: row.event_id,
+            session_id: row.session_id,
+            sequence: row.sequence.max(0) as u64,
+            timestamp: row.timestamp,
+            kind: row.kind,
+            payload: serde_json::from_str(&row.payload)?,
+            duration_ms: row.duration_ms.and_then(|duration| u64::try_from(duration).ok()),
+        })
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -134,7 +543,11 @@ struct SessionRow {
     name: String,
     agent: String,
     project: Option<String>,
+    branch: Option<String>,
     status: String,
+    worktree_path: Option<String>,
+    cost: Option<f64>,
+    tokens_used: Option<i64>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -146,7 +559,7 @@ impl From<SessionRow> for Session {
             name: row.name,
             agent: row.agent,
             project: row.project,
-            branch: None,
+            branch: row.branch,
             status: match row.status.as_str() {
                 "starting" => SessionStatus::Starting,
                 "running" => SessionStatus::Running,
@@ -157,11 +570,11 @@ impl From<SessionRow> for Session {
                 "archived" => SessionStatus::Archived,
                 _ => SessionStatus::Exited,
             },
-            worktree_path: None,
+            worktree_path: row.worktree_path,
             created_at: row.created_at,
             updated_at: row.updated_at,
-            cost: None,
-            tokens_used: None,
+            cost: row.cost,
+            tokens_used: row.tokens_used.and_then(|value| u64::try_from(value).ok()),
         }
     }
 }

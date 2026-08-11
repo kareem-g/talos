@@ -37,8 +37,28 @@
   body {
     @apply bg-background text-text antialiased;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    min-width: 320px;
   }
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  }
+}
+
+@layer components {
+  .mobile-app {
+    background:
+      radial-gradient(circle at 100% 0%, hsl(var(--accent) / 0.045), transparent 28rem),
+      hsl(var(--background));
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-app button,
+  .mobile-app textarea,
+  .mobile-app select {
+    touch-action: manipulation;
+  }
+
+  .mobile-app textarea {
+    font-size: 16px;
   }
 }

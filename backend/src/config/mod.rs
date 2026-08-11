@@ -1,11 +1,27 @@
 pub mod settings;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::pty::manager::PtyManager;
+use crate::auth::devices::DeviceStore;
+use crate::sessions::manager::SessionManager;
+use crate::websocket::broadcast::BroadcastHub;
 use crate::Result;
+
+#[derive(Debug, Clone)]
+pub struct PendingOffer {
+    pub fingerprint: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub secret_hash: String,
+}
 
 pub struct Config {
     settings: settings::Settings,
     path: PathBuf,
+    pub pending_offers: HashMap<String, PendingOffer>,
 }
 
 impl Config {
@@ -27,7 +43,11 @@ impl Config {
             default
         };
 
-        Ok(Self { settings, path })
+        Ok(Self {
+            settings,
+            path,
+            pending_offers: HashMap::new(),
+        })
     }
 
     pub async fn save(&self) -> Result<()> {
@@ -55,4 +75,14 @@ impl Config {
         xdg_dirs.place_config_file("config.toml")
             .expect("Failed to create config directory")
     }
+}
+
+pub struct AppState {
+    pub config: Arc<RwLock<Config>>,
+    pub session_manager: Arc<SessionManager>,
+    pub pty_manager: Arc<PtyManager>,
+    pub devices: Arc<DeviceStore>,
+    pub hook_tokens: Arc<RwLock<HashMap<String, String>>>,
+    pub hook_starts: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
+    pub broadcast: BroadcastHub,
 }

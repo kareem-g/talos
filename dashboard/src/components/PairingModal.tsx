@@ -1,5 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, Shield, Copy, Check, Smartphone, Clock, RefreshCw } from 'lucide-react'
+import { X, Shield, Copy, Check, Clock, RefreshCw, Wifi } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import { api } from '../lib/api'
+
+interface PairingOffer {
+  offer_id: string
+  qr_data: string
+  fingerprint: string
+  expires_at: string
+  status?: string
+}
+
+interface PairedDevice {
+  id: string
+  name: string
+  paired_at: string
+}
 
 interface PairingModalProps {
   isOpen: boolean
@@ -7,31 +23,26 @@ interface PairingModalProps {
 }
 
 export function PairingModal({ isOpen, onClose }: PairingModalProps) {
-  const [offer, setOffer] = useState<any>(null)
-  const [timeLeft, setTimeLeft] = useState(120)
+  const [offer, setOffer] = useState<PairingOffer | null>(null)
+  const [timeLeft, setTimeLeft] = useState(0)
   const [copied, setCopied] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pairedDevice, setPairedDevice] = useState<PairedDevice | null>(null)
+  const [knownDeviceIds, setKnownDeviceIds] = useState<string[]>([])
 
   const generateOffer = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/pair', { method: 'POST' })
-      if (!res.ok) throw new Error('Failed to create pairing offer')
-      const data = await res.json()
+      const existing = await api.devices.list() as { devices?: PairedDevice[] }
+      setKnownDeviceIds((existing.devices || []).map((device) => device.id))
+      const data = await api.pair.initiate() as PairingOffer
       setOffer(data)
-      setTimeLeft(120)
+      setPairedDevice(null)
+      setTimeLeft(Math.max(0, Math.floor((new Date(data.expires_at).getTime() - Date.now()) / 1000)))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
-      // Fallback for demo
-      setOffer({
-        offer_id: 'demo-' + Math.random().toString(36).slice(2, 10),
-        qr_data: 'agentdeck://pair?host=localhost&port=9120&fingerprint=a1b2c3d4&offer=demo',
-        fingerprint: 'a1b2c3d4',
-        expires_at: new Date(Date.now() + 120000).toISOString(),
-      })
-      setTimeLeft(120)
     } finally {
       setLoading(false)
     }
@@ -45,17 +56,23 @@ export function PairingModal({ isOpen, onClose }: PairingModalProps) {
 
   useEffect(() => {
     if (!isOpen || !offer) return
-    const interval = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          clearInterval(interval)
-          return 0
-        }
-        return t - 1
-      })
-    }, 1000)
+    const interval = setInterval(() => setTimeLeft(Math.max(0, Math.floor((new Date(offer.expires_at).getTime() - Date.now()) / 1000))), 1000)
     return () => clearInterval(interval)
   }, [isOpen, offer])
+
+  useEffect(() => {
+    if (!isOpen || !offer || timeLeft === 0 || pairedDevice) return
+    const interval = setInterval(async () => {
+      try {
+        const result = await api.devices.list() as { devices?: PairedDevice[] }
+        const latest = result.devices?.find((device) => !knownDeviceIds.includes(device.id))
+        if (latest) setPairedDevice(latest)
+      } catch {
+        // The QR remains usable when device polling is temporarily unavailable.
+      }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [isOpen, offer, pairedDevice, timeLeft, knownDeviceIds])
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
@@ -67,43 +84,6 @@ export function PairingModal({ isOpen, onClose }: PairingModalProps) {
     const m = Math.floor(seconds / 60)
     const s = seconds % 60
     return `${m}:${s.toString().padStart(2, '0')}`
-  }
-
-  // Generate simple QR pattern from data
-  const generateQRPattern = (data: string) => {
-    const hash = data.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)
-    const cells = 25
-    const pattern = []
-    for (let i = 0; i < cells; i++) {
-      for (let j = 0; j < cells; j++) {
-        // Position detection patterns (corners)
-        const isCorner = (i < 7 && j < 7) || (i < 7 && j >= cells - 7) || (i >= cells - 7 && j < 7)
-        const isTiming = i === 6 || j === 6
-        const isAlignment = i > cells - 9 && i < cells - 4 && j > cells - 9 && j < cells - 4
-
-        let filled = false
-        if (isCorner) {
-          const ci = i % 7
-          const cj = j % 7
-          filled = (ci === 0 || ci === 6 || cj === 0 || cj === 6) || 
-                   (ci >= 2 && ci <= 4 && cj >= 2 && cj <= 4)
-        } else if (isTiming) {
-          filled = (i + j) % 2 === 0
-        } else if (isAlignment) {
-          const ai = i - (cells - 9)
-          const aj = j - (cells - 9)
-          filled = (ai === 0 || ai === 4 || aj === 0 || aj === 4) || 
-                   (ai === 2 && aj === 2)
-        } else {
-          // Data pattern
-          const idx = i * cells + j
-          filled = ((hash >> (idx % 32)) & 1) === 1
-        }
-
-        pattern.push({ i, j, filled })
-      }
-    }
-    return pattern
   }
 
   if (!isOpen) return null
@@ -144,25 +124,9 @@ export function PairingModal({ isOpen, onClose }: PairingModalProps) {
               {/* QR Code */}
               <div className="flex flex-col items-center">
                 <div className="relative bg-white rounded-xl p-4">
-                  <svg viewBox="0 0 25 25" className="w-48 h-48">
-                    {generateQRPattern(offer.qr_data).map((cell, idx) => (
-                      <rect
-                        key={idx}
-                        x={cell.j}
-                        y={cell.i}
-                        width={1}
-                        height={1}
-                        fill={cell.filled ? '#000' : '#fff'}
-                      />
-                    ))}
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
-                      <Smartphone className="w-6 h-6 text-accent" />
-                    </div>
-                  </div>
+                  <QRCodeSVG value={offer.qr_data} size={192} level="M" includeMargin bgColor="#ffffff" fgColor="#09090b" />
                 </div>
-                <p className="text-xs text-text-muted mt-3">Scan with your mobile app</p>
+                <p className="text-xs text-text-muted mt-3">Scan with your phone camera</p>
               </div>
 
               {/* Fingerprint */}
@@ -201,6 +165,13 @@ export function PairingModal({ isOpen, onClose }: PairingModalProps) {
                   Expires in <span className="font-mono font-medium">{formatTime(timeLeft)}</span>
                 </span>
               </div>
+
+              {pairedDevice && (
+                <div className="flex items-center gap-3 rounded-lg border border-success/20 bg-success/10 p-3">
+                  <Wifi className="h-4 w-4 text-success" />
+                  <div><p className="text-sm font-medium text-text">{pairedDevice.name} connected</p><p className="text-[10px] text-text-muted">The mobile device is now trusted.</p></div>
+                </div>
+              )}
 
               {timeLeft === 0 && (
                 <button

@@ -1,4 +1,4 @@
-use crate::agents::{detect_agent, AgentAdapter, AgentConfig, AgentInfo};
+use crate::agents::{detect_agent, AgentAdapter, AgentCapabilities, AgentConfig, AgentInfo};
 use crate::Result;
 
 pub struct ClaudeAdapter {
@@ -38,16 +38,9 @@ impl AgentAdapter for ClaudeAdapter {
         let mut cmd = vec![self.config.binary.clone()];
         cmd.extend(self.config.args.clone());
 
-        if let Some(proj) = project {
-            cmd.push("--cwd".to_string());
-            cmd.push(proj.to_string());
-        }
-
-        // If prompt provided, use non-interactive mode
-        if let Some(p) = prompt {
-            cmd.push("--prompt".to_string());
-            cmd.push(p.to_string());
-        }
+        // The PTY owns the working directory and initial input is sent through
+        // stdin so the adapter does not assume unsupported CLI flags.
+        let _ = (project, prompt);
 
         Ok(cmd)
     }
@@ -84,4 +77,66 @@ impl AgentAdapter for ClaudeAdapter {
             "SubagentStop".to_string(),
         ]
     }
+
+    fn capabilities(&self) -> AgentCapabilities {
+        AgentCapabilities {
+            structured_output: true,
+            hooks: true,
+            streaming: true,
+            approvals: true,
+            file_events: true,
+            terminal: true,
+        }
+    }
+
+    fn supports_questions(&self) -> bool {
+        true
+    }
+
+    fn answer_question(
+        &self,
+        question: &crate::questions::Question,
+        answer: &crate::questions::QuestionAnswer,
+    ) -> Result<Vec<String>> {
+        answer_question_input(question, answer)
+    }
+}
+
+pub fn answer_question_input(
+    question: &crate::questions::Question,
+    answer: &crate::questions::QuestionAnswer,
+) -> Result<Vec<String>> {
+    let mut indexes = answer
+        .selected_options
+        .iter()
+        .filter_map(|selected| question.options.iter().position(|option| &option.id == selected))
+        .collect::<Vec<_>>();
+    indexes.sort_unstable();
+    indexes.dedup();
+    if indexes.is_empty() {
+        return Err(crate::AgentDeckError::Unknown("No valid question option selected".to_string()));
+    }
+
+    let mut navigation = String::new();
+    let mut cursor = 0;
+    for index in &indexes {
+        for _ in cursor..*index {
+            navigation.push_str("\u{1b}[B");
+        }
+        if question.selection_mode == "multiple" {
+            navigation.push(' ');
+        }
+        cursor = *index;
+    }
+
+    let custom_selected = indexes.iter().any(|index| question.options[*index].allows_custom_text);
+    if question.selection_mode == "multiple" {
+        navigation.push('\r');
+    } else if custom_selected {
+        navigation.push('\r');
+        return Ok(vec![navigation, format!("{}\r", answer.custom_text.as_deref().unwrap_or(""))]);
+    } else {
+        navigation.push('\r');
+    }
+    Ok(vec![navigation])
 }
