@@ -5,8 +5,6 @@ import {
   Plus,
   Search,
   Settings,
-  Wifi,
-  WifiOff,
   Command,
   Smartphone
 } from 'lucide-react'
@@ -47,12 +45,8 @@ export function Header() {
       <div className="flex-1" />
 
       <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-hover">
-          {connected ? (
-            <Wifi className="w-3.5 h-3.5 text-success" />
-          ) : (
-            <WifiOff className="w-3.5 h-3.5 text-error" />
-          )}
+        <div className="flex items-center gap-1.5 rounded-full bg-surface-hover px-2.5 py-1">
+          <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-success animate-pulse' : 'bg-error'}`} />
           <span className="text-[11px] text-text-muted">
             {connected ? 'Connected' : 'Disconnected'}
           </span>
@@ -60,7 +54,7 @@ export function Header() {
 
         <button
           onClick={() => navigate('/settings')}
-          className="p-2 rounded-md hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+          className="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
           title="Settings"
         >
           <Settings className="w-4 h-4" />
@@ -68,7 +62,7 @@ export function Header() {
 
         <button
           onClick={() => navigate('/pairing')}
-          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border hover:border-border-hover hover:bg-surface-hover text-text-muted text-xs transition-colors"
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-border hover:border-border-hover hover:bg-surface-hover text-text-muted text-xs transition-colors"
         >
           <Smartphone className="w-3.5 h-3.5" />
           <span>Connect mobile</span>
@@ -76,7 +70,7 @@ export function Header() {
 
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>New Session</span>

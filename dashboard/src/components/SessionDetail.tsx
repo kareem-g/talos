@@ -74,19 +74,20 @@ export function SessionDetail() {
   }
 
   const statusBadge = () => {
-    const colors: Record<string, string> = {
-      running: 'bg-success/10 text-success',
-      starting: 'bg-accent/10 text-accent',
-      idle: 'bg-text-muted/10 text-text-muted',
-      waiting_for_input: 'bg-warning/10 text-warning',
-      waiting_for_approval: 'bg-warning/10 text-warning',
-      error: 'bg-error/10 text-error',
-      exited: 'bg-surface-active text-text-dim',
-      archived: 'bg-surface-active text-text-dim',
+    const colors: Record<string, { pill: string; dot: string }> = {
+      running: { pill: 'bg-success/10 text-success', dot: 'bg-success' },
+      starting: { pill: 'bg-accent/10 text-accent', dot: 'bg-accent' },
+      idle: { pill: 'bg-surface-hover text-text-muted', dot: 'bg-text-dim' },
+      waiting_for_input: { pill: 'bg-warning/10 text-warning', dot: 'bg-warning' },
+      waiting_for_approval: { pill: 'bg-warning/10 text-warning', dot: 'bg-warning' },
+      error: { pill: 'bg-error/10 text-error', dot: 'bg-error' },
+      exited: { pill: 'bg-surface-active text-text-dim', dot: 'bg-text-dim' },
+      archived: { pill: 'bg-surface-active text-text-dim', dot: 'bg-text-dim' },
     }
-    const bg = colors[sessionStatus] || 'bg-text-muted/10 text-text-muted'
+    const tone = colors[sessionStatus] || { pill: 'bg-surface-hover text-text-muted', dot: 'bg-text-dim' }
     return (
-      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${bg}`}>
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${tone.pill}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${tone.dot} ${sessionStatus === 'running' || sessionStatus === 'starting' ? 'animate-pulse' : ''}`} />
         {sessionStatus.replace(/_/g, ' ')}
       </span>
     )
@@ -97,12 +98,14 @@ export function SessionDetail() {
       {/* Session Header */}
       <div className="h-10 border-b border-border bg-surface flex items-center px-4 gap-3 shrink-0">
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <Terminal className="w-4 h-4 text-accent shrink-0" />
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10">
+            <Terminal className="h-3.5 w-3.5 text-accent" />
+          </div>
           <span className="text-sm font-medium truncate">
             {sessionName || `Session ${id?.slice(0, 8)}`}
           </span>
           {statusBadge()}
-          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-success' : 'bg-text-dim'}`} title={connected ? 'Connected' : 'Disconnected'} />
+          <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-success' : 'bg-text-dim'}`} title={connected ? 'Connected' : 'Disconnected'} />
         </div>
 
         <div className="flex items-center gap-1">
@@ -110,7 +113,7 @@ export function SessionDetail() {
           {(sessionStatus === 'running' || sessionStatus === 'starting' || sessionStatus === 'waiting_for_input' || sessionStatus === 'idle') && (
             <button
               onClick={() => setShowStopConfirm(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-error/10 hover:bg-error/20 text-error text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-error/10 hover:bg-error/20 text-error text-xs font-medium transition-colors"
               title="Stop session"
             >
               <Square className="w-3.5 h-3.5" />
@@ -141,8 +144,8 @@ export function SessionDetail() {
           <Transcript sessionId={id || ''} />
 
           {/* Input */}
-          <div className="h-12 border-t border-border bg-surface flex items-center px-4 gap-3 shrink-0">
-            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-md bg-terminal-bg border border-border focus-within:border-accent transition-colors">
+          <div className="h-14 border-t border-border bg-surface flex items-center px-4 gap-3 shrink-0">
+            <div className="flex-1 flex items-center gap-2.5 px-4 py-2 rounded-full bg-terminal-bg border border-border focus-within:border-accent/60 transition-all">
               <span className="text-terminal-green font-mono text-sm">$</span>
               <input
                 ref={inputRef}
@@ -162,9 +165,10 @@ export function SessionDetail() {
             <button
               onClick={handleSend}
               disabled={!input.trim() || sessionStatus === 'exited' || sessionStatus === 'archived'}
-              className="p-2.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-30 disabled:hover:bg-accent text-white transition-colors"
+              aria-label="Send message"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-all hover:bg-accent-hover enabled:active:scale-95 disabled:opacity-30"
             >
-              <Send className="w-4 h-4" />
+              <Send className="h-4 w-4" />
             </button>
           </div>
         </div>

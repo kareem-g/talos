@@ -62,3 +62,107 @@
     font-size: 16px;
   }
 }
+
+/* ============================================================================
+ * AI-NATIVE LAYER — Beautiful UI motion + tokens adapted to AgentDeck.
+ * Keeps the app's existing HSL token system (theme stays coherent) and adds the
+ * semantic animation language collected from beautifului.dev.
+ * ========================================================================== */
+@layer base {
+  :root {
+    /* Semantic AI accents layered on top of the existing theme tokens. */
+    --ai-ink-3: hsl(var(--text-dim));          /* most-muted foreground   */
+    --ai-ink-2: hsl(var(--text-muted));        /* muted foreground        */
+    --ai-line: hsl(var(--border));             /* hairline separator      */
+    --ai-line-strong: hsl(var(--border-hover));
+    --ai-surface: hsl(var(--surface));
+    --ai-surface-2: hsl(var(--surface-hover));
+    --ai-canvas: hsl(var(--background));
+    --ai-accent-tint: hsl(var(--accent) / 0.12);
+    --ai-green-tint: hsl(var(--success) / 0.12);
+    --ai-red-tint: hsl(var(--error) / 0.12);
+    --ai-orange: hsl(var(--warning));
+    --ai-green: hsl(var(--success));
+    --ai-red: hsl(var(--error));
+    --ai-accent: hsl(var(--accent));
+  }
+}
+
+@layer utilities {
+  /* Shimmering text used by loading + streaming headers. */
+  .ai-shimmer-text {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--text-dim)) 35%,
+      hsl(var(--text)) 50%,
+      hsl(var(--text-dim)) 65%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: ai-shimmer 1.4s linear infinite;
+  }
+
+  .ai-hairline {
+    box-shadow: inset 0 1px 0 0 hsl(var(--accent) / 0.06);
+  }
+
+  .ai-muted-check {
+    color: hsl(var(--success));
+  }
+
+  .ai-scroll-thin::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  .ai-scroll-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-hover));
+    border-radius: 999px;
+  }
+
+  .ai-reduced-motion {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@layer keyframes {
+  @keyframes ai-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+  /* Word resolve out of blur (streaming text). */
+  @keyframes ai-stream-in {
+    from { opacity: 0; filter: blur(4px); }
+    to { opacity: 1; filter: blur(0); }
+  }
+  /* Gentle rise for list rows. */
+  @keyframes ai-fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  /* Soft scale-in for popped elements. */
+  @keyframes ai-pop-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  /* Pixel-grid loader cells. */
+  @keyframes ai-pixel-on {
+    0% { opacity: 0.15; }
+    100% { opacity: 1; }
+  }
+  /* Blinking caret for streaming composition. */
+  @keyframes ai-caret {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+}
+
+/* Respect prefers-reduced-motion globally for the AI layer. */
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer-text,
+  [data-ai-anim] {
+    animation: none !important;
+  }
+}

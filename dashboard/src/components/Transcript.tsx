@@ -1,7 +1,11 @@
 import { useRef, useEffect, useState } from 'react'
+import { AlertCircle, Check } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { cleanTerminalText, normalizedText } from '../lib/terminalText'
 import { QuestionCard } from './QuestionCard'
+import { Thinking } from './ai/Thinking'
+import { CodeBlock } from './ai/CodeBlock'
+import { ToolActivityRow, type ToolActivityItem } from './ai/ToolActivity'
 import type { MobileQuestion } from '../types/mobile'
 
 interface TranscriptProps {
@@ -15,6 +19,40 @@ interface TranscriptItem {
   question?: MobileQuestion
   timestamp: string
   source: 'ws' | 'history'
+  event?: { kind: string; payload: Record<string, unknown>; duration_ms?: number }
+}
+
+/** Maps a semantic AgentEvent to a compact tool row for the AI activity feed. */
+function activityEventToTool(event: TranscriptItem['event']): ToolActivityItem | null {
+  if (!event) return null
+  const payload = event.payload || {}
+  const kind = event.kind
+  const duration = typeof event.duration_ms === 'number' ? `${(event.duration_ms / 1000).toFixed(1)}s` : undefined
+  let label = kind.replace(/_/g, ' ')
+  let icon: ToolActivityItem['icon'] = 'tool'
+
+  if (kind.includes('search')) {
+    icon = 'search'
+    label = `Search${payload.query ? ` · ${String(payload.query)}` : ''}`
+  } else if (kind.includes('file') || kind.includes('edit') || kind.includes('read')) {
+    label = `${kind.includes('edit') ? 'Editing' : kind.includes('read') ? 'Reading' : 'File'} ${payload.path ? String(payload.path) : ''}`
+  } else if (kind.includes('command')) {
+    icon = 'command'
+    label = `$ ${payload.command ? String(payload.command) : 'command'}`
+  } else if (kind.includes('tool')) {
+    label = payload.tool_name ? String(payload.tool_name) : label
+  }
+
+  const isStart = /_started$/.test(kind)
+  const isFail = /failed|error$/.test(kind)
+  return {
+    id: `event-${kind}-${String(payload.path || payload.query || payload.tool_name || payload.command || '')}-${event.duration_ms ?? ''}`,
+    label,
+    state: isFail ? 'failed' : isStart ? 'running' : 'completed',
+    detail: payload.detail ? String(payload.detail) : undefined,
+    duration,
+    icon,
+  }
 }
 
 const kindStyle = (kind: string) => {
@@ -155,9 +193,16 @@ export function Transcript({ sessionId }: TranscriptProps) {
           if (content) wsItems.push({ id: `event-${event.event_id || content}`, content, kind: 'agent', timestamp: event.timestamp || new Date().toISOString(), source: 'ws' })
         } else if (event.kind === 'question_started') {
           wsItems.push({ id: `event-${event.event_id || event.timestamp}`, content: '', question: event.payload as unknown as MobileQuestion, kind: 'question', timestamp: event.timestamp || new Date().toISOString(), source: 'ws' })
-        } else {
-          wsItems.push({ id: `event-${event.event_id || `${event.kind}-${event.timestamp}`}`, content: activityLabel(event), kind: 'activity', timestamp: event.timestamp || new Date().toISOString(), source: 'ws' })
-        }
+  } else {
+    wsItems.push({
+      id: `event-${event.event_id || `${event.kind}-${event.timestamp}`}`,
+      content: activityLabel(event),
+      kind: 'activity',
+      timestamp: event.timestamp || new Date().toISOString(),
+      source: 'ws',
+      event: { kind: event.kind || '', payload: event.payload || {}, duration_ms: event.duration_ms },
+    })
+  }
       }
     } else if (msg.type === 'SessionError' && msg.payload?.session_id === sessionId) {
       wsItems.push({ id: `session-error-${msg.payload.code || msg.payload.message}`, content: String(msg.payload.message || 'Session error'), kind: 'error', timestamp: new Date().toISOString(), source: 'ws' })
@@ -239,27 +284,108 @@ export function Transcript({ sessionId }: TranscriptProps) {
       ) : (
           items.map((item) => (
           <div key={item.id} className={`flex ${alignClass(item.kind)}`}>
-            {item.kind === 'question' && item.question ? <QuestionCard question={item.question} onAnswer={(answer) => { const sent = sendMessage({ type: 'QuestionAnswer', payload: { answer } }); if (!sent) throw new Error('Connection is unavailable') }} /> : <div
+            {item.kind === 'question' && item.question ? <QuestionCard question={item.question} onAnswer={(answer) => { const sent = sendMessage({ type: 'QuestionAnswer', payload: { answer } }); if (!sent) throw new Error('Connection is unavailable') }} /> :
+            item.kind === 'activity' ? renderActivity(item) :
+            item.kind === 'system' || item.kind === 'error' ? (
+              <div className={`
+                inline-flex max-w-[85%] items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium
+                ${item.kind === 'error' ? 'border-error/25 bg-error/10 text-error' : 'border-border bg-surface-hover text-text-muted'}
+              `}>
+                {item.kind === 'error' && <AlertCircle className="h-3 w-3 shrink-0" />}
+                <span>{item.content}</span>
+              </div>
+            ) : (
+            <div
               className={`
-                max-w-[80%] rounded-lg border px-3 py-2
+                max-w-[80%] rounded-2xl border px-3.5 py-2.5 shadow-sm
                 ${kindStyle(item.kind)}
               `}
             >
-              <pre
-                className={`
-                  whitespace-pre-wrap break-words font-mono text-sm leading-relaxed m-0
-                  ${textStyle(item.kind)}
-                `}
-              >
-                {item.content}
-              </pre>
-              <div className={`text-[10px] mt-1 opacity-50 ${textStyle(item.kind)}`}>
+              <div className={`text-sm leading-relaxed ${textStyle(item.kind)}`}>
+                {renderMessageContent(item.content)}
+              </div>
+              <div className={`mt-1.5 text-[10px] opacity-50 ${textStyle(item.kind)}`}>
                 {new Date(item.timestamp).toLocaleTimeString()}
               </div>
-            </div>}
+            </div>)}
           </div>
         ))
       )}
+    </div>
+  )
+}
+
+/** Renders user/agent message content, lifting fenced code blocks out of the bubble. */
+function renderMessageContent(content: string) {
+  const blocks = content.split(/```/)
+  return blocks.map((block, index) => {
+    if (index % 2 === 1) {
+      const lines = block.split('\n')
+      const language = lines[0]?.trim() || 'code'
+      const code = lines.slice(1).join('\n')
+      const looksLikePath = language.includes('.')
+      return (
+        <CodeBlock
+          key={index}
+          filename={looksLikePath ? language : undefined}
+          language={looksLikePath ? undefined : language}
+          code={code}
+        />
+      )
+    }
+    if (!block.trim()) return null
+    return <p key={index} className="whitespace-pre-wrap break-words">{block}</p>
+  })
+}
+
+/** Renders a semantic activity event as Thinking / ToolActivityRow / completion pill. */
+function renderActivity(item: TranscriptItem) {
+  const event = item.event
+  if (!event) {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-hover px-3 py-1.5 text-[11px] text-text-muted">
+        {item.content}
+      </div>
+    )
+  }
+
+  if (event.kind === 'thinking_started' || event.kind === 'thinking_finished') {
+    const payload = event.payload || {}
+    const subject = typeof payload.subject === 'string' ? payload.subject : 'Reasoning about the task'
+    const seconds = typeof event.duration_ms === 'number' ? Number((event.duration_ms / 1000).toFixed(1)) : undefined
+    const done = event.kind === 'thinking_finished'
+    return (
+      <div className="w-full max-w-[85%]">
+        <Thinking
+          seconds={seconds}
+          defaultOpen={done}
+          steps={[{ label: subject, kind: 'step', done }]}
+        />
+      </div>
+    )
+  }
+
+  if (event.kind === 'agent_completed') {
+    const seconds = typeof event.duration_ms === 'number' ? ` · ${(event.duration_ms / 1000).toFixed(1)}s` : ''
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-3 py-1.5 text-[11px] font-medium text-success">
+        <Check className="h-3 w-3" />Done{seconds}
+      </div>
+    )
+  }
+
+  const tool = activityEventToTool(event)
+  if (tool) {
+    return (
+      <div className="w-full max-w-[85%]">
+        <ToolActivityRow item={tool} index={0} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-hover px-3 py-1.5 text-[11px] text-text-muted">
+      {item.content}
     </div>
   )
 }

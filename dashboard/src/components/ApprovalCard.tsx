@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, AlertTriangle, Check, X, Infinity } from 'lucide-react'
+import { Shield, AlertTriangle, Check, X, Infinity as InfinityIcon } from 'lucide-react'
 
 interface ApprovalRequest {
   id: string
@@ -61,7 +61,7 @@ export function ApprovalCard({ request, onApprove, onReject }: ApprovalCardProps
               onClick={() => onApprove?.(request.id, true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-accent/20 hover:bg-accent/30 text-accent text-sm font-medium transition-colors"
             >
-              <Infinity className="w-4 h-4" />
+              <InfinityIcon className="w-4 h-4" />
               <span>Always</span>
             </button>
             <button

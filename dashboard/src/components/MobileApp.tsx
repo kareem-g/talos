@@ -10,13 +10,11 @@ import {
   Clipboard,
   Code2,
   Copy,
-  FileCode2,
   FolderGit2,
   Loader2,
   Paperclip,
   Plus,
   RefreshCw,
-  Search,
   Send,
   ShieldAlert,
   Smartphone,
@@ -46,6 +44,50 @@ import type {
   MobileWorkspace,
 } from '../types/mobile'
 import { QuestionCard } from './QuestionCard'
+import { Loader } from './ai/Loader'
+import { Thinking } from './ai/Thinking'
+import { ToolActivityRow, type ToolActivityItem } from './ai/ToolActivity'
+import { DiffSummary, type DiffFile } from './ai/DiffSummary'
+
+/** Best-effort "N seconds" parse from a thinking title like "Thought for 8 seconds". */
+function thoughtSeconds(title?: string): number | undefined {
+  const match = title && title.match(/(\d+)\s*s/i)
+  return match ? Number(match[1]) : undefined
+}
+
+/** Derives thinking steps from a ChatItem of kind 'thinking'. */
+function thinkingSteps(item: ChatItem): import('./ai/Thinking').ThinkingStep[] {
+  if (item.detail) return [{ label: item.detail, kind: 'step', done: true }]
+  const label = item.title?.toLowerCase().includes('thought') ? 'Analyzed the request' : item.title || 'Thinking'
+  return [{ label, kind: 'step', done: true }]
+}
+
+/** Best-effort diff parse from an activity title + raw detail. */
+function parseDiff(title: string | undefined, detail: string | undefined): DiffFile[] {
+  const source = detail && detail.length > (title?.length ?? 0) ? detail : title
+  if (!source) return []
+  const lines = source.split('\n').filter((line) => /^[+-]/.test(line))
+  if (lines.length === 0) return []
+  return [{
+    filename: title && /\.\w+$/.test(title) ? title : 'changes',
+    lines: lines.map((line) => ({ type: line.startsWith('+') ? 'add' : 'remove', text: line.slice(1) })),
+  }]
+}
+
+/** Turns a ChatItem of activity/plan kind into a compact tool row. */
+function activityToTool(item: ChatItem): ToolActivityItem {
+  const text = `${item.title || ''} ${item.detail || ''}`
+  const failed = /failed/i.test(text)
+  const completed = /completed|done|✓/i.test(text)
+  return {
+    id: item.id,
+    label: item.title || 'Agent activity',
+    state: failed ? 'failed' : completed ? 'completed' : 'running',
+    detail: item.detail,
+    icon: item.kind === 'plan' ? 'command' : item.kind === 'activity' ? 'tool' : undefined,
+    timestamp: item.timestamp,
+  }
+}
 
 const statusMeta: Record<string, { label: string; tone: string; dot: string }> = {
   starting: { label: 'Starting', tone: 'text-accent', dot: 'bg-accent' },
@@ -269,7 +311,7 @@ export function MobileApp() {
           <EmptyState icon={FolderGit2} title="No workspaces available" detail="Make sure the desktop daemon is running and a workspace has a task." />
         ) : snapshot ? (
           <div className="space-y-3">
-            {snapshot.workspaces.map((workspace) => (
+            {snapshot.workspaces.map((workspace, index) => (
               <WorkspaceCard
                 key={workspace.id}
                 workspace={workspace}
@@ -277,6 +319,7 @@ export function MobileApp() {
                 onToggle={() => toggleWorkspace(workspace.id)}
                 onOpenTask={(id) => navigate(`/mobile/task/${encodeURIComponent(id)}`)}
                 onNewTask={() => setShowCreate(true)}
+                index={index}
               />
             ))}
           </div>
@@ -384,9 +427,13 @@ function ConnectionBanner({ connection, error, onRetry }: { connection: MobileCo
   )
 }
 
-function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask }: { workspace: MobileWorkspace; expanded: boolean; onToggle: () => void; onOpenTask: (id: string) => void; onNewTask: () => void }) {
+function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask, index }: { workspace: MobileWorkspace; expanded: boolean; onToggle: () => void; onOpenTask: (id: string) => void; onNewTask: () => void; index: number }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-surface">
+    <article
+      className="overflow-hidden rounded-2xl border border-border bg-surface"
+      data-ai-anim
+      style={{ animation: `ai-fade-up 240ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index * 60, 420)}ms both` }}
+    >
       <button onClick={onToggle} className="block w-full px-4 py-4 text-left active:bg-surface-hover">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent"><FolderGit2 className="h-4 w-4" /></div>
@@ -400,7 +447,7 @@ function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask }:
       </button>
       {expanded && (
         <div className="border-t border-border bg-background/30 px-3 pb-3 pt-2">
-          {workspace.tasks.length === 0 ? <p className="px-2 py-4 text-xs text-text-dim">No active tasks</p> : workspace.tasks.map((task) => <TaskRow key={task.id} task={task} onOpen={() => onOpenTask(task.id)} />)}
+          {workspace.tasks.length === 0 ? <p className="px-2 py-4 text-xs text-text-dim">No active tasks</p> : workspace.tasks.map((task, index) => <TaskRow key={task.id} task={task} onOpen={() => onOpenTask(task.id)} index={index} />)}
           <button onClick={onNewTask} className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs font-medium text-text-muted hover:bg-surface-hover hover:text-text"><Plus className="h-3.5 w-3.5" /> New task in this workspace</button>
         </div>
       )}
@@ -408,11 +455,12 @@ function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask }:
   )
 }
 
-function TaskRow({ task, onOpen }: { task: MobileSession; onOpen: () => void }) {
+function TaskRow({ task, onOpen, index }: { task: MobileSession; onOpen: () => void; index?: number }) {
+  const status = statusFor(task.status)
   return (
-    <button onClick={onOpen} className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-surface-hover active:bg-surface-active">
+    <button onClick={onOpen} className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-surface-hover active:bg-surface-active" data-ai-anim style={index != null ? { animation: `ai-fade-up 200ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index * 40, 300)}ms both` } : undefined}>
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted"><Bot className="h-3.5 w-3.5" /></div>
-      <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-medium text-text group-hover:text-accent">{task.title}</p><div className="mt-1 flex items-center gap-2"><StatusPill status={task.status} /><span className="text-[10px] text-text-dim">{task.agent}</span></div></div>
+      <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-medium text-text group-hover:text-accent">{task.title}</p><div className="mt-1 flex items-center gap-2"><span className="flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium"><span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />{status.label}</span><span className="text-[10px] text-text-dim">{task.agent}</span></div></div>
       <div className="flex shrink-0 items-center gap-2"><span className="text-[10px] text-text-dim">{relativeTime(task.updated_at).replace('Updated ', '')}</span><ChevronRight className="h-3.5 w-3.5 text-text-dim" /></div>
     </button>
   )
@@ -752,10 +800,18 @@ function ChatItemView({ item, onCopy, onEdit }: { item: ChatItem; onCopy: (text:
 }
 
 function ActivityRow({ item }: { item: ChatItem }) {
-  const [expanded, setExpanded] = useState(false)
-  if (item.kind === 'thinking') return <div className="flex items-center gap-2 px-2 py-0.5 text-[10px] text-text-dim"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent/70" />{item.title}</div>
-  const Icon = item.kind === 'diff' ? FileCode2 : item.kind === 'plan' ? Clipboard : Search
-  return <div className="rounded-xl border border-border/70 bg-surface/60"><button onClick={() => setExpanded((value) => !value)} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"><Icon className={`h-3.5 w-3.5 shrink-0 ${item.kind === 'diff' ? 'text-success' : 'text-text-dim'}`} /><span className="min-w-0 flex-1 truncate text-[11px] font-medium text-text-muted">{item.title || 'Agent activity'}</span>{item.detail && (expanded ? <ChevronDown className="h-3 w-3 text-text-dim" /> : <ChevronRight className="h-3 w-3 text-text-dim" />)}</button>{expanded && item.detail && <div className="border-t border-border/60 px-3 pb-3 pt-2 text-[11px] leading-5 text-text-muted"><pre className="whitespace-pre-wrap font-sans">{item.detail}</pre></div>}</div>
+  if (item.kind === 'thinking') {
+    return <Thinking seconds={thoughtSeconds(item.title)} steps={thinkingSteps(item)} defaultOpen={false} />
+  }
+  if (item.kind === 'diff') {
+    const files = parseDiff(item.title, item.detail)
+    return files.length ? <DiffSummary files={files} /> : <ToolActivityRow item={activityToTool(item)} index={0} />
+  }
+  if (item.kind === 'plan') {
+    const tool = activityToTool(item)
+    return <ToolActivityRow item={{ ...tool, detail: item.detail, icon: 'command' }} index={0} />
+  }
+  return <ToolActivityRow item={activityToTool(item)} index={0} />
 }
 
 function ApprovalPrompt({ approval, onResolve }: { approval: MobileApproval; onResolve: (decision: string) => void }) {
@@ -768,7 +824,7 @@ function WorkingIndicator({ since, now }: { since: string; now: number }) {
   const seconds = Math.floor(elapsed / 1000)
   const minutes = Math.floor(seconds / 60)
   const label = minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`
-  return <div className="flex items-center gap-2 px-1 py-1 text-[11px] text-text-muted"><span className="flex gap-0.5"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.2s]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.1s]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent" /></span><span>Working for {label}</span></div>
+  return <div className="px-1 py-1"><Loader label={`Working for ${label}`} variant="orbit" showElapsed={false} /></div>
 }
 
 function MessageContent({ content }: { content: string }) {

@@ -1,0 +1,374 @@
+{
+  "source": "https://www.beautifului.dev/",
+  "collectedAt": "2026-08-12",
+  "collectionMethod": "public View code modal (one file per component)",
+  "components": [
+    {
+      "slug": "tool-chips",
+      "name": "Tool Chips",
+      "title": "Tool Chips",
+      "url": "https://www.beautifului.dev/#tool-chips",
+      "source": "components/ToolChips.tsx",
+      "variants": [
+        "Tool call rows",
+        "File-diff chips",
+        "Expandable rows"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 8846,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "rows + expandable tool/file-diff chips (+2 more)"
+    },
+    {
+      "slug": "loading-state",
+      "name": "Loading State",
+      "title": "Loading State",
+      "url": "https://www.beautifului.dev/#loading-state",
+      "source": "components/LoadingState.tsx",
+      "variants": [
+        "Drive",
+        "Dots",
+        "Orbit"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 2843,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "PATTERNS map + `variant` prop (Drive | Dots | Orbit)"
+    },
+    {
+      "slug": "thinking-state",
+      "name": "Thinking",
+      "title": "Thinking",
+      "url": "https://www.beautifului.dev/#thinking-state",
+      "source": "components/ThinkingState.tsx",
+      "variants": [
+        "Thought for 4s",
+        "Steps",
+        "Reasoning",
+        "Search",
+        "Coding"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 10201,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "`variant` prop branches (Steps | Reasoning | Search | Coding); base = Thought-for-4s playthrough"
+    },
+    {
+      "slug": "streaming-text",
+      "name": "Streaming Text",
+      "title": "Streaming Text",
+      "url": "https://www.beautifului.dev/#streaming-text",
+      "source": "components/StreamingText.tsx",
+      "variants": [
+        "interactive stream (actions, citations, follow-ups)"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 8734,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "state-machine playthrough (stream → citations → actions → follow-ups)"
+    },
+    {
+      "slug": "approval-card",
+      "name": "Approval Card",
+      "title": "Approval Card",
+      "url": "https://www.beautifului.dev/#approval-card",
+      "source": "components/ApprovalCard.tsx",
+      "variants": [
+        "Core line (3)",
+        "Full case (5)",
+        "Single hero"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 10244,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "question-count presets (core-line 3 | full 5 | single hero); interactive flow"
+    },
+    {
+      "slug": "task-rows",
+      "name": "Task Rows",
+      "title": "Task Rows",
+      "url": "https://www.beautifului.dev/#task-rows",
+      "source": "components/TaskRows.tsx",
+      "variants": [
+        "Capsules",
+        "List"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 8792,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "`layout` prop (Capsules | List)"
+    },
+    {
+      "slug": "chat-composer",
+      "name": "Chat",
+      "title": "Chat",
+      "url": "https://www.beautifului.dev/#chat-composer",
+      "source": "components/ChatComposer.tsx",
+      "variants": [
+        "Tabs",
+        "Reply flow",
+        "Composer"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 7103,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "tabs + reply sequence + composer (interactive)"
+    },
+    {
+      "slug": "prompt-bar",
+      "name": "Prompt Bar",
+      "title": "Prompt Bar",
+      "url": "https://www.beautifului.dev/#prompt-bar",
+      "source": "components/PromptBar.tsx",
+      "variants": [
+        "Rounded",
+        "Pill"
+      ],
+      "dependencies": [
+        "glimm"
+      ],
+      "imports": [
+        "createShader",
+        "playSweep",
+        "accentChain",
+        "ACCENTS"
+      ],
+      "codeLength": 28668,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "`variant` prop (Rounded | Pill) + interactive @ / /command menus"
+    },
+    {
+      "slug": "recommendation-card",
+      "name": "Recommendation Card",
+      "title": "Recommendation Card",
+      "url": "https://www.beautifului.dev/#recommendation-card",
+      "source": "components/RecommendationCard.tsx",
+      "variants": [
+        "Alternatives drawer",
+        "Accept"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 5883,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "Alternatives drawer + Accept (interactive)"
+    },
+    {
+      "slug": "context-cards",
+      "name": "Context Cards",
+      "title": "Context Cards",
+      "url": "https://www.beautifului.dev/#context-cards",
+      "source": "components/ContextCards.tsx",
+      "variants": [
+        "static chunk cards"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 3575,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file"
+    },
+    {
+      "slug": "diff-table",
+      "name": "Diff Table",
+      "title": "Diff Table",
+      "url": "https://www.beautifului.dev/#diff-table",
+      "source": "components/DiffTable.tsx",
+      "variants": [
+        "animated diff"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 5352,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file"
+    },
+    {
+      "slug": "records-table",
+      "name": "Records Table",
+      "title": "Records Table",
+      "url": "https://www.beautifului.dev/#records-table",
+      "source": "components/RecordsTable.tsx",
+      "variants": [
+        "CRM grid, calculations"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 12947,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "columns/categories/links/add-calculation (interactive)"
+    },
+    {
+      "slug": "filter-table",
+      "name": "Filter Table",
+      "title": "Filter Table",
+      "url": "https://www.beautifului.dev/#filter-table",
+      "source": "components/FilterTable.tsx",
+      "variants": [
+        "Status filter: All/To do/In Progress/Completed"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 4839,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "status filter chips (All | To do | In Progress | Completed)"
+    },
+    {
+      "slug": "sidebar-nav",
+      "name": "Sidebar Nav",
+      "title": "Sidebar Nav",
+      "url": "https://www.beautifului.dev/#sidebar-nav",
+      "source": "components/SidebarNav.tsx",
+      "variants": [
+        "Search + direct select"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 8590,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "inline search + direct select (interactive)"
+    },
+    {
+      "slug": "search",
+      "name": "Search",
+      "title": "Search",
+      "url": "https://www.beautifului.dev/#search",
+      "source": "components/SearchList.tsx",
+      "variants": [
+        "live filtering"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 3715,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "live filter as you type (interactive)"
+    },
+    {
+      "slug": "insight-cards",
+      "name": "Insight Cards",
+      "title": "Insight Cards",
+      "url": "https://www.beautifului.dev/#insight-cards",
+      "source": "components/InsightCards.tsx",
+      "variants": [
+        "carousel autoplay + manual"
+      ],
+      "dependencies": [
+        "liveline"
+      ],
+      "imports": [
+        "Liveline",
+        "LivelinePoint",
+        "LivelineSeries"
+      ],
+      "codeLength": 17597,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "carousel autoplay/manual (‹ ›)"
+    },
+    {
+      "slug": "code-block",
+      "name": "Code Block",
+      "title": "Code Block",
+      "url": "https://www.beautifului.dev/#code-block",
+      "source": "components/CodeBlock.tsx",
+      "variants": [
+        "streaming lines + live copy"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 4379,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "streaming lines + live copy (interactive)"
+    },
+    {
+      "slug": "fine-tune-card",
+      "name": "Fine-tune Card",
+      "title": "Fine-tune Card",
+      "url": "https://www.beautifului.dev/#fine-tune-card",
+      "source": "components/FineTuneCard.tsx",
+      "variants": [
+        "row",
+        "col",
+        "grid"
+      ],
+      "dependencies": [],
+      "imports": [],
+      "codeLength": 9664,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file",
+      "variantMechanism": "`layout` prop (row | col | grid)"
+    },
+    {
+      "slug": "selection-actions",
+      "name": "Selection Actions",
+      "title": "Selection Actions",
+      "url": "https://www.beautifului.dev/#selection-actions",
+      "source": "components/SelectionActions.tsx",
+      "variants": [
+        "contextual AI bar"
+      ],
+      "dependencies": [
+        "iconoir-react",
+        "@/components/atoms/Shimmer",
+        "@/components/atoms/StreamText"
+      ],
+      "imports": [
+        "ArrowUp",
+        "ChatBubbleQuestion",
+        "Check",
+        "EmojiSatisfied",
+        "NavArrowRight",
+        "Refresh",
+        "Scissor",
+        "Spark",
+        "TextBox",
+        "Xmark",
+        "Shimmer",
+        "StreamText"
+      ],
+      "codeLength": 17567,
+      "codePubliclyExposed": true,
+      "multiFile": false,
+      "variantsMode": "embedded-in-single-file"
+    }
+  ]
+}

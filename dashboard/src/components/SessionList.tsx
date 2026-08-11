@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
-  Terminal, 
-  Play, 
-  Pause, 
-  Square, 
+import {
+  Terminal,
+  Play,
+  Pause,
+  Square,
   GitBranch,
   Clock,
-  MoreHorizontal,
   Search,
   Plus,
   Bot,
@@ -37,14 +36,23 @@ interface AgentInfo {
 }
 
 const statusConfig = {
-  running: { color: 'text-success', bg: 'bg-success/10', icon: Play, label: 'Running' },
-  waiting: { color: 'text-warning', bg: 'bg-warning/10', icon: Pause, label: 'Waiting' },
-  idle: { color: 'text-text-muted', bg: 'bg-surface-hover', icon: Terminal, label: 'Idle' },
-  error: { color: 'text-error', bg: 'bg-error/10', icon: Square, label: 'Error' },
-  archived: { color: 'text-text-dim', bg: 'bg-surface-hover', icon: Terminal, label: 'Archived' },
-  starting: { color: 'text-accent', bg: 'bg-accent/10', icon: Play, label: 'Starting' },
-  exited: { color: 'text-text-dim', bg: 'bg-surface-active', icon: Square, label: 'Exited' },
+  running: { color: 'text-success', bg: 'bg-success/10', icon: Play, label: 'Running', dot: 'bg-success', pill: 'bg-success/10 text-success' },
+  waiting: { color: 'text-warning', bg: 'bg-warning/10', icon: Pause, label: 'Waiting', dot: 'bg-warning', pill: 'bg-warning/10 text-warning' },
+  idle: { color: 'text-text-muted', bg: 'bg-surface-hover', icon: Terminal, label: 'Idle', dot: 'bg-text-dim', pill: 'bg-surface-hover text-text-muted' },
+  error: { color: 'text-error', bg: 'bg-error/10', icon: Square, label: 'Error', dot: 'bg-error', pill: 'bg-error/10 text-error' },
+  archived: { color: 'text-text-dim', bg: 'bg-surface-hover', icon: Terminal, label: 'Archived', dot: 'bg-text-dim', pill: 'bg-surface-hover text-text-dim' },
+  starting: { color: 'text-accent', bg: 'bg-accent/10', icon: Play, label: 'Starting', dot: 'bg-accent', pill: 'bg-accent/10 text-accent' },
+  exited: { color: 'text-text-dim', bg: 'bg-surface-active', icon: Square, label: 'Exited', dot: 'bg-text-dim', pill: 'bg-surface-active text-text-dim' },
 }
+
+/** Filter chips modeled on Beautiful UI's Filter Table (status chips + counts). */
+const FILTERS: { key: string | null; label: string }[] = [
+  { key: null, label: 'All' },
+  { key: 'running', label: 'Running' },
+  { key: 'waiting', label: 'Waiting' },
+  { key: 'idle', label: 'Idle' },
+  { key: 'error', label: 'Error' },
+]
 
 export function SessionList() {
   const navigate = useNavigate()
@@ -126,6 +134,7 @@ export function SessionList() {
   })
 
   const availableAgents = agents.filter(a => a.available)
+  const countFor = (status: string | null) => status === null ? sessions.length : sessions.filter(s => s.status === status).length
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
@@ -141,20 +150,29 @@ export function SessionList() {
             className="bg-transparent text-sm text-text placeholder:text-text-dim outline-none flex-1"
           />
         </div>
-        <div className="flex items-center gap-1">
-          {(['running', 'waiting', 'idle', 'error'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(statusFilter === status ? null : status)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
-                statusFilter === status
-                  ? 'bg-accent/10 text-accent'
-                  : 'text-text-muted hover:text-text hover:bg-surface-hover'
-              }`}
-            >
-              {status}
-            </button>
-          ))}
+        {/* Filter chips — Beautiful UI Filter Table pattern */}
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {FILTERS.map((f) => {
+            const active = statusFilter === f.key
+            const config = f.key ? statusConfig[f.key as keyof typeof statusConfig] : null
+            return (
+              <button
+                key={f.label}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setStatusFilter(f.key)}
+                className={`flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors duration-200 ${
+                  active ? 'bg-accent/10 text-accent' : 'text-text-muted hover:bg-surface-hover hover:text-text'
+                }`}
+              >
+                {config?.dot && <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />}
+                {f.label}
+                <span className={`rounded px-1 text-[10.5px] tabular-nums ${active ? 'bg-surface-active text-text' : 'text-text-dim'}`}>
+                  {countFor(f.key)}
+                </span>
+              </button>
+            )
+          })}
         </div>
         <div className="h-5 w-px bg-border mx-1" />
         <div className="relative">
@@ -209,58 +227,60 @@ export function SessionList() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filtered.map((session) => {
+            {filtered.map((session, index) => {
               const config = statusConfig[session.status]
               const StatusIcon = config.icon
               return (
                 <div
                   key={session.id}
                   onClick={() => navigate(`/session/${session.id}`)}
-                  className="group relative p-4 rounded-lg border border-border bg-surface hover:border-border-hover hover:bg-surface-hover cursor-pointer transition-all"
+                  className="group relative cursor-pointer rounded-xl border border-border bg-surface p-4 transition-all hover:border-border-hover hover:shadow-lg"
+                  style={{ animation: `ai-fade-up 220ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index * 45, 300)}ms both` }}
+                  data-ai-anim
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-md ${config.bg} flex items-center justify-center`}>
-                        <StatusIcon className={`w-4 h-4 ${config.color}`} />
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${config.bg}`}>
+                        <StatusIcon className={`h-4 w-4 ${config.color}`} />
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-text group-hover:text-accent transition-colors">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-medium text-text transition-colors group-hover:text-accent">
                           {session.name}
                         </h3>
-                        <p className="text-[11px] text-text-dim">{session.agentName}</p>
+                        <p className="flex items-center gap-1.5 text-[11px] text-text-dim">
+                          <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
+                          {session.agentName || session.agent}
+                        </p>
                       </div>
                     </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation() }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-surface-active transition-all"
-                    >
-                      <MoreHorizontal className="w-4 h-4 text-text-muted" />
-                    </button>
+                    <span className={`inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${config.pill}`}>
+                      {config.label}
+                    </span>
                   </div>
 
                   {session.project && (
                     <div className="flex items-center gap-1.5 mb-2">
-                      <GitBranch className="w-3 h-3 text-text-dim" />
-                      <span className="text-[11px] text-text-muted truncate">
+                      <GitBranch className="h-3 w-3 text-text-dim" />
+                      <span className="truncate text-[11px] text-text-muted">
                         {session.project}
                         {session.branch && ` • ${session.branch}`}
                       </span>
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+                  <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
                     <div className="flex items-center gap-1.5 text-text-dim">
-                      <Clock className="w-3 h-3" />
+                      <Clock className="h-3 w-3" />
                       <span className="text-[11px]">{session.updatedAt}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      {session.tokensUsed && (
-                        <span className="text-[11px] text-text-dim font-mono">
+                      {session.tokensUsed != null && (
+                        <span className="font-mono text-[11px] text-text-dim tabular-nums">
                           {(session.tokensUsed / 1000).toFixed(1)}k tokens
                         </span>
                       )}
                       {session.cost != null && (
-                        <span className="text-[11px] text-text-dim">
+                        <span className="text-[11px] text-text-dim tabular-nums">
                           ${session.cost.toFixed(4)}
                         </span>
                       )}
