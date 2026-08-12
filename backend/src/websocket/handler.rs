@@ -228,7 +228,9 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         },
     });
 
-    let pty_data = format!("{}\r", data.trim_end_matches(['\r', '\n']));
+    // Type the text first, then press Enter as a separate keystroke so the
+    // TUI treats it as a submit rather than part of the pasted draft.
+    let pty_data = data.trim_end_matches(['\r', '\n']).to_string();
     if let Err(error) = state.pty_manager.send_input(session_id, &pty_data).await {
         tracing::error!("[AgentDeck][PTY] Failed to write input: {}", error);
         state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
@@ -236,7 +238,16 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
             code: "pty_error".to_string(),
             message: format!("Failed to send input to agent: {}", error),
         });
+        return;
     }
+    let state = state.clone();
+    let session_id = session_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if let Err(error) = state.pty_manager.send_input(&session_id, "\r").await {
+            tracing::error!("[AgentDeck][PTY] Failed to submit input: {}", error);
+        }
+    });
 }
 
 async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {

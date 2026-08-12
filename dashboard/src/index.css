@@ -85,7 +85,107 @@
     --ai-green: hsl(var(--success));
     --ai-red: hsl(var(--error));
     --ai-accent: hsl(var(--accent));
+
+    /* Beautiful UI collection palette — the exact token names the saved
+       components reference via var(--*) and Tailwind utilities. Values are
+       mapped onto AgentDeck's dark theme so the collection renders natively. */
+    --ink: hsl(var(--text));                   /* primary foreground      */
+    --ink-2: hsl(var(--text-muted));           /* secondary foreground    */
+    --ink-3: hsl(var(--text-dim));             /* muted foreground        */
+    --canvas: hsl(var(--background));          /* app background          */
+    --field: hsl(var(--surface-hover));        /* input/control wells     */
+    --inset: hsl(0 0% 11.5%);                  /* recessed insets         */
+    --hover: hsl(var(--surface-hover));        /* hover wash              */
+    --hover-2: hsl(var(--surface-active));     /* stronger hover wash     */
+    --line: hsl(var(--border));                /* hairline separator      */
+    --line-strong: hsl(var(--border-hover));   /* emphasized separator    */
+    --accent-ink: hsl(0 0% 100%);              /* text on accent          */
+    --accent-tint: hsl(var(--accent) / 0.12);
+    --green: hsl(var(--terminal-green));
+    --green-tint: hsl(var(--terminal-green) / 0.12);
+    --red: hsl(var(--error));
+    --red-tint: hsl(var(--error) / 0.12);
+    --orange: hsl(var(--warning));
+    --orange-tint: hsl(var(--warning) / 0.12);
+
+    /* Elevation tokens — same values as the Tailwind shadow-* utilities, also
+       exposed as vars because saved components use var(--shadow-*) inline. */
+    --shadow-btn: 0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+    --shadow-hairline: inset 0 1px 0 rgba(255,255,255,0.045);
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
+    --shadow-raised: 0 8px 24px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.03);
+    --shadow-overlay: 0 16px 48px rgba(0,0,0,0.55);
   }
+}
+
+/* Keyframes the saved Beautiful UI components reference by name from inline
+   styles. Kept global (outside layers) so they are always emitted. */
+@keyframes shimmer-text {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes stream-in {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@keyframes pixel-on {
+  0% { opacity: 0.15; }
+  100% { opacity: 1; }
+}
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@layer components {
+  /* Shared primitives the collection components apply as plain classes. */
+  .primitive-card-pad {
+    @apply rounded-card bg-surface p-3 shadow-card;
+  }
+  .primitive-card-bar {
+    @apply flex items-center gap-2 border-b border-line px-3 py-2;
+  }
+  .primitive-card-footer {
+    @apply flex items-center gap-2 border-t border-line px-3 py-2;
+  }
+  .primitive-icon-button {
+    @apply flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink-2;
+  }
+  .primitive-table-cell {
+    @apply px-3 py-2 text-[12px];
+  }
+  .animated-underline {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: hsl(var(--line-strong));
+    text-decoration-thickness: 1px;
+    transition: text-decoration-color 150ms ease, color 150ms ease;
+  }
+  .animated-underline:hover {
+    text-decoration-color: hsl(var(--ink));
+  }
+  .source-avatar {
+    object-fit: cover;
+  }
+  .filter-status-todo { @apply bg-orange-tint text-orange; }
+  .filter-status-progress { @apply bg-accent-tint text-accent; }
+  .filter-status-done { @apply bg-green-tint text-green; }
 }
 
 @layer utilities {

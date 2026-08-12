@@ -2,12 +2,11 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Terminal,
-  GitBranch,
   Puzzle,
   Settings,
   ChevronLeft,
   ChevronRight,
-  Activity
+  Smartphone
 } from 'lucide-react'
 
 const NAV_SECTIONS: { label: string; items: { path: string; label: string; icon: typeof Terminal }[] }[] = [
@@ -15,8 +14,6 @@ const NAV_SECTIONS: { label: string; items: { path: string; label: string; icon:
     label: 'Workspace',
     items: [
       { path: '/', label: 'Sessions', icon: Terminal },
-      { path: '/worktrees', label: 'Worktrees', icon: GitBranch },
-      { path: '/activity', label: 'Activity', icon: Activity },
     ],
   },
   {
@@ -24,6 +21,7 @@ const NAV_SECTIONS: { label: string; items: { path: string; label: string; icon:
     items: [
       { path: '/mcp', label: 'MCP', icon: Puzzle },
       { path: '/settings', label: 'Settings', icon: Settings },
+      { path: '/pairing', label: 'Mobile pairing', icon: Smartphone },
     ],
   },
 ]
@@ -61,7 +59,7 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-12 shrink-0 flex-col border-r border-border bg-surface">
+      <aside className="hidden w-12 shrink-0 flex-col border-r border-line bg-canvas lg:flex">
         <div className="flex-1 py-2">
           {ALL_PATHS.map((path) => {
             const item = NAV_SECTIONS.flatMap((section) => section.items).find((i) => i.path === path)!
@@ -71,8 +69,8 @@ export function Sidebar() {
                 key={path}
                 onClick={() => navigate(path)}
                 title={item.label}
-                className={`mx-1.5 flex w-[calc(100%-12px)] items-center justify-center rounded-md p-2 transition-colors ${
-                  isActive ? 'bg-accent/10 text-accent' : 'text-text-muted hover:bg-surface-hover hover:text-text'
+                className={`mx-1.5 flex w-[calc(100%-12px)] items-center justify-center rounded-control p-2 transition-colors ${
+                  isActive ? 'bg-accent-tint text-accent' : 'text-ink-3 hover:bg-hover-2 hover:text-ink'
                 }`}
               >
                 <item.icon className="h-4 w-4 shrink-0" />
@@ -80,10 +78,10 @@ export function Sidebar() {
             )
           })}
         </div>
-        <div className="border-t border-border p-2">
+        <div className="border-t border-line p-2">
           <button
             onClick={() => setCollapsed(false)}
-            className="flex w-full items-center justify-center rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-hover"
+            className="flex w-full items-center justify-center rounded-control p-1.5 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -93,7 +91,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="hidden w-52 shrink-0 flex-col border-r border-line bg-canvas lg:flex">
       <div className="flex-1 overflow-y-auto p-2">
         <div
           ref={navRef}
@@ -102,7 +100,7 @@ export function Sidebar() {
           {/* Sliding active indicator — Beautiful UI SidebarNav pattern */}
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 rounded-md bg-accent/10"
+            className="pointer-events-none absolute inset-x-0 rounded-control bg-accent-tint"
             style={{
               top: box?.top ?? 0,
               height: box?.height ?? 0,
@@ -112,7 +110,7 @@ export function Sidebar() {
           />
           {NAV_SECTIONS.map((section) => (
             <div key={section.label}>
-              <div className="px-2 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-dim">
+              <div className="px-2 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3">
                 {section.label}
               </div>
               <div className="flex flex-col gap-px">
@@ -124,11 +122,11 @@ export function Sidebar() {
                       ref={(el) => { itemRefs.current[item.path] = el }}
                       onClick={() => navigate(item.path)}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`group relative z-10 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
-                        isActive ? 'text-text' : 'text-text-muted hover:text-text'
+                      className={`group relative z-10 flex w-full items-center gap-2.5 rounded-control px-2 py-1.5 text-left transition-colors ${
+                        isActive ? 'text-ink' : 'text-ink-2 hover:text-ink'
                       }`}
                     >
-                      <span className={isActive ? 'text-accent' : 'text-text-dim'}>
+                      <span className={isActive ? 'text-accent' : 'text-ink-3'}>
                         <item.icon className="h-4 w-4" />
                       </span>
                       <span className={`min-w-0 flex-1 truncate text-[13px] ${isActive ? 'font-medium' : ''}`}>
@@ -143,10 +141,10 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="border-t border-border p-2">
+      <div className="border-t border-line p-2">
         <button
           onClick={() => setCollapsed(true)}
-          className="flex w-full items-center justify-center rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-hover"
+          className="flex w-full items-center justify-center rounded-control p-1.5 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>

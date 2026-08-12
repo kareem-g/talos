@@ -675,17 +675,21 @@ async fn finish_spawn(
                 timestamp: chrono::Utc::now(),
             },
         });
-        let input = format!("{}\r", clean_prompt);
         let pty_manager = Arc::clone(&state.pty_manager);
         let session_id = session.id.clone();
         tokio::spawn(async move {
-            if let Err(error) = pty_manager.send_input_when_ready(&session_id, &input).await {
+            // Type the prompt, then press Enter as its own keystroke so the
+            // agent TUI submits it instead of keeping it as a draft.
+            if let Err(error) = pty_manager.send_input_when_ready(&session_id, &clean_prompt).await {
                 tracing::warn!(
                     "[AgentDeck][PTY] Initial prompt could not be sent to session {}: {}",
                     session_id,
                     error
                 );
+                return;
             }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let _ = pty_manager.send_input(&session_id, "\r").await;
         });
     }
 

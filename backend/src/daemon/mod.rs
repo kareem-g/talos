@@ -9,6 +9,7 @@ use crate::websocket::broadcast::BroadcastHub;
 use crate::Result;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -33,9 +34,15 @@ impl Daemon {
         let db_path = data_dir.join("agentdeck.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
+        // WAL keeps hook writes from blocking on PTY output writes; the
+        // busy timeout covers the rare writer-vs-writer overlap.
+        let options = sqlx::sqlite::SqliteConnectOptions::from_str(&db_url)?
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(std::time::Duration::from_secs(5));
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&db_url)
+            .connect_with(options)
             .await?;
 
         // Run migrations

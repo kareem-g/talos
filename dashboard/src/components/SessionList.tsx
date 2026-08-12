@@ -38,12 +38,17 @@ interface AgentInfo {
 const statusConfig = {
   running: { color: 'text-success', bg: 'bg-success/10', icon: Play, label: 'Running', dot: 'bg-success', pill: 'bg-success/10 text-success' },
   waiting: { color: 'text-warning', bg: 'bg-warning/10', icon: Pause, label: 'Waiting', dot: 'bg-warning', pill: 'bg-warning/10 text-warning' },
+  waiting_for_input: { color: 'text-warning', bg: 'bg-warning/10', icon: Pause, label: 'Waiting for input', dot: 'bg-warning', pill: 'bg-warning/10 text-warning' },
+  waiting_for_approval: { color: 'text-warning', bg: 'bg-warning/10', icon: Pause, label: 'Waiting for approval', dot: 'bg-warning', pill: 'bg-warning/10 text-warning' },
   idle: { color: 'text-text-muted', bg: 'bg-surface-hover', icon: Terminal, label: 'Idle', dot: 'bg-text-dim', pill: 'bg-surface-hover text-text-muted' },
   error: { color: 'text-error', bg: 'bg-error/10', icon: Square, label: 'Error', dot: 'bg-error', pill: 'bg-error/10 text-error' },
   archived: { color: 'text-text-dim', bg: 'bg-surface-hover', icon: Terminal, label: 'Archived', dot: 'bg-text-dim', pill: 'bg-surface-hover text-text-dim' },
   starting: { color: 'text-accent', bg: 'bg-accent/10', icon: Play, label: 'Starting', dot: 'bg-accent', pill: 'bg-accent/10 text-accent' },
   exited: { color: 'text-text-dim', bg: 'bg-surface-active', icon: Square, label: 'Exited', dot: 'bg-text-dim', pill: 'bg-surface-active text-text-dim' },
-}
+} as Record<string, { color: string; bg: string; icon: typeof Terminal; label: string; dot: string; pill: string }>
+
+/** Unknown statuses fall back to idle instead of crashing the grid. */
+const configFor = (status: string) => statusConfig[status] || statusConfig.idle
 
 /** Filter chips modeled on Beautiful UI's Filter Table (status chips + counts). */
 const FILTERS: { key: string | null; label: string }[] = [
@@ -129,12 +134,15 @@ export function SessionList() {
       s.name.toLowerCase().includes(filter.toLowerCase()) ||
       s.agent.toLowerCase().includes(filter.toLowerCase()) ||
       (s.project && s.project.toLowerCase().includes(filter.toLowerCase()))
-    const matchesStatus = !statusFilter || s.status === statusFilter
+    const matchesStatus = !statusFilter
+      || (statusFilter === 'waiting' ? s.status.startsWith('waiting') : s.status === statusFilter)
     return matchesFilter && matchesStatus
   })
 
   const availableAgents = agents.filter(a => a.available)
-  const countFor = (status: string | null) => status === null ? sessions.length : sessions.filter(s => s.status === status).length
+  const countFor = (status: string | null) => status === null
+    ? sessions.length
+    : sessions.filter(s => status === 'waiting' ? s.status.startsWith('waiting') : s.status === status).length
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
@@ -228,7 +236,7 @@ export function SessionList() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
             {filtered.map((session, index) => {
-              const config = statusConfig[session.status]
+              const config = configFor(session.status)
               const StatusIcon = config.icon
               return (
                 <div
