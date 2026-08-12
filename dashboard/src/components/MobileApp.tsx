@@ -31,7 +31,7 @@ import {
   groupBlocks,
 } from './chat/blocks'
 import LoadingState from './beautiful/LoadingState'
-import PromptBar from './beautiful/PromptBar'
+import { MobileComposer } from './MobileComposer'
 import { MobileContextPanel } from './MobileContextPanel'
 import type {
   MobileAgent,
@@ -773,8 +773,13 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     send({ type: 'QuestionAnswer', payload: { answer } })
   }
 
-  const sendText = (text: string) => {
-    send({ type: 'Input', payload: { session_id: taskId, data: `${text}\n` } })
+  const sendText = (text: string, attachments: { ref: string; fileName: string }[] = []) => {
+    // Attachments are sent as a trailing note the agent can act on; the
+    // file bytes already live in the session scratch dir on the desktop.
+    const attachmentNote = attachments.length
+      ? `\n\n[attachments: ${attachments.map((a) => `${a.ref}=${a.fileName}`).join(', ')}]`
+      : ''
+    send({ type: 'Input', payload: { session_id: taskId, data: `${text}${attachmentNote}\n` } })
     setIsAtBottom(true)
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -901,18 +906,16 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
               <AlertCircle className="h-3 w-3" /> Reconnecting — messages send when the desktop is back.
             </p>
           )}
-          <PromptBar
-            variant="Pill"
-            placeholder={ended ? 'Task stopped — start a new task' : working ? 'Queue a follow-up…' : 'Message the agent…'}
+          <MobileComposer
+            sessionId={taskId}
             disabled={ended}
+            ended={ended}
+            working={working}
             onSend={sendText}
-            onPlus={() => setDebug((value) => !value)}
           />
           <div className="flex items-center justify-between px-1 text-[10px] text-ink-3">
-            <button type="button" onClick={() => setDebug((value) => !value)} className="animated-underline transition-colors hover:text-ink">
-              {debug ? 'Back to chat' : 'Terminal debug'}
-            </button>
             <span>{working ? 'Follow-ups queue for this task' : ended ? 'Read-only history' : connection === 'connected' ? 'Ready' : connectionLabel(connection)}</span>
+            <span>{task?.agent}</span>
           </div>
         </div>
       </div>
