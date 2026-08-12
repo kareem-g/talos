@@ -103,6 +103,22 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
   let lastTextPart: MutableTextPart | null = null
   // In-flight tool calls keyed by tool_id (falls back to name for legacy events).
   const openTools = new Map<string, MutableToolCallPart>()
+  // Tool-call ids already emitted this build. assistant-ui's runtime requires
+  // every tool-call part to carry a globally unique toolCallId, so when the
+  // agent reuses a tool_id (a tool that finishes then runs again, or a start
+  // event delivered twice) we disambiguate instead of pushing a duplicate part.
+  const usedToolCallIds = new Set<string>()
+  const uniqueToolCallId = (base: string): string => {
+    if (!usedToolCallIds.has(base)) {
+      usedToolCallIds.add(base)
+      return base
+    }
+    let n = 1
+    while (usedToolCallIds.has(`${base}#${n}`)) n++
+    const id = `${base}#${n}`
+    usedToolCallIds.add(id)
+    return id
+  }
   // Reasoning is a distinct in-thread block; hold the running block to complete it.
   let openReasoning: MutableReasoningPart | null = null
 
@@ -204,7 +220,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'activity': {
-        const part = raw ? activityPart(raw, item, openTools) : activityData(item)
+        const part = raw ? activityPart(raw, item, openTools, uniqueToolCallId) : activityData(item)
         if (part) {
           ensureTurn(item.id).content.push(part)
         }
@@ -215,7 +231,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       case 'plan':
       case 'diff': {
         if (item.kind === 'plan' || (raw && item.kind === 'diff')) {
-          const part = raw ? activityPart(raw, item, openTools) : null
+          const part = raw ? activityPart(raw, item, openTools, uniqueToolCallId) : null
           if (part) {
             ensureTurn(item.id).content.push(part)
           }
@@ -344,6 +360,7 @@ function activityPart(
   event: MobileAgentEvent,
   item: ChatItem,
   openTools: Map<string, MutableToolCallPart>,
+  uniqueToolCallId: (base: string) => string,
 ): MutablePart | null {
   const payload = event.payload || {}
   const toolId = String(payload.tool_id || '')
@@ -353,9 +370,15 @@ function activityPart(
 
   switch (event.kind) {
     case 'tool_started': {
+      // If a tool with this id is still in flight (start delivered twice, or a
+      // previous run never sent a finish), reuse it in place rather than
+      // emitting a second part that would collide on its toolCallId.
+      const existingKey = toolId || `anon-${toolName}`
+      const inFlight = openTools.get(existingKey)
+      if (inFlight) return null
       const part: MutableToolCallPart = {
         type: 'tool-call',
-        toolCallId: toolId || `call-${item.id}`,
+        toolCallId: uniqueToolCallId(toolId || `call-${item.id}`),
         toolName,
         args: payload.input && typeof payload.input === 'object'
           ? (payload.input as Record<string, unknown>)
@@ -363,7 +386,7 @@ function activityPart(
         argsText: payload.input ? JSON.stringify(payload.input) : '{}',
         status: { type: 'running' },
       }
-      openTools.set(toolId || `anon-${toolName}`, part)
+      openTools.set(existingKey, part)
       return part
     }
     case 'tool_finished': {
@@ -375,15 +398,18 @@ function activityPart(
       return null
     }
     case 'command_started': {
+      const existingKey = toolId || 'cmd-bash'
+      const inFlight = openTools.get(existingKey)
+      if (inFlight) return null
       const part: MutableToolCallPart = {
         type: 'tool-call',
-        toolCallId: toolId || `cmd-${item.id}`,
+        toolCallId: uniqueToolCallId(toolId || `cmd-${item.id}`),
         toolName: 'bash',
         args: { command: payload.command },
         argsText: payload.command ? JSON.stringify({ command: payload.command }) : '{}',
         status: { type: 'running' },
       }
-      openTools.set(toolId || 'cmd-bash', part)
+      openTools.set(existingKey, part)
       return part
     }
     case 'command_finished': {
