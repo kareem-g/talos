@@ -64,6 +64,7 @@ impl Daemon {
             hook_tokens: Arc::new(RwLock::new(std::collections::HashMap::new())),
             hook_starts: Arc::new(RwLock::new(std::collections::HashMap::new())),
             broadcast,
+            transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
         });
 
         // Persist terminal bytes and semantic streams into separate stores.

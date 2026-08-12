@@ -9,6 +9,7 @@ pub mod notifications;
 pub mod pty;
 pub mod protocol;
 pub mod sessions;
+pub mod transcript;
 pub mod tunnel;
 pub mod websocket;
 pub mod worktree;

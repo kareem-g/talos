@@ -58,6 +58,17 @@ pub async fn handle_claude_hook(
                 session_id: session_id.clone(),
                 state: "waiting_for_input".to_string(),
             });
+            // Begin tailing the Claude transcript so assistant text streams
+            // into the UI turn-by-turn instead of arriving only at Stop.
+            let state_clone = Arc::clone(&state);
+            let session_id_clone = session_id.clone();
+            tokio::spawn(async move {
+                crate::transcript::spawn_transcript_tail(
+                    state_clone,
+                    session_id_clone,
+                    tokio_util::sync::CancellationToken::new(),
+                );
+            });
         }
         "PreToolUse" => {
             state.broadcast.broadcast(WsMessage::StateChange {
@@ -340,7 +351,18 @@ async fn handle_permission(state: &AppState, session_id: &str, body: &Value) {
 }
 
 async fn handle_stop(state: &AppState, session_id: &str, body: &Value) {
-    if let Some(text) = body.get("last_assistant_message").and_then(Value::as_str) {
+    // The transcript tailer streams assistant text turn-by-turn. Flush the
+    // final turn (polling briefly for the write to land) and, if the
+    // transcript delivered anything, skip the duplicate assembled
+    // `last_assistant_message` broadcast so the UI does not render the same
+    // text twice.
+    let transcript_text = crate::transcript::tail_final(state, session_id).await;
+    if transcript_text.is_some() {
+        tracing::debug!("[AgentDeck][Hook] Transcript streamed assistant text for {session_id}; suppressing Stop message");
+        // Fall through to completion handling below without broadcasting.
+    } else if let Some(text) = body.get("last_assistant_message").and_then(Value::as_str) {
+        // No transcript text (non-Claude agent, or transcript unavailable):
+        // fall back to the assembled final message.
         state.broadcast.broadcast(WsMessage::Message {
             message: AgentMessage {
                 id: uuid::Uuid::new_v4().to_string(),

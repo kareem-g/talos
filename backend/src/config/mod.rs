@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use crate::pty::manager::PtyManager;
 use crate::auth::devices::DeviceStore;
 use crate::sessions::manager::SessionManager;
+use crate::transcript::TranscriptTails;
 use crate::websocket::broadcast::BroadcastHub;
 use crate::Result;
 
@@ -85,4 +86,5 @@ pub struct AppState {
     pub hook_tokens: Arc<RwLock<HashMap<String, String>>>,
     pub hook_starts: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
     pub broadcast: BroadcastHub,
+    pub transcript_tails: Option<Arc<TranscriptTails>>,
 }
