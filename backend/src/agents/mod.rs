@@ -83,6 +83,39 @@ pub async fn detect_agent(binary: &str) -> Option<(String, String)> {
     None
 }
 
+/// Attempt to discover a CLI agent's supported models by probing its own
+/// `--help` output. Returns the labels it finds (e.g. the aliases named in
+/// claude's `--model` documentation). This is best-effort discovery from the
+/// actual installed binary, not a hardcoded list — the editable config always
+/// wins when present.
+pub async fn detect_agent_models(binary: &str) -> Vec<String> {
+    let Ok(output) = tokio::process::Command::new(binary).arg("--help").output().await else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let help = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    // Claude documents its model aliases in the --model help text. Pull any
+    // quoted alias tokens out of that paragraph.
+    let mut found = Vec::new();
+    for line in help.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains("--model") || lower.contains("model for the current session") {
+            // Collect single-quoted tokens that look like model aliases.
+            for token in lower.split('\'') {
+                let t = token.trim();
+                if t.len() >= 3 && t.len() <= 12 && t.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    if !found.contains(&t.to_string()) {
+                        found.push(t.to_string());
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
 pub trait AgentAdapter: Send + Sync {
     fn info(&self) -> AgentInfo;
     fn build_command(&self, project: Option<&str>, prompt: Option<&str>) -> Result<Vec<String>>;

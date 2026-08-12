@@ -315,6 +315,18 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
     let mut agents = Vec::new();
     for (id, name, path, features, models, reasoning_levels) in configured {
         if let Some((resolved_path, version)) = crate::agents::detect_agent(&path).await {
+            // If config declares no models, probe the CLI's own --help to
+            // discover the aliases it advertises. Models are never hardcoded
+            // in the binary — they come from config or from the agent itself.
+            let models = if models.is_empty() {
+                crate::agents::detect_agent_models(&resolved_path)
+                    .await
+                    .into_iter()
+                    .map(|id| crate::config::settings::AgentModel { id: id.clone(), name: id, tag: None })
+                    .collect()
+            } else {
+                models
+            };
             let supports_model_switch = !models.is_empty();
             agents.push(json!({
                 "id": id,
@@ -322,7 +334,7 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
                 "available": true,
                 "path": resolved_path,
                 "version": version,
-                "features": features,
+                "features": features.clone(),
                 "models": models,
                 "reasoningLevels": reasoning_levels,
                 "capabilities": {

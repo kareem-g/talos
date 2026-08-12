@@ -31,6 +31,7 @@ import {
   groupBlocks,
 } from './chat/blocks'
 import LoadingState from './beautiful/LoadingState'
+import ThinkingState from './beautiful/ThinkingState'
 import { MobileComposer } from './MobileComposer'
 import { MobileContextPanel } from './MobileContextPanel'
 import type {
@@ -668,18 +669,6 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
 
   const blocks = useMemo(() => groupBlocks(items), [items])
 
-  const streamingId = useMemo(() => {
-    const status = taskFromSnapshot?.status || payload?.session?.status || ''
-    const working = status === 'running' || status === 'starting'
-    if (!working) return null
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]
-      if (item.kind === 'agent' && item.id.startsWith('event-')) return item.id
-      if (item.kind === 'user') return null
-    }
-    return null
-  }, [items, taskFromSnapshot, payload])
-
   const rawHistory = (payload?.terminal_output || [])
     .slice()
     .sort((a, b) => a.sequence - b.sequence)
@@ -737,6 +726,9 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     return { pendingApprovals: approvals, pendingQuestions: questions }
   }, [historyItems, liveItems, items, payload, events, resolvedApprovals])
 
+  // Live status from WebSocket StateUpdate/StateChange wins over the
+  // fetched snapshot — this is what makes the loading state and streaming
+  // highlight reflect what the agent is actually doing right now.
   const liveSession = [...events].reverse().find((event) => {
     if (event.type === 'SessionUpdate') {
       const session = event.payload?.session as Record<string, unknown> | undefined
@@ -744,16 +736,39 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     }
     return event.type === 'StateChange' && String(event.payload?.session_id || '') === taskId
   })
-  const baseTask = payload?.session || taskFromSnapshot
+  const liveBaseTask = payload?.session || taskFromSnapshot
   const liveSessionValue = liveSession?.type === 'SessionUpdate'
     ? normalizeSession(liveSession.payload?.session as Record<string, unknown>)
-    : liveSession?.type === 'StateChange' && baseTask
-      ? { ...baseTask, status: String(liveSession.payload?.state || 'exited').split(':')[0] as MobileSession['status'] }
+    : liveSession?.type === 'StateChange' && liveBaseTask
+      ? { ...liveBaseTask, status: String(liveSession.payload?.state || 'exited').split(':')[0] as MobileSession['status'] }
       : undefined
-  const task = liveSessionValue || payload?.session || taskFromSnapshot
-  const status = pendingApprovals.length > 0 ? 'waiting_for_approval' : task?.status || 'idle'
-  const working = status === 'running' || status === 'starting'
-  const ended = status === 'exited' || status === 'archived'
+  const liveTask = liveSessionValue || payload?.session || taskFromSnapshot
+  const liveStatus = pendingApprovals.length > 0 ? 'waiting_for_approval' : liveTask?.status || 'idle'
+  const working = liveStatus === 'running' || liveStatus === 'starting'
+  const ended = liveStatus === 'exited' || liveStatus === 'archived'
+
+  // Optimistic "awaiting response" — the timeline's last item is a user
+  // message and the agent has not replied yet. This makes the thinking /
+  // loading state appear the instant the user hits Send, without waiting for
+  // a WebSocket StateChange frame (which can lag by a second or two).
+  const lastItem = items[items.length - 1]
+  const awaitingResponse = connection === 'connected'
+    && !ended
+    && !working
+    && lastItem?.kind === 'user'
+
+  // The newest live assistant message streams while the agent is working.
+  // Uses the live working state so the loading highlight and streaming
+  // animation actually trigger while the agent is active.
+  const streamingId = useMemo(() => {
+    if (!working) return null
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i]
+      if (item.kind === 'agent' && item.id.startsWith('event-')) return item.id
+      if (item.kind === 'user') return null
+    }
+    return null
+  }, [items, working])
 
   useEffect(() => {
     if (items.length > lastItemCount.current && !isAtBottom) setNewActivity(true)
@@ -803,7 +818,7 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   }
 
   if (loading) return <TaskLoading onBack={onBack} />
-  if (error || !task) return <TaskError error={error || 'Task unavailable.'} onBack={onBack} onRetry={() => { setReload((value) => value + 1); void onRefresh() }} />
+  if (error || !liveTask) return <TaskError error={error || 'Task unavailable.'} onBack={onBack} onRetry={() => { setReload((value) => value + 1); void onRefresh() }} />
 
   return (
     <main className="mobile-app flex min-h-[100dvh] flex-col bg-canvas text-ink">
@@ -814,14 +829,14 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[13.5px] font-semibold text-ink">{task.title}</h1>
+            <h1 className="truncate text-[13.5px] font-semibold text-ink">{liveTask.title}</h1>
             <p className="mt-0.5 flex items-center gap-1.5 truncate text-[10px] text-ink-3">
-              <Bot className="h-3 w-3 shrink-0" />{task.agent}
+              <Bot className="h-3 w-3 shrink-0" />{liveTask.agent}
               <span className="h-0.5 w-0.5 rounded-full bg-ink-3" />
-              <span className="truncate">{workspace?.name || compactPath(task.project || '')}</span>
+              <span className="truncate">{workspace?.name || compactPath(liveTask.project || '')}</span>
             </p>
           </div>
-          <StatusPill status={status} />
+          <StatusPill status={liveStatus} />
           {/* chat ⇄ terminal toggle */}
           <div className="flex h-8 shrink-0 items-center rounded-chip border border-line bg-surface p-0.5">
             <button onClick={() => setDebug(false)} className={`flex h-full items-center rounded-chip px-2 text-[11px] font-medium transition-colors ${!debug ? 'bg-hover-2 text-ink' : 'text-ink-3'}`} aria-pressed={!debug}>Chat</button>
@@ -829,10 +844,10 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
               <TerminalSquare className="h-3 w-3" />CLI
             </button>
           </div>
-          <button onClick={() => task?.project && setShowContext(true)} disabled={!task?.project} className="flex size-9 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover disabled:opacity-30" aria-label="Files and changes">
+          <button onClick={() => liveTask?.project && setShowContext(true)} disabled={!liveTask?.project} className="flex size-9 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover disabled:opacity-30" aria-label="Files and changes">
             <FolderGit2 className="h-4 w-4" />
           </button>
-          <button onClick={() => void stopTask()} disabled={!working && status !== 'waiting_for_approval'} className="flex h-8 shrink-0 items-center gap-1.5 rounded-chip bg-red-tint px-2.5 text-[11px] font-medium text-red transition-colors active:bg-red active:text-white disabled:opacity-30">
+          <button onClick={() => void stopTask()} disabled={!working && liveStatus !== 'waiting_for_approval'} className="flex h-8 shrink-0 items-center gap-1.5 rounded-chip bg-red-tint px-2.5 text-[11px] font-medium text-red transition-colors active:bg-red active:text-white disabled:opacity-30">
             <Square className="h-3 w-3 fill-current" />Stop
           </button>
         </div>
@@ -877,7 +892,13 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
               {pendingApprovals.map((approval) => (
                 <ApprovalBlock key={approval.id} approval={approval} onResolve={(decision) => resolveApproval(approval, decision)} />
               ))}
-              {working && pendingApprovals.length === 0 && (
+              {/* Immediate loading state while awaiting the agent's first
+                  response, then the "Working" churning state once the agent
+                  confirms it is running. Neither shows during approvals. */}
+              {pendingApprovals.length === 0 && awaitingResponse && (
+                <ThinkingState variant="Steps" active="Thinking" working rows={[]} />
+              )}
+              {working && pendingApprovals.length === 0 && !awaitingResponse && (
                 <LoadingState label="Working" variant="Orbit" />
               )}
             </>
@@ -915,13 +936,13 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
           />
           <div className="flex items-center justify-between px-1 text-[10px] text-ink-3">
             <span>{working ? 'Follow-ups queue for this task' : ended ? 'Read-only history' : connection === 'connected' ? 'Ready' : connectionLabel(connection)}</span>
-            <span>{task?.agent}</span>
+            <span>{liveTask?.agent}</span>
           </div>
         </div>
       </div>
       {/* full-screen context panel (files / diffs / worktrees) */}
-      {task?.project && (
-        <MobileContextPanel project={task.project} open={showContext} onClose={() => setShowContext(false)} />
+      {liveTask?.project && (
+        <MobileContextPanel project={liveTask.project} open={showContext} onClose={() => setShowContext(false)} />
       )}
     </main>
   )

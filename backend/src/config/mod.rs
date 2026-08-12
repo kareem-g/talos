@@ -30,11 +30,20 @@ impl Config {
         let path = Self::config_path();
         let settings = if path.exists() {
             let content = tokio::fs::read_to_string(&path).await?;
-            toml::from_str(&content)
-                .map_err(|e| crate::AgentDeckError::Config(e.to_string()))?
+            let mut loaded = toml::from_str(&content)
+                .map_err(|e| crate::AgentDeckError::Config(e.to_string()))?;
+            // Backfill models/reasoning for agents that predate the field so
+            // existing installs get the same discoverable list without a
+            // manual config edit.
+            settings::backfill_defaults(&mut loaded);
+            let backfilled_toml = toml::to_string_pretty(&loaded)
+                .map_err(|e| crate::AgentDeckError::Config(e.to_string()))?;
+            if backfilled_toml.trim() != content.trim() {
+                tokio::fs::write(&path, backfilled_toml).await?;
+            }
+            loaded
         } else {
             let default = settings::Settings::default();
-            // Write default config
             let default_toml = toml::to_string_pretty(&default)
                 .map_err(|e| crate::AgentDeckError::Config(e.to_string()))?;
             if let Some(parent) = path.parent() {

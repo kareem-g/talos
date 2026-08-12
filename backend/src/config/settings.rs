@@ -208,6 +208,29 @@ pub struct ThemePalette {
     pub error: String,
 }
 
+/// Seed default models/reasoning into a loaded Settings. Used to backfill
+/// existing configs and to populate the config file on first run. The model
+/// list lives in config.toml (editable), not hardcoded in the binary.
+pub fn backfill_defaults(settings: &mut Settings) {
+    let claude = &mut settings.agents.claude;
+    if claude.models.is_empty() {
+        claude.models = vec![
+            AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
+            AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
+            AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+        ];
+    }
+    if claude.reasoning_levels.is_empty() {
+        claude.reasoning_levels = vec![
+            "low".to_string(),
+            "medium".to_string(),
+            "high".to_string(),
+            "xhigh".to_string(),
+            "max".to_string(),
+        ];
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
