@@ -1,5 +1,6 @@
 use crate::sessions::{Session, SessionStatus};
 use crate::{agent_events::{AgentEvent, AgentMessage}, questions::{Question, QuestionOption}, Result};
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -121,6 +122,48 @@ impl SessionManager {
             session.updated_at = chrono::Utc::now();
         }
 
+        self.record_state(id, status_str, None, "session_manager", None).await
+    }
+
+    /// Append a row to the `agent_state` history table. Consecutive duplicate
+    /// states are collapsed so the log describes transitions, not the health
+    /// checks and stream updates that repeat the current state every tick.
+    pub async fn record_state(
+        &self,
+        session_id: &str,
+        status: &str,
+        detail: Option<String>,
+        source: &str,
+        context: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO agent_state (session_id, status, detail, source)
+            SELECT ?1, ?2, ?3, ?4
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM agent_state latest
+                WHERE latest.session_id = ?1
+                  AND latest.id = (SELECT MAX(id) FROM agent_state WHERE session_id = ?1)
+                  AND latest.status = ?2
+            )
+            "#,
+        )
+        .bind(session_id)
+        .bind(status)
+        .bind(detail)
+        .bind(source)
+        .execute(&self.pool)
+        .await?;
+        if let Some(context) = context {
+            tracing::trace!(
+                "[AgentDeck][State] session={} -> {} (from {}): {}",
+                session_id,
+                status,
+                source,
+                context
+            );
+        }
         Ok(())
     }
 
@@ -251,6 +294,20 @@ impl SessionManager {
         .bind(session_id)
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// Full state-transition history for a session, oldest first. Backed by
+    /// the append-only `agent_state` table the status submisser writes to.
+    pub async fn get_agent_states(&self, session_id: &str) -> Result<Vec<AgentStateRecord>> {
+        Ok(sqlx::query_as::<_, AgentStateRow>(
+            "SELECT session_id, status, detail, source, created_at FROM agent_state WHERE session_id = ?1 ORDER BY id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
     }
 
     pub async fn create_approval(
@@ -534,6 +591,36 @@ impl TryFrom<AgentEventRow> for AgentEvent {
             payload: serde_json::from_str(&row.payload)?,
             duration_ms: row.duration_ms.and_then(|duration| u64::try_from(duration).ok()),
         })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentStateRecord {
+    pub session_id: String,
+    pub status: String,
+    pub detail: Option<String>,
+    pub source: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct AgentStateRow {
+    session_id: String,
+    status: String,
+    detail: Option<String>,
+    source: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<AgentStateRow> for AgentStateRecord {
+    fn from(row: AgentStateRow) -> Self {
+        Self {
+            session_id: row.session_id,
+            status: row.status,
+            detail: row.detail,
+            source: row.source,
+            created_at: row.created_at,
+        }
     }
 }
 

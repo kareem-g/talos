@@ -351,6 +351,7 @@ async fn handle_permission(state: &AppState, session_id: &str, body: &Value) {
 }
 
 async fn handle_stop(state: &AppState, session_id: &str, body: &Value) {
+    state.pty_manager.end_assistant_turn(session_id);
     // The transcript tailer streams assistant text turn-by-turn. Flush the
     // final turn (polling briefly for the write to land) and, if the
     // transcript delivered anything, skip the duplicate assembled

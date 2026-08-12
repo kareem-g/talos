@@ -5,12 +5,15 @@ import '@xterm/xterm/css/xterm.css'
 
 interface XtermTerminalProps {
   output: string
+  onData?: (data: string) => void
 }
 
-export function XtermTerminal({ output }: XtermTerminalProps) {
+export function XtermTerminal({ output, onData }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const previousOutput = useRef('')
+  const onDataRef = useRef(onData)
+  onDataRef.current = onData
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -19,7 +22,7 @@ export function XtermTerminal({ output }: XtermTerminalProps) {
       allowTransparency: false,
       convertEol: true,
       cursorBlink: false,
-      disableStdin: true,
+      disableStdin: !onDataRef.current,
       fontFamily: 'JetBrains Mono, Fira Code, SF Mono, monospace',
       fontSize: 12,
       lineHeight: 1.25,
@@ -50,6 +53,7 @@ export function XtermTerminal({ output }: XtermTerminalProps) {
     terminal.loadAddon(fit)
     terminal.open(containerRef.current)
     terminalRef.current = terminal
+    const input = terminal.onData((data) => onDataRef.current?.(data))
 
     const resizeObserver = new ResizeObserver(() => fit.fit())
     resizeObserver.observe(containerRef.current)
@@ -57,6 +61,7 @@ export function XtermTerminal({ output }: XtermTerminalProps) {
 
     return () => {
       resizeObserver.disconnect()
+      input.dispose()
       terminal.dispose()
       terminalRef.current = null
       previousOutput.current = ''

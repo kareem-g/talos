@@ -300,6 +300,7 @@ fn is_terminal_chrome(line: &str) -> bool {
         || lower.contains("pondering")
         || lower.contains("vibing")
         || lower.contains("zizagg")
+        || lower.contains("running stop hook")
         || trimmed.starts_with('⎿')
         || compact.contains("expectedvariable")
         || compact.contains("claudelogout")
@@ -401,5 +402,11 @@ mod tests {
         let output = "\u{1b}[38;2;153;153;153mThought for 5s\u{1b}[39m\r\n\u{1b}[38;2;255;255;255m●\u{1b}[39mAGENTDECK_CLAUDE_OK\r\n\u{1b}[38;2;215;119;87m· Booping…\u{1b}[39m";
         let parsed = OutputParser::parse_chunk(output);
         assert!(parsed.iter().any(|item| matches!(item, ParsedOutput::Text(text) if text == "AGENTDECK_CLAUDE_OK")));
+    }
+
+    #[test]
+    fn removes_claude_stop_hook_chrome_without_hiding_answer() {
+        let parsed = OutputParser::parse_chunk("\u{1b}[2D\r\n● Hello from Claude\r\nrunning stop hook · 4s");
+        assert!(parsed.iter().any(|item| matches!(item, ParsedOutput::Text(text) if text == "Hello from Claude")));
     }
 }

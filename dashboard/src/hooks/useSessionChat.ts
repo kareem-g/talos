@@ -84,7 +84,7 @@ export function useSessionChat(sessionId: string) {
 
   const liveEvents = messages as RealtimeEvent[]
 
-  const { items, pendingApprovals, pendingQuestions, status, rawOutput } = useMemo(() => {
+  const { items, pendingApprovals, pendingQuestions, status, rawOutput, resolvedDecisionById } = useMemo(() => {
     const historyEvents = history?.events || []
     const historyItems = buildHistoryItems(history?.messages || [], historyEvents, history?.transcripts || [])
     const liveItems = buildLiveItems(liveEvents, sessionId)
@@ -135,6 +135,25 @@ export function useSessionChat(sessionId: string) {
       && !supersededIds.has(approval.id)
       && all.findIndex((candidate) => candidate.id === approval.id) === index)
 
+    // resolved approval decisions: local optimistic map + events broadcast
+    // over the wire (permission_resolved), so in-thread pasted approvals keep
+    // their chosen decision across reloads and live updates.
+    const resolvedDecisionById = new Map<string, string>()
+    for (const [id, decision] of resolvedApprovals) resolvedDecisionById.set(id, decision)
+    const indexResolved = (payload?: Record<string, unknown>) => {
+      if (payload && payload.request_id != null) {
+        resolvedDecisionById.set(String(payload.request_id), String(payload.decision || 'resolved'))
+      }
+    }
+    historyEvents.forEach((event) => { if (event.kind === 'permission_resolved') indexResolved(event.payload) })
+    for (const frame of liveEvents) {
+      if (frame.type !== 'AgentEvent') continue
+      const payload = frame.payload as Record<string, unknown> | undefined
+      const nested = payload?.event as MobileAgentEvent | undefined
+      if (nested?.kind === 'permission_resolved') indexResolved(nested.payload)
+      indexResolved(payload)
+    }
+
     const answeredIds = answeredQuestionIds(historyEvents, liveEvents)
     const questions = merged
       .filter((item): item is ChatItem & { question: MobileQuestion } => item.kind === 'question' && Boolean(item.question))
@@ -176,6 +195,7 @@ export function useSessionChat(sessionId: string) {
       pendingQuestions: pendingQs,
       status: effectiveStatus,
       rawOutput: rawHistory + rawLive,
+      resolvedDecisionById,
     }
   }, [history, liveEvents, resolvedApprovals, session, sessionId])
 
@@ -205,6 +225,9 @@ export function useSessionChat(sessionId: string) {
     connected,
     session,
     items,
+    historyEvents: history?.events || [],
+    liveEvents,
+    resolvedDecisionById,
     pendingApprovals,
     pendingQuestions,
     resolvedApprovals,

@@ -186,6 +186,15 @@ async fn handle_message(msg: crate::websocket::WsMessage, state: &Arc<AppState>)
         crate::websocket::WsMessage::Input { session_id, data } => {
             handle_input(state, &session_id, &data).await;
         }
+        crate::websocket::WsMessage::TerminalInput { session_id, data } => {
+            if let Err(error) = state.pty_manager.send_input(&session_id, &data).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                    session_id,
+                    code: "pty_error".to_string(),
+                    message: format!("Failed to write to terminal: {}", error),
+                });
+            }
+        }
         crate::websocket::WsMessage::Command { action, params } => {
             handle_command(state, &action, params).await;
         }
@@ -228,6 +237,16 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         },
     });
 
+    // The chat runtime must enter its generation state as soon as the user
+    // submits, not only after a provider hook happens to fire (simple Claude
+    // replies often have no tool hook at all). It also arms Claude PTY text
+    // normalization for this specific turn.
+    state.pty_manager.begin_assistant_turn(session_id);
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "running".to_string(),
+    });
+
     // Type the text first, then press Enter as a separate keystroke so the
     // TUI treats it as a submit rather than part of the pasted draft.
     let pty_data = data.trim_end_matches(['\r', '\n']).to_string();
@@ -264,6 +283,7 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
         "approval_response" => {
             let request_id = params.get("request_id").and_then(Value::as_str).unwrap_or("");
             let decision = params.get("decision").and_then(Value::as_str).unwrap_or("deny");
+            let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
             let mut response = state.pty_manager.respond_to_approval(request_id, decision).await;
             if response.is_err() {
                 if let Ok(Some(stored)) = state.session_manager.get_approval(request_id).await {
@@ -273,6 +293,23 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
                         prompt: stored.prompt,
                     });
                     response = state.pty_manager.respond_to_approval(request_id, decision).await;
+                }
+            }
+            if response.is_err() && !session_id.is_empty() {
+                // Parser-detected approval (codex/opencode): it was never
+                // registered on the backend, so resolve it by typing the
+                // decision into the running CLI directly.
+                let typed = match decision {
+                    "allow" | "yes" | "Accept" | "accept" => "y",
+                    "always" => "always",
+                    "deny" | "no" => "n",
+                    _ => "",
+                };
+                if !typed.is_empty() {
+                    let answer = format!("{typed}\r");
+                    if state.pty_manager.send_input(session_id, &answer).await.is_ok() {
+                        response = Ok(session_id.to_string());
+                    }
                 }
             }
             match response {

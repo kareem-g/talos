@@ -69,6 +69,10 @@ export function agentEventToChatItem(event: MobileAgentEvent, id: string): ChatI
       return { id, kind: 'thinking', content: '', title: duration ? `Thought for ${duration}` : 'Thought', timestamp: event.timestamp }
     case 'tool_started':
       return { id, kind: 'activity', content: '', title: String(payload.tool_name || 'Tool'), detail: payload.input ? JSON.stringify(payload.input) : undefined, timestamp: event.timestamp }
+    case 'tool_activity':
+      return { id, kind: 'activity', content: '', title: String(payload.tool_name || 'Tool'), detail: payload.input ? JSON.stringify(payload.input) : undefined, timestamp: event.timestamp }
+    case 'plan':
+      return { id, kind: 'plan', content: '', title: String(payload.title || 'Plan'), detail: Array.isArray(payload.steps) ? payload.steps.join('\n') : undefined, timestamp: event.timestamp }
     case 'tool_finished':
       return { id, kind: 'activity', content: '', title: `${payload.success === false ? 'Failed' : 'Completed'} · ${String(payload.tool_name || 'Tool')}${duration ? ` · ${duration}` : ''}`, timestamp: event.timestamp }
     case 'file_edited':
@@ -87,8 +91,11 @@ export function agentEventToChatItem(event: MobileAgentEvent, id: string): ChatI
       return { id, kind: 'question', content: '', timestamp: event.timestamp, question: payload as unknown as MobileQuestion }
     case 'question_answered':
       return { id, kind: 'system', content: `Question answered: ${String(payload.question_id || '')}`, timestamp: event.timestamp }
+    // Completion changes the assistant-ui message status. It is not a chat
+    // message itself: rendering it as "Worked for …" hid the actual answer
+    // behind an activity card.
     case 'agent_completed':
-      return { id, kind: 'thinking', content: '', title: duration ? `Worked for ${duration}` : 'Completed', timestamp: event.timestamp }
+      return null
     case 'agent_error':
       return { id, kind: 'system', content: String(payload.message || 'Agent error'), timestamp: event.timestamp }
     default:

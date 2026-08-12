@@ -11,6 +11,9 @@ pub enum WsMessage {
     Subscribe { channels: Vec<String> },
     Unsubscribe { channels: Vec<String> },
     Input { session_id: String, data: String },
+    /// Raw keystrokes from the interactive xterm view. Unlike `Input`, these
+    /// bypass chat persistence and are written to the existing PTY verbatim.
+    TerminalInput { session_id: String, data: String },
     Command { action: String, params: serde_json::Value },
     QuestionAnswer { answer: crate::questions::QuestionAnswer },
     Ping,

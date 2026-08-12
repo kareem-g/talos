@@ -160,6 +160,7 @@ pub async fn get_session_transcripts(
             let messages = state.session_manager.get_messages(&id).await.unwrap_or_default();
             let events = state.session_manager.get_agent_events(&id).await.unwrap_or_default();
             let terminal_output = state.session_manager.get_terminal_output(&id).await.unwrap_or_default();
+            let agent_states = state.session_manager.get_agent_states(&id).await.unwrap_or_default();
             tracing::debug!("[AgentDeck][Persistence] Loaded {} legacy transcripts, {} messages, {} events for session={}", transcripts.len(), messages.len(), events.len(), id);
             Json(json!({
                 "session_id": id,
@@ -167,6 +168,7 @@ pub async fn get_session_transcripts(
                 "messages": messages,
                 "events": events,
                 "terminal_output": terminal_output,
+                "agent_states": agent_states,
                 "total": transcripts.len(),
             }))
         }

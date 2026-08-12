@@ -15,6 +15,14 @@ pub struct PtyManager {
     pending_approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
     terminated: Arc<Mutex<HashSet<String>>>,
     last_states: Arc<Mutex<HashMap<String, String>>>,
+    semantic_text: Arc<Mutex<HashMap<String, SemanticTextStream>>>,
+}
+
+#[derive(Debug, Default)]
+struct SemanticTextStream {
+    active: bool,
+    previous: String,
+    turn: u64,
 }
 
 pub struct PtySessionHandle {
@@ -38,6 +46,7 @@ impl PtyManager {
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
             terminated: Arc::new(Mutex::new(HashSet::new())),
             last_states: Arc::new(Mutex::new(HashMap::new())),
+            semantic_text: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -95,6 +104,7 @@ impl PtyManager {
         let agent_name = agent.to_string();
         let session_id = id.clone();
         let last_states = Arc::clone(&self.last_states);
+        let semantic_text = Arc::clone(&self.semantic_text);
         tokio::task::spawn_blocking(move || {
             let mut buffer = [0_u8; 4096];
             let mut fallback_started = false;
@@ -103,11 +113,13 @@ impl PtyManager {
                     Ok(size) if size > 0 => {
                         let data = String::from_utf8_lossy(&buffer[..size]).to_string();
 
-                        // This is the only terminal stream. It is never converted
-                        // into an assistant message or semantic tool event.
+                        // This is the raw terminal stream. It is always kept
+                        // for the debug view; for CLIs without a structured
+                        // hooks protocol it is also parsed into incremental
+                        // semantic events so the chat streams live.
                         broadcast.broadcast(WsMessage::TerminalOutput {
                             session_id: session_id.clone(),
-                            data,
+                            data: data.clone(),
                         });
 
                         if agent_name != "claude" && !fallback_started {
@@ -120,6 +132,91 @@ impl PtyManager {
                                 "agent_status",
                                 serde_json::json!({ "state": "running", "fallback": true }),
                             ));
+                        }
+
+                        if agent_name != "claude" {
+                            for event in crate::agents::agent_semantic_events(
+                                &session_id,
+                                &agent_name,
+                                &data,
+                            ) {
+                                broadcast.broadcast_agent_event(event);
+                            }
+                            if let Some(state) =
+                                crate::agents::agent_state_transition(&agent_name, &data)
+                            {
+                                let changed = last_states
+                                    .lock()
+                                    .map(|mut states| {
+                                        if states.get(&session_id).map(String::as_str) != Some(state) {
+                                            states.insert(session_id.clone(), state.to_string());
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                    .unwrap_or(false);
+                                if changed {
+                                    broadcast.broadcast(WsMessage::StateChange {
+                                        session_id: session_id.clone(),
+                                        state: state.to_string(),
+                                    });
+                                }
+                            }
+                        } else if let Some(text) = crate::agents::agent_text_fragment(&data) {
+                            // Claude's hooks provide authoritative tool and
+                            // approval events, but its JSONL transcript is
+                            // written only after a complete turn. Normalize
+                            // its live terminal redraws into true text deltas.
+                            let delta = semantic_text
+                                .lock()
+                                .ok()
+                                .and_then(|mut streams| {
+                                    let stream = streams.entry(session_id.clone()).or_default();
+                                    if !stream.active {
+                                        return None;
+                                    }
+                                    if !looks_like_claude_answer(&text) {
+                                        return None;
+                                    }
+                                    if text == stream.previous || stream.previous.ends_with(&text) {
+                                        return None;
+                                    }
+                                    let delta = if text.starts_with(&stream.previous) {
+                                        text[stream.previous.len()..].to_string()
+                                    } else {
+                                        if !stream.previous.is_empty() {
+                                            "\n".to_string() + &text
+                                        } else {
+                                            text.clone()
+                                        }
+                                    };
+                                    stream.previous = text;
+                                    (!delta.trim().is_empty()).then_some((delta, stream.turn))
+                                });
+                            if let Some((delta, turn)) = delta {
+                                broadcast.broadcast_agent_event(AgentEvent::new(
+                                    &session_id,
+                                    "assistant_text",
+                                    serde_json::json!({
+                                        "text": delta,
+                                        "source": "pty",
+                                        "turn": turn,
+                                        "delta": true,
+                                    }),
+                                ));
+                            }
+                        }
+
+                        if agent_name == "claude"
+                            && crate::pty::parser::detect_terminal_state(&data) == Some("waiting_for_input")
+                        {
+                            if let Ok(mut streams) = semantic_text.lock() {
+                                if let Some(stream) = streams.get_mut(&session_id) {
+                                    stream.active = false;
+                                    stream.previous.clear();
+                                }
+                            }
                         }
                     }
                     Ok(_) | Err(_) => break,
@@ -186,6 +283,31 @@ impl PtyManager {
                 "Session {} not found",
                 session_id
             )))
+        }
+    }
+
+    /// Begin one chat-generated assistant turn. Claude's terminal uses screen
+    /// redraws, so this resets the delta baseline before the next response.
+    pub fn begin_assistant_turn(&self, session_id: &str) {
+        if let Ok(mut streams) = self.semantic_text.lock() {
+            let stream = streams.entry(session_id.to_string()).or_default();
+            stream.active = true;
+            stream.previous.clear();
+            stream.turn = stream.turn.saturating_add(1);
+        }
+        if let Ok(mut states) = self.last_states.lock() {
+            states.insert(session_id.to_string(), "running".to_string());
+        }
+    }
+
+    /// Stop accepting PTY text as assistant output once the provider marks a
+    /// turn complete. Idle prompt redraws must remain terminal-only.
+    pub fn end_assistant_turn(&self, session_id: &str) {
+        if let Ok(mut streams) = self.semantic_text.lock() {
+            if let Some(stream) = streams.get_mut(session_id) {
+                stream.active = false;
+                stream.previous.clear();
+            }
         }
     }
 
@@ -291,4 +413,25 @@ impl PtyManager {
             .map(|approvals| approvals.values().cloned().collect())
             .unwrap_or_default()
     }
+}
+
+/// Claude's TUI redraws prompts, status lines, tool labels and completion
+/// timing alongside its answer. Only promote lines that look like actual
+/// assistant prose into the semantic stream; raw output remains intact in
+/// xterm regardless.
+fn looks_like_claude_answer(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ![
+        "running stop hook",
+        "manual mode",
+        "agent",
+        "tip:",
+        "waiting for your input",
+        "worked for",
+        "thought for",
+        "churned for",
+        "running command",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }

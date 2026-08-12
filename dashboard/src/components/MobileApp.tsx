@@ -23,17 +23,10 @@ import { normalizedText } from '../lib/terminalText'
 import { buildHistoryItems, buildLiveItems, type ChatItem } from '../lib/chatItems'
 import { XtermTerminal } from './XtermTerminal'
 import { useMobileWebSocket, type MobileRealtimeEvent, type MobileRealtimeMessage } from '../hooks/useMobileWebSocket'
-import {
-  ApprovalBlock,
-  ChatItemBlock,
-  QuestionBlock,
-  ToolRun,
-  groupBlocks,
-} from './chat/blocks'
 import LoadingState from './beautiful/LoadingState'
-import ThinkingState from './beautiful/ThinkingState'
-import { MobileComposer } from './MobileComposer'
 import { MobileContextPanel } from './MobileContextPanel'
+import { TaskConversation } from './task/TaskConversation'
+import { eventIndexByItemId } from '../lib/taskMessages'
 import type {
   MobileAgent,
   MobileAgentEvent,
@@ -538,8 +531,8 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
   const [error, setError] = useState<string | null>(null)
 
   const selectedAgent = agents.find((item) => item.id === agent)
-  const models = selectedAgent?.models ?? []
-  const reasoning = selectedAgent?.reasoningLevels ?? []
+  const models = useMemo(() => selectedAgent?.models ?? [], [selectedAgent])
+  const reasoning = useMemo(() => selectedAgent?.reasoningLevels ?? [], [selectedAgent])
   // Default to the first model / middle effort when the agent supports them.
   useEffect(() => {
     if (models.length && !models.some((m) => m.id === model)) setModel(models[0].id)
@@ -633,14 +626,10 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   const [debug, setDebug] = useState(false)
   const [showContext, setShowContext] = useState(false)
   const [resolvedApprovals, setResolvedApprovals] = useState(new Set<string>())
-  const [newActivity, setNewActivity] = useState(false)
-  const [isAtBottom, setIsAtBottom] = useState(true)
   // Optimistic user messages: rendered the instant the user hits Send so
   // the timeline never lags the send action. Each entry self-expires once
   // the matching persisted/WS message arrives (matched by normalized text).
   const [optimisticMessages, setOptimisticMessages] = useState<Array<{ id: string; content: string; timestamp: string }>>([])
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const lastItemCount = useRef(0)
 
   const taskFromSnapshot = findTask(snapshot, taskId)
   const workspace = snapshot?.workspaces.find((item) => item.tasks.some((task) => task.id === taskId))
@@ -655,36 +644,36 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
 
   const liveItems = useMemo(() => buildLiveItems(events, taskId), [events, taskId])
   const historyItems = useMemo(() => buildHistoryItems(payload?.messages || [], payload?.events || [], payload?.transcripts || []), [payload])
-
-  const items = useMemo(() => {
-    const historyUserContent = new Set(historyItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content)))
-    // Drop optimistic messages once the real (persisted or live) message
-    // arrives, matched by normalized content.
+  const historyUserContent = useMemo(
+    () => new Set(historyItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content))),
+    [historyItems],
+  )
+  const visibleOptimisticMessages = useMemo(() => {
     const realUserContent = new Set([
       ...historyUserContent,
       ...liveItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content)),
     ])
-    const visibleOptimistic = optimisticMessages.filter((msg) => !realUserContent.has(normalizedText(msg.content)))
-    const optimisticItems: ChatItem[] = visibleOptimistic.map((msg) => ({
-      id: msg.id,
-      kind: 'user' as const,
-      content: msg.content,
-      timestamp: msg.timestamp,
-    }))
+    return optimisticMessages.filter((message) => {
+      const normalized = normalizedText(message.content)
+      // Attachments append a `[attachments: …]` note to the persisted copy,
+      // so match by prefix when replacing the temporary assistant-ui message.
+      return ![...realUserContent].some((real) => real === normalized || real.startsWith(normalized))
+    })
+  }, [historyUserContent, liveItems, optimisticMessages])
+
+  const items = useMemo(() => {
     const questionAnswers = new Map<string, { selected_options?: unknown; custom_text?: unknown }>([
       ...(payload?.events || []).filter((event) => event.kind === 'question_answered').map((event) => [String(event.payload.question_id || ''), event.payload] as const),
       ...events.filter((event) => event.type === 'AgentEvent').map((event) => event.payload?.event as MobileAgentEvent | undefined).filter((event): event is MobileAgentEvent => event?.kind === 'question_answered').map((event) => [String(event.payload.question_id || ''), event.payload] as const),
     ])
-    return [...historyItems, ...liveItems.filter((item) => item.kind !== 'user' || !historyUserContent.has(normalizedText(item.content))), ...optimisticItems].map((item) => {
+    return [...historyItems, ...liveItems.filter((item) => item.kind !== 'user' || !historyUserContent.has(normalizedText(item.content)))].map((item) => {
       if (item.kind === 'question' && item.question) {
         const answer = questionAnswers.get(item.question.question_id)
         if (answer) return { ...item, question: { ...item.question, status: 'answered' as const, selected_options: Array.isArray(answer.selected_options) ? answer.selected_options.map(String) : [], custom_text: typeof answer.custom_text === 'string' ? answer.custom_text : undefined } }
       }
       return item
     }).filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index)
-  }, [historyItems, liveItems, payload, events])
-
-  const blocks = useMemo(() => groupBlocks(items), [items])
+  }, [historyItems, liveItems, payload, events, historyUserContent])
 
   const rawHistory = (payload?.terminal_output || [])
     .slice()
@@ -764,16 +753,6 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   const working = liveStatus === 'running' || liveStatus === 'starting'
   const ended = liveStatus === 'exited' || liveStatus === 'archived'
 
-  // Optimistic "awaiting response" — the timeline's last item is a user
-  // message and the agent has not replied yet. This makes the thinking /
-  // loading state appear the instant the user hits Send, without waiting for
-  // a WebSocket StateChange frame (which can lag by a second or two).
-  const lastItem = items[items.length - 1]
-  const awaitingResponse = connection === 'connected'
-    && !ended
-    && !working
-    && lastItem?.kind === 'user'
-
   // The newest live assistant message streams while the agent is working.
   // Uses the live working state so the loading highlight and streaming
   // animation actually trigger while the agent is active.
@@ -787,19 +766,30 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     return null
   }, [items, working])
 
-  useEffect(() => {
-    if (items.length > lastItemCount.current && !isAtBottom) setNewActivity(true)
-    if (isAtBottom && items.length > lastItemCount.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    lastItemCount.current = items.length
-  }, [items.length, isAtBottom])
+  // Raw semantic events indexed by ChatItem id, so the converter can pair
+  // tool-start / tool-finish and attach real inputs/results inside the thread.
+  const rawEvents = useMemo(() => eventIndexByItemId(payload?.events || [], events), [payload, events])
 
-  const handleScroll = () => {
-    const element = scrollRef.current
-    if (!element) return
-    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 48
-    setIsAtBottom(atBottom)
-    if (atBottom) setNewActivity(false)
-  }
+  // Approval decisions to render next to resolved approvals in the timeline.
+  const resolvedDecisionById = useMemo(() => {
+    const decisions = new Map<string, string>()
+    for (const event of payload?.events || []) {
+      if (event.kind === 'permission_resolved') {
+        decisions.set(String(event.payload.request_id || ''), String(event.payload.decision || 'resolved'))
+      }
+    }
+    for (const frame of events) {
+      if (frame.type === 'ApprovalResolved') {
+        decisions.set(String(frame.payload?.request_id || ''), String(frame.payload?.decision || 'resolved'))
+      } else if (frame.type === 'AgentEvent') {
+        const event = frame.payload?.event as { kind?: string; payload?: Record<string, unknown> } | undefined
+        if (event?.kind === 'permission_resolved') {
+          decisions.set(String(event.payload?.request_id || ''), String(event.payload?.decision || 'resolved'))
+        }
+      }
+    }
+    return decisions
+  }, [payload, events])
 
   const sendQuestionAnswer = (answer: { question_id: string; session_id: string; selected_options: string[]; custom_text: string | null }) => {
     send({ type: 'QuestionAnswer', payload: { answer } })
@@ -807,7 +797,7 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
 
   const sendText = (text: string, attachments: { ref: string; fileName: string }[] = []) => {
     const value = text.trim()
-    if (!value) return
+    if (!value) return false
     // Attachments are sent as a trailing note the agent can act on; the
     // file bytes already live in the session scratch dir on the desktop.
     const attachmentNote = attachments.length
@@ -821,15 +811,24 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
       ...current,
       { id: optimisticId, content: value, timestamp },
     ])
-    send({ type: 'Input', payload: { session_id: taskId, data: `${value}${attachmentNote}\n` } })
-    setIsAtBottom(true)
-    requestAnimationFrame(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    })
+    const sent = send({ type: 'Input', payload: { session_id: taskId, data: `${value}${attachmentNote}\n` } })
+    if (!sent) {
+      setOptimisticMessages((current) => current.filter((message) => message.id !== optimisticId))
+      setError('Connection is unavailable. Try again when the desktop reconnects.')
+    }
+    return sent
   }
 
-  const stopTask = async () => {
-    if (!window.confirm('Stop this agent? The conversation will remain available.')) return
+  const sendModelCommand = (command: string) => {
+    if (ended) return
+    // Real mid-task config switch: typed into the running CLI at its prompt.
+    // If the agent does not understand the command it replies visibly —
+    // the control never pretends to change something it cannot.
+    void sendText(command)
+  }
+
+  const stopTask = async (confirm = true) => {
+    if (confirm && !window.confirm('Stop this agent? The conversation will remain available.')) return
     try {
       const result = await api.mobile.kill(taskId)
       if (!result.killed) throw new Error('The desktop did not stop the task.')
@@ -843,6 +842,15 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     if (!sent) { setError('Connection is unavailable. Try again when the desktop reconnects.'); return }
     setResolvedApprovals((current) => new Set(current).add(approval.id))
   }
+
+  // Real agent metadata for the composer's model/effort controls. The
+  // selectors only appear when the agent actually advertises them, and the
+  // change is sent into the running CLI as /model and /effort commands.
+  const taskAgent = snapshot?.agents.find((agent) => agent.id === liveTask?.agent)
+  const supportsModelSwitch = Boolean(taskAgent?.capabilities?.supportsModelSwitch)
+  const supportsEffort = Boolean(taskAgent?.capabilities?.supportsReasoning)
+  const models = taskAgent?.models ?? []
+  const reasoningLevels = taskAgent?.reasoningLevels ?? []
 
   if (loading) return <TaskLoading onBack={onBack} />
   if (error || !liveTask) return <TaskError error={error || 'Task unavailable.'} onBack={onBack} onRetry={() => { setReload((value) => value + 1); void onRefresh() }} />
@@ -880,93 +888,44 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
         </div>
       </header>
 
-      {/* semantic timeline */}
-      <div ref={scrollRef} onScroll={handleScroll} className="ai-scroll-thin relative flex-1 px-4 pb-6 pt-4">
-        <div className="mx-auto flex w-full max-w-lg flex-col gap-3">
-          {connection !== 'connected' && <ConnectionBanner connection={connection} error={null} onRetry={onRetry} />}
-          {error && <p className="rounded-card border border-red/25 bg-red-tint px-3 py-2 text-[11.5px] text-red">{error}</p>}
-          {debug ? (
-            <RawDebugView rawOutput={rawOutput} />
-          ) : (
-            <>
-              {items.length === 0 && !working && pendingQuestions.length === 0 && pendingApprovals.length === 0 && (
-                <div className="flex min-h-[45vh] flex-col items-center justify-center text-center">
-                  <div className="flex size-11 items-center justify-center rounded-card border border-line bg-surface shadow-card">
-                    <Bot className="h-5 w-5 text-accent" />
-                  </div>
-                  <p className="mt-4 text-[13.5px] font-medium text-ink">Start the conversation</p>
-                  <p className="mt-1 max-w-xs text-[11.5px] leading-5 text-ink-3">Send a message and the agent's thinking, tool calls and results will appear here as they happen.</p>
-                </div>
-              )}
-              {blocks.map((block) =>
-                block.kind === 'tools' ? (
-                  <ToolRun key={`run-${block.items[0].id}`} items={block.items} working={working} lastItemId={items[items.length - 1]?.id} />
-                ) : (
-                  <ChatItemBlock
-                    key={block.item.id}
-                    item={block.item}
-                    streaming={block.item.id === streamingId}
-                    working={working}
-                    isLast={block.item.id === items[items.length - 1]?.id}
-                    pendingApprovals={pendingApprovals}
-                    resolvedApprovals={resolvedApprovals}
-                  />
-                ),
-              )}
-              {pendingQuestions.map((question) => (
-                <QuestionBlock key={question.question_id} question={question} onAnswer={sendQuestionAnswer} />
-              ))}
-              {pendingApprovals.map((approval) => (
-                <ApprovalBlock key={approval.id} approval={approval} onResolve={(decision) => resolveApproval(approval, decision)} />
-              ))}
-              {/* Immediate loading state while awaiting the agent's first
-                  response, then the "Working" churning state once the agent
-                  confirms it is running. Neither shows during approvals. */}
-              {pendingApprovals.length === 0 && awaitingResponse && (
-                <ThinkingState variant="Steps" active="Thinking" working rows={[]} />
-              )}
-              {working && pendingApprovals.length === 0 && !awaitingResponse && (
-                <LoadingState label="Working" variant="Orbit" />
-              )}
-            </>
-          )}
-          {newActivity && !debug && (
-            <button
-              type="button"
-              onClick={() => {
-                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-                setNewActivity(false)
-              }}
-              className="sticky bottom-2 left-1/2 mt-2 flex -translate-x-1/2 items-center gap-1.5 rounded-chip border border-line bg-surface px-3 py-1.5 text-[11px] font-medium text-ink shadow-raised"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-              New activity
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* pill composer pinned above the keyboard */}
-      <div className="sticky bottom-0 z-20 border-t border-line bg-canvas/95 px-3 pt-2 backdrop-blur-xl" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)' }}>
-        <div className="mx-auto flex w-full max-w-lg flex-col gap-1.5">
-          {connection !== 'connected' && (
-            <p className="flex items-center gap-1.5 text-[11px] text-orange">
-              <AlertCircle className="h-3 w-3" /> Reconnecting — messages send when the desktop is back.
-            </p>
-          )}
-          <MobileComposer
-            sessionId={taskId}
-            disabled={ended}
-            ended={ended}
-            working={working}
-            onSend={sendText}
-          />
-          <div className="flex items-center justify-between px-1 text-[10px] text-ink-3">
-            <span>{working ? 'Follow-ups queue for this task' : ended ? 'Read-only history' : connection === 'connected' ? 'Ready' : connectionLabel(connection)}</span>
-            <span>{liveTask?.agent}</span>
-          </div>
-        </div>
-      </div>
+      {/* streaming conversation / raw CLI */}
+      {debug ? (
+        <RawDebugView
+          rawOutput={rawOutput}
+          onData={(data) => {
+            if (!send({ type: 'TerminalInput', payload: { session_id: taskId, data } })) {
+              setError('Connection is unavailable. Try again when the desktop reconnects.')
+            }
+          }}
+        />
+      ) : (
+        <TaskConversation
+          taskId={taskId}
+          items={items}
+          rawEvents={rawEvents}
+          optimisticMessages={visibleOptimisticMessages}
+          working={working}
+          streamingId={streamingId}
+          pendingApprovals={pendingApprovals}
+          pendingQuestions={pendingQuestions}
+          resolvedDecisionById={resolvedDecisionById}
+          connection={connection}
+          error={error}
+          ended={ended}
+          agentLabel={liveTask.agent}
+          models={models}
+          reasoningLevels={reasoningLevels}
+          supportsModelSwitch={supportsModelSwitch}
+          supportsEffort={supportsEffort}
+          onSend={sendText}
+          onStop={() => void stopTask(false)}
+          onModelCommand={sendModelCommand}
+          onOpenContext={() => liveTask?.project && setShowContext(true)}
+          onRetry={onRetry}
+          onQuestionAnswer={sendQuestionAnswer}
+          onResolveApproval={resolveApproval}
+        />
+      )}
       {/* full-screen context panel (files / diffs / worktrees) */}
       {liveTask?.project && (
         <MobileContextPanel project={liveTask.project} open={showContext} onClose={() => setShowContext(false)} />
@@ -975,14 +934,14 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   )
 }
 
-function RawDebugView({ rawOutput }: { rawOutput: string }) {
+function RawDebugView({ rawOutput, onData }: { rawOutput: string; onData: (data: string) => void }) {
   return (
     <div className="rounded-card border border-line bg-inset p-3 shadow-card">
       <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-ink-3">
         <TerminalSquare className="h-3 w-3" /> Terminal / debug
       </div>
       {rawOutput ? (
-        <XtermTerminal output={rawOutput} />
+        <XtermTerminal output={rawOutput} onData={onData} />
       ) : (
         <div className="flex h-64 items-center justify-center font-mono text-xs text-ink-3">No raw output yet.</div>
       )}
