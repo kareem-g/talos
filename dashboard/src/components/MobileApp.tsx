@@ -32,6 +32,7 @@ import {
 } from './chat/blocks'
 import LoadingState from './beautiful/LoadingState'
 import PromptBar from './beautiful/PromptBar'
+import { MobileContextPanel } from './MobileContextPanel'
 import type {
   MobileAgent,
   MobileAgentEvent,
@@ -530,14 +531,30 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
   const [prompt, setPrompt] = useState('')
   const [agent, setAgent] = useState(agents.find((item) => item.available)?.id || agents[0]?.id || '')
   const [project, setProject] = useState(workspaces[0]?.path || '')
+  const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const selectedAgent = agents.find((item) => item.id === agent)
+  const models = selectedAgent?.models ?? []
+  const reasoning = selectedAgent?.reasoningLevels ?? []
+  // Default to the first model / middle effort when the agent supports them.
+  useEffect(() => {
+    if (models.length && !models.some((m) => m.id === model)) setModel(models[0].id)
+  }, [models, model])
+  useEffect(() => {
+    if (reasoning.length && !reasoning.includes(effort)) setEffort(reasoning[Math.floor(reasoning.length / 2)])
+  }, [reasoning, effort])
 
   const submit = async () => {
     if (!prompt.trim() || !agent) return
     setCreating(true)
     setError(null)
-    try { await onCreate({ agent, project: project || undefined, prompt: prompt.trim() }) }
+    const data: MobileCreateSessionRequest = { agent, project: project || undefined, prompt: prompt.trim() }
+    if (models.length && model) data.model = model
+    if (reasoning.length && effort) data.effort = effort
+    try { await onCreate(data) }
     catch (error: unknown) { setError(error instanceof Error ? error.message : 'Could not start task.') }
     finally { setCreating(false) }
   }
@@ -546,7 +563,7 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 backdrop-blur-sm sm:items-center">
-      <div className="w-full max-w-md rounded-t-card border border-line bg-surface p-4 shadow-overlay sm:rounded-card" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)', animation: 'fade-up 260ms cubic-bezier(0.23,1,0.32,1) both' }}>
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-card border border-line bg-surface p-4 shadow-overlay sm:rounded-card" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)', animation: 'fade-up 260ms cubic-bezier(0.23,1,0.32,1) both' }}>
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-3">New task</p>
@@ -563,6 +580,31 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
         <select value={agent} onChange={(event) => setAgent(event.target.value)} className={`${field} mb-3.5`}>
           {agents.filter((item) => item.available).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
+        {models.length > 0 && (
+          <>
+            <label className="mb-1.5 block text-[11px] font-medium text-ink-2">Model</label>
+            <div className="mb-3.5 flex flex-wrap gap-1.5">
+              {models.map((m) => (
+                <button key={m.id} type="button" onClick={() => setModel(m.id)} className={`flex items-center gap-1.5 rounded-chip border px-2.5 py-1.5 text-[12px] transition-colors ${model === m.id ? 'border-ink bg-ink text-canvas' : 'border-line bg-surface text-ink-2 hover:border-line-strong'}`}>
+                  {m.name}
+                  {m.tag && <span className={`text-[10px] ${model === m.id ? 'text-canvas/70' : 'text-ink-3'}`}>{m.tag}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {reasoning.length > 0 && (
+          <>
+            <label className="mb-1.5 block text-[11px] font-medium text-ink-2">Effort</label>
+            <div className="mb-3.5 flex flex-wrap gap-1.5">
+              {reasoning.map((level) => (
+                <button key={level} type="button" onClick={() => setEffort(level)} className={`rounded-chip border px-2.5 py-1.5 text-[12px] capitalize transition-colors ${effort === level ? 'border-ink bg-ink text-canvas' : 'border-line bg-surface text-ink-2 hover:border-line-strong'}`}>
+                  {level}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <label className="mb-1.5 block text-[11px] font-medium text-ink-2">What should it do?</label>
         <textarea autoFocus value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Describe the task..." className={`${field} resize-none leading-6`} />
         {error && <p className="mt-2 text-[11.5px] text-red">{error}</p>}
@@ -588,6 +630,7 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [debug, setDebug] = useState(false)
+  const [showContext, setShowContext] = useState(false)
   const [resolvedApprovals, setResolvedApprovals] = useState(new Set<string>())
   const [newActivity, setNewActivity] = useState(false)
   const [isAtBottom, setIsAtBottom] = useState(true)
@@ -774,8 +817,15 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
             </p>
           </div>
           <StatusPill status={status} />
-          <button onClick={() => setDebug((value) => !value)} className={`flex size-9 shrink-0 items-center justify-center rounded-control transition-colors ${debug ? 'bg-hover-2 text-ink' : 'text-ink-3 active:bg-hover'}`} aria-label="Terminal debug">
-            <TerminalSquare className="h-4 w-4" />
+          {/* chat ⇄ terminal toggle */}
+          <div className="flex h-8 shrink-0 items-center rounded-chip border border-line bg-surface p-0.5">
+            <button onClick={() => setDebug(false)} className={`flex h-full items-center rounded-chip px-2 text-[11px] font-medium transition-colors ${!debug ? 'bg-hover-2 text-ink' : 'text-ink-3'}`} aria-pressed={!debug}>Chat</button>
+            <button onClick={() => setDebug(true)} className={`flex h-full items-center gap-1 rounded-chip px-2 text-[11px] font-medium transition-colors ${debug ? 'bg-hover-2 text-ink' : 'text-ink-3'}`} aria-pressed={debug}>
+              <TerminalSquare className="h-3 w-3" />CLI
+            </button>
+          </div>
+          <button onClick={() => task?.project && setShowContext(true)} disabled={!task?.project} className="flex size-9 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover disabled:opacity-30" aria-label="Files and changes">
+            <FolderGit2 className="h-4 w-4" />
           </button>
           <button onClick={() => void stopTask()} disabled={!working && status !== 'waiting_for_approval'} className="flex h-8 shrink-0 items-center gap-1.5 rounded-chip bg-red-tint px-2.5 text-[11px] font-medium text-red transition-colors active:bg-red active:text-white disabled:opacity-30">
             <Square className="h-3 w-3 fill-current" />Stop
@@ -866,6 +916,10 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
           </div>
         </div>
       </div>
+      {/* full-screen context panel (files / diffs / worktrees) */}
+      {task?.project && (
+        <MobileContextPanel project={task.project} open={showContext} onClose={() => setShowContext(false)} />
+      )}
     </main>
   )
 }

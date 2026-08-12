@@ -13,6 +13,12 @@ export type MobileConnectionState =
   | 'desktop_unavailable'
   | 'sync_failed'
 
+export interface MobileAgentModel {
+  id: string
+  name: string
+  tag?: string
+}
+
 export interface MobileAgent {
   id: string
   name: string
@@ -20,6 +26,8 @@ export interface MobileAgent {
   path: string
   version?: string
   features: string[]
+  models?: MobileAgentModel[]
+  reasoningLevels?: string[]
   capabilities?: Record<string, boolean>
 }
 
@@ -141,4 +149,8 @@ export interface MobileCreateSessionRequest {
   name?: string
   executable?: string
   args?: string[]
+  /** Selected model id (sent to the agent CLI when supported). */
+  model?: string
+  /** Selected reasoning/effort level (sent to the agent CLI when supported). */
+  effort?: string
 }

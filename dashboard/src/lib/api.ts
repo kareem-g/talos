@@ -61,6 +61,32 @@ export const api = {
     list: () => fetchApi('/devices'),
     revoke: (id: string) => fetchApi(`/devices/${id}`, { method: 'DELETE' }),
   },
+  workspace: {
+    overview: (project: string) => fetchApi<WorkspaceOverview>(
+      `/workspace/overview?project=${encodeURIComponent(project)}`,
+    ),
+    file: (project: string, path: string) => fetchApi<{ path: string; contents: string }>(
+      `/workspace/file?project=${encodeURIComponent(project)}&path=${encodeURIComponent(path)}`,
+    ),
+    worktrees: (project: string) => fetchApi<{ worktrees: unknown[] }>(
+      `/worktrees?project=${encodeURIComponent(project)}`,
+    ),
+  },
+  attachments: {
+    upload: (sessionId: string, file: File): Promise<{ attachments: Array<{ ref: string; name: string; fileName: string; size: number }> }> => {
+      const form = new FormData()
+      form.append('file', file)
+      return fetch(`${API_BASE}/attachments/upload?session=${encodeURIComponent(sessionId)}`, {
+        method: 'POST',
+        headers: deviceAuthHeaders(),
+        body: form,
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({})) as { error?: string; attachments?: unknown[] }
+        if (!res.ok) throw new ApiError(res.status, data.error || 'Upload failed')
+        return data as { attachments: Array<{ ref: string; name: string; fileName: string; size: number }> }
+      })
+    },
+  },
   mobile: {
     me: () => fetchApi<MobileMe>('/mobile/me'),
     snapshot: () => fetchApi<MobileSnapshot>('/mobile/snapshot'),
@@ -72,4 +98,18 @@ export const api = {
     ),
     kill: (id: string) => fetchApi<{ killed: boolean }>(`/mobile/sessions/${id}/kill`, { method: 'POST' }),
   },
+}
+
+export interface WorkspaceFile {
+  path: string
+  status: string
+  staged: boolean
+  diff: string
+}
+
+export interface WorkspaceOverview {
+  project: string
+  branch: string | null
+  worktrees: Array<{ worktree?: string; HEAD?: string; branch?: string; bare?: boolean }>
+  files: WorkspaceFile[]
 }
