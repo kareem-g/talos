@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
@@ -27,6 +27,12 @@ import LoadingState from './beautiful/LoadingState'
 import { MobileContextPanel } from './MobileContextPanel'
 import { TaskConversation } from './task/TaskConversation'
 import { eventIndexByItemId } from '../lib/taskMessages'
+import {
+  AssistantRuntimeProvider,
+  ComposerPrimitive,
+  useLocalRuntime,
+  type ChatModelAdapter,
+} from '@assistant-ui/react'
 import type {
   MobileAgent,
   MobileAgentEvent,
@@ -521,6 +527,38 @@ function ErrorState({ message, detail, onRetry }: { message: string; detail: str
   )
 }
 
+/**
+ * No-op model adapter: the New Task composer only captures the prompt; the real
+ * agent run happens in the backend once the task is created, so nothing is sent
+ * through this local runtime.
+ */
+const newTaskAdapter: ChatModelAdapter = {
+  async *run() {
+    yield { content: [] }
+  },
+}
+
+/**
+ * Prompt field built on assistant-ui's base `ComposerPrimitive.Input`. It runs a
+ * tiny local runtime so the primitive has a composer context to bind to; the
+ * typed text (held by the runtime) is propagated upward via onChange so the
+ * dialog can submit it.
+ */
+function NewTaskInput({ onChange }: { onChange: (text: string) => void }) {
+  // The input is controlled by the local runtime; surface its text on each edit.
+  return (
+    <ComposerPrimitive.Root className="w-full rounded-control border border-line bg-inset px-3 py-2.5 outline-none transition-colors focus-within:border-line-strong">
+      <ComposerPrimitive.Input
+        autoFocus
+        rows={4}
+        placeholder="Describe the task..."
+        onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value)}
+        className="w-full resize-none bg-transparent text-[13px] leading-6 text-ink placeholder:text-ink-3 outline-none"
+      />
+    </ComposerPrimitive.Root>
+  )
+}
+
 function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: MobileWorkspace[]; agents: MobileAgent[]; onClose: () => void; onCreate: (data: MobileCreateSessionRequest) => Promise<void> }) {
   const [prompt, setPrompt] = useState('')
   const [agent, setAgent] = useState(agents.find((item) => item.available)?.id || agents[0]?.id || '')
@@ -600,7 +638,9 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
           </>
         )}
         <label className="mb-1.5 block text-[11px] font-medium text-ink-2">What should it do?</label>
-        <textarea autoFocus value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Describe the task..." className={`${field} resize-none leading-6`} />
+        <AssistantRuntimeProvider runtime={useLocalRuntime(newTaskAdapter)}>
+          <NewTaskInput onChange={setPrompt} />
+        </AssistantRuntimeProvider>
         {error && <p className="mt-2 text-[11.5px] text-red">{error}</p>}
         <button
           onClick={() => void submit()}
