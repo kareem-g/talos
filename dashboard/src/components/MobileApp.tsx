@@ -635,6 +635,10 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   const [resolvedApprovals, setResolvedApprovals] = useState(new Set<string>())
   const [newActivity, setNewActivity] = useState(false)
   const [isAtBottom, setIsAtBottom] = useState(true)
+  // Optimistic user messages: rendered the instant the user hits Send so
+  // the timeline never lags the send action. Each entry self-expires once
+  // the matching persisted/WS message arrives (matched by normalized text).
+  const [optimisticMessages, setOptimisticMessages] = useState<Array<{ id: string; content: string; timestamp: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const lastItemCount = useRef(0)
 
@@ -654,11 +658,24 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
 
   const items = useMemo(() => {
     const historyUserContent = new Set(historyItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content)))
+    // Drop optimistic messages once the real (persisted or live) message
+    // arrives, matched by normalized content.
+    const realUserContent = new Set([
+      ...historyUserContent,
+      ...liveItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content)),
+    ])
+    const visibleOptimistic = optimisticMessages.filter((msg) => !realUserContent.has(normalizedText(msg.content)))
+    const optimisticItems: ChatItem[] = visibleOptimistic.map((msg) => ({
+      id: msg.id,
+      kind: 'user' as const,
+      content: msg.content,
+      timestamp: msg.timestamp,
+    }))
     const questionAnswers = new Map<string, { selected_options?: unknown; custom_text?: unknown }>([
       ...(payload?.events || []).filter((event) => event.kind === 'question_answered').map((event) => [String(event.payload.question_id || ''), event.payload] as const),
       ...events.filter((event) => event.type === 'AgentEvent').map((event) => event.payload?.event as MobileAgentEvent | undefined).filter((event): event is MobileAgentEvent => event?.kind === 'question_answered').map((event) => [String(event.payload.question_id || ''), event.payload] as const),
     ])
-    return [...historyItems, ...liveItems.filter((item) => item.kind !== 'user' || !historyUserContent.has(normalizedText(item.content)))].map((item) => {
+    return [...historyItems, ...liveItems.filter((item) => item.kind !== 'user' || !historyUserContent.has(normalizedText(item.content))), ...optimisticItems].map((item) => {
       if (item.kind === 'question' && item.question) {
         const answer = questionAnswers.get(item.question.question_id)
         if (answer) return { ...item, question: { ...item.question, status: 'answered' as const, selected_options: Array.isArray(answer.selected_options) ? answer.selected_options.map(String) : [], custom_text: typeof answer.custom_text === 'string' ? answer.custom_text : undefined } }
@@ -789,12 +806,22 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   }
 
   const sendText = (text: string, attachments: { ref: string; fileName: string }[] = []) => {
+    const value = text.trim()
+    if (!value) return
     // Attachments are sent as a trailing note the agent can act on; the
     // file bytes already live in the session scratch dir on the desktop.
     const attachmentNote = attachments.length
       ? `\n\n[attachments: ${attachments.map((a) => `${a.ref}=${a.fileName}`).join(', ')}]`
       : ''
-    send({ type: 'Input', payload: { session_id: taskId, data: `${text}${attachmentNote}\n` } })
+    // Optimistic: render the user message immediately so the timeline never
+    // lags the send action. Self-expires when the persisted/WS message arrives.
+    const optimisticId = `optimistic-${Date.now()}`
+    const timestamp = new Date().toISOString()
+    setOptimisticMessages((current) => [
+      ...current,
+      { id: optimisticId, content: value, timestamp },
+    ])
+    send({ type: 'Input', payload: { session_id: taskId, data: `${value}${attachmentNote}\n` } })
     setIsAtBottom(true)
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
