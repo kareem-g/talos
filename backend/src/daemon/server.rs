@@ -43,6 +43,9 @@ pub async fn start(
         // Agents
         .route("/api/agents", get(crate::api::routes::list_agents))
 
+        // Attachments (multipart upload)
+        .route("/api/attachments/upload", post(crate::api::routes::upload_attachment))
+
         // MCP
         .route("/api/mcp", get(crate::api::routes::list_mcp))
         .route("/api/mcp", post(crate::api::routes::add_mcp))
@@ -61,8 +64,10 @@ pub async fn start(
         .route("/api/settings", get(crate::api::routes::get_settings))
         .route("/api/settings", put(crate::api::routes::update_settings))
 
-        // Worktrees
+        // Workspace (worktrees + changed files + diffs + file read)
         .route("/api/worktrees", get(crate::api::routes::list_worktrees))
+        .route("/api/workspace/overview", get(crate::api::routes::workspace_overview))
+        .route("/api/workspace/file", get(crate::api::routes::workspace_file))
 
         // Notifications
         .route("/api/notifications/test", post(crate::api::routes::send_test_notification))

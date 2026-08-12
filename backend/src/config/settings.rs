@@ -59,11 +59,72 @@ pub struct AgentsConfig {
     pub auto_detect: bool,
 }
 
+impl AgentBinary {
+    /// Models/reasoning for well-known agents. User config (models/
+    /// reasoning_levels) takes precedence when non-empty, so users can
+    /// override or extend these lists.
+    pub fn built_in_models(&self) -> Vec<AgentModel> {
+        // Heuristic by binary name so custom agents still resolve.
+        let name = self.path.to_lowercase();
+        if name.contains("claude") {
+            vec![
+                AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
+                AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
+                AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+            ]
+        } else {
+            vec![]
+        }
+    }
+
+    pub fn built_in_reasoning(&self) -> Vec<String> {
+        let name = self.path.to_lowercase();
+        if name.contains("claude") {
+            vec!["low".to_string(), "medium".to_string(), "high".to_string(), "xhigh".to_string(), "max".to_string()]
+        } else {
+            vec![]
+        }
+    }
+
+    pub fn effective_models(&self) -> Vec<AgentModel> {
+        if self.models.is_empty() {
+            self.built_in_models()
+        } else {
+            self.models.clone()
+        }
+    }
+
+    pub fn effective_reasoning(&self) -> Vec<String> {
+        if self.reasoning_levels.is_empty() {
+            self.built_in_reasoning()
+        } else {
+            self.reasoning_levels.clone()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentBinary {
     pub path: String,
     pub args: Vec<String>,
     pub env: std::collections::HashMap<String, String>,
+    /// Models this agent can switch between. Empty means the agent has a
+    /// single fixed model (no picker shown).
+    #[serde(default)]
+    pub models: Vec<AgentModel>,
+    /// Reasoning/effort levels the agent supports, ordered low→high.
+    /// Empty means the agent exposes no reasoning control.
+    #[serde(default)]
+    pub reasoning_levels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentModel {
+    pub id: String,
+    pub name: String,
+    /// Optional human-readable tag shown beside the model name.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,16 +243,32 @@ impl Default for Settings {
                     path: "claude".to_string(),
                     args: vec![],
                     env: std::collections::HashMap::new(),
+                    models: vec![
+                        AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
+                        AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
+                        AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+                    ],
+                    reasoning_levels: vec![
+                        "low".to_string(),
+                        "medium".to_string(),
+                        "high".to_string(),
+                        "xhigh".to_string(),
+                        "max".to_string(),
+                    ],
                 },
                 codex: AgentBinary {
                     path: "codex".to_string(),
                     args: vec![],
                     env: std::collections::HashMap::new(),
+                    models: vec![],
+                    reasoning_levels: vec![],
                 },
                 opencode: AgentBinary {
                     path: "opencode".to_string(),
                     args: vec![],
                     env: std::collections::HashMap::new(),
+                    models: vec![],
+                    reasoning_levels: vec![],
                 },
                 auto_detect: true,
             },

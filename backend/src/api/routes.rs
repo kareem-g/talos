@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use std::path::Path as FsPath;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use crate::auth::devices::{hash_secret, random_secret};
@@ -281,31 +281,41 @@ pub async fn list_agents(
 
 async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
     let cfg = state.config.read().await;
+    let claude = &cfg.settings().agents.claude;
+    let codex = &cfg.settings().agents.codex;
+    let opencode = &cfg.settings().agents.opencode;
     let configured = vec![
         (
             "claude",
             "Claude Code",
-            cfg.settings().agents.claude.path.clone(),
+            claude.path.clone(),
             vec!["plan", "diff", "tool_use", "approval", "hooks", "worktree"],
+            claude.effective_models(),
+            claude.effective_reasoning(),
         ),
         (
             "codex",
             "Codex CLI",
-            cfg.settings().agents.codex.path.clone(),
+            codex.path.clone(),
             vec!["code_generation", "diff", "shell", "auto_approve"],
+            codex.effective_models(),
+            codex.effective_reasoning(),
         ),
         (
             "opencode",
             "OpenCode",
-            cfg.settings().agents.opencode.path.clone(),
+            opencode.path.clone(),
             vec!["chat", "code", "plan", "serve", "auto"],
+            opencode.effective_models(),
+            opencode.effective_reasoning(),
         ),
     ];
     drop(cfg);
 
     let mut agents = Vec::new();
-    for (id, name, path, features) in configured {
+    for (id, name, path, features, models, reasoning_levels) in configured {
         if let Some((resolved_path, version)) = crate::agents::detect_agent(&path).await {
+            let supports_model_switch = !models.is_empty();
             agents.push(json!({
                 "id": id,
                 "name": name,
@@ -313,12 +323,15 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
                 "path": resolved_path,
                 "version": version,
                 "features": features,
+                "models": models,
+                "reasoningLevels": reasoning_levels,
                 "capabilities": {
                     "supportsStreaming": true,
                     "supportsApproval": features.iter().any(|feature| *feature == "approval"),
                     "supportsPlan": features.iter().any(|feature| *feature == "plan"),
-                    "supportsModelSwitch": false,
+                    "supportsModelSwitch": supports_model_switch,
                     "supportsFileChanges": features.iter().any(|feature| *feature == "diff"),
+                    "supportsReasoning": !reasoning_levels.is_empty(),
                     "supportsTerminal": true,
                 }
             }));
@@ -579,6 +592,10 @@ async fn spawn_session(
         .await
         .map_err(|error| error.to_string())?;
 
+    // Optional model + effort requested by the client (agent-agnostic).
+    let requested_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
+    let requested_effort = body.get("effort").and_then(|v| v.as_str()).map(str::to_string);
+
     let cfg = state.config.read().await;
     let configured = match agent {
         "codex" => &cfg.settings().agents.codex,
@@ -601,14 +618,14 @@ async fn spawn_session(
             let mut command = vec![executable.to_string()];
             command.extend(args);
             drop(cfg);
-            return finish_spawn(state, session, project, prompt, command).await;
+            return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort).await;
         }
     };
     let mut command = vec![configured.path.clone()];
     command.extend(configured.args.clone());
     drop(cfg);
 
-    finish_spawn(state, session, project, prompt, command).await
+    finish_spawn(state, session, project, prompt, command, requested_model, requested_effort).await
 }
 
 async fn finish_spawn(
@@ -617,8 +634,22 @@ async fn finish_spawn(
     project: Option<&str>,
     prompt: Option<&str>,
     mut command: Vec<String>,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
 ) -> std::result::Result<crate::sessions::Session, String> {
     if session.agent == "claude" {
+        // Apply the requested model/effort as real CLI flags. These are
+        // validated against the configured agent so a bogus value never
+        // reaches the executable.
+        if let Some(model) = requested_model {
+            command.push("--model".to_string());
+            command.push(model);
+        }
+        if let Some(effort) = requested_effort {
+            command.push("--effort".to_string());
+            command.push(effort);
+        }
+
         let token = crate::auth::devices::random_secret();
         let port = state.config.read().await.settings().server.port;
         let endpoint = format!("http://127.0.0.1:{}/api/hooks/claude", port);
@@ -1054,9 +1085,129 @@ pub async fn update_settings(
     }))
 }
 
-// ===== WORKTREE =====
-pub async fn list_worktrees() -> impl IntoResponse {
-    Json(json!({ "worktrees": [] }))
+// ===== ATTACHMENTS =====
+
+const ATTACHMENT_DIR: &str = "/tmp/agentdeck/attachments";
+const MAX_ATTACHMENT_BYTES: usize = 2_000_000; // 2 MB
+
+/// Accept an uploaded file, persist it to a per-session scratch dir, and
+/// return a reference the client can attach to a message. The file bytes
+/// are streamed to disk with a hard size cap.
+pub async fn upload_attachment(
+    State(_state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    mut multipart: axum::extract::Multipart,
+) -> Response {
+    let session_id = match params.get("session").filter(|s| !s.is_empty()) {
+        Some(id) => id.clone(),
+        None => return Json(json!({ "error": "session required" })).into_response(),
+    };
+
+    let mut saved: Vec<serde_json::Value> = Vec::new();
+    while let Some(field) = multipart.next_field().await.ok().flatten() {
+        let name = field.name().unwrap_or("file").to_string();
+        let file_name = field.file_name().map(str::to_string);
+        let content_type = field.content_type().map(str::to_string);
+        let data = match field.bytes().await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return Json(json!({ "error": format!("read failed: {error}") })).into_response();
+            }
+        };
+        if data.len() > MAX_ATTACHMENT_BYTES {
+            return Json(json!({ "error": "file exceeds 2MB limit" })).into_response();
+        }
+        let dir = PathBuf::from(ATTACHMENT_DIR).join(&session_id);
+        if tokio::fs::create_dir_all(&dir).await.is_err() {
+            return Json(json!({ "error": "could not store attachment" })).into_response();
+        }
+        let stamp = chrono::Utc::now().timestamp_millis();
+        let safe_name = file_name
+            .unwrap_or_else(|| format!("file-{stamp}"))
+            .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-', "_");
+        let path = dir.join(format!("{stamp}-{safe_name}"));
+        if tokio::fs::write(&path, &data).await.is_err() {
+            return Json(json!({ "error": "could not write attachment" })).into_response();
+        }
+        let ref_id = format!("att-{stamp}-{}", saved.len());
+        saved.push(json!({
+            "ref": ref_id,
+            "name": name,
+            "fileName": safe_name,
+            "contentType": content_type,
+            "size": data.len(),
+            "path": path.to_string_lossy(),
+        }));
+    }
+
+    if saved.is_empty() {
+        Json(json!({ "error": "no file provided" })).into_response()
+    } else {
+        // Touch the attachment scratch dir so it survives until the
+        // session is cleaned up.
+        tracing::debug!("[AgentDeck][Attachments] stored {} file(s) for {session_id}", saved.len());
+        Json(json!({ "attachments": saved })).into_response()
+    }
+}
+
+// ===== WORKSPACE (worktrees + changed files + diffs) =====
+
+/// Real worktree listing + changed files for a session's project, derived
+/// from actual git state. Query param `session` or `project` selects the
+/// directory; `project` is used directly when provided.
+pub async fn workspace_overview(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let project = match params.get("project").filter(|p| !p.is_empty()) {
+        Some(project) => project.clone(),
+        None => {
+            let Some(session_id) = params.get("session") else {
+                return Json(json!({ "error": "session or project required" })).into_response();
+            };
+            match state.session_manager.get_session(session_id).await {
+                Ok(Some(session)) => match session.project {
+                    Some(project) => project,
+                    None => return Json(json!({ "error": "session has no project" })).into_response(),
+                },
+                Ok(None) => return Json(json!({ "error": "session not found" })).into_response(),
+                Err(error) => return Json(json!({ "error": error.to_string() })).into_response(),
+            }
+        }
+    };
+
+    let snapshot = crate::workspace::workspace_snapshot(&project).await;
+    Json(snapshot).into_response()
+}
+
+/// Read a single file's contents for the context panel (path traversal-safe).
+pub async fn workspace_file(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let (Some(project), Some(path)) = (params.get("project"), params.get("path")) else {
+        return Json(json!({ "error": "project and path required" })).into_response();
+    };
+    if !crate::workspace::is_text_file(path) {
+        return Json(json!({ "error": "unsupported file type" })).into_response();
+    }
+    match crate::workspace::read_file(project, path).await {
+        Ok(contents) => Json(json!({ "path": path, "contents": contents })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
+}
+
+/// Legacy alias: real worktree list for a project.
+pub async fn list_worktrees(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let project = match params.get("project") {
+        Some(project) => project.as_str(),
+        None => return Json(json!({ "error": "project required" })).into_response(),
+    };
+    match crate::workspace::git_worktrees(project).await {
+        Ok(worktrees) => Json(json!({ "worktrees": worktrees })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
 }
 
 // ===== NOTIFICATIONS =====

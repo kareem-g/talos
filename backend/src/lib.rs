@@ -12,6 +12,7 @@ pub mod sessions;
 pub mod transcript;
 pub mod tunnel;
 pub mod websocket;
+pub mod workspace;
 pub mod worktree;
 pub mod agents;
 pub mod agent_events;
