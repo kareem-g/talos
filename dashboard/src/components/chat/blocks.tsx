@@ -4,7 +4,7 @@ import type { MobileApproval, MobileQuestion } from '../../types/mobile'
 import StreamingText from '../beautiful/StreamingText'
 import ThinkingState from '../beautiful/ThinkingState'
 import ToolChips, { type ToolChipRow } from '../beautiful/ToolChips'
-import ApprovalCard from '../beautiful/ApprovalCard'
+import ApprovalCard, { type ApprovalOption } from '../beautiful/ApprovalCard'
 import DiffTable, { type DiffLine } from '../beautiful/DiffTable'
 import CodeBlock from '../beautiful/CodeBlock'
 
@@ -100,7 +100,7 @@ export function ChatItemBlock({
       const decision = resolvedApprovals instanceof Map ? resolvedApprovals.get(approval.id) : undefined
       return (
         <ApprovalCard
-          question={{ title: approval.prompt, type: 'radio', options: approval.options }}
+          question={{ title: approval.prompt, type: 'radio', options: approval.options.map((id) => ({ id, label: ({ allow: 'Allow', always: 'Always allow', deny: 'Deny' }[id] || id) } as ApprovalOption)) }}
           onSubmit={() => {}}
           answered
           answeredSelection={decision ? [decision] : []}
@@ -248,7 +248,7 @@ export function ApprovalBlock({ approval, onResolve }: { approval: MobileApprova
   return (
     <div style={{ animation: 'fade-up 320ms cubic-bezier(0.23,1,0.32,1) both' }}>
       <ApprovalCard
-        question={{ title: approval.prompt, type: 'radio', options: approval.options }}
+        question={{ title: approval.prompt, type: 'radio', options: approval.options.map((id) => ({ id, label: ({ allow: 'Allow', always: 'Always allow', deny: 'Deny' }[id] || id) })) }}
         onSubmit={(selected) => {
           if (selected[0]) onResolve(selected[0])
         }}
@@ -259,7 +259,6 @@ export function ApprovalBlock({ approval, onResolve }: { approval: MobileApprova
 
 export function QuestionBlock({ question, onAnswer }: { question: MobileQuestion; onAnswer: (answer: { question_id: string; session_id: string; selected_options: string[]; custom_text: string | null }) => boolean | void }) {
   const answered = question.status === 'answered'
-  const labelToId = new Map(question.options.map((option) => [option.label, option.id]))
   const customOption = question.options.find((option) => option.allows_custom_text)
   if (question.options.length === 0) {
     // Free-text question: the composer below is the answer path.
@@ -277,11 +276,11 @@ export function QuestionBlock({ question, onAnswer }: { question: MobileQuestion
         question={{
           title: question.question || question.title,
           type: question.selection_mode === 'multiple' ? 'check' : 'radio',
-          options: question.options.map((option) => option.label),
+          options: question.options.map((option) => ({ id: option.id, label: option.label, description: option.description, allowsCustom: option.allows_custom_text })),
           allowsCustom: Boolean(customOption),
         }}
         onSubmit={(selected, customText) => {
-          const ids = selected.map((label) => labelToId.get(label)).filter((id): id is string => Boolean(id))
+          const ids = selected
           if (customText && customOption && !ids.includes(customOption.id)) ids.push(customOption.id)
           onAnswer({
             question_id: question.question_id,
@@ -291,8 +290,7 @@ export function QuestionBlock({ question, onAnswer }: { question: MobileQuestion
           })
         }}
         answered={answered}
-        answeredSelection={(question.selected_options || [])
-          .map((id) => question.options.find((option) => option.id === id)?.label || id)}
+        answeredSelection={question.selected_options || []}
         answeredCustom={question.custom_text}
         disabled={answered}
       />

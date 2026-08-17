@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::pty::manager::PtyManager;
+use crate::agents::acp::AcpManager;
 use crate::auth::devices::DeviceStore;
+use crate::pty::manager::PtyManager;
 use crate::sessions::manager::SessionManager;
 use crate::transcript::TranscriptTails;
 use crate::websocket::broadcast::BroadcastHub;
@@ -91,6 +92,10 @@ pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     pub session_manager: Arc<SessionManager>,
     pub pty_manager: Arc<PtyManager>,
+    /// Generic ACP (Agent Client Protocol) subprocess manager for CLIs that
+    /// speak ACP (opencode, copilot, gemini, cursor, qwen, …). These agents
+    /// stream native structured events instead of a PTY.
+    pub acp_manager: Arc<AcpManager>,
     pub devices: Arc<DeviceStore>,
     pub hook_tokens: Arc<RwLock<HashMap<String, String>>>,
     pub hook_starts: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,

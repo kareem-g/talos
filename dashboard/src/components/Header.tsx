@@ -7,13 +7,26 @@ import {
   Command,
   Smartphone
 } from 'lucide-react'
-import { useWebSocket } from '../hooks/useWebSocket'
+import { useWebSocketConnected } from '../hooks/useWebSocket'
 import { useCommandPalette } from '../hooks/useCommands'
+import { createSessionWithDefaultAgent } from '../lib/sessions'
 
 export function Header() {
   const navigate = useNavigate()
-  const { connected } = useWebSocket()
+  const connected = useWebSocketConnected()
   const { open } = useCommandPalette()
+
+  const handleNewSession = () => {
+    void (async () => {
+      try {
+        const id = await createSessionWithDefaultAgent()
+        navigate(`/?session=${encodeURIComponent(id)}`)
+      } catch (err) {
+        console.error('[AgentDeck][Session] Failed to create session:', err)
+        navigate('/')
+      }
+    })()
+  }
 
   return (
     <header className="h-12 border-b border-border bg-surface flex items-center px-3 sm:px-4 shrink-0">
@@ -59,7 +72,7 @@ export function Header() {
         </button>
 
         <button
-          onClick={() => navigate('/pairing')}
+          onClick={() => navigate('/pair')}
           className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-border hover:border-border-hover hover:bg-surface-hover text-text-muted text-xs transition-colors"
         >
           <Smartphone className="w-3.5 h-3.5" />
@@ -67,7 +80,7 @@ export function Header() {
         </button>
 
         <button
-          onClick={() => navigate('/')}
+          onClick={handleNewSession}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors sm:px-3"
           title="New session"
         >

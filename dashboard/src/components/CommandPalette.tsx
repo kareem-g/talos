@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, Terminal, Settings, Puzzle } from 'lucide-react'
 import { useCommandPalette } from '../hooks/useCommands'
+import { createSessionWithDefaultAgent } from '../lib/sessions'
 
 interface CommandItem {
   id: string
@@ -21,19 +22,23 @@ export function CommandPalette() {
 
   const commands: CommandItem[] = [
     {
-      id: 'new-claude',
-      label: 'New Claude Session',
-      description: 'Launch a new Claude Code session',
+      id: 'new-session',
+      label: 'New Session',
+      description: 'Start a new agent session',
       icon: Terminal,
-      action: () => { navigate('/'); close() },
+      action: () => {
+        close()
+        void (async () => {
+          try {
+            const id = await createSessionWithDefaultAgent()
+            navigate(`/?session=${encodeURIComponent(id)}`)
+          } catch (err) {
+            console.error('[AgentDeck][Command] Failed to create session:', err)
+            navigate('/')
+          }
+        })()
+      },
       shortcut: '⌘N',
-    },
-    {
-      id: 'new-codex',
-      label: 'New Codex Session',
-      description: 'Launch a new Codex CLI session',
-      icon: Terminal,
-      action: () => { navigate('/'); close() },
     },
     {
       id: 'mcp',

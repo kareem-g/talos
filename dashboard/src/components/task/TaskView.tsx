@@ -3,6 +3,8 @@ import { Bot } from 'lucide-react'
 import { useSessionChat } from '../../hooks/useSessionChat'
 import { eventIndexByItemId } from '../../lib/taskMessages'
 import LoadingState from '../beautiful/LoadingState'
+import { ResumeSession } from '../ResumeSession'
+import { assessResumable } from '../../lib/resume'
 import { TaskConversation } from './TaskConversation'
 
 /**
@@ -15,6 +17,13 @@ import { TaskConversation } from './TaskConversation'
 export function TaskView({ sessionId }: { sessionId: string }) {
   const chat = useSessionChat(sessionId)
   const { items, working, ended, rawOutput } = chat
+  const resume = assessResumable(
+    chat.status,
+    chat.session?.agent,
+    chat.session?.resume_command,
+    items,
+    rawOutput,
+  )
   const [debug, setDebug] = useState(false)
   const [stopping, setStopping] = useState(false)
 
@@ -61,11 +70,19 @@ export function TaskView({ sessionId }: { sessionId: string }) {
           <DebugView rawOutput={rawOutput} />
         </div>
       ) : (
-        <TaskConversation
+        <>
+          {resume.showResume && (
+            <ResumeSession
+              sessionId={sessionId}
+              resumeCommand={resume.resumeCommand?.replace('<session>', sessionId)}
+            />
+          )}
+          <TaskConversation
           taskId={sessionId}
           items={items}
           rawEvents={rawEvents}
-          optimisticMessages={[]}
+          optimisticMessages={chat.optimisticMessages}
+          optimisticRunning={chat.optimisticRunning}
           working={working}
           streamingId={streamingId}
           pendingApprovals={chat.pendingApprovals}
@@ -75,10 +92,10 @@ export function TaskView({ sessionId }: { sessionId: string }) {
           error={null}
           ended={ended}
           agentLabel={chat.session?.agent || 'agent'}
-          models={[]}
-          reasoningLevels={[]}
-          supportsModelSwitch={false}
-          supportsEffort={false}
+          models={chat.agentMeta.models}
+          reasoningLevels={chat.agentMeta.reasoningLevels}
+          supportsModelSwitch={chat.agentMeta.supportsModelSwitch}
+          supportsEffort={chat.agentMeta.supportsEffort}
           onSend={(text, attachments) => {
             const note = attachments.length
               ? `\n[attachments: ${attachments.map((attachment) => attachment.fileName).join(', ')}]`
@@ -86,12 +103,17 @@ export function TaskView({ sessionId }: { sessionId: string }) {
             return chat.sendText(text + note)
           }}
           onStop={stopSession}
-          onModelCommand={() => {}}
+          onModelCommand={(command) => {
+            // Real mid-task config switch: typed into the running CLI at its
+            // prompt, mirroring the mobile task screen.
+            if (!chat.ended) void chat.sendText(command)
+          }}
           onOpenContext={() => {}}
           onRetry={() => {}}
           onQuestionAnswer={chat.answerQuestion}
           onResolveApproval={chat.resolveApproval}
         />
+        </>
       )}
       <div className="flex h-8 shrink-0 items-center justify-between border-t border-line bg-canvas/95 px-4 backdrop-blur-xl">
         <span className="flex items-center gap-1.5 text-[10.5px] text-ink-3">

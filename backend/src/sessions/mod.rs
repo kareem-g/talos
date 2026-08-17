@@ -16,6 +16,9 @@ pub struct Session {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub cost: Option<f64>,
     pub tokens_used: Option<u64>,
+    /// Populated by the backend when status is `needs_resume`. Lets the UI show
+    /// the command without the frontend ever parsing terminal text.
+    pub resume_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +29,7 @@ pub enum SessionStatus {
     WaitingForInput,
     WaitingForApproval,
     Idle,
+    NeedsResume,
     Error,
     Archived,
     Exited,
@@ -45,6 +49,7 @@ impl Default for Session {
             updated_at: chrono::Utc::now(),
             cost: None,
             tokens_used: None,
+            resume_command: None,
         }
     }
 }

@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Wifi, WifiOff, HardDrive, Cpu, Clock } from 'lucide-react'
+import { useWebSocketConnected } from '../hooks/useWebSocket'
 
 interface StatusBarProps {
-  connected: boolean
+  connected?: boolean
 }
 
 export function StatusBar({ connected }: StatusBarProps) {
+  // The connection state comes from the shared socket; the uptime clock is the
+  // only thing that ticks locally.
+  const liveConnected = useWebSocketConnected()
+  const isConnected = connected ?? liveConnected
   const [uptime, setUptime] = useState(0)
 
   useEffect(() => {
@@ -25,12 +30,12 @@ export function StatusBar({ connected }: StatusBarProps) {
   return (
     <footer className="h-7 border-t border-border bg-surface flex items-center px-3 gap-4 text-[11px] text-text-dim shrink-0">
       <div className="flex items-center gap-1.5">
-        {connected ? (
+        {isConnected ? (
           <Wifi className="w-3 h-3 text-success" />
         ) : (
           <WifiOff className="w-3 h-3 text-error" />
         )}
-        <span>{connected ? 'Connected' : 'Disconnected'}</span>
+        <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
       </div>
 
       <div className="h-3 w-px bg-border" />

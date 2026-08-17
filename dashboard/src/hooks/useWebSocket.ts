@@ -31,6 +31,22 @@ let connected = false
 let messages: WsMessage[] = []
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
 
+// Monotonic counter bumped only for session-state-relevant frames
+// (StateChange / SessionUpdate / SessionDeleted). Consumers that subscribe
+// with useWebSocketState re-render only when a session's state actually
+// changes — never for streamed tokens — so the sidebar, headers and session
+// list stay isolated from the chat stream.
+let stateVersion = 0
+
+function isStateRelevant(msg: WsMessage): boolean {
+  return (
+    msg.type === 'StateChange' ||
+    msg.type === 'SessionUpdate' ||
+    msg.type === 'SessionDeleted' ||
+    msg.type === 'SessionCreated'
+  )
+}
+
 function emit() {
   for (const listener of listeners) listener()
 }
@@ -67,6 +83,9 @@ function connect() {
       messages = [...messages, msg]
       if (messages.length > MAX_MESSAGES) {
         messages = messages.slice(messages.length - MAX_MESSAGES)
+      }
+      if (isStateRelevant(msg)) {
+        stateVersion += 1
       }
       emit()
     } catch {
@@ -116,12 +135,35 @@ function subscribe(listener: () => void): () => void {
 // re-render on every subscribe call.
 const getConnected = () => connected
 const getMessages = () => messages
+const getStateVersion = () => stateVersion
 
-// ---- Hook --------------------------------------------------------------------
+// ---- Hooks -------------------------------------------------------------------
 
 export function useWebSocket() {
   const isConnected = useSyncExternalStore(subscribe, getConnected, getConnected)
   const allMessages = useSyncExternalStore(subscribe, getMessages, getMessages)
 
   return { connected: isConnected, messages: allMessages, sendMessage }
+}
+
+/**
+ * Connection status only. The snapshot is a stable boolean, so the consuming
+ * component never re-renders for streamed tokens — only when the socket
+ * connects/disconnects. Use this in headers, status bars and other chrome that
+ * does not read the message stream itself.
+ */
+export function useWebSocketConnected(): boolean {
+  return useSyncExternalStore(subscribe, getConnected, getConnected)
+}
+
+/**
+ * Subscribe to session-state changes only.
+ *
+ * The snapshot (a counter) is stable across streamed token frames, so this
+ * hook does not re-render the consuming component for every WebSocket message.
+ * It only updates when a session's status/session record actually changes,
+ * letting the sidebar and headers stay isolated from the chat stream.
+ */
+export function useWebSocketState(): number {
+  return useSyncExternalStore(subscribe, getStateVersion, getStateVersion)
 }

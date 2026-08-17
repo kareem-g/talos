@@ -47,6 +47,7 @@ impl SessionManager {
             updated_at: chrono::Utc::now(),
             cost: None,
             tokens_used: None,
+            resume_command: None,
         };
 
         sqlx::query(
@@ -71,11 +72,18 @@ impl SessionManager {
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
-        let rows = sqlx::query_as::<_, SessionRow>(
+        self.list_sessions_with_archived(false).await
+    }
+
+    pub async fn list_sessions_with_archived(&self, include_archived: bool) -> Result<Vec<Session>> {
+        let query = if include_archived {
             "SELECT * FROM sessions ORDER BY updated_at DESC"
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        } else {
+            "SELECT * FROM sessions WHERE status != 'archived' ORDER BY updated_at DESC"
+        };
+        let rows = sqlx::query_as::<_, SessionRow>(query)
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -104,6 +112,7 @@ impl SessionManager {
             SessionStatus::WaitingForInput => "waiting_for_input",
             SessionStatus::WaitingForApproval => "waiting_for_approval",
             SessionStatus::Idle => "idle",
+            SessionStatus::NeedsResume => "needs_resume",
             SessionStatus::Error => "error",
             SessionStatus::Archived => "archived",
             SessionStatus::Exited => "exited",
@@ -123,6 +132,43 @@ impl SessionManager {
         }
 
         self.record_state(id, status_str, None, "session_manager", None).await
+    }
+
+    /// Store the command the UI should show for resuming this session. Only
+    /// meaningful when the status is `needs_resume`.
+    pub async fn set_resume_command(&self, id: &str, resume_command: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET resume_command = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(resume_command)
+            .bind(chrono::Utc::now())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut active = self.active_sessions.write().await;
+        if let Some(session) = active.get_mut(id) {
+            session.resume_command = Some(resume_command.to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Mark a session as resumable: transition it to `needs_resume` and persist
+    /// the command a user could run to resume it. No-op (returns Ok) if the
+    /// session is not in a state that can transition to `needs_resume`.
+    pub async fn mark_needs_resume(&self, id: &str) -> Result<()> {
+        {
+            let active = self.active_sessions.read().await;
+            let status = active.get(id).map(|s| s.status.clone());
+            drop(active);
+            match status {
+                Some(SessionStatus::Exited) | Some(SessionStatus::Idle) => {}
+                _ => return Ok(()),
+            }
+        }
+
+        let resume_command = format!("claude --resume {}", id);
+        self.update_status(id, SessionStatus::NeedsResume).await?;
+        self.set_resume_command(id, &resume_command).await
     }
 
     /// Append a row to the `agent_state` history table. Consecutive duplicate
@@ -168,16 +214,42 @@ impl SessionManager {
     }
 
     pub async fn archive_session(&self, id: &str) -> Result<()> {
+        let Some(session) = self.get_session(id).await? else {
+            return Err(crate::AgentDeckError::Session("Session not found".to_string()));
+        };
+        if matches!(session.status, SessionStatus::Running | SessionStatus::Starting | SessionStatus::WaitingForInput | SessionStatus::WaitingForApproval) {
+            return Err(crate::AgentDeckError::Session("Stop the running session before archiving it".to_string()));
+        }
         self.update_status(id, SessionStatus::Archived).await
     }
 
+    pub async fn restore_session(&self, id: &str) -> Result<()> {
+        let Some(session) = self.get_session(id).await? else {
+            return Err(crate::AgentDeckError::Session("Session not found".to_string()));
+        };
+        if !matches!(session.status, SessionStatus::Archived) {
+            return Err(crate::AgentDeckError::Session("Session is not archived".to_string()));
+        }
+        let has_history = !self.get_messages(id).await?.is_empty() || !self.get_transcripts(id).await?.is_empty();
+        self.update_status(id, if has_history { SessionStatus::NeedsResume } else { SessionStatus::Idle }).await
+    }
+
     pub async fn delete_session(&self, id: &str) -> Result<()> {
+        if self.get_session(id).await?.is_none() {
+            return Err(crate::AgentDeckError::Session("Session not found".to_string()));
+        }
+        for table in ["transcripts", "messages", "agent_events", "terminal_output", "approvals", "questions", "agent_state"] {
+            sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?1"))
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        }
         sqlx::query("DELETE FROM sessions WHERE id = ?1")
             .bind(id)
             .execute(&self.pool)
             .await?;
-
         self.active_sessions.write().await.remove(id);
+        self.session_pids.write().await.remove(id);
         Ok(())
     }
 
@@ -635,6 +707,7 @@ struct SessionRow {
     worktree_path: Option<String>,
     cost: Option<f64>,
     tokens_used: Option<i64>,
+    resume_command: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -653,6 +726,7 @@ impl From<SessionRow> for Session {
                 "waiting_for_input" => SessionStatus::WaitingForInput,
                 "waiting_for_approval" => SessionStatus::WaitingForApproval,
                 "idle" => SessionStatus::Idle,
+                "needs_resume" => SessionStatus::NeedsResume,
                 "error" => SessionStatus::Error,
                 "archived" => SessionStatus::Archived,
                 _ => SessionStatus::Exited,
@@ -662,6 +736,7 @@ impl From<SessionRow> for Session {
             updated_at: row.updated_at,
             cost: row.cost,
             tokens_used: row.tokens_used.and_then(|value| u64::try_from(value).ok()),
+            resume_command: row.resume_command,
         }
     }
 }

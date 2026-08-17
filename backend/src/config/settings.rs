@@ -57,6 +57,10 @@ pub struct AgentsConfig {
     pub codex: AgentBinary,
     pub opencode: AgentBinary,
     pub auto_detect: bool,
+    /// User-defined agents (e.g. any ACP-capable CLI). Probed for ACP support
+    /// like the built-in catalog.
+    #[serde(default)]
+    pub custom: Vec<crate::agents::catalog::CustomAgent>,
 }
 
 impl AgentBinary {
@@ -294,6 +298,7 @@ impl Default for Settings {
                     reasoning_levels: vec![],
                 },
                 auto_detect: true,
+                custom: vec![],
             },
             worktree: WorktreeConfig {
                 enabled: true,

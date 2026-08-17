@@ -56,10 +56,12 @@ impl Daemon {
         let session_manager = Arc::new(SessionManager::new(pool).await?);
         let broadcast = BroadcastHub::new();
         let pty_manager = Arc::new(PtyManager::new(broadcast.clone()));
+        let acp_manager = Arc::new(crate::agents::acp::AcpManager::new(broadcast.clone()));
         let state = Arc::new(AppState {
             config: Arc::clone(&self.config),
             session_manager: Arc::clone(&session_manager),
             pty_manager,
+            acp_manager,
             devices,
             hook_tokens: Arc::new(RwLock::new(std::collections::HashMap::new())),
             hook_starts: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -145,6 +147,7 @@ impl Daemon {
                                 "waiting_for_approval" => crate::sessions::SessionStatus::WaitingForApproval,
                                 "waiting_for_input" => crate::sessions::SessionStatus::WaitingForInput,
                                 "idle" => crate::sessions::SessionStatus::Idle,
+                                "needs_resume" => crate::sessions::SessionStatus::NeedsResume,
                                 "error" => crate::sessions::SessionStatus::Error,
                                 _ => crate::sessions::SessionStatus::Exited,
                             };
@@ -161,6 +164,10 @@ impl Daemon {
                                         ));
                                     }
                                 }
+                                // A finished claude session with prior conversation can be
+                                // resumed — surface that as a structured status instead of
+                                // leaving the user at a dead "exited" with no path forward.
+                                maybe_mark_needs_resume(&sm, &session_id, &event_broadcast).await;
                             }
                         }
                         WsMessage::Activity { session_id, activity } => {
@@ -211,4 +218,39 @@ impl Daemon {
 
 fn state_is_terminal(state: &str) -> bool {
     state == "completed" || state == "exited" || state.starts_with("error")
+}
+
+/// When a Claude session ends and left behind conversation history, transition it
+/// to `needs_resume` so the UI can offer a structured Resume action. No-op for
+/// other agents, sessions without prior history, or sessions that are already
+/// in a non-resumable state.
+async fn maybe_mark_needs_resume(
+    sm: &SessionManager,
+    session_id: &str,
+    event_broadcast: &crate::websocket::broadcast::BroadcastHub,
+) {
+    let Some(session) = sm.get_session(session_id).await.ok().flatten() else {
+        return;
+    };
+    if session.agent != "claude" {
+        return;
+    }
+    match session.status {
+        crate::sessions::SessionStatus::Exited | crate::sessions::SessionStatus::Idle => {}
+        _ => return,
+    }
+    // Only resumable if there is prior conversation to continue.
+    let has_history = !sm.get_messages(session_id).await.unwrap_or_default().is_empty()
+        || !sm.get_transcripts(session_id).await.unwrap_or_default().is_empty();
+    if !has_history {
+        return;
+    }
+    if let Err(e) = sm.mark_needs_resume(session_id).await {
+        tracing::warn!("[AgentDeck][Session] Failed to mark session {} as needs_resume: {}", session_id, e);
+        return;
+    }
+    event_broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "needs_resume".to_string(),
+    });
 }

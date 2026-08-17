@@ -36,6 +36,12 @@ impl SessionStateMachine {
             (SessionStatus::WaitingForApproval, SessionStatus::Running) => true,
             (SessionStatus::WaitingForApproval, SessionStatus::Idle) => true,
             (SessionStatus::Idle, SessionStatus::Running) => true,
+            // A session that exited or went idle can become resumable when the
+            // backend detects prior conversation state the CLI could resume.
+            (SessionStatus::Exited, SessionStatus::NeedsResume) => true,
+            (SessionStatus::Idle, SessionStatus::NeedsResume) => true,
+            (SessionStatus::NeedsResume, SessionStatus::Starting) => true,
+            (SessionStatus::NeedsResume, SessionStatus::Error) => true,
             (SessionStatus::Error, SessionStatus::Idle) => true,
             (SessionStatus::Error, SessionStatus::Running) => true,
             (_, SessionStatus::Archived) => true,

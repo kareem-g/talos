@@ -1,12 +1,13 @@
+pub mod acp;
+pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod opencode;
+pub mod stream;
 
 use crate::pty::parser::ParsedOutput;
 use crate::Result;
 use serde::{Deserialize, Serialize};
-
-use crate::agent_events::AgentEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
@@ -127,6 +128,13 @@ pub trait AgentAdapter: Send + Sync {
     fn supports_hooks(&self) -> bool;
     fn hook_events(&self) -> Vec<String>;
 
+    /// Whether the prompt is already embedded in the command line (e.g.
+    /// opencode's `run` subcommand). When true, `finish_spawn` skips
+    /// sending the prompt via stdin to avoid duplication.
+    fn prompt_in_command(&self) -> bool {
+        false
+    }
+
     fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
             structured_output: false,
@@ -168,96 +176,43 @@ pub fn question_input(
     }
 }
 
-/// Derive incremental semantic events from raw PTY output for CLIs that have
-/// no structured hooks protocol (codex, opencode). The existing `OutputParser`
-/// already understands the text these CLIs print — wiring it into the live
-/// stream turns the chat timeline into a true stream instead of a single
-/// "Working" state that resolves when the process exits.
-///
-/// Claude is excluded on purpose: its hooks protocol already produces
-/// authoritative structured events, and feeding parser guesses on top of them
-/// would double-render text and tool calls.
-pub fn agent_semantic_events(session_id: &str, agent: &str, chunk: &str) -> Vec<AgentEvent> {
-    if agent == "claude" {
-        return Vec::new();
+/// Whether the given agent's CLI embeds the prompt in the command line
+/// (e.g. opencode's `run` subcommand). When true, the initial prompt should
+/// NOT be sent via stdin to avoid duplication.
+pub fn agent_prompt_in_command(agent: &str) -> bool {
+    match agent {
+        "opencode" => true,
+        _ => false,
     }
-    let mut events = Vec::new();
-    let mut tool_index = 0usize;
-    for parsed in crate::pty::parser::OutputParser::parse_chunk(chunk) {
-        match parsed {
-            ParsedOutput::Text(text) => {
-                events.push(AgentEvent::new(
-                    session_id,
-                    "assistant_text",
-                    serde_json::json!({ "text": text, "source": "parser" }),
-                ));
-            }
-            ParsedOutput::ToolCall { name, params } => {
-                let is_thinking = params
-                    .get("activity")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("thinking");
-                events.push(AgentEvent::new(
-                    session_id,
-                    if is_thinking {
-                        "thinking_started"
-                    } else {
-                        "tool_activity"
-                    },
-                    serde_json::json!({
-                        "tool_name": name,
-                        "input": params,
-                        "tool_id": format!("parser-{tool_index}"),
-                    }),
-                ));
-                tool_index += 1;
-            }
-            ParsedOutput::Plan { title, steps } => {
-                events.push(AgentEvent::new(
-                    session_id,
-                    "plan",
-                    serde_json::json!({ "title": title, "steps": steps }),
-                ));
-            }
-            ParsedOutput::Diff { file, .. } => {
-                events.push(AgentEvent::new(
-                    session_id,
-                    "file_edited",
-                    serde_json::json!({
-                        "path": file,
-                        "success": true,
-                        "source": "parser",
-                    }),
-                ));
-            }
-            ParsedOutput::ApprovalRequest { prompt } => {
-                // Parser-detected approvals are not registered anywhere on the
-                // backend — the client resolves them and the WS handler falls
-                // back to typing the decision into the running CLI.
-                events.push(AgentEvent::new(
-                    session_id,
-                    "permission_required",
-                    serde_json::json!({
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "prompt": prompt,
-                        "options": ["allow", "always", "deny"],
-                        "source": "parser",
-                    }),
-                ));
-            }
-            ParsedOutput::Error(message) => {
-                events.push(AgentEvent::new(
-                    session_id,
-                    "agent_error",
-                    serde_json::json!({ "message": message, "source": "parser" }),
-                ));
-            }
-        }
-    }
-    events
 }
 
-/// Detect genuine terminal states for non-Claude agents from live output.
+/// Build the full command line for an agent using its adapter.
+/// Falls back to just `[binary] + args` if the adapter is not available.
+pub async fn build_agent_command(
+    agent: &str,
+    binary_config: &crate::config::settings::AgentBinary,
+    project: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<Vec<String>> {
+    let config = AgentConfig {
+        binary: binary_config.path.clone(),
+        args: binary_config.args.clone(),
+        env: binary_config.env.clone(),
+    };
+    let adapter: Option<Box<dyn AgentAdapter>> = match agent {
+        "claude" => claude::ClaudeAdapter::detect(config).await.map(|a| Box::new(a) as Box<dyn AgentAdapter>),
+        "codex" => codex::CodexAdapter::detect(config).await.map(|a| Box::new(a) as Box<dyn AgentAdapter>),
+        "opencode" => opencode::OpenCodeAdapter::detect(config).await.map(|a| Box::new(a) as Box<dyn AgentAdapter>),
+        _ => None,
+    };
+    if let Some(adapter) = adapter {
+        adapter.build_command(project, prompt)
+    } else {
+        let mut cmd = vec![binary_config.path.clone()];
+        cmd.extend(binary_config.args.clone());
+        Ok(cmd)
+    }
+}
 /// Only reports states that differ from "running" (the fallback used for the
 /// whole session) so transition broadcasts are meaningful rather than spammy.
 pub fn agent_state_transition(agent: &str, chunk: &str) -> Option<&'static str> {

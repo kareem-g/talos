@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
 import {
   Terminal,
   Square,
   GitBranch,
+  Archive,
+  RotateCcw,
+  Trash2,
   Maximize2,
   Minimize2,
   X,
@@ -12,36 +14,47 @@ import {
 } from 'lucide-react'
 import { ChatView } from './ChatView'
 import { WorktreePanel } from './WorktreePanel'
-import { useWebSocket } from '../hooks/useWebSocket'
+import { useWebSocketConnected, useWebSocketState } from '../hooks/useWebSocket'
+import { api } from '../lib/api'
 
-export function SessionDetail() {
-  const { id } = useParams<{ id: string }>()
+/**
+ * Session page: compact status header + chat (TaskView) + optional worktree
+ * rail on very wide screens. Status is refreshed reactively whenever the
+ * WebSocket reports a state change for any session — never by polling, and
+ * never re-rendered for streamed tokens (see useWebSocketState).
+ */
+export function SessionDetail({ sessionId }: { sessionId: string }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStopConfirm, setShowStopConfirm] = useState(false)
+  const [showActions, setShowActions] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('running')
   const [sessionName, setSessionName] = useState('')
-  const { connected } = useWebSocket()
+  const stateVersion = useWebSocketState()
+  const connected = useWebSocketConnected()
 
-  // Fetch session info on mount
+  // Fetch session info on mount and whenever the backend reports a session
+  // state change (resume, stop, approval, start, …).
   useEffect(() => {
-    if (!id) return
-    fetch(`/api/sessions/${id}`)
+    let cancelled = false
+    fetch(`/api/sessions/${sessionId}`)
       .then(res => res.json())
       .then(data => {
+        if (cancelled) return
         if (data.status) setSessionStatus(data.status)
         if (data.name) setSessionName(data.name)
       })
       .catch(err => console.error('[AgentDeck][Session] Failed to fetch session:', err))
-  }, [id])
+    return () => { cancelled = true }
+  }, [sessionId, stateVersion])
 
   const handleStop = async () => {
-    if (!id || stopping) return
+    if (!sessionId || stopping) return
     setStopping(true)
-    console.log(`[AgentDeck][Session] Stopping session ${id}...`)
+    console.log(`[AgentDeck][Session] Stopping session ${sessionId}...`)
     try {
-      const res = await fetch(`/api/sessions/${id}/kill`, { method: 'POST' })
+      const res = await fetch(`/api/sessions/${sessionId}/kill`, { method: 'POST' })
       const data = await res.json()
       console.log('[AgentDeck][Session] Stop response:', data)
       if (data.killed) {
@@ -52,6 +65,20 @@ export function SessionDetail() {
     } finally {
       setStopping(false)
       setShowStopConfirm(false)
+    }
+  }
+
+  const mutateSession = async (action: 'archive' | 'restore' | 'delete') => {
+    if (action === 'delete' && !window.confirm(`Delete “${sessionName || sessionId}” permanently? Its history will be removed.`)) return
+    try {
+      if (action === 'archive') await api.sessions.archive(sessionId)
+      if (action === 'restore') await api.sessions.restore(sessionId)
+      if (action === 'delete') await api.sessions.delete(sessionId)
+      if (action === 'delete') window.location.assign('/')
+      else setSessionStatus(action === 'archive' ? 'archived' : 'idle')
+      setShowActions(false)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Session update failed.')
     }
   }
 
@@ -84,7 +111,7 @@ export function SessionDetail() {
             <Terminal className="h-3.5 w-3.5 text-accent" />
           </div>
           <span className="truncate text-[13px] font-medium text-ink">
-            {sessionName || `Session ${id?.slice(0, 8)}`}
+            {sessionName || `Session ${sessionId.slice(0, 8)}`}
           </span>
           {statusBadge()}
           <span
@@ -105,6 +132,22 @@ export function SessionDetail() {
               <span className="hidden sm:inline">Stop</span>
             </button>
           )}
+          <div className="relative">
+            <button type="button" onClick={() => setShowActions((value) => !value)} className="flex size-8 items-center justify-center rounded-control text-ink-3 hover:bg-hover-2 hover:text-ink" aria-label="Session actions">
+              <Archive className="h-3.5 w-3.5" />
+            </button>
+            {showActions && (
+              <div className="absolute right-0 top-9 z-30 w-48 rounded-card border border-line bg-surface p-1.5 shadow-overlay">
+                <button type="button" onClick={() => void mutateSession(sessionStatus === 'archived' ? 'restore' : 'archive')} className="flex min-h-10 w-full items-center gap-2 rounded-control px-2 text-left text-xs text-ink-2 hover:bg-hover hover:text-ink">
+                  {sessionStatus === 'archived' ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                  {sessionStatus === 'archived' ? 'Restore session' : 'Archive session'}
+                </button>
+                <button type="button" onClick={() => void mutateSession('delete')} className="flex min-h-10 w-full items-center gap-2 rounded-control px-2 text-left text-xs text-red hover:bg-red-tint">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete permanently
+                </button>
+              </div>
+            )}
+          </div>
           {/* Worktree panel is a large-desktop side panel only */}
           <button
             onClick={() => setShowSidebar(!showSidebar)}
@@ -126,12 +169,12 @@ export function SessionDetail() {
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Chat — semantic timeline + composer (centered readable column) */}
-        <ChatView sessionId={id || ''} />
+        <ChatView sessionId={sessionId} />
 
         {/* Right rail — optional side panel on large desktops */}
         {showSidebar && (
           <div className="ai-scroll-thin hidden w-72 shrink-0 overflow-auto border-l border-line bg-canvas xl:block">
-            <WorktreePanel sessionId={id || ''} />
+            <WorktreePanel sessionId={sessionId} />
           </div>
         )}
       </div>

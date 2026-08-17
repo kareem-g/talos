@@ -42,6 +42,14 @@ export const api = {
     get: (id: string) => fetchApi(`/sessions/${id}`),
     create: (data: unknown) => fetchApi('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     kill: (id: string) => fetchApi(`/sessions/${id}/kill`, { method: 'POST' }),
+    archive: (id: string) => fetchApi<{ archived: boolean; session_id: string }>(`/sessions/${id}/archive`, { method: 'POST' }),
+    restore: (id: string) => fetchApi<{ restored: boolean; session_id: string }>(`/sessions/${id}/restore`, { method: 'POST' }),
+    delete: (id: string) => fetchApi<{ deleted: boolean; session_id: string }>(`/sessions/${id}`, { method: 'DELETE' }),
+    resume: (id: string) =>
+      fetchApi<{ success: boolean; session_id: string; status: string; error?: string; message?: string }>(
+        `/sessions/${id}/resume`,
+        { method: 'POST', body: JSON.stringify({ session_id: id }) },
+      ),
   },
   agents: {
     list: () => fetchApi('/agents'),
@@ -89,7 +97,7 @@ export const api = {
   },
   mobile: {
     me: () => fetchApi<MobileMe>('/mobile/me'),
-    snapshot: () => fetchApi<MobileSnapshot>('/mobile/snapshot'),
+    snapshot: (includeArchived = false) => fetchApi<MobileSnapshot>(`/mobile/snapshot${includeArchived ? '?include_archived=true' : ''}`),
     agents: () => fetchApi<{ agents: MobileAgent[] }>('/mobile/agents'),
     session: (id: string) => fetchApi<MobileSessionPayload>(`/mobile/sessions/${id}`),
     createSession: (data: MobileCreateSessionRequest) => fetchApi<{ session: MobileSession }>(
@@ -97,6 +105,9 @@ export const api = {
       { method: 'POST', body: JSON.stringify(data) },
     ),
     kill: (id: string) => fetchApi<{ killed: boolean }>(`/mobile/sessions/${id}/kill`, { method: 'POST' }),
+    archive: (id: string) => fetchApi<{ archived: boolean; session_id: string }>(`/mobile/sessions/${id}/archive`, { method: 'POST' }),
+    restore: (id: string) => fetchApi<{ restored: boolean; session_id: string }>(`/mobile/sessions/${id}/restore`, { method: 'POST' }),
+    delete: (id: string) => fetchApi<{ deleted: boolean; session_id: string }>(`/mobile/sessions/${id}`, { method: 'DELETE' }),
   },
 }
 

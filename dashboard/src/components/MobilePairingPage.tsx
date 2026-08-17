@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Check, KeyRound, Loader2, Smartphone } from 'lucide-react'
+import { AlertTriangle, Check, KeyRound, Loader2, Smartphone } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { clearDeviceCredential, getDeviceCredential, setDeviceCredential } from '../lib/auth'
 
@@ -23,12 +23,8 @@ export function MobilePairingPage() {
   const [phase, setPhase] = useState<PairingPhase>('checking')
   const [message, setMessage] = useState('Checking this device...')
   const [pairingUrl, setPairingUrl] = useState('')
-  const started = useRef(false)
 
   useEffect(() => {
-    if (started.current) return
-    started.current = true
-
     const offerId = searchParams.get('offer')
     const secret = searchParams.get('secret')
     const credential = getDeviceCredential()
@@ -41,7 +37,7 @@ export function MobilePairingPage() {
       }
 
       api.mobile.me()
-        .then(() => navigate('/mobile', { replace: true }))
+        .then(() => navigate('/', { replace: true }))
         .catch(() => {
           clearDeviceCredential()
           setPhase('missing')
@@ -78,7 +74,9 @@ export function MobilePairingPage() {
         })
         setPhase('success')
         setMessage('Device paired. Loading your workspaces...')
-        setTimeout(() => navigate('/mobile', { replace: true }), 500)
+        // Navigate back to the root app; the shell now sees the credential and
+        // swaps the pairing screen for the remote control. No reload needed.
+        navigate('/', { replace: true })
       })
       .catch((error: unknown) => {
         setPhase(error instanceof ApiError && error.status >= 400 ? 'expired' : 'error')
@@ -92,8 +90,9 @@ export function MobilePairingPage() {
       const offer = url.searchParams.get('offer')
       const secret = url.searchParams.get('secret')
       if (offer && secret) {
-        navigate(`/mobile/pair?offer=${encodeURIComponent(offer)}&secret=${encodeURIComponent(secret)}`, { replace: true })
-        window.location.reload()
+        // The pairing effect re-runs because the shell keys this screen on the
+        // offer/secret params — no window.location.reload() needed.
+        navigate(`/?offer=${encodeURIComponent(offer)}&secret=${encodeURIComponent(secret)}`, { replace: true })
       } else {
         setPhase('error')
         setMessage('That does not look like an AgentDeck pairing link.')
@@ -107,14 +106,6 @@ export function MobilePairingPage() {
   return (
     <main className="mobile-app min-h-[100dvh] flex items-center justify-center px-5 py-8 text-text">
       <section className="w-full max-w-sm">
-        <button
-          onClick={() => navigate('/')}
-          className="mb-8 inline-flex items-center gap-2 text-sm text-text-muted hover:text-text"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Desktop dashboard
-        </button>
-
         <div className="mb-8 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-surface">
             <Smartphone className="h-5 w-5 text-accent" />
@@ -158,7 +149,7 @@ export function MobilePairingPage() {
           )}
 
           {(phase === 'expired' || phase === 'error') && (
-            <button onClick={() => navigate('/mobile/pair', { replace: true })} className="mt-2 w-full rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text hover:bg-surface-hover">
+            <button onClick={() => navigate('/', { replace: true })} className="mt-2 w-full rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text hover:bg-surface-hover">
               Return to pairing
             </button>
           )}

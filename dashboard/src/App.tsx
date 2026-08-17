@@ -1,46 +1,64 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { WorkspaceView } from './components/workspace/WorkspaceView'
 import { ThemeProvider } from './components/ThemeProvider'
-import { CommandPalette } from './components/CommandPalette'
-import { Header } from './components/Header'
-import { Sidebar } from './components/Sidebar'
-import { StatusBar } from './components/StatusBar'
-import { SessionList } from './components/SessionList'
-import { SessionDetail } from './components/SessionDetail'
-import { Settings } from './components/Settings'
-import { MCPManager } from './components/MCPManager'
-import { useWebSocket } from './hooks/useWebSocket'
+import { DesktopApp } from './components/home/DesktopApp'
+import { MobileRoot } from './components/home/MobileRoot'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { useTheme } from './hooks/useTheme'
-import { MobileApp } from './components/MobileApp'
-import { MobilePairingPage } from './components/MobilePairingPage'
-import { PairingPage } from './components/PairingPage'
 
-function AppContent() {
-  const { connected } = useWebSocket()
+/**
+ * `/mobile/task/<id>` → `/?task=<id>` · `/mobile/pair?offer=…` → `/?offer=…`
+ * `/mobile` → `/`. Pairing params ride along in the search string so the
+ * mobile shell at the root can complete the pairing flow inline.
+ */
+function MobileRedirect() {
+  const location = useLocation()
+  if (location.pathname.startsWith('/mobile/task/')) {
+    const id = location.pathname.slice('/mobile/task/'.length)
+    return <Navigate to={`/?task=${encodeURIComponent(id)}${location.search}`} replace />
+  }
+  return <Navigate to={`/${location.search}`} replace />
+}
+
+/** Old session/task links keep working — they land on the same session in `/`. */
+function SessionRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/?session=${encodeURIComponent(id || '')}`} replace />
+}
+
+function TaskRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/?task=${encodeURIComponent(id || '')}`} replace />
+}
+
+/**
+ * One responsive application at `/`.
+ *
+ *   /  └─ MainApplication
+ *         ├─ DesktopApp     (lg+ viewports: chat, sidebar, CLI, work/diff)
+ *         ├─ MobileRoot     (<lg viewports: pairing, then remote control)
+ *         └─ Mobile pairing (inline at / on mobile; at /pair on desktop)
+ *
+ * Mounting is decided by the CSS media query (viewport width), not by
+ * user-agent sniffing, so the same URL serves both layouts and only the
+ * visible shell opens WebSocket connections.
+ */
+function AppShell() {
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
   const { theme } = useTheme()
 
+  // Apply the theme class on the <html> element for whichever shell is active
+  // (previously only the desktop shell did this).
   useEffect(() => {
     document.documentElement.className = theme
   }, [theme])
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background text-text overflow-hidden">
-      <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 flex flex-col min-w-0">
-          <Routes>
-            <Route path="/" element={<SessionList />} />
-            <Route path="/session/:id" element={<SessionDetail />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/mcp" element={<MCPManager />} />
-            <Route path="/pairing" element={<PairingPage />} />
-          </Routes>
-        </main>
-      </div>
-      <StatusBar connected={connected} />
-      <CommandPalette />
-    </div>
+    <>
+      {isDesktop && <DesktopApp />}
+      {!isDesktop && <MobileRoot />}
+    </>
   )
 }
 
@@ -49,9 +67,11 @@ export default function App() {
     <BrowserRouter>
       <ThemeProvider>
         <Routes>
-          <Route path="/mobile/pair" element={<MobilePairingPage />} />
-          <Route path="/mobile/*" element={<MobileApp />} />
-          <Route path="*" element={<AppContent />} />
+          <Route path="/mobile/*" element={<MobileRedirect />} />
+          <Route path="/session/:id" element={<SessionRedirect />} />
+          <Route path="/task/:id" element={<TaskRedirect />} />
+          <Route path="/workspace/:project" element={<WorkspaceView />} />
+          <Route path="*" element={<AppShell />} />
         </Routes>
       </ThemeProvider>
     </BrowserRouter>

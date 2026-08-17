@@ -8,6 +8,27 @@ use tokio::time::{timeout, Duration};
 
 type SocketSender = SplitSink<WebSocket, Message>;
 
+const MAX_TERMINAL_DIMENSION: u16 = 500;
+
+fn clamp_terminal_dimensions(cols: u16, rows: u16) -> (u16, u16) {
+    (
+        cols.clamp(1, MAX_TERMINAL_DIMENSION),
+        rows.clamp(1, MAX_TERMINAL_DIMENSION),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_terminal_dimensions;
+
+    #[test]
+    fn clamps_terminal_dimensions_to_safe_bounds() {
+        assert_eq!(clamp_terminal_dimensions(0, 0), (1, 1));
+        assert_eq!(clamp_terminal_dimensions(80, 24), (80, 24));
+        assert_eq!(clamp_terminal_dimensions(u16::MAX, u16::MAX), (500, 500));
+    }
+}
+
 pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     tracing::info!("New desktop WebSocket connection established");
 
@@ -187,12 +208,48 @@ async fn handle_message(msg: crate::websocket::WsMessage, state: &Arc<AppState>)
             handle_input(state, &session_id, &data).await;
         }
         crate::websocket::WsMessage::TerminalInput { session_id, data } => {
+            // ACP agents have no interactive PTY: raw keystrokes are not
+            // meaningful. Report clearly instead of silently dropping them.
+            if state.acp_manager.has_active_session(&session_id).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                    session_id,
+                    code: "pty_error".to_string(),
+                    message: "This agent does not expose an interactive terminal".to_string(),
+                });
+                return;
+            }
             if let Err(error) = state.pty_manager.send_input(&session_id, &data).await {
                 state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                     session_id,
                     code: "pty_error".to_string(),
                     message: format!("Failed to write to terminal: {}", error),
                 });
+            }
+        }
+        crate::websocket::WsMessage::TerminalResize { session_id, cols, rows } => {
+            let (cols, rows) = clamp_terminal_dimensions(cols, rows);
+            match state.pty_manager.resize_session(&session_id, cols, rows).await {
+                Ok(()) => {
+                    state.broadcast.broadcast(crate::websocket::WsMessage::TerminalResized {
+                        session_id,
+                        cols,
+                        rows,
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        cols,
+                        rows,
+                        error = %error,
+                        "PTY resize failed"
+                    );
+                    state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                        session_id,
+                        code: "pty_resize_error".to_string(),
+                        message: format!("Failed to resize terminal: {}", error),
+                    });
+                }
             }
         }
         crate::websocket::WsMessage::Command { action, params } => {
@@ -232,20 +289,35 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             role: "user".to_string(),
-            content: clean_data,
+            content: clean_data.clone(),
             timestamp: chrono::Utc::now(),
         },
     });
+
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "running".to_string(),
+    });
+
+    // ACP agents (opencode, copilot, gemini, …) receive follow-ups as a
+    // `session/prompt` on the same live subprocess — true multi-turn chat,
+    // not keystrokes typed into a TUI.
+    if state.acp_manager.has_active_session(session_id).await {
+        if let Err(error) = state.acp_manager.send_prompt(session_id, &clean_data).await {
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                session_id: session_id.to_string(),
+                code: "acp_error".to_string(),
+                message: format!("Failed to send prompt to agent: {}", error),
+            });
+        }
+        return;
+    }
 
     // The chat runtime must enter its generation state as soon as the user
     // submits, not only after a provider hook happens to fire (simple Claude
     // replies often have no tool hook at all). It also arms Claude PTY text
     // normalization for this specific turn.
-    state.pty_manager.begin_assistant_turn(session_id);
-    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
-        session_id: session_id.to_string(),
-        state: "running".to_string(),
-    });
+    state.pty_manager.begin_assistant_turn(session_id, &clean_data);
 
     // Type the text first, then press Enter as a separate keystroke so the
     // TUI treats it as a submit rather than part of the pasted draft.
@@ -273,7 +345,13 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
     match action {
         "stop" | "kill" => {
             if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
-                let _ = state.pty_manager.kill_session(session_id).await;
+                // ACP sessions are stopped by cancelling + killing the
+                // subprocess; PTY sessions by signalling the process.
+                if state.acp_manager.has_active_session(session_id).await {
+                    let _ = state.acp_manager.kill_session(session_id).await;
+                } else {
+                    let _ = state.pty_manager.kill_session(session_id).await;
+                }
                 let _ = state.session_manager.update_status(
                     session_id,
                     crate::sessions::SessionStatus::Exited,
@@ -284,6 +362,28 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             let request_id = params.get("request_id").and_then(Value::as_str).unwrap_or("");
             let decision = params.get("decision").and_then(Value::as_str).unwrap_or("deny");
             let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
+            // ACP approvals are structured protocol requests: respond with the
+            // chosen optionId instead of typing a keystroke into a TUI.
+            if !session_id.is_empty() && state.acp_manager.has_active_session(session_id).await {
+                match state.acp_manager.respond_approval(session_id, request_id, decision).await {
+                    Ok(session_id) => {
+                        let _ = state.session_manager.resolve_approval(request_id, decision).await;
+                        state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                            &session_id,
+                            "permission_resolved",
+                            serde_json::json!({ "request_id": request_id, "decision": decision }),
+                        ));
+                    }
+                    Err(error) => {
+                        state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                            session_id: session_id.to_string(),
+                            code: "approval_error".to_string(),
+                            message: error.to_string(),
+                        });
+                    }
+                }
+                return;
+            }
             let mut response = state.pty_manager.respond_to_approval(request_id, decision).await;
             if response.is_err() {
                 if let Ok(Some(stored)) = state.session_manager.get_approval(request_id).await {

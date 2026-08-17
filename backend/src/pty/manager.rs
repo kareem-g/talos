@@ -6,7 +6,7 @@ use crate::{
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 pub struct PtyManager {
     sessions: Arc<RwLock<HashMap<String, PtySessionHandle>>>,
@@ -16,18 +16,26 @@ pub struct PtyManager {
     terminated: Arc<Mutex<HashSet<String>>>,
     last_states: Arc<Mutex<HashMap<String, String>>>,
     semantic_text: Arc<Mutex<HashMap<String, SemanticTextStream>>>,
+    normalizers: Arc<Mutex<HashMap<String, crate::agents::stream::AgentStreamNormalizer>>>,
 }
 
 #[derive(Debug, Default)]
 struct SemanticTextStream {
     active: bool,
     previous: String,
+    submitted: Option<String>,
     turn: u64,
 }
 
 pub struct PtySessionHandle {
     pub session: PtySession,
     pub tx: mpsc::UnboundedSender<String>,
+    pub resize_tx: mpsc::UnboundedSender<ResizeRequest>,
+}
+
+pub struct ResizeRequest {
+    pub size: PtySize,
+    pub result: oneshot::Sender<Result<(), String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +55,7 @@ impl PtyManager {
             terminated: Arc::new(Mutex::new(HashSet::new())),
             last_states: Arc::new(Mutex::new(HashMap::new())),
             semantic_text: Arc::new(Mutex::new(HashMap::new())),
+            normalizers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -79,6 +88,12 @@ impl PtyManager {
         if let Some(project) = project {
             command_builder.cwd(project);
         }
+        command_builder.env("TERM", "xterm-256color");
+
+        tracing::info!(
+            "[AgentDeck][PTY] Spawning session={} agent={} command={:?} cwd={:?}",
+            session_id, agent, command, project
+        );
 
         let mut child = pair
             .slave
@@ -95,6 +110,7 @@ impl PtyManager {
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let (resize_tx, mut resize_rx) = mpsc::unbounded_channel::<ResizeRequest>();
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -103,11 +119,13 @@ impl PtyManager {
         let broadcast = self.broadcast.clone();
         let agent_name = agent.to_string();
         let session_id = id.clone();
-        let last_states = Arc::clone(&self.last_states);
         let semantic_text = Arc::clone(&self.semantic_text);
+        let normalizers = Arc::clone(&self.normalizers);
         tokio::task::spawn_blocking(move || {
             let mut buffer = [0_u8; 4096];
-            let mut fallback_started = false;
+            if let Ok(mut all_normalizers) = normalizers.lock() {
+                all_normalizers.insert(session_id.clone(), crate::agents::stream::AgentStreamNormalizer::new(&agent_name));
+            }
             loop {
                 match std::io::Read::read(&mut reader, &mut buffer) {
                     Ok(size) if size > 0 => {
@@ -122,45 +140,12 @@ impl PtyManager {
                             data: data.clone(),
                         });
 
-                        if agent_name != "claude" && !fallback_started {
-                            fallback_started = true;
-                            if let Ok(mut states) = last_states.lock() {
-                                states.insert(session_id.clone(), "running".to_string());
-                            }
-                            broadcast.broadcast_agent_event(AgentEvent::new(
-                                &session_id,
-                                "agent_status",
-                                serde_json::json!({ "state": "running", "fallback": true }),
-                            ));
-                        }
-
                         if agent_name != "claude" {
-                            for event in crate::agents::agent_semantic_events(
-                                &session_id,
-                                &agent_name,
-                                &data,
-                            ) {
-                                broadcast.broadcast_agent_event(event);
-                            }
-                            if let Some(state) =
-                                crate::agents::agent_state_transition(&agent_name, &data)
-                            {
-                                let changed = last_states
-                                    .lock()
-                                    .map(|mut states| {
-                                        if states.get(&session_id).map(String::as_str) != Some(state) {
-                                            states.insert(session_id.clone(), state.to_string());
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    })
-                                    .unwrap_or(false);
-                                if changed {
-                                    broadcast.broadcast(WsMessage::StateChange {
-                                        session_id: session_id.clone(),
-                                        state: state.to_string(),
-                                    });
+                            if let Ok(mut all_normalizers) = normalizers.lock() {
+                                if let Some(normalizer) = all_normalizers.get_mut(&session_id) {
+                                    for event in normalizer.parse(&session_id, &data) {
+                                        broadcast.broadcast_agent_event(event);
+                                    }
                                 }
                             }
                         } else if let Some(text) = crate::agents::agent_text_fragment(&data) {
@@ -177,6 +162,10 @@ impl PtyManager {
                                         return None;
                                     }
                                     if !looks_like_claude_answer(&text) {
+                                        return None;
+                                    }
+                                    if stream.submitted.as_deref().is_some_and(|submitted| normalize_semantic_text(submitted) == normalize_semantic_text(&text)) {
+                                        stream.submitted = None;
                                         return None;
                                     }
                                     if text == stream.previous || stream.previous.ends_with(&text) {
@@ -226,6 +215,8 @@ impl PtyManager {
 
         let broadcast = self.broadcast.clone();
         let terminated = Arc::clone(&self.terminated);
+        let sessions = Arc::clone(&self.sessions);
+        let normalizers = Arc::clone(&self.normalizers);
         let session_id = id.clone();
         tokio::task::spawn_blocking(move || {
             let was_terminated = terminated
@@ -238,6 +229,13 @@ impl PtyManager {
                 Ok(status) => format!("error:{}", status.exit_code()),
                 Err(_) => "exited".to_string(),
             };
+            sessions.blocking_write().remove(&session_id);
+            if let Ok(mut normalizers) = normalizers.lock() {
+                if let Some(normalizer) = normalizers.get_mut(&session_id) {
+                    normalizer.finish_turn();
+                }
+                normalizers.remove(&session_id);
+            }
             broadcast.broadcast(WsMessage::StateChange {
                 session_id: session_id.clone(),
                 state: state.clone(),
@@ -260,10 +258,18 @@ impl PtyManager {
             }
         });
 
+        let master = pair.master;
+        tokio::spawn(async move {
+            while let Some(request) = resize_rx.recv().await {
+                let result = master.resize(request.size).map_err(|error| error.to_string());
+                let _ = request.result.send(result);
+            }
+        });
+
         self.sessions
             .write()
             .await
-            .insert(id.clone(), PtySessionHandle { session: session.clone(), tx });
+            .insert(id.clone(), PtySessionHandle { session: session.clone(), tx, resize_tx });
         self.broadcast.broadcast_agent_event(AgentEvent::new(
             &id,
             "session_started",
@@ -286,13 +292,50 @@ impl PtyManager {
         }
     }
 
+    pub async fn resize_session(&self, session_id: &str, cols: u16, rows: u16) -> crate::Result<()> {
+        let (result_tx, result_rx) = oneshot::channel();
+        {
+            let sessions = self.sessions.read().await;
+            let handle = sessions.get(session_id).ok_or_else(|| {
+                crate::AgentDeckError::Session(format!("Session {} not found", session_id))
+            })?;
+            handle
+                .resize_tx
+                .send(ResizeRequest {
+                    size: PtySize { rows, cols, pixel_width: 0, pixel_height: 0 },
+                    result: result_tx,
+                })
+                .map_err(|_| crate::AgentDeckError::Pty("PTY resize channel closed".to_string()))?;
+        }
+
+        match tokio::time::timeout(tokio::time::Duration::from_secs(2), result_rx).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(error))) => Err(crate::AgentDeckError::Pty(error)),
+            Ok(Err(_)) => Err(crate::AgentDeckError::Pty("PTY resize worker stopped".to_string())),
+            Err(_) => Err(crate::AgentDeckError::Pty("PTY resize timed out".to_string())),
+        }
+    }
+
+    /// True when the session currently has a live PTY process. Used by the
+    /// resume endpoint to avoid spawning a duplicate Claude process.
+    pub async fn has_active_session(&self, session_id: &str) -> bool {
+        let sessions = self.sessions.read().await;
+        sessions.contains_key(session_id)
+    }
+
     /// Begin one chat-generated assistant turn. Claude's terminal uses screen
     /// redraws, so this resets the delta baseline before the next response.
-    pub fn begin_assistant_turn(&self, session_id: &str) {
+    pub fn begin_assistant_turn(&self, session_id: &str, submitted: &str) {
+        if let Ok(mut normalizers) = self.normalizers.lock() {
+            if let Some(normalizer) = normalizers.get_mut(session_id) {
+                normalizer.begin_turn(submitted);
+            }
+        }
         if let Ok(mut streams) = self.semantic_text.lock() {
             let stream = streams.entry(session_id.to_string()).or_default();
             stream.active = true;
             stream.previous.clear();
+            stream.submitted = Some(submitted.to_string());
             stream.turn = stream.turn.saturating_add(1);
         }
         if let Ok(mut states) = self.last_states.lock() {
@@ -419,6 +462,21 @@ impl PtyManager {
 /// timing alongside its answer. Only promote lines that look like actual
 /// assistant prose into the semantic stream; raw output remains intact in
 /// xterm regardless.
+fn normalize_semantic_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+#[cfg(test)]
+mod semantic_tests {
+    use super::normalize_semantic_text;
+
+    #[test]
+    fn normalizes_terminal_echo_for_comparison() {
+        assert_eq!(normalize_semantic_text(" Hello   Chat\n"), "hello chat");
+        assert_eq!(normalize_semantic_text("hello chat"), "hello chat");
+    }
+}
+
 fn looks_like_claude_answer(text: &str) -> bool {
     let lower = text.to_lowercase();
     ![

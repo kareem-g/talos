@@ -278,6 +278,7 @@ fn is_terminal_chrome(line: &str) -> bool {
 
     if trimmed.is_empty()
         || trimmed.starts_with('❯')
+        || trimmed.starts_with('›')
         || lower.contains("welcome back!")
         || lower.contains("tips for getting started")
         || lower.contains("what's new")

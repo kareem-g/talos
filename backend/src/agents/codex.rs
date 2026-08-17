@@ -37,13 +37,12 @@ impl AgentAdapter for CodexAdapter {
         cmd.extend(self.config.args.clone());
 
         if let Some(proj) = project {
-            cmd.push("--path".to_string());
+            cmd.push("--cd".to_string());
             cmd.push(proj.to_string());
         }
 
         // Use full-auto mode for non-interactive
-        cmd.push("--approval-mode".to_string());
-        cmd.push("full-auto".to_string());
+        cmd.push("--approve-for-me".to_string());
 
         if let Some(p) = prompt {
             cmd.push(p.to_string());

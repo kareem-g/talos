@@ -1,13 +1,33 @@
-import { FolderGit2, Loader2, Paperclip, Send, Square } from 'lucide-react'
-import { AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive } from '@assistant-ui/react'
+import { Loader2, Paperclip, Send, Square } from 'lucide-react'
+import {
+  AttachmentPrimitive,
+  ComposerPrimitive,
+  ThreadPrimitive,
+} from '@assistant-ui/react'
 import type { MobileAgentModel } from '../../types/mobile'
 
 /**
- * Task composer powered by the assistant-ui composer runtime. The runtime
- * drives the textarea, the send/cancel lifecycle and the attachment pipeline;
- * the model / effort selectors send real CLI slash commands (`/model`,
- * `/effort`) so a change genuinely reaches the running agent instead of being
- * a cosmetic toggle. Context opens the existing files/diffs panel.
+ * Task composer built entirely on assistant-ui's base primitives.
+ *
+ * Runtime lifecycle
+ * ────────────────
+ * `ComposerPrimitive.Root`  – <form> wrapper; intercepts Enter-to-send,
+ *                             auto-focuses the input, and wires the
+ *                             send/cancel lifecycle.
+ * `ComposerPrimitive.Input` – runtime-controlled <textarea>. No manual
+ *                             value sync; the runtime holds the text.
+ * `ComposerPrimitive.Send`  – emits the composer payload; auto-disabled when
+ *                             the input is empty or the thread is running.
+ * `ComposerPrimitive.Cancel` – stops the current agent run.
+ * `ComposerPrimitive.Attachments` – renders file-chips for in-flight
+ *                                    uploads; each chip has a remove button.
+ * `ComposerPrimitive.AddAttachment` – triggers the native file picker;
+ *                                     pipes the chosen file through the
+ *                                     AttachmentAdapter (which uploads it
+ *                                     via the backend API before send).
+ *
+ * The model/effort selectors and context button live outside the composer
+ * form so they remain interactive regardless of composer state.
  */
 
 interface TaskComposerProps {
@@ -35,71 +55,77 @@ export function TaskComposer({
   onModelCommand,
   onOpenContext,
 }: TaskComposerProps) {
-  const placeholder = disabled
-    ? 'Task stopped — start a new task'
-    : working
-      ? 'Queue a follow-up…'
-      : 'Message the agent…'
-
   return (
-    <ComposerPrimitive.Root className="flex w-full flex-col gap-1.5">
-      <ComposerPrimitive.Attachments>
-        {({ attachment }) => (
-          <AttachmentPrimitive.Root
-            key={attachment.id}
-            className="flex h-6 max-w-48 items-center gap-1 rounded-chip bg-field px-1.5 pl-2 text-[11px] text-ink-2 shadow-hairline"
-          >
-            <Paperclip className="h-3 w-3 shrink-0" />
-            <AttachmentPrimitive.Name />
-            <AttachmentPrimitive.Remove
-              aria-label={`Remove ${attachment.name}`}
-              className="flex size-4 shrink-0 items-center justify-center text-ink-3 hover:text-ink"
+    <div className="flex w-full flex-col gap-2">
+      <ComposerPrimitive.Root className="flex w-full flex-col gap-1.5">
+        <ComposerPrimitive.Attachments>
+          {({ attachment }) => (
+            <AttachmentPrimitive.Root
+              key={attachment.id}
+              className="flex h-6 max-w-48 items-center gap-1 rounded-chip bg-field px-1.5 pl-2 text-[11px] text-ink-2 shadow-hairline"
             >
-              ×
-            </AttachmentPrimitive.Remove>
-          </AttachmentPrimitive.Root>
-        )}
-      </ComposerPrimitive.Attachments>
+              <Paperclip className="h-3 w-3 shrink-0" />
+              <AttachmentPrimitive.Name />
+              <AttachmentPrimitive.Remove
+                aria-label={`Remove ${attachment.name}`}
+                className="flex size-4 shrink-0 items-center justify-center text-ink-3 hover:text-ink"
+              >
+                ×
+              </AttachmentPrimitive.Remove>
+            </AttachmentPrimitive.Root>
+          )}
+        </ComposerPrimitive.Attachments>
 
-      <div className="rounded-pill border border-line bg-field px-2 py-1.5 shadow-hairline focus-within:border-accent/50">
-        <ComposerPrimitive.Input
-          autoFocus
-          rows={1}
-          placeholder={placeholder}
-          className="max-h-36 w-full resize-none bg-transparent px-2 py-1 text-[13.5px] leading-6 text-ink placeholder:text-ink-3 outline-none"
-        />
-        <div className="mt-1 flex items-center gap-1">
-          <ComposerPrimitive.AddAttachment
-            aria-label="Attach a file"
-            className="flex size-8 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover disabled:opacity-30"
-          >
-            <Paperclip className="h-4 w-4" />
-          </ComposerPrimitive.AddAttachment>
-          <button
-            type="button"
-            onClick={onOpenContext}
-            aria-label="Files and changes"
-            className="flex size-8 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover"
-          >
-            <FolderGit2 className="h-4 w-4" />
-          </button>
-          <div className="flex-1" />
-          <ThreadPrimitive.If running>
-            <ComposerPrimitive.Cancel
-              aria-label="Stop generating"
-              className="flex size-8 shrink-0 items-center justify-center rounded-control bg-red-tint text-red transition-colors active:bg-red active:text-white"
+        {/* ChatGPT-style rounded composer well */}
+        <div
+          role="presentation"
+          className="flex cursor-text flex-col gap-1.5 rounded-[26px] border border-line bg-field p-3 shadow-hairline transition-[border-color,box-shadow] duration-150 focus-within:border-line-strong focus-within:shadow-[0_0_0_4px_hsl(var(--accent)/0.12)]"
+        >
+          <ComposerPrimitive.Input
+            autoFocus
+            rows={1}
+            disabled={disabled}
+            placeholder={disabled ? 'Task stopped — start a new task' : `Ask ${agentLabel === 'agent' ? 'the agent' : agentLabel} anything...`}
+            className="max-h-40 w-full resize-none bg-transparent px-1 py-1.5 text-[14px] leading-[1.5] text-ink outline-none placeholder:text-ink-3"
+          />
+          <div className="flex items-center gap-1.5">
+            <ComposerPrimitive.AddAttachment
+              aria-label="Attach a file"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2 active:bg-hover disabled:opacity-30"
             >
-              <Square className="h-3.5 w-3.5 fill-current" />
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
-          <ComposerPrimitive.Send
-            aria-label="Send message"
-            className="flex size-8 shrink-0 items-center justify-center rounded-control bg-accent text-white transition-opacity active:opacity-80 disabled:opacity-30"
-          >
-            <Send className="h-4 w-4" />
-          </ComposerPrimitive.Send>
+              <Paperclip className="h-[18px] w-[18px]" />
+            </ComposerPrimitive.AddAttachment>
+            <button
+              type="button"
+              onClick={onOpenContext}
+              aria-label="Files and changes"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2 active:bg-hover"
+            >
+              <Loader2 className="h-[18px] w-[18px]" />
+            </button>
+            <div className="flex-1" />
+            {/* Stop replaces Send while the thread is running. */}
+            <ThreadPrimitive.If running>
+              <ComposerPrimitive.Cancel
+                aria-label="Stop generating"
+                className="flex size-9 shrink-0 items-center justify-center gap-1.5 rounded-full bg-red-tint px-2.5 text-[12px] font-medium text-red transition-colors hover:bg-red hover:text-white"
+              >
+                <Square className="h-4 w-4 fill-current" />
+                Stop
+              </ComposerPrimitive.Cancel>
+            </ThreadPrimitive.If>
+            <ThreadPrimitive.If running={false}>
+              <ComposerPrimitive.Send
+                aria-label="Send message"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-[background-color,transform] duration-200 enabled:active:scale-[0.96] disabled:opacity-30 enabled:hover:brightness-110"
+                style={{ background: 'var(--ink)' }}
+              >
+                <Send className="h-4 w-4" />
+              </ComposerPrimitive.Send>
+            </ThreadPrimitive.If>
+          </div>
         </div>
-      </div>
+      </ComposerPrimitive.Root>
 
       <div className="flex flex-wrap items-center gap-1.5 px-1">
         {supportsModelSwitch && models.length > 0 && (
@@ -121,7 +147,7 @@ export function TaskComposer({
           {working ? 'Working' : disabled ? 'Read-only history' : offline ? 'Offline' : 'Ready'} · {agentLabel}
         </span>
       </div>
-    </ComposerPrimitive.Root>
+    </div>
   )
 }
 
@@ -141,11 +167,12 @@ function ModelSelect({
         defaultValue=""
         onChange={(event) => {
           if (event.target.value) onSelect(event.target.value)
-          event.target.value = ''
         }}
-        className="max-w-28 appearance-none bg-transparent text-[10.5px] font-medium text-ink outline-none"
+        className="bg-transparent outline-none"
       >
-        <option value="">—</option>
+        <option value="" disabled>
+          —
+        </option>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

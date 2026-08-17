@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(pnpm:*)",
+      "Shell(cargo:*)",
+      "Shell(command:*)",
+      "Shell(ss:*)",
+      "Shell(lsof:*)",
+      "Shell(curl -fsS http://localhost:9120/health)",
+      "Shell(curl -fsSI http://localhost:3000/)",
+      "Shell(agent-browser:*)",
+      "Shell(curl -fsSI 'http://localhost:3000/task/d1d64707-4888-4280-a85f-faaeb871a39b')",
+      "Shell(curl -fsS 'http://localhost:9120/health')",
+      "Shell(curl -fsSI http://192.168.1.8:3000/)",
+      "Shell(curl -fsSI http://192.168.1.8:3000/task/d1d64707-4888-4280-a85f-faaeb871a39b)",
+      "Shell(curl -fsS http://192.168.1.8:9120/health)",
+      "Shell(rustfmt:*)",
+      "Shell(curl -fsS -o /dev/null -w task route: %{http_code}\\n http://192.168.1.8:3000/task/d1d64707-4888-4280-a85f-faaeb871a39b)",
+      "Shell(curl -fsSI http://192.168.1.8:3000/workspace/%2Fhome%2Fkareem%2FDocuments%2Fagentdeck-linux)",
+      "Shell(curl -fsSI -X POST http://192.168.1.8:9120/api/sessions/not-a-session/archive)",
+      "Shell(curl -fsS -o /dev/null -w %{http_code}\\n http://192.168.1.8:3000/task/d1d64707-4888-4280-a85f-faaeb871a39b)",
+      "Shell(curl -fsS -o /dev/null -w %{http_code}\\n http://192.168.1.8:3000/workspace/%2Fhome%2Fkareem%2FDocuments%2Fagentdeck-linux)",
+      "Shell(python3 - <<'PY' import json, urllib.request url='http://localhost:9120/api/sessions/d177cc02-d23c-462b-92c7-6d1a8191798a/transcripts' data=json.load(urllib.request.urlopen(url)) print('messages:') for item in data.get('messages', []): print(json.dumps(item, ensure_ascii=False)) print('\\nevents:') for item in data.get('events', []): print(json.dumps(item, ensure_ascii=False)) print('\\ntranscripts:') for item in data.get('transcripts', []): print(json.dumps(item, ensure_ascii=False)) print('\\nterminal tail:') for item in data.get('terminal_output', [])[-20:]: print(json.dumps(item, ensure_ascii=False)) PY)",
+      "Shell(curl -fsS http://localhost:9120/api/sessions/d177cc02-d23c-462b-92c7-6d1a8191798a)",
+      "Shell(python3 - <<'PY' import json, urllib.request url='http://localhost:9120/api/sessions/d177cc02-d23c-462b-92c7-6d1a8191798a/transcripts' data=json.load(urllib.request.urlopen(url)) raw=''.join(item.get('data','') for item in data.get('terminal_output', [])) clean=raw.replace('\\x1b','') for needle in ('metadata','fallback','Working','Write tests'): print('\\n---', needle, '---') start=clean.lower().find(needle.lower()) print(clean[max(0,start-300):start+500] if start >= 0 else 'not found') PY)",
+      "Shell(cd /home/kareem/Documents/agentdeck-linux && ls dashboard/src/components/beautiful/ 2>/dev/null; echo \"---\"; grep -l \"ApprovalCard\\|HumanDecision\\|Thinking\" dashboard/src/components/{beautiful,chat,task}/*.{tsx,ts} 2>/dev/null)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

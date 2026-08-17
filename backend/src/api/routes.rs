@@ -1,9 +1,10 @@
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
+use serde::Deserialize;
 use serde_json::json;
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
@@ -83,10 +84,16 @@ pub async fn health_handler() -> impl IntoResponse {
 }
 
 // ===== SESSIONS =====
+#[derive(Debug, Default, Deserialize)]
+pub struct SessionListQuery {
+    pub include_archived: Option<bool>,
+}
+
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<SessionListQuery>,
 ) -> impl IntoResponse {
-    match state.session_manager.list_sessions().await {
+    match state.session_manager.list_sessions_with_archived(query.include_archived.unwrap_or(false)).await {
         Ok(sessions) => {
             let mut reconciled = Vec::with_capacity(sessions.len());
             for session in sessions {
@@ -269,6 +276,222 @@ pub async fn fork_session(
     }
 }
 
+fn session_mutation_error(error: crate::AgentDeckError) -> Response {
+    let message = error.to_string();
+    let status = if message.contains("not found") { StatusCode::NOT_FOUND } else if message.contains("Stop the running") || message.contains("not archived") { StatusCode::CONFLICT } else { StatusCode::INTERNAL_SERVER_ERROR };
+    (status, Json(json!({ "error": message }))).into_response()
+}
+
+pub async fn archive_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.session_manager.archive_session(&id).await {
+        Ok(()) => {
+            if let Ok(Some(session)) = state.session_manager.get_session(&id).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session });
+            }
+            Json(json!({ "archived": true, "session_id": id })).into_response()
+        }
+        Err(error) => session_mutation_error(error),
+    }
+}
+
+pub async fn restore_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.session_manager.restore_session(&id).await {
+        Ok(()) => {
+            if let Ok(Some(session)) = state.session_manager.get_session(&id).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session });
+            }
+            Json(json!({ "restored": true, "session_id": id })).into_response()
+        }
+        Err(error) => session_mutation_error(error),
+    }
+}
+
+pub async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    if state.pty_manager.has_active_session(&id).await {
+        return (StatusCode::CONFLICT, Json(json!({ "error": "Stop the running session before deleting it" }))).into_response();
+    }
+    match state.session_manager.delete_session(&id).await {
+        Ok(()) => {
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionDeleted { session_id: id.clone() });
+            Json(json!({ "deleted": true, "session_id": id })).into_response()
+        }
+        Err(error) => session_mutation_error(error),
+    }
+}
+
+// ===== RESUME =====
+pub async fn resume_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // Only the session identifier is trusted from the client; the backend
+    // builds and owns the actual resume operation.
+    let requested_id = body
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty());
+
+    // Reject mismatched / missing IDs up front.
+    match requested_id {
+        None => {
+            return Json(json!({
+                "success": false,
+                "error": "Missing session_id",
+            }));
+        }
+        Some(req_id) if req_id != id => {
+            return Json(json!({
+                "success": false,
+                "error": "session_id does not match the session being resumed",
+            }));
+        }
+        _ => {}
+    }
+
+    // Look up the existing session (exited/idle, needs_resume).
+    let session = match state.session_manager.get_session(&id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            return Json(json!({
+                "success": false,
+                "error": "Session not found",
+                "session_id": id,
+            }));
+        }
+        Err(e) => {
+            return Json(json!({
+                "success": false,
+                "error": e.to_string(),
+                "session_id": id,
+            }));
+        }
+    };
+
+    // Guard against duplicate spawns: if the session is already active or has a
+    // live PTY, return the current state rather than spawning a second process.
+    match session.status {
+        SessionStatus::Running | SessionStatus::Starting => {
+            return Json(json!({
+                "success": true,
+                "session_id": id,
+                "status": "already_active",
+                "message": "Session is already running",
+            }));
+        }
+        SessionStatus::NeedsResume | SessionStatus::Exited | SessionStatus::Idle => {}
+        other => {
+            return Json(json!({
+                "success": false,
+                "error": format!("Session cannot be resumed from state: {:?}", other),
+                "session_id": id,
+            }));
+        }
+    }
+
+    if state.pty_manager.has_active_session(&id).await {
+        return Json(json!({
+            "success": true,
+            "session_id": id,
+            "status": "already_active",
+            "message": "Session already has an active PTY",
+        }));
+    }
+
+    // Transition to starting BEFORE spawning so concurrent requests see the
+    // in-flight state and cannot trigger a second spawn.
+    if let Err(e) = state
+        .session_manager
+        .update_status(&id, SessionStatus::Starting)
+        .await
+    {
+        return Json(json!({
+            "success": false,
+            "error": format!("Failed to mark session starting: {}", e),
+            "session_id": id,
+        }));
+    }
+
+    // Build the resume command: reuse the same binary/args as a fresh session,
+    // but append `--resume <session_id>` for the claude agent so the CLI
+    // continues the prior conversation instead of starting a new one.
+    let cfg = state.config.read().await;
+    let configured = match session.agent.as_str() {
+        "codex" => cfg.settings().agents.codex.clone(),
+        "opencode" => cfg.settings().agents.opencode.clone(),
+        "claude" => cfg.settings().agents.claude.clone(),
+        other => {
+            let _ = state
+                .session_manager
+                .update_status(&id, SessionStatus::Error)
+                .await;
+            return Json(json!({
+                "success": false,
+                "error": format!("Resume is not supported for agent '{}'", other),
+                "session_id": id,
+            }));
+        }
+    };
+    drop(cfg);
+
+    let mut command = vec![configured.path.clone()];
+    command.extend(configured.args.clone());
+    if session.agent == "claude" {
+        command.push("--resume".to_string());
+        command.push(id.clone());
+    }
+
+    // Spawn the PTY. finish_spawn writes hooks settings and broadcasts output.
+    match finish_spawn(
+        &state,
+        session.clone(),
+        session.project.as_deref(),
+        None,
+        command,
+        None,
+        None,
+        true,
+    )
+    .await
+    {
+        Ok(_resumed) => {
+            // Clear any stale resume_command now that we're active.
+            let _ = state.session_manager.set_resume_command(&id, "").await;
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: id.clone(),
+                state: "starting".to_string(),
+            });
+            Json(json!({
+                "success": true,
+                "session_id": id,
+                "status": "starting",
+                "spawned": true,
+            }))
+        }
+        Err(error) => {
+            let _ = state
+                .session_manager
+                .update_status(&id, SessionStatus::Error)
+                .await;
+            Json(json!({
+                "success": false,
+                "error": error,
+                "session_id": id,
+                "spawned": false,
+            }))
+        }
+    }
+}
+
 // ===== AGENTS =====
 pub async fn list_agents(
     State(state): State<Arc<AppState>>,
@@ -286,41 +509,76 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
     let claude = &cfg.settings().agents.claude;
     let codex = &cfg.settings().agents.codex;
     let opencode = &cfg.settings().agents.opencode;
-    let configured = vec![
+    let configured: Vec<(String, String, String, Vec<&'static str>, Vec<crate::config::settings::AgentModel>, Vec<String>)> = vec![
         (
-            "claude",
-            "Claude Code",
+            "claude".to_string(),
+            "Claude Code".to_string(),
             claude.path.clone(),
             vec!["plan", "diff", "tool_use", "approval", "hooks", "worktree"],
             claude.effective_models(),
             claude.effective_reasoning(),
         ),
         (
-            "codex",
-            "Codex CLI",
+            "codex".to_string(),
+            "Codex CLI".to_string(),
             codex.path.clone(),
             vec!["code_generation", "diff", "shell", "auto_approve"],
             codex.effective_models(),
             codex.effective_reasoning(),
         ),
         (
-            "opencode",
-            "OpenCode",
+            "opencode".to_string(),
+            "OpenCode".to_string(),
             opencode.path.clone(),
             vec!["chat", "code", "plan", "serve", "auto"],
             opencode.effective_models(),
             opencode.effective_reasoning(),
         ),
     ];
+    let custom = cfg.settings().agents.custom.clone();
     drop(cfg);
 
-    let mut agents = Vec::new();
-    for (id, name, path, features, models, reasoning_levels) in configured {
-        if let Some((resolved_path, version)) = crate::agents::detect_agent(&path).await {
-            // If config declares no models, probe the CLI's own --help to
-            // discover the aliases it advertises. Models are never hardcoded
-            // in the binary — they come from config or from the agent itself.
-            let models = if models.is_empty() {
+    // Every candidate gets probed concurrently: the configured agents, the
+    // ACP catalog, and user-defined custom agents. Detection (is the binary
+    // on PATH?) and the ACP handshake probe both run inside each future, so
+    // a slow CLI can't stall the others.
+    /// Per-candidate probe outcome (id, name, features, models, reasoning,
+    /// detected path/version + whether it speaks ACP).
+    #[derive(Default)]
+    struct AgentProbeResult {
+        id: String,
+        name: String,
+        features: Vec<&'static str>,
+        models: Vec<crate::config::settings::AgentModel>,
+        reasoning_levels: Vec<String>,
+        info: Option<(String, String, bool)>,
+    }
+
+    let mut tasks: Vec<futures::future::BoxFuture<'static, AgentProbeResult>> = Vec::new();
+    for (id, name, path, features, models, reasoning_levels) in configured.clone() {
+        let acp_manager = Arc::clone(&state.acp_manager);
+        tasks.push(Box::pin(async move {
+            let Some((resolved_path, version)) = crate::agents::detect_agent(&path).await else {
+                return AgentProbeResult { id, name, features, models, reasoning_levels, ..Default::default() };
+            };
+            // If the CLI is ACP-capable it is driven through the generic ACP
+            // client (native structured events) instead of a PTY. opencode
+            // answers the handshake, so it is promoted here automatically.
+            let acp_supported = match crate::agents::catalog::acp_entry_for(&id) {
+                Some((_, _, binary, args, _)) => {
+                    let args: Vec<String> = args.iter().map(|value| value.to_string()).collect();
+                    match crate::agents::detect_agent(binary).await {
+                        Some((resolved, _)) => acp_manager.probe(&resolved, &args).await,
+                        None => false,
+                    }
+                }
+                None => false,
+            };
+            // PTY agents: if config declares no models, discover them from the
+            // CLI's own --help output (never hardcoded in the binary).
+            let models = if acp_supported {
+                models
+            } else if models.is_empty() {
                 crate::agents::detect_agent_models(&resolved_path)
                     .await
                     .into_iter()
@@ -329,27 +587,128 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
             } else {
                 models
             };
-            let supports_model_switch = !models.is_empty();
+            AgentProbeResult {
+                id,
+                name,
+                features,
+                models,
+                reasoning_levels,
+                info: Some((resolved_path, version, acp_supported)),
+            }
+        }));
+    }
+    for (id, name, binary, args, features) in crate::agents::catalog::ACP_CATALOG {
+        if configured.iter().any(|(cid, _, _, _, _, _)| cid == id) {
+            continue;
+        }
+        let acp_manager = Arc::clone(&state.acp_manager);
+        let args: Vec<String> = args.iter().map(|value| value.to_string()).collect();
+        let features: Vec<&'static str> = features.to_vec();
+        let id = id.to_string();
+        let name = name.to_string();
+        tasks.push(Box::pin(async move {
+            let Some((resolved_path, version)) = crate::agents::detect_agent(binary).await else {
+                return AgentProbeResult { id, name, features, ..Default::default() };
+            };
+            let acp_supported = acp_manager.probe(&resolved_path, &args).await;
+            // Catalog entries are ACP-only: if the CLI doesn't answer the
+            // handshake it has no PTY adapter here, so drop it instead of
+            // advertising an agent that can't be launched.
+            if !acp_supported {
+                return AgentProbeResult { id, name, features, ..Default::default() };
+            }
+            AgentProbeResult {
+                id,
+                name,
+                features,
+                info: Some((resolved_path, version, acp_supported)),
+                ..Default::default()
+            }
+        }));
+    }
+    for custom_agent in custom {
+        let acp_manager = Arc::clone(&state.acp_manager);
+        let id = custom_agent.id.clone();
+        let name = custom_agent.name.clone();
+        let binary = custom_agent.binary.clone();
+        let args = custom_agent.args.clone();
+        let features: Vec<&'static str> = vec!["chat", "code", "native_ui"];
+        tasks.push(Box::pin(async move {
+            let Some((resolved_path, version)) = crate::agents::detect_agent(&binary).await else {
+                return AgentProbeResult { id, name, features, ..Default::default() };
+            };
+            let acp_supported = acp_manager.probe(&resolved_path, &args).await;
+            AgentProbeResult {
+                id,
+                name,
+                features,
+                info: Some((resolved_path, version, acp_supported)),
+                ..Default::default()
+            }
+        }));
+    }
+
+    let results = futures::future::join_all(tasks).await;
+    let mut agents: Vec<serde_json::Value> = Vec::new();
+    for AgentProbeResult {
+        id,
+        name,
+        features,
+        models,
+        reasoning_levels,
+        info,
+    } in results
+    {
+        let Some((resolved_path, version, acp_supported)) = info else {
+            continue;
+        };
+        if acp_supported {
             agents.push(json!({
                 "id": id,
                 "name": name,
                 "available": true,
                 "path": resolved_path,
                 "version": version,
-                "features": features.clone(),
-                "models": models,
-                "reasoningLevels": reasoning_levels,
+                "features": features,
+                "models": [],
+                "reasoningLevels": [],
+                "protocol": "acp",
                 "capabilities": {
                     "supportsStreaming": true,
-                    "supportsApproval": features.iter().any(|feature| *feature == "approval"),
+                    "supportsApproval": true,
                     "supportsPlan": features.iter().any(|feature| *feature == "plan"),
-                    "supportsModelSwitch": supports_model_switch,
-                    "supportsFileChanges": features.iter().any(|feature| *feature == "diff"),
-                    "supportsReasoning": !reasoning_levels.is_empty(),
+                    "supportsModelSwitch": false,
+                    "supportsFileChanges": true,
+                    "supportsReasoning": false,
+                    "supportsStructuredQuestions": false,
                     "supportsTerminal": true,
                 }
             }));
+            continue;
         }
+        let supports_model_switch = id == "claude" && !models.is_empty();
+        let supports_reasoning = id == "claude" && !reasoning_levels.is_empty();
+        agents.push(json!({
+            "id": id,
+            "name": name,
+            "available": true,
+            "path": resolved_path,
+            "version": version,
+            "features": features,
+            "models": models,
+            "reasoningLevels": reasoning_levels,
+            "protocol": "pty",
+            "capabilities": {
+                "supportsStreaming": true,
+                "supportsApproval": features.iter().any(|feature| *feature == "approval"),
+                "supportsPlan": features.iter().any(|feature| *feature == "plan"),
+                "supportsModelSwitch": supports_model_switch,
+                "supportsFileChanges": features.iter().any(|feature| *feature == "diff"),
+                "supportsReasoning": supports_reasoning,
+                "supportsStructuredQuestions": id == "claude",
+                "supportsTerminal": true,
+            }
+        }));
     }
     agents
 }
@@ -376,8 +735,9 @@ pub async fn mobile_me(
 pub async fn mobile_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(device): Extension<crate::auth::devices::AuthenticatedDevice>,
+    Query(query): Query<SessionListQuery>,
 ) -> Response {
-    let sessions = match state.session_manager.list_sessions().await {
+    let sessions = match state.session_manager.list_sessions_with_archived(query.include_archived.unwrap_or(false)).await {
         Ok(sessions) => sessions,
         Err(error) => {
             return (
@@ -557,6 +917,30 @@ pub async fn mobile_create_session(
     Json(json!({ "session": session })).into_response()
 }
 
+pub async fn mobile_archive_session(
+    State(state): State<Arc<AppState>>,
+    Extension(_device): Extension<crate::auth::devices::AuthenticatedDevice>,
+    Path(id): Path<String>,
+) -> Response {
+    archive_session(State(state), Path(id)).await
+}
+
+pub async fn mobile_restore_session(
+    State(state): State<Arc<AppState>>,
+    Extension(_device): Extension<crate::auth::devices::AuthenticatedDevice>,
+    Path(id): Path<String>,
+) -> Response {
+    restore_session(State(state), Path(id)).await
+}
+
+pub async fn mobile_delete_session(
+    State(state): State<Arc<AppState>>,
+    Extension(_device): Extension<crate::auth::devices::AuthenticatedDevice>,
+    Path(id): Path<String>,
+) -> Response {
+    delete_session(State(state), Path(id)).await
+}
+
 pub async fn mobile_kill_session(
     State(state): State<Arc<AppState>>,
     Extension(_device): Extension<crate::auth::devices::AuthenticatedDevice>,
@@ -592,6 +976,45 @@ pub async fn mobile_agents(
     Json(json!({ "agents": available_agents(&state).await })).into_response()
 }
 
+/// Launch command for an ACP-capable agent.
+struct AcpLaunch {
+    binary: String,
+    args: Vec<String>,
+}
+
+/// Resolve an agent id to an ACP launch command, probing the CLI for real ACP
+/// support. Catalog entries (opencode, copilot, gemini, …) and user-defined
+/// custom agents are both probed; the probe is cached by the AcpManager.
+async fn resolve_acp_launch(state: &AppState, agent: &str) -> Option<AcpLaunch> {
+    if let Some((_, _, binary, args, _)) = crate::agents::catalog::acp_entry_for(agent) {
+        let args: Vec<String> = args.iter().map(|value| value.to_string()).collect();
+        // Probe with the resolved path (same key the /api/agents listing
+        // cached) so a spawn right after listing doesn't re-probe.
+        let Some((resolved, _)) = crate::agents::detect_agent(binary).await else {
+            return None;
+        };
+        if state.acp_manager.probe(&resolved, &args).await {
+            return Some(AcpLaunch { binary: resolved, args });
+        }
+        return None;
+    }
+    let cfg = state.config.read().await;
+    let custom = cfg.settings().agents.custom.clone();
+    drop(cfg);
+    if let Some(custom_agent) = custom.iter().find(|candidate| candidate.id == agent) {
+        let Some((resolved, _)) = crate::agents::detect_agent(&custom_agent.binary).await else {
+            return None;
+        };
+        if state.acp_manager.probe(&resolved, &custom_agent.args).await {
+            return Some(AcpLaunch {
+                binary: resolved,
+                args: custom_agent.args.clone(),
+            });
+        }
+    }
+    None
+}
+
 async fn spawn_session(
     state: &AppState,
     name: &str,
@@ -610,12 +1033,27 @@ async fn spawn_session(
     let requested_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
     let requested_effort = body.get("effort").and_then(|v| v.as_str()).map(str::to_string);
 
+    // ACP-capable agents (opencode, copilot, gemini, cursor, qwen, kimi,
+    // hermes, goose, … and custom agents) run through the generic ACP
+    // client, which streams native structured events instead of a PTY.
+    if let Some(launch) = resolve_acp_launch(state, agent).await {
+        return finish_acp_spawn(state, session, project, prompt, launch).await;
+    }
+
     let cfg = state.config.read().await;
     let configured = match agent {
         "codex" => &cfg.settings().agents.codex,
         "opencode" => &cfg.settings().agents.opencode,
         "claude" => &cfg.settings().agents.claude,
         _ => {
+            // Custom configured agents that are not ACP-capable fall back to a
+            // plain PTY launch with their own binary/args.
+            if let Some(custom) = cfg.settings().agents.custom.iter().find(|candidate| candidate.id == agent) {
+                let mut command = vec![custom.binary.clone()];
+                command.extend(custom.args.clone());
+                drop(cfg);
+                return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
+            }
             let Some(executable) = body.get("executable").and_then(|value| value.as_str()) else {
                 drop(cfg);
                 let _ = state
@@ -632,14 +1070,76 @@ async fn spawn_session(
             let mut command = vec![executable.to_string()];
             command.extend(args);
             drop(cfg);
-            return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort).await;
+            return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
         }
     };
-    let mut command = vec![configured.path.clone()];
-    command.extend(configured.args.clone());
+    let command = crate::agents::build_agent_command(agent, &configured, project, prompt).await
+        .map_err(|error| error.to_string())?;
     drop(cfg);
 
-    finish_spawn(state, session, project, prompt, command, requested_model, requested_effort).await
+    finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await
+}
+
+/// ACP spawn path: launch the subprocess, complete the initialize/session/new
+/// handshake, then submit the initial prompt over the protocol. The process
+/// stays alive so follow-up messages reuse the same conversation.
+async fn finish_acp_spawn(
+    state: &AppState,
+    session: crate::sessions::Session,
+    project: Option<&str>,
+    prompt: Option<&str>,
+    launch: AcpLaunch,
+) -> std::result::Result<crate::sessions::Session, String> {
+    let info = match state
+        .acp_manager
+        .spawn_session(&session.id, &session.agent, project, &launch.binary, &launch.args)
+        .await
+    {
+        Ok(info) => info,
+        Err(error) => {
+            let _ = state
+                .session_manager
+                .update_status(&session.id, SessionStatus::Error)
+                .await;
+            return Err(error.to_string());
+        }
+    };
+
+    state.session_manager.set_session_pid(&session.id, info.pid).await;
+
+    if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
+        let clean_prompt = prompt.trim().to_string();
+        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
+            message: crate::agent_events::AgentMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session.id.clone(),
+                role: "user".to_string(),
+                content: clean_prompt.clone(),
+                timestamp: chrono::Utc::now(),
+            },
+        });
+        state
+            .acp_manager
+            .send_prompt(&session.id, &clean_prompt)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    state
+        .session_manager
+        .update_status(&session.id, SessionStatus::Running)
+        .await
+        .map_err(|error| error.to_string())?;
+    let current = state
+        .session_manager
+        .get_session(&session.id)
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap_or(session);
+    state
+        .broadcast
+        .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current.clone() });
+    Ok(current)
 }
 
 async fn finish_spawn(
@@ -650,8 +1150,9 @@ async fn finish_spawn(
     mut command: Vec<String>,
     requested_model: Option<String>,
     requested_effort: Option<String>,
+    resume: bool,
 ) -> std::result::Result<crate::sessions::Session, String> {
-    if session.agent == "claude" {
+    if session.agent == "claude" && !resume {
         // Apply the requested model/effort as real CLI flags. These are
         // validated against the configured agent so a bogus value never
         // reaches the executable.
@@ -709,6 +1210,9 @@ async fn finish_spawn(
     // The PTY already starts in the project directory. Do not inject
     // CLI-specific flags such as --cwd or --prompt into arbitrary executables.
     // Interactive agents receive the initial request through their stdin.
+    // Agents that embed the prompt in the command line (e.g. opencode run)
+    // should not have the prompt sent via stdin to avoid duplication.
+    let prompt_in_cmd = crate::agents::agent_prompt_in_command(&session.agent);
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let clean_prompt = prompt.trim().to_string();
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
@@ -720,22 +1224,29 @@ async fn finish_spawn(
                 timestamp: chrono::Utc::now(),
             },
         });
-        let pty_manager = Arc::clone(&state.pty_manager);
-        let session_id = session.id.clone();
-        tokio::spawn(async move {
-            // Type the prompt, then press Enter as its own keystroke so the
-            // agent TUI submits it instead of keeping it as a draft.
-            if let Err(error) = pty_manager.send_input_when_ready(&session_id, &clean_prompt).await {
-                tracing::warn!(
-                    "[AgentDeck][PTY] Initial prompt could not be sent to session {}: {}",
-                    session_id,
-                    error
-                );
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let _ = pty_manager.send_input(&session_id, "\r").await;
-        });
+        if prompt_in_cmd {
+            // Prompt is already in the command line; just activate the normalizer
+            // so streaming events are captured from the PTY output.
+            state.pty_manager.begin_assistant_turn(&session.id, &clean_prompt);
+        } else {
+            state.pty_manager.begin_assistant_turn(&session.id, &clean_prompt);
+            let pty_manager = Arc::clone(&state.pty_manager);
+            let session_id = session.id.clone();
+            tokio::spawn(async move {
+                // Type the prompt, then press Enter as its own keystroke so the
+                // agent TUI submits it instead of keeping it as a draft.
+                if let Err(error) = pty_manager.send_input_when_ready(&session_id, &clean_prompt).await {
+                    tracing::warn!(
+                        "[AgentDeck][PTY] Initial prompt could not be sent to session {}: {}",
+                        session_id,
+                        error
+                    );
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let _ = pty_manager.send_input(&session_id, "\r").await;
+            });
+        }
     }
 
     state

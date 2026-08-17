@@ -44,6 +44,8 @@ export interface MobileSession {
   cost?: number
   tokens_used?: number
   capabilities?: Record<string, boolean>
+  /** Populated by the backend when status is `needs_resume`. */
+  resume_command?: string
 }
 
 export interface MobileTaskTranscript {

@@ -1,5 +1,6 @@
 import type { MessagePartStreamStatus, ThreadMessageLike } from '@assistant-ui/react'
 import type { ChatItem } from './chatItems'
+import { normalizedText } from './terminalText'
 import { formatDuration } from './chatItems'
 import type { MobileAgentEvent, MobileApproval, MobileQuestion } from '../types/mobile'
 
@@ -25,6 +26,12 @@ export interface TaskThreadContext {
   items: ChatItem[]
   optimistic: Array<{ id: string; content: string }>
   working: boolean
+  /**
+   * True in the window right after the user hits Send, before the backend has
+   * reported the session as running. Renders the ✦ Thinking… placeholder
+   * assistant message immediately instead of leaving a silent gap.
+   */
+  optimisticRunning?: boolean
   /** id of the live ChatItem currently streaming — drives the caret. */
   streamingId: string | null
   /** approvals rendered in the action zone below the composer — not in-thread. */
@@ -77,6 +84,15 @@ interface MutableMessage {
     | { type: 'running' }
     | { type: 'requires-action'; reason: 'interrupt' }
     | { type: 'complete'; reason: 'stop' }
+  /** Generation metadata, persisted across reloads via the assistant-ui runtime. */
+  metadata?: {
+    custom?: {
+      /** Wall-clock milliseconds of the generation (last event minus first). 0 when unknown. */
+      durationMs?: number
+      /** How the generation ended. Drives the post-generation status line. */
+      status?: 'completed' | 'failed'
+    }
+  }
 }
 
 const eventNumber = (id: string) => {
@@ -89,6 +105,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
     items,
     optimistic,
     working,
+    optimisticRunning = false,
     streamingId,
     pendingApprovalIds,
     pendingQuestionIds,
@@ -121,6 +138,46 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
   }
   // Reasoning is a distinct in-thread block; hold the running block to complete it.
   let openReasoning: MutableReasoningPart | null = null
+
+  // Per-turn generation timing, derived purely from the persisted event
+  // timestamps of the items that make up the assistant turn. Used to compute a
+  // reload-safe duration that is attached to the message metadata.
+  let turnStartEpoch: number | null = null
+  let turnEndEpoch: number | null = null
+  let turnHasError = false
+
+  const recordTurnTiming = (item: ChatItem) => {
+    if (!current) return
+    const epoch = item.timestamp ? new Date(item.timestamp).getTime() : NaN
+    if (Number.isFinite(epoch)) {
+      if (turnStartEpoch === null) turnStartEpoch = epoch
+      turnEndEpoch = epoch
+    }
+    if (item.kind === 'system' && (item.id.includes('error') || /error/i.test(item.content))) {
+      turnHasError = true
+    }
+  }
+
+  // Finalize the outgoing assistant turn: compute its wall-clock duration from
+  // the first-to-last event timestamps and persist it to message metadata so it
+  // survives reloads. Resets the per-turn trackers for the next turn.
+  const finalizeTurn = () => {
+    if (!current) return
+    const durationMs =
+      turnStartEpoch !== null && turnEndEpoch !== null
+        ? Math.max(0, turnEndEpoch - turnStartEpoch)
+        : 0
+    current.metadata = {
+      custom: {
+        durationMs,
+        status: turnHasError ? 'failed' : 'completed',
+      },
+    }
+    current = null
+    turnStartEpoch = null
+    turnEndEpoch = null
+    turnHasError = false
+  }
 
   const startTurn = (id: string) => {
     const message: MutableMessage = {
@@ -160,25 +217,35 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
 
     switch (item.kind) {
       case 'user': {
+        // A new user turn finalizes any outgoing assistant turn — persisting its
+        // wall-clock duration to metadata before resetting per-turn trackers.
+        finalizeTurn()
         messages.push({
           id: item.id,
           role: 'user',
           content: [{ type: 'text', text: item.content }],
           createdAt: createItemDate(item.timestamp),
         })
-        current = null
         lastTextPart = null
         openReasoning = null
         break
       }
 
       case 'agent': {
+        const previousUser = [...items].slice(0, items.indexOf(item)).reverse().find((candidate) => candidate.kind === 'user')
+        if (previousUser && normalizedText(item.content) === normalizedText(previousUser.content)) break
+        recordTurnTiming(item)
         const isDelta = raw?.payload?.delta === true
+        const isRedraw = raw?.payload?.redraw === true
         if (lastTextPart) {
           if (item.content === lastTextPart.text || lastTextPart.text.endsWith(item.content)) {
             break
           }
-          if (isDelta) {
+          if (isRedraw) {
+            // Redraw events contain the full authoritative render — replace
+            // the prior partial PTY render rather than appending.
+            lastTextPart.text = item.content
+          } else if (isDelta) {
             lastTextPart.text += item.content
           } else if (item.content.startsWith(lastTextPart.text)) {
             // Transcript frames are complete snapshots, while PTY frames are
@@ -201,6 +268,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'thinking': {
+        recordTurnTiming(item)
         const finished = /for|results|completed/i.test(item.title || '')
         if (finished && openReasoning) {
           openReasoning.text = item.title || 'Thought'
@@ -220,6 +288,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'activity': {
+        recordTurnTiming(item)
         const part = raw ? activityPart(raw, item, openTools, uniqueToolCallId) : activityData(item)
         if (part) {
           ensureTurn(item.id).content.push(part)
@@ -230,6 +299,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
 
       case 'plan':
       case 'diff': {
+        recordTurnTiming(item)
         if (item.kind === 'plan' || (raw && item.kind === 'diff')) {
           const part = raw ? activityPart(raw, item, openTools, uniqueToolCallId) : null
           if (part) {
@@ -248,6 +318,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'approval': {
+        recordTurnTiming(item)
         const approval: MobileApproval | undefined = item.approval
         if (!approval) break
         if (!current && !hasUserMessage(messages)) break
@@ -269,6 +340,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'question': {
+        recordTurnTiming(item)
         const question: MobileQuestion | undefined = item.question
         if (!question) break
         if (!current && !hasUserMessage(messages)) break
@@ -286,6 +358,7 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
       }
 
       case 'system': {
+        recordTurnTiming(item)
         if (!current && !hasUserMessage(messages)) break
         ensureTurn(item.id).content.push({
           type: 'data',
@@ -298,6 +371,17 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
     }
   }
 
+  // Finalize the trailing assistant turn (if any) so its duration is persisted
+  // even though no subsequent user message triggered finalization above.
+  finalizeTurn()
+
+  // Legacy transcript turns fold the agent's internal reasoning and its final
+  // reply into one text block (no discrete `thinking` events). Split that
+  // merged text into a `reasoning` part (the "Thinking" component) plus the
+  // reply as text. This runs as a single post-pass so it applies uniformly to
+  // both live (delta) frames and reloaded (snapshot) transcripts — otherwise the
+  // reasoning component would only appear after a reload, and the live reply
+  // would render the thinking text inline (garbled).
   // Optimistic user messages render the instant the user hits send, then
   // self-expire once the matching real message arrives (matched by normalized
   // text upstream, mirroring the pre-runtime behavior).
@@ -317,12 +401,18 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
 
   // The session switches to running immediately after a user send. Until the
   // first semantic event arrives, expose a real assistant-ui running message
-  // so the thread is never visually silent.
-  if (working && messages[messages.length - 1]?.role === 'user') {
+  // so the thread is never visually silent. `optimisticRunning` covers the
+  // gap before the backend confirms the run, making the ✦ Thinking…
+  // placeholder appear the instant the user hits Send.
+  if ((working || optimisticRunning) && messages[messages.length - 1]?.role === 'user') {
     messages.push({
       id: `generating-${messages[messages.length - 1].id}`,
       role: 'assistant',
-      content: [],
+      content: [{
+        type: 'reasoning',
+        text: 'Thinking',
+        status: { type: 'running' },
+      }],
       createdAt: new Date(),
       status: { type: 'running' },
     })
@@ -332,6 +422,62 @@ export function buildThreadMessages(context: TaskThreadContext): ThreadMessageLi
 
 function hasUserMessage(messages: MutableMessage[]) {
   return messages.some((message) => message.role === 'user')
+}
+
+/**
+ * Splits a monolithic legacy-transcript assistant block into its internal
+ * reasoning (the "thinking") and the user-facing reply. Returns
+ * `[undefined, text]` when no clear boundary exists so callers fall back to
+ * rendering the whole block as text (current behaviour preserved).
+ *
+ * Heuristic: reasoning reads as an instruction / bullet monologue (system
+ * notes, skill lists, "Follow all instructions..."), while the reply is the
+ * first paragraph that addresses the user directly — a greeting or a normal
+ * prose sentence that follows the monologue.
+ */
+const GREETING_WORDS = /^(hello|hi|hey|greetings|welcome|thanks|thank you|sure|okay|certainly|great|good |i can|i'd|i will|let me|here's|here is|of course)/i
+export function splitReasoning(text: string): [string | undefined, string | undefined] {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+  if (paragraphs.length < 2) return [undefined, text]
+
+  const isMonologue = (paragraph: string) => {
+    // cleanTerminalText rewrites bullets ("• foo") to ". foo"; strip that plus
+    // any remaining list-marker prefix before testing the leading keyword.
+    const stripped = paragraph.replace(/^\.\s+/, '').replace(/^[-•*]\.\s*/, '').replace(/^[-•*]\s*/, '')
+    if (/^(follow|see|use|note|remember|you can|you should|the user|let me think|i should|i need to|first,|next,)/i.test(stripped)) return true
+    // Bulleted / itemized lists read as internal reasoning, not a reply.
+    if (/^[-•*]\s+/.test(paragraph)) return true
+    const lines = paragraph.split('\n')
+    if (lines.length > 1 && lines.every((line) => /^[-•*]\s+/.test(line.trim()) || /:$/.test(line.trim()))) return true
+    return false
+  }
+
+  // Only split when there is a genuine monologue/instruction prefix followed by
+  // the actual reply. A reply-start is recognized solely after we have seen at
+  // least one monologue paragraph, so plain multi-paragraph prose is left intact.
+  let replyStart = -1
+  let seenMonologue = false
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    const paragraph = paragraphs[index]
+    if (isMonologue(paragraph)) {
+      seenMonologue = true
+      continue
+    }
+    const looksLikeReply = GREETING_WORDS.test(paragraph) || (/[.!?]$/.test(paragraph.trim()) && paragraph.length > 24)
+    if (looksLikeReply && seenMonologue) {
+      replyStart = index
+      break
+    }
+  }
+  if (replyStart <= 0) return [undefined, text]
+
+  const reasoning = paragraphs.slice(0, replyStart).join('\n\n').trim()
+  const reply = paragraphs.slice(replyStart).join('\n\n').trim()
+  if (!reasoning || !reply) return [undefined, text]
+  return [reasoning, reply]
 }
 
 function createItemDate(timestamp?: string) {

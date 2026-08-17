@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWebSocket } from './useWebSocket'
 import {
   answeredQuestionIds,
@@ -18,6 +18,7 @@ interface SessionMeta {
   status: string
   project?: string
   branch?: string
+  resume_command?: string
 }
 
 interface HistoryPayload {
@@ -45,20 +46,41 @@ export function useSessionChat(sessionId: string) {
   const [session, setSession] = useState<SessionMeta | null>(null)
   const [history, setHistory] = useState<HistoryPayload | null>(null)
   const [loading, setLoading] = useState(true)
+  // Real agent metadata (models / reasoning levels / capabilities) so the
+  // composer can show native model + effort selectors, sourced from the same
+  // backend /api/agents response the mobile app uses — never faked.
+  const [agentMeta, setAgentMeta] = useState<{
+    models: import('../types/mobile').MobileAgentModel[]
+    reasoningLevels: string[]
+    supportsModelSwitch: boolean
+    supportsEffort: boolean
+  }>({ models: [], reasoningLevels: [], supportsModelSwitch: false, supportsEffort: false })
   // approval id -> decision taken in this UI session (optimistic, pre-event)
   const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, string>>(new Map())
+  // Optimistic user messages: rendered the instant the user hits Send so the
+  // timeline never lags the send action. Each entry self-expires once the
+  // matching persisted/WS message arrives (matched by normalized text).
+  const [optimisticMessages, setOptimisticMessages] = useState<Array<{ id: string; content: string; timestamp: string }>>([])
+  // True in the window between Send and the backend confirming the run, so the
+  // ✦ Thinking… placeholder appears immediately instead of a silent gap.
+  const [pendingTurn, setPendingTurn] = useState(false)
+  const lastSendTimeRef = useRef(0)
 
   useEffect(() => {
     setSession(null)
     setHistory(null)
     setLoading(true)
     setResolvedApprovals(new Map())
+    setAgentMeta({ models: [], reasoningLevels: [], supportsModelSwitch: false, supportsEffort: false })
+    setOptimisticMessages([])
+    setPendingTurn(false)
     let cancelled = false
     Promise.all([
       fetch(`/api/sessions/${sessionId}`).then((res) => res.json()),
       fetch(`/api/sessions/${sessionId}/transcripts`).then((res) => res.json()),
+      fetch('/api/agents').then((res) => res.json()).catch(() => ({ agents: [] })),
     ])
-      .then(([sessionData, transcriptData]) => {
+      .then(([sessionData, transcriptData, agentsData]) => {
         if (cancelled) return
         if (!sessionData?.error) {
           setSession({
@@ -69,6 +91,17 @@ export function useSessionChat(sessionId: string) {
             project: sessionData.project || undefined,
             branch: sessionData.branch || undefined,
           })
+          const agent = (agentsData.agents || []).find(
+            (candidate: { id?: string }) => candidate.id === sessionData.agent,
+          )
+          if (agent) {
+            setAgentMeta({
+              models: Array.isArray(agent.models) ? agent.models : [],
+              reasoningLevels: Array.isArray(agent.reasoningLevels) ? agent.reasoningLevels.map(String) : [],
+              supportsModelSwitch: agent.capabilities?.supportsModelSwitch === true,
+              supportsEffort: agent.capabilities?.supportsReasoning === true,
+            })
+          }
         }
         setHistory({
           transcripts: transcriptData?.transcripts || [],
@@ -84,7 +117,7 @@ export function useSessionChat(sessionId: string) {
 
   const liveEvents = messages as RealtimeEvent[]
 
-  const { items, pendingApprovals, pendingQuestions, status, rawOutput, resolvedDecisionById } = useMemo(() => {
+  const { items, pendingApprovals, pendingQuestions, status, rawOutput, resolvedDecisionById, historyUserContent, liveItems } = useMemo(() => {
     const historyEvents = history?.events || []
     const historyItems = buildHistoryItems(history?.messages || [], historyEvents, history?.transcripts || [])
     const liveItems = buildLiveItems(liveEvents, sessionId)
@@ -196,16 +229,68 @@ export function useSessionChat(sessionId: string) {
       status: effectiveStatus,
       rawOutput: rawHistory + rawLive,
       resolvedDecisionById,
+      historyUserContent,
+      liveItems,
     }
   }, [history, liveEvents, resolvedApprovals, session, sessionId])
 
-  const working = status === 'running' || status === 'starting'
+  // Optimistic entries self-expire once the real (persisted or live) copy of
+  // the user message arrives. Attachments append a `[attachments: …]` note to
+  // the persisted copy, so match by prefix when replacing the temporary one.
+  const visibleOptimisticMessages = useMemo(() => {
+    const realUserContent = new Set([
+      ...historyUserContent,
+      ...liveItems.filter((item) => item.kind === 'user').map((item) => normalizedText(item.content)),
+    ])
+    return optimisticMessages.filter((entry) => {
+      const normalized = normalizedText(entry.content)
+      // Attachments append a `[attachments: …]` note to the persisted copy,
+      // so match by prefix when replacing the temporary assistant-ui message.
+      return ![...realUserContent].some((real) => real === normalized || real.startsWith(normalized))
+    })
+  }, [historyUserContent, liveItems, optimisticMessages])
+
   const ended = status === 'exited' || status === 'archived'
+
+  // A generation can only be live while the socket is connected and the
+  // persisted session record hasn't already reached a terminal state. This
+  // prevents the "stuck generating" hang when a stream ends without a final
+  // live event (network drop, missed event, backend crash). No timer is used;
+  // the reactive connection flag and snapshot state are the source of truth.
+  const working =
+    (status === 'running' || status === 'starting') && connected && !ended
+
+  // Clear the pending-turn placeholder once the run is really active or the
+  // agent has produced content newer than the send. Pure derived cleanup — no
+  // timers, so it can never hang the UI.
+  useEffect(() => {
+    if (!pendingTurn) return
+    if (working) {
+      setPendingTurn(false)
+      return
+    }
+    const hasNewerContent = items.some((item) => {
+      if (item.kind === 'user' || !item.timestamp) return false
+      return new Date(item.timestamp).getTime() > lastSendTimeRef.current
+    })
+    if (hasNewerContent) setPendingTurn(false)
+  }, [items, pendingTurn, working])
 
   const sendText = (text: string): boolean => {
     const value = text.trim()
     if (!value) return false
-    return sendMessage({ type: 'Input', payload: { session_id: sessionId, data: `${value}\n` } })
+    const sent = sendMessage({ type: 'Input', payload: { session_id: sessionId, data: `${value}\n` } })
+    if (sent) {
+      // Optimistic: render the user message immediately so the timeline never
+      // lags the send action. Self-expires when the real message arrives.
+      setOptimisticMessages((current) => [
+        ...current,
+        { id: `optimistic-${Date.now()}`, content: value, timestamp: new Date().toISOString() },
+      ])
+      lastSendTimeRef.current = Date.now()
+      setPendingTurn(true)
+    }
+    return sent
   }
 
   const answerQuestion = (answer: QuestionAnswer): boolean =>
@@ -225,6 +310,9 @@ export function useSessionChat(sessionId: string) {
     connected,
     session,
     items,
+    agentMeta,
+    optimisticMessages: visibleOptimisticMessages,
+    optimisticRunning: pendingTurn,
     historyEvents: history?.events || [],
     liveEvents,
     resolvedDecisionById,

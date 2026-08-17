@@ -1,0 +1,14 @@
+# - Prefers CLI interfaces to be mobile-compatible and controllable with touch input. Confidence: 0.9
+- Prefers CLI interfaces to be mobile-compatible and controllable with touch input. Confidence: 0.9
+- Prefers the frontend development server to run with Vite's `--host` option for network/LAN access. Confidence: 0.9
+- Expects the frontend to be rebuilt before restarting or serving the development server, so the running app reflects the latest code. Confidence: 0.95
+- Prefers mobile UI issues to be reproduced against the exact LAN/deployed URL at a phone viewport before making a fix, rather than relying only on source inspection. Confidence: 0.8
+- Prefers task/CLI views to expose a direct, semantic `/task/:id` route instead of requiring a query-parameter URL. Confidence: 0.8
+- Expects fixes to be production-grade and end-to-end, including reliable behavior across UI, transport, and backend layers rather than superficial visual workarounds. Confidence: 0.9
+- Expects every supported CLI provider, not only the primary one, to integrate cleanly with the shared frontend UI; provider-specific prompts, redraw/status chrome, and metadata should be normalized rather than leaking into chat. Confidence: 0.95
+- Is open to rewriting a component when its existing lifecycle or layout is unreliable, rather than limiting changes to small patches. Confidence: 0.85
+- Prefers chat lifecycle controls to include reversible archive/restore and explicitly confirmed permanent deletion, with archived items separated from active lists. Confidence: 0.9
+- Prefers meaningful, direct workspace routes that can be used as first-class navigation targets, rather than workspace context existing only implicitly in session lists. Confidence: 0.85
+- Expects streaming chat UI to keep user content strictly separate from assistant reasoning and to show an immediate visible thinking/loading state on the first turn. Confidence: 0.95
+- Prefers approval and question interactions to be data-driven from backend-provided options: display human-readable labels, submit stable option IDs, and show custom-input controls only when explicitly supported. Confidence: 0.95
+- Dislikes generic or misleading interaction controls and prefers polished, purpose-specific UI that reflects the actual available choices. Confidence: 0.9

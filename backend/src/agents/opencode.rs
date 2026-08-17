@@ -38,12 +38,9 @@ impl AgentAdapter for OpenCodeAdapter {
         cmd.extend(self.config.args.clone());
 
         if let Some(proj) = project {
-            cmd.push("--project".to_string());
+            cmd.push("--dir".to_string());
             cmd.push(proj.to_string());
         }
-
-        // Use auto mode for non-interactive
-        cmd.push("--auto".to_string());
 
         if let Some(p) = prompt {
             cmd.push("run".to_string());
@@ -67,5 +64,9 @@ impl AgentAdapter for OpenCodeAdapter {
 
     fn hook_events(&self) -> Vec<String> {
         vec![]
+    }
+
+    fn prompt_in_command(&self) -> bool {
+        true
     }
 }

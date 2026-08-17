@@ -1,5 +1,5 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
@@ -16,12 +16,18 @@ import {
   TerminalSquare,
   WifiOff,
   X,
+  Archive,
+  MoreHorizontal,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { clearDeviceCredential, getDeviceCredential } from '../lib/auth'
 import { normalizedText } from '../lib/terminalText'
 import { buildHistoryItems, buildLiveItems, type ChatItem } from '../lib/chatItems'
-import { XtermTerminal } from './XtermTerminal'
+import { MobileTerminal } from './MobileTerminal'
+import { ResumeSession } from './ResumeSession'
+import { assessResumable } from '../lib/resume'
 import { useMobileWebSocket, type MobileRealtimeEvent, type MobileRealtimeMessage } from '../hooks/useMobileWebSocket'
 import LoadingState from './beautiful/LoadingState'
 import { MobileContextPanel } from './MobileContextPanel'
@@ -142,12 +148,13 @@ function normalizeSession(raw: Record<string, unknown>): MobileSession {
 
 export function MobileApp() {
   const navigate = useNavigate()
-  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const credential = getDeviceCredential()
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null)
   const [syncing, setSyncing] = useState(Boolean(credential))
   const [syncError, setSyncError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const previousConnection = useRef<MobileConnectionState | null>(null)
   const processedEvents = useRef(new Set<number>())
@@ -155,19 +162,20 @@ export function MobileApp() {
 
   const refresh = async () => {
     if (!credential) {
-      navigate('/mobile/pair', { replace: true })
+      // No credential on the root app: the shell renders the pairing page.
+      navigate('/', { replace: true })
       return
     }
     setSyncing(true)
     setSyncError(null)
     try {
-      const next = await api.mobile.snapshot()
+      const next = await api.mobile.snapshot(true)
       setSnapshot(next)
       setExpanded((current) => current.size ? current : new Set(next.workspaces.map((workspace) => workspace.id)))
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 401) {
         clearDeviceCredential()
-        navigate('/mobile/pair', { replace: true })
+        navigate('/', { replace: true })
       } else {
         setSyncError(error instanceof Error ? error.message : 'Could not sync workspaces.')
       }
@@ -178,19 +186,19 @@ export function MobileApp() {
 
   useEffect(() => {
     if (!credential) {
-      navigate('/mobile/pair', { replace: true })
+      navigate('/', { replace: true })
       return
     }
     void refresh()
     // The credential is intentionally read once per mounted mobile session.
     // Pairing changes route and remounts this shell.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [credential?.token, navigate])
+  }, [credential?.token, navigate, showArchived])
 
   useEffect(() => {
     if (connection === 'device_revoked' || connection === 'session_expired') {
       clearDeviceCredential()
-      navigate('/mobile/pair', { replace: true })
+      navigate('/', { replace: true })
       return
     }
     if (connection === 'connected' && previousConnection.current !== 'connected') {
@@ -221,9 +229,10 @@ export function MobileApp() {
     }
   }, [events])
 
-  const taskId = location.pathname.startsWith('/mobile/task/')
-    ? decodeURIComponent(location.pathname.slice('/mobile/task/'.length))
-    : null
+  // The task screen is opened via `?task=` on mobile; desktop `?session=` links
+  // work here too so a shared link opens the same conversation on any device.
+  const taskParam = searchParams.get('task') || searchParams.get('session')
+  const taskId = taskParam ? decodeURIComponent(taskParam) : null
 
   const toggleWorkspace = (id: string) => {
     setExpanded((current) => {
@@ -239,7 +248,7 @@ export function MobileApp() {
     const session = result.session
     setSnapshot((current) => current ? mergeSession(current, session) : current)
     setShowCreate(false)
-    navigate(`/mobile/task/${encodeURIComponent(session.id)}`)
+    navigate(`/?task=${encodeURIComponent(session.id)}`)
   }
 
   if (taskId) {
@@ -251,7 +260,7 @@ export function MobileApp() {
         events={events}
         terminalOutput={terminalOutput}
         send={send}
-        onBack={() => navigate('/mobile')}
+        onBack={() => navigate('/')}
         onRetry={retry}
         onRefresh={refresh}
       />
@@ -259,8 +268,35 @@ export function MobileApp() {
   }
 
   const tasks = snapshot ? snapshot.workspaces.flatMap((workspace) => workspace.tasks) : []
-  const needsYou = tasks.filter((task) => task.status === 'waiting_for_approval' || task.status === 'waiting_for_input' || task.status === 'error')
-  const active = tasks.filter((task) => task.status === 'running' || task.status === 'starting')
+  const visibleTasks = showArchived ? tasks : tasks.filter((task) => task.status !== 'archived')
+  const needsYou = visibleTasks.filter((task) => task.status === 'waiting_for_approval' || task.status === 'waiting_for_input' || task.status === 'error')
+  const active = visibleTasks.filter((task) => task.status === 'running' || task.status === 'starting')
+  const archivedCount = tasks.filter((task) => task.status === 'archived').length
+
+  const archiveTask = async (taskId: string) => {
+    try {
+      const task = tasks.find((t) => t.id === taskId)
+      if (task?.status === 'archived') {
+        await api.mobile.restore(taskId)
+      } else {
+        await api.mobile.archive(taskId)
+      }
+      await refresh()
+    } catch (reason) {
+      setSyncError(reason instanceof Error ? reason.message : 'Task update failed.')
+    }
+  }
+
+  const deleteTask = async (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId)
+    if (!window.confirm(`Delete "${task?.title || taskId}" permanently? Its history will be removed.`)) return
+    try {
+      await api.mobile.delete(taskId)
+      await refresh()
+    } catch (reason) {
+      setSyncError(reason instanceof Error ? reason.message : 'Task delete failed.')
+    }
+  }
 
   return (
     <main className="mobile-app min-h-[100dvh] bg-canvas text-ink">
@@ -295,7 +331,7 @@ export function MobileApp() {
               {needsYou.slice(0, 5).map((task, index) => (
                 <button
                   key={task.id}
-                  onClick={() => navigate(`/mobile/task/${encodeURIComponent(task.id)}`)}
+                  onClick={() => navigate(`/?task=${encodeURIComponent(task.id)}`)}
                   className="flex w-full items-center gap-3 rounded-card border border-line bg-surface p-3 text-left shadow-card transition-colors active:bg-hover"
                   style={{ animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${index * 60}ms both` }}
                 >
@@ -324,7 +360,7 @@ export function MobileApp() {
               {active.map((task, index) => (
                 <button
                   key={task.id}
-                  onClick={() => navigate(`/mobile/task/${encodeURIComponent(task.id)}`)}
+                  onClick={() => navigate(`/?task=${encodeURIComponent(task.id)}`)}
                   className="flex w-full items-center gap-3 rounded-card border border-line bg-surface p-3 text-left shadow-card transition-colors active:bg-hover"
                   style={{ animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${index * 60}ms both` }}
                 >
@@ -347,7 +383,10 @@ export function MobileApp() {
         <section className="pt-5">
           <div className="flex items-end justify-between">
             <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-3">Workspaces</h2>
-            {snapshot && <span className="text-[11px] tabular-nums text-ink-3">{snapshot.workspaces.length} · {countTasks(snapshot.workspaces)} tasks</span>}
+            <div className="flex items-center gap-2">
+              {archivedCount > 0 && <button type="button" onClick={() => setShowArchived((value) => !value)} className="flex min-h-9 items-center gap-1 rounded-control border border-line px-2 text-[10.5px] text-ink-2">{showArchived ? <RotateCcw className="h-3 w-3" /> : <Archive className="h-3 w-3" />}{showArchived ? 'Active' : `${archivedCount} archived`}</button>}
+              {snapshot && <span className="text-[11px] tabular-nums text-ink-3">{snapshot.workspaces.length} · {visibleTasks.length} tasks</span>}
+            </div>
           </div>
           <div className="mt-2 flex flex-col gap-3">
             {syncing && !snapshot ? <WorkspaceSkeleton /> : syncError && !snapshot ? (
@@ -357,11 +396,14 @@ export function MobileApp() {
             ) : snapshot ? snapshot.workspaces.map((workspace, index) => (
               <WorkspaceCard
                 key={workspace.id}
-                workspace={workspace}
+                workspace={{ ...workspace, tasks: workspace.tasks.filter((task) => showArchived || task.status !== 'archived'), task_count: workspace.tasks.filter((task) => showArchived || task.status !== 'archived').length }}
                 expanded={expanded.has(workspace.id)}
                 onToggle={() => toggleWorkspace(workspace.id)}
-                onOpenTask={(id) => navigate(`/mobile/task/${encodeURIComponent(id)}`)}
-                onNewTask={() => setShowCreate(true)}
+                onOpenTask={(id) => navigate(`/task/${encodeURIComponent(id)}`)}
+                onOpenWorkspace={() => navigate(`/workspace/${encodeURIComponent(workspace.path)}`)}
+                onNewTask={() => { setShowCreate(true) }}
+                onArchiveTask={(id) => void archiveTask(id)}
+                onDeleteTask={(id) => void deleteTask(id)}
                 index={index}
               />
             )) : null}
@@ -435,10 +477,6 @@ function updateSessionStatus(snapshot: MobileSnapshot, id: string, status: strin
   }
 }
 
-function countTasks(workspaces: MobileWorkspace[]) {
-  return workspaces.reduce((total, workspace) => total + workspace.tasks.length, 0)
-}
-
 function ConnectionBanner({ connection, error, onRetry }: { connection: MobileConnectionState; error: string | null; onRetry: () => void }) {
   if (connection === 'connected' && !error) return null
   const isError = connection === 'offline' || connection === 'sync_failed' || connection === 'desktop_unavailable' || Boolean(error)
@@ -453,14 +491,15 @@ function ConnectionBanner({ connection, error, onRetry }: { connection: MobileCo
   )
 }
 
-function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask, index }: { workspace: MobileWorkspace; expanded: boolean; onToggle: () => void; onOpenTask: (id: string) => void; onNewTask: () => void; index: number }) {
+function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onOpenWorkspace, onNewTask, onArchiveTask, onDeleteTask, index }: { workspace: MobileWorkspace; expanded: boolean; onToggle: () => void; onOpenTask: (id: string) => void; onOpenWorkspace: () => void; onNewTask: () => void; onArchiveTask: (id: string) => void; onDeleteTask: (id: string) => void; index: number }) {
   return (
     <article
       className="overflow-hidden rounded-card border border-line bg-surface shadow-card"
       style={{ animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index * 60, 360)}ms both` }}
     >
-      <button onClick={onToggle} className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors active:bg-hover" aria-expanded={expanded}>
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-accent-tint text-accent"><FolderGit2 className="h-4 w-4" /></span>
+      <div className="flex w-full items-center gap-3 px-3.5 py-3">
+        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-3 text-left transition-colors active:bg-hover" aria-expanded={expanded}>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-accent-tint text-accent"><FolderGit2 className="h-4 w-4" /></span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-[13px] font-semibold text-ink">{workspace.name}</span>
@@ -469,26 +508,50 @@ function WorkspaceCard({ workspace, expanded, onToggle, onOpenTask, onNewTask, i
           <span className="mt-0.5 block truncate font-mono text-[10px] text-ink-3">{compactPath(workspace.path)}</span>
         </span>
         <span className="shrink-0 text-right text-[10.5px] tabular-nums text-ink-3">{workspace.task_count} {workspace.task_count === 1 ? 'task' : 'tasks'}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-ink-3 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`} />
-      </button>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-ink-3 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+        <button type="button" onClick={onOpenWorkspace} className="flex size-10 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-hover" aria-label={`Open ${workspace.name}`}>
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
       <div className="grid transition-[grid-template-rows] duration-300" style={{ gridTemplateRows: expanded ? '1fr' : '0fr', transitionTimingFunction: 'cubic-bezier(0.23,1,0.32,1)' }}>
         <div className="overflow-hidden">
           <div className="border-t border-line">
-            {workspace.tasks.length === 0 ? (
+            {              workspace.tasks.length === 0 ? (
               <p className="px-3.5 py-4 text-[11.5px] text-ink-3">No tasks in this workspace yet.</p>
             ) : (
               workspace.tasks.map((task) => {
                 const meta = statusFor(task.status)
                 return (
-                  <button key={task.id} onClick={() => onOpenTask(task.id)} className="flex w-full items-center gap-2.5 border-b border-line px-3.5 py-2.5 text-left transition-colors last:border-0 active:bg-hover">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot} ${task.status === 'running' || task.status === 'starting' ? 'animate-pulse' : ''}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-medium text-ink">{task.title}</span>
-                      <span className="mt-0.5 block truncate text-[10.5px] text-ink-3">{task.agent} · {meta.label}</span>
-                    </span>
-                    <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">{relativeTime(task.updated_at)}</span>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3" />
-                  </button>
+                  <div key={task.id} className="flex items-center border-b border-line last:border-0">
+                    <button onClick={() => onOpenTask(task.id)} className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors active:bg-hover">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot} ${task.status === 'running' || task.status === 'starting' ? 'animate-pulse' : ''}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12.5px] font-medium text-ink">{task.title}</span>
+                        <span className="mt-0.5 block truncate text-[10.5px] text-ink-3">{task.agent} · {meta.label}</span>
+                      </span>
+                      <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">{relativeTime(task.updated_at)}</span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3" />
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5 pr-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onArchiveTask(task.id) }}
+                        className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+                        aria-label={task.status === 'archived' ? 'Restore task' : 'Archive task'}
+                      >
+                        {task.status === 'archived' ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id) }}
+                        className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-red-tint hover:text-red"
+                        aria-label="Delete task"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 )
               })
             )}
@@ -569,8 +632,8 @@ function NewTaskSheet({ workspaces, agents, onClose, onCreate }: { workspaces: M
   const [error, setError] = useState<string | null>(null)
 
   const selectedAgent = agents.find((item) => item.id === agent)
-  const models = useMemo(() => selectedAgent?.models ?? [], [selectedAgent])
-  const reasoning = useMemo(() => selectedAgent?.reasoningLevels ?? [], [selectedAgent])
+  const models = useMemo(() => selectedAgent?.capabilities?.supportsModelSwitch === true ? selectedAgent.models ?? [] : [], [selectedAgent])
+  const reasoning = useMemo(() => selectedAgent?.capabilities?.supportsReasoning === true ? selectedAgent.reasoningLevels ?? [] : [], [selectedAgent])
   // Default to the first model / middle effort when the agent supports them.
   useEffect(() => {
     if (models.length && !models.some((m) => m.id === model)) setModel(models[0].id)
@@ -664,12 +727,20 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [debug, setDebug] = useState(false)
+  const [showActions, setShowActions] = useState(false)
   const [showContext, setShowContext] = useState(false)
   const [resolvedApprovals, setResolvedApprovals] = useState(new Set<string>())
   // Optimistic user messages: rendered the instant the user hits Send so
   // the timeline never lags the send action. Each entry self-expires once
   // the matching persisted/WS message arrives (matched by normalized text).
   const [optimisticMessages, setOptimisticMessages] = useState<Array<{ id: string; content: string; timestamp: string }>>([])
+  // True in the window between Send and the backend confirming the run, so the
+  // ✦ Thinking… placeholder appears immediately instead of a silent gap.
+  const [pendingTurn, setPendingTurn] = useState(false)
+  const lastSendTimeRef = useRef(0)
+  const latestTerminalSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+  const sentTerminalSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+  const pendingTerminalSizeRef = useRef<{ cols: number; rows: number } | null>(null)
 
   const taskFromSnapshot = findTask(snapshot, taskId)
   const workspace = snapshot?.workspaces.find((item) => item.tasks.some((task) => task.id === taskId))
@@ -724,6 +795,62 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     .filter((event) => String(event.payload?.session_id || '') === taskId)
     .map((event) => String(event.payload?.data || ''))
     .join('')
+
+  const terminalControlEvent = [...events]
+    .reverse()
+    .find((event) => {
+      if (String(event.payload?.session_id || '') !== taskId) return false
+      if (event.type === 'TerminalResized') return true
+      return event.type === 'SessionError' && ['pty_error', 'pty_resize_error'].includes(String(event.payload?.code || ''))
+    })
+  const terminalErrorMessage = terminalControlEvent?.type === 'SessionError'
+    ? String(terminalControlEvent.payload?.message || 'Terminal control failed.')
+    : null
+
+  const sendPendingTerminalResize = useCallback(() => {
+    if (connection !== 'connected') return false
+    const dimensions = pendingTerminalSizeRef.current || latestTerminalSizeRef.current
+    if (!dimensions) return true
+    if (sentTerminalSizeRef.current?.cols === dimensions.cols && sentTerminalSizeRef.current?.rows === dimensions.rows) return true
+    const sent = send({ type: 'TerminalResize', payload: { session_id: taskId, ...dimensions } })
+    if (sent) sentTerminalSizeRef.current = dimensions
+    return sent
+  }, [connection, send, taskId])
+
+  useEffect(() => {
+    if (connection !== 'connected') return
+    if (!pendingTerminalSizeRef.current && latestTerminalSizeRef.current) {
+      pendingTerminalSizeRef.current = latestTerminalSizeRef.current
+    }
+    if (!sendPendingTerminalResize() && latestTerminalSizeRef.current) {
+      pendingTerminalSizeRef.current = latestTerminalSizeRef.current
+    }
+  }, [connection, sendPendingTerminalResize, taskId])
+
+  useEffect(() => {
+    const resized = [...events]
+      .reverse()
+      .find((event) => event.type === 'TerminalResized' && String(event.payload?.session_id || '') === taskId)
+    if (!resized) return
+    const acknowledged = {
+      cols: Number(resized.payload?.cols),
+      rows: Number(resized.payload?.rows),
+    }
+    const pending = pendingTerminalSizeRef.current
+    if (pending && pending.cols === acknowledged.cols && pending.rows === acknowledged.rows) {
+      pendingTerminalSizeRef.current = null
+    }
+  }, [events, taskId])
+
+  const retryTerminalResize = useCallback(() => {
+    if (connection !== 'connected') {
+      onRetry()
+      return
+    }
+    pendingTerminalSizeRef.current = latestTerminalSizeRef.current
+    sentTerminalSizeRef.current = null
+    if (!sendPendingTerminalResize()) setError('Resize will retry when the desktop reconnects.')
+  }, [connection, onRetry, sendPendingTerminalResize])
 
   const { pendingApprovals, pendingQuestions } = useMemo(() => {
     const historyApprovals = historyItems
@@ -790,8 +917,49 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
       : undefined
   const liveTask = liveSessionValue || payload?.session || taskFromSnapshot
   const liveStatus = pendingApprovals.length > 0 ? 'waiting_for_approval' : liveTask?.status || 'idle'
-  const working = liveStatus === 'running' || liveStatus === 'starting'
+
+  // Authoritative completion comes from the persisted backend/snapshot record,
+  // not from the absence of live events. If the snapshot already reports a
+  // terminal state, generation is finished even when a final live event was
+  // missed (the root cause of the "stuck generating" hang).
+  const snapshotStatus = payload?.session?.status || taskFromSnapshot?.status
+  const snapshotEnded =
+    snapshotStatus === 'exited' || snapshotStatus === 'archived' || snapshotStatus === 'idle'
+
+  // A generation can only be live while the realtime socket is connected. If
+  // the connection drops (network failure, stream abort, backend crash), the
+  // UI must leave the generating state — it must never hang on a dead stream.
+  // No timer is used; the connection flag is the source of truth here.
+  const connectionLive = connection === 'connected'
+
+  const working =
+    (liveStatus === 'running' || liveStatus === 'starting') &&
+    connectionLive &&
+    !snapshotEnded
   const ended = liveStatus === 'exited' || liveStatus === 'archived'
+
+  // Clear the pending-turn placeholder once the run is really active or the
+  // agent has produced content newer than the send. Pure derived cleanup — no
+  // timers, so it can never hang the UI.
+  useEffect(() => {
+    if (!pendingTurn) return
+    if (working) {
+      setPendingTurn(false)
+      return
+    }
+    const hasNewerContent = items.some((item) =>
+      item.kind !== 'user' && item.timestamp && new Date(item.timestamp).getTime() > lastSendTimeRef.current,
+    )
+    if (hasNewerContent) setPendingTurn(false)
+  }, [items, pendingTurn, working])
+
+  const resume = assessResumable(
+    liveStatus,
+    liveTask?.agent,
+    payload?.session?.resume_command || liveTask?.resume_command,
+    items,
+    rawOutput,
+  )
 
   // The newest live assistant message streams while the agent is working.
   // Uses the live working state so the loading highlight and streaming
@@ -851,6 +1019,8 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
       ...current,
       { id: optimisticId, content: value, timestamp },
     ])
+    lastSendTimeRef.current = Date.now()
+    setPendingTurn(true)
     const sent = send({ type: 'Input', payload: { session_id: taskId, data: `${value}${attachmentNote}\n` } })
     if (!sent) {
       setOptimisticMessages((current) => current.filter((message) => message.id !== optimisticId))
@@ -883,17 +1053,60 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
     setResolvedApprovals((current) => new Set(current).add(approval.id))
   }
 
+  const mutateTask = async (action: 'archive' | 'restore' | 'delete') => {
+    if (action === 'delete' && !window.confirm(`Delete “${liveTask?.title || taskId}” permanently? Its history will be removed.`)) return
+    try {
+      if (action === 'archive') await api.mobile.archive(taskId)
+      if (action === 'restore') await api.mobile.restore(taskId)
+      if (action === 'delete') await api.mobile.delete(taskId)
+      if (action === 'delete') onBack()
+      else setPayload((current) => current ? { ...current, session: { ...current.session, status: action === 'archive' ? 'archived' : 'idle' } } : current)
+      setShowActions(false)
+      await onRefresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Task update failed.')
+    }
+  }
+
   // Real agent metadata for the composer's model/effort controls. The
   // selectors only appear when the agent actually advertises them, and the
   // change is sent into the running CLI as /model and /effort commands.
   const taskAgent = snapshot?.agents.find((agent) => agent.id === liveTask?.agent)
-  const supportsModelSwitch = Boolean(taskAgent?.capabilities?.supportsModelSwitch)
-  const supportsEffort = Boolean(taskAgent?.capabilities?.supportsReasoning)
+  const supportsModelSwitch = taskAgent?.capabilities?.supportsModelSwitch === true
+  const supportsEffort = taskAgent?.capabilities?.supportsReasoning === true
   const models = taskAgent?.models ?? []
   const reasoningLevels = taskAgent?.reasoningLevels ?? []
 
   if (loading) return <TaskLoading onBack={onBack} />
   if (error || !liveTask) return <TaskError error={error || 'Task unavailable.'} onBack={onBack} onRetry={() => { setReload((value) => value + 1); void onRefresh() }} />
+
+  if (debug) {
+    return (
+      <MobileTerminal
+        sessionId={taskId}
+        title={liveTask.title}
+        output={rawOutput}
+        connection={connection}
+        error={terminalErrorMessage}
+        onRetry={retryTerminalResize}
+        onStop={working || liveStatus === 'waiting_for_approval' ? () => void stopTask() : undefined}
+        onResize={(dimensions) => {
+          latestTerminalSizeRef.current = dimensions
+          pendingTerminalSizeRef.current = dimensions
+          sentTerminalSizeRef.current = null
+          if (connection === 'connected' && !sendPendingTerminalResize()) {
+            setError('Resize will retry when the desktop reconnects.')
+          }
+        }}
+        onData={(data) => {
+          if (!send({ type: 'TerminalInput', payload: { session_id: taskId, data } })) {
+            setError('Connection is unavailable. Try again when the desktop reconnects.')
+          }
+        }}
+        onBack={() => setDebug(false)}
+      />
+    )
+  }
 
   return (
     <main className="mobile-app flex min-h-[100dvh] flex-col bg-canvas text-ink">
@@ -922,70 +1135,67 @@ function MobileTaskScreen({ taskId, snapshot, connection, events, terminalOutput
           <button onClick={() => liveTask?.project && setShowContext(true)} disabled={!liveTask?.project} className="flex size-9 shrink-0 items-center justify-center rounded-control text-ink-3 transition-colors active:bg-hover disabled:opacity-30" aria-label="Files and changes">
             <FolderGit2 className="h-4 w-4" />
           </button>
+          <div className="relative">
+            <button type="button" onClick={() => setShowActions((value) => !value)} className="flex size-9 items-center justify-center rounded-control text-ink-3 active:bg-hover" aria-label="Task actions">
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            {showActions && (
+              <div className="absolute right-0 top-10 z-30 w-48 rounded-card border border-line bg-surface p-1.5 shadow-overlay">
+                <button type="button" onClick={() => void mutateTask(liveStatus === 'archived' ? 'restore' : 'archive')} className="flex min-h-11 w-full items-center gap-2 rounded-control px-2 text-left text-xs text-ink-2 hover:bg-hover">
+                  {liveStatus === 'archived' ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                  {liveStatus === 'archived' ? 'Restore task' : 'Archive task'}
+                </button>
+                <button type="button" onClick={() => void mutateTask('delete')} className="flex min-h-11 w-full items-center gap-2 rounded-control px-2 text-left text-xs text-red hover:bg-red-tint">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete permanently
+                </button>
+              </div>
+            )}
+          </div>
           <button onClick={() => void stopTask()} disabled={!working && liveStatus !== 'waiting_for_approval'} className="flex h-8 shrink-0 items-center gap-1.5 rounded-chip bg-red-tint px-2.5 text-[11px] font-medium text-red transition-colors active:bg-red active:text-white disabled:opacity-30">
             <Square className="h-3 w-3 fill-current" />Stop
           </button>
         </div>
       </header>
 
-      {/* streaming conversation / raw CLI */}
-      {debug ? (
-        <RawDebugView
-          rawOutput={rawOutput}
-          onData={(data) => {
-            if (!send({ type: 'TerminalInput', payload: { session_id: taskId, data } })) {
-              setError('Connection is unavailable. Try again when the desktop reconnects.')
-            }
-          }}
-        />
-      ) : (
-        <TaskConversation
-          taskId={taskId}
-          items={items}
-          rawEvents={rawEvents}
-          optimisticMessages={visibleOptimisticMessages}
-          working={working}
-          streamingId={streamingId}
-          pendingApprovals={pendingApprovals}
-          pendingQuestions={pendingQuestions}
-          resolvedDecisionById={resolvedDecisionById}
-          connection={connection}
-          error={error}
-          ended={ended}
-          agentLabel={liveTask.agent}
-          models={models}
-          reasoningLevels={reasoningLevels}
-          supportsModelSwitch={supportsModelSwitch}
-          supportsEffort={supportsEffort}
-          onSend={sendText}
-          onStop={() => void stopTask(false)}
-          onModelCommand={sendModelCommand}
-          onOpenContext={() => liveTask?.project && setShowContext(true)}
-          onRetry={onRetry}
-          onQuestionAnswer={sendQuestionAnswer}
-          onResolveApproval={resolveApproval}
+      {/* streaming conversation */}
+      {resume.showResume && (
+        <ResumeSession
+          sessionId={taskId}
+          resumeCommand={resume.resumeCommand?.replace('<session>', taskId)}
         />
       )}
+      <TaskConversation
+        taskId={taskId}
+        items={items}
+        rawEvents={rawEvents}
+        optimisticMessages={visibleOptimisticMessages}
+        optimisticRunning={pendingTurn}
+        working={working}
+        streamingId={streamingId}
+        pendingApprovals={pendingApprovals}
+        pendingQuestions={pendingQuestions}
+        resolvedDecisionById={resolvedDecisionById}
+        connection={connection}
+        error={error}
+        ended={ended}
+        agentLabel={liveTask.agent}
+        models={models}
+        reasoningLevels={reasoningLevels}
+        supportsModelSwitch={supportsModelSwitch}
+        supportsEffort={supportsEffort}
+        onSend={sendText}
+        onStop={() => void stopTask(false)}
+        onModelCommand={sendModelCommand}
+        onOpenContext={() => liveTask?.project && setShowContext(true)}
+        onRetry={onRetry}
+        onQuestionAnswer={sendQuestionAnswer}
+        onResolveApproval={resolveApproval}
+      />
       {/* full-screen context panel (files / diffs / worktrees) */}
       {liveTask?.project && (
         <MobileContextPanel project={liveTask.project} open={showContext} onClose={() => setShowContext(false)} />
       )}
     </main>
-  )
-}
-
-function RawDebugView({ rawOutput, onData }: { rawOutput: string; onData: (data: string) => void }) {
-  return (
-    <div className="rounded-card border border-line bg-inset p-3 shadow-card">
-      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-ink-3">
-        <TerminalSquare className="h-3 w-3" /> Terminal / debug
-      </div>
-      {rawOutput ? (
-        <XtermTerminal output={rawOutput} onData={onData} />
-      ) : (
-        <div className="flex h-64 items-center justify-center font-mono text-xs text-ink-3">No raw output yet.</div>
-      )}
-    </div>
   )
 }
 

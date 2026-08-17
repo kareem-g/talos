@@ -14,6 +14,7 @@ pub enum WsMessage {
     /// Raw keystrokes from the interactive xterm view. Unlike `Input`, these
     /// bypass chat persistence and are written to the existing PTY verbatim.
     TerminalInput { session_id: String, data: String },
+    TerminalResize { session_id: String, cols: u16, rows: u16 },
     Command { action: String, params: serde_json::Value },
     QuestionAnswer { answer: crate::questions::QuestionAnswer },
     Ping,
@@ -22,7 +23,9 @@ pub enum WsMessage {
     Authenticated { device_id: String, last_event_id: u64 },
     DeviceRevoked { device_id: String },
     SessionUpdate { session: crate::sessions::Session },
+    SessionDeleted { session_id: String },
     TerminalOutput { session_id: String, data: String },
+    TerminalResized { session_id: String, cols: u16, rows: u16 },
     Message { message: crate::agent_events::AgentMessage },
     AgentEvent { event: crate::agent_events::AgentEvent },
     // Legacy semantic transcript frame retained for old desktop clients.
@@ -73,4 +76,23 @@ pub enum RiskLevel {
     Medium,
     High,
     Critical,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WsMessage;
+
+    #[test]
+    fn serializes_terminal_resize_message() {
+        let message = WsMessage::TerminalResize {
+            session_id: "session-1".to_string(),
+            cols: 120,
+            rows: 40,
+        };
+        let value = serde_json::to_value(message).expect("message should serialize");
+        assert_eq!(value["type"], "TerminalResize");
+        assert_eq!(value["payload"]["session_id"], "session-1");
+        assert_eq!(value["payload"]["cols"], 120);
+        assert_eq!(value["payload"]["rows"], 40);
+    }
 }

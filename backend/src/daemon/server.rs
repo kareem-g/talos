@@ -8,7 +8,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub async fn start(
     state: Arc<AppState>,
@@ -19,7 +19,9 @@ pub async fn start(
         .route("/snapshot", get(crate::api::routes::mobile_snapshot))
         .route("/agents", get(crate::api::routes::mobile_agents))
         .route("/sessions", post(crate::api::routes::mobile_create_session))
-        .route("/sessions/{id}", get(crate::api::routes::mobile_session))
+        .route("/sessions/{id}", get(crate::api::routes::mobile_session).delete(crate::api::routes::mobile_delete_session))
+        .route("/sessions/{id}/archive", post(crate::api::routes::mobile_archive_session))
+        .route("/sessions/{id}/restore", post(crate::api::routes::mobile_restore_session))
         .route("/sessions/{id}/kill", post(crate::api::routes::mobile_kill_session))
         .layer(middleware::from_fn_with_state(state.clone(), crate::api::middleware::auth_middleware));
 
@@ -34,11 +36,14 @@ pub async fn start(
         // Sessions
         .route("/api/sessions", get(crate::api::routes::list_sessions))
         .route("/api/sessions", post(crate::api::routes::create_session))
-        .route("/api/sessions/{id}", get(crate::api::routes::get_session))
+        .route("/api/sessions/{id}", get(crate::api::routes::get_session).delete(crate::api::routes::delete_session))
         .route("/api/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
         .route("/api/sessions/{id}/attach", post(crate::api::routes::attach_session))
         .route("/api/sessions/{id}/kill", post(crate::api::routes::kill_session))
+        .route("/api/sessions/{id}/archive", post(crate::api::routes::archive_session))
+        .route("/api/sessions/{id}/restore", post(crate::api::routes::restore_session))
         .route("/api/sessions/{id}/fork", post(crate::api::routes::fork_session))
+        .route("/api/sessions/{id}/resume", post(crate::api::routes::resume_session))
 
         // Agents
         .route("/api/agents", get(crate::api::routes::list_agents))
@@ -77,10 +82,14 @@ pub async fn start(
 
         .nest("/api/mobile", mobile_api)
 
-        // Static files (dashboard SPA)
+        // Static files (dashboard SPA). Any path that isn't an API route falls
+        // back to the SPA's index.html so client-side routes (`/mobile/pair`, …)
+        // load the app — the frontend router then decides what to render.
+        // `.fallback` (not `not_found_service`) keeps the 200 status so the
+        // browser actually renders the SPA for deep links.
         .fallback_service(
             ServeDir::new("dashboard/dist").fallback(
-                ServeDir::new("dashboard/dist/index.html")
+                ServeFile::new("dashboard/dist/index.html")
             )
         )
         .layer(CorsLayer::permissive())

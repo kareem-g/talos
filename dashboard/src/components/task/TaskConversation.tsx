@@ -7,6 +7,7 @@ import {
   ThreadPrimitive,
   generateId,
   useExternalStoreRuntime,
+  useThreadViewport,
   type AttachmentAdapter,
   type CompleteAttachment,
   type DataMessagePart,
@@ -14,7 +15,7 @@ import {
   type TextMessagePart,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
-import { Bot, Loader2 } from 'lucide-react'
+import { Bot, Copy, Loader2 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { buildThreadMessages } from '../../lib/taskMessages'
 import type { ChatItem } from '../../lib/chatItems'
@@ -22,16 +23,19 @@ import type { MobileAgentEvent, MobileAgentModel, MobileApproval, MobileQuestion
 import { TaskComposer } from './TaskComposer'
 import {
   TaskActivityDataPart,
+  TaskApprovalDataPart,
   TaskDataFallback,
   TaskDiffDataPart,
   TaskEmptyPart,
   TaskPlanDataPart,
+  TaskQuestionDataPart,
   TaskReasoningPart,
   TaskSystemDataPart,
   TaskTextPart,
   TaskToolCallPart,
   TaskInteractionContext,
 } from './taskParts'
+import { MessageStreamingDuration } from '../status/StreamingStatus'
 
 /**
  * The streaming conversation host for a mobile task.
@@ -40,7 +44,7 @@ import {
  * lib/taskMessages) and pushed into an external-store assistant-ui runtime.
  * The runtime reconciles incrementally: the newest assistant message grows
  * text chunk by chunk, tool-call parts resolve in place, and the thread
- * reacts the moment a frame arrives — no "wait until the process finishes".
+ * reacts the moment a frame arrives.
  */
 
 interface TaskConversationProps {
@@ -49,6 +53,9 @@ interface TaskConversationProps {
   rawEvents: Map<string, MobileAgentEvent>
   optimisticMessages: Array<{ id: string; content: string; timestamp: string }>
   working: boolean
+  /** True right after Send, before the backend confirms the run — renders the
+   *  ✦ Thinking… placeholder immediately. */
+  optimisticRunning?: boolean
   streamingId: string | null
   pendingApprovals: MobileApproval[]
   pendingQuestions: MobileQuestion[]
@@ -80,7 +87,6 @@ const userParts = {
     <p className="whitespace-pre-wrap break-words text-[13.5px] leading-6 text-ink">{text}</p>
   ),
 }
-
 const assistantParts = {
   Text: TaskTextPart,
   Reasoning: TaskReasoningPart,
@@ -95,6 +101,8 @@ const assistantParts = {
       'agent-system': TaskSystemDataPart,
       'agent-activity': TaskActivityDataPart,
       'agent-thinking-chip': TaskActivityDataPart,
+      'agent-approval': TaskApprovalDataPart,
+      'agent-question': TaskQuestionDataPart,
     },
     Fallback: TaskDataFallback,
   },
@@ -133,6 +141,7 @@ export function TaskConversation(props: TaskConversationProps) {
     rawEvents,
     optimisticMessages,
     working,
+    optimisticRunning = false,
     streamingId,
     pendingApprovals,
     pendingQuestions,
@@ -154,8 +163,14 @@ export function TaskConversation(props: TaskConversationProps) {
     onResolveApproval,
   } = props
 
-  const pendingApprovalIds = useMemo(() => new Set(pendingApprovals.map((approval) => approval.id)), [pendingApprovals])
-  const pendingQuestionIds = useMemo(() => new Set(pendingQuestions.map((question) => question.question_id)), [pendingQuestions])
+  const pendingApprovalIds = useMemo(
+    () => new Set(pendingApprovals.map((a) => a.id)),
+    [pendingApprovals],
+  )
+  const pendingQuestionIds = useMemo(
+    () => new Set(pendingQuestions.map((q) => q.question_id)),
+    [pendingQuestions],
+  )
   const optimistic = useMemo(
     () => optimisticMessages.map((entry) => ({ id: entry.id, content: entry.content })),
     [optimisticMessages],
@@ -167,13 +182,14 @@ export function TaskConversation(props: TaskConversationProps) {
         items,
         optimistic,
         working,
+        optimisticRunning,
         streamingId,
         pendingApprovalIds,
         pendingQuestionIds,
         resolvedDecisionById,
         rawEvents,
       }),
-    [items, optimistic, working, streamingId, pendingApprovalIds, pendingQuestionIds, resolvedDecisionById, rawEvents],
+    [items, optimistic, working, optimisticRunning, streamingId, pendingApprovalIds, pendingQuestionIds, resolvedDecisionById, rawEvents],
   )
 
   const attachmentAdapter = useMemo(() => createTaskAttachmentAdapter(taskId), [taskId])
@@ -209,47 +225,60 @@ export function TaskConversation(props: TaskConversationProps) {
     <TaskInteractionContext.Provider value={{ onQuestionAnswer, onResolveApproval }}>
       <AssistantRuntimeProvider runtime={runtime}>
         <div className="relative flex flex-1 flex-col overflow-hidden">
-        <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="ai-scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4">
-            <div className="mx-auto flex w-full max-w-lg flex-col gap-3">
-              {connection !== 'connected' && (
-                <ConnectionNote connection={connection} onRetry={onRetry} />
-              )}
-              {error && (
-                <p className="rounded-card border border-red/25 bg-red-tint px-3 py-2 text-[11.5px] text-red">{error}</p>
-              )}
-              <ThreadPrimitive.Empty>
-                <div className="flex min-h-[45vh] flex-col items-center justify-center text-center">
-                  <div className="flex size-11 items-center justify-center rounded-card border border-line bg-surface shadow-card">
-                    <Bot className="h-5 w-5 text-accent" />
-                  </div>
-                  <p className="mt-4 text-[13.5px] font-medium text-ink">Start the conversation</p>
-                  <p className="mt-1 max-w-xs text-[11.5px] leading-5 text-ink-3">
-                    Send a message and the agent's thinking, tool calls and results will stream here as they happen.
-                  </p>
-                </div>
-              </ThreadPrimitive.Empty>
-              <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
-            </div>
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
+          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
+            <ThreadPrimitive.Viewport className="ai-scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4">
+              <div className="mx-auto flex w-full max-w-lg flex-col gap-3 lg:max-w-2xl">
+                {connection !== 'connected' && (
+                  <ConnectionNote connection={connection} onRetry={onRetry} />
+                )}
+                {error && (
+                  <p className="rounded-card border border-red/25 bg-red-tint px-3 py-2 text-[11.5px] text-red">{error}</p>
+                )}
 
-          <div className="sticky bottom-0 z-20 border-t border-line bg-canvas/95 px-3 pt-2 backdrop-blur-xl" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)' }}>
-          <div className="mx-auto flex w-full max-w-lg flex-col gap-1.5">
-            <TaskComposer
-              disabled={ended}
-              working={working}
-              offline={connection !== 'connected'}
-              agentLabel={agentLabel}
-              models={models}
-              reasoningLevels={reasoningLevels}
-              supportsModelSwitch={supportsModelSwitch}
-              supportsEffort={supportsEffort}
-              onModelCommand={onModelCommand}
-              onOpenContext={onOpenContext}
-            />
-          </div>
-          </div>
+                <ThreadPrimitive.If empty>
+                  <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-accent-tint shadow-hairline">
+                      <Bot className="h-6 w-6 text-accent" />
+                    </div>
+                    <p className="text-[15px] font-medium text-ink">What can I help you with?</p>
+                    <p className="max-w-70 text-[12.5px] leading-5 text-ink-3">
+                      Send a message to start the agent on this task.
+                    </p>
+                  </div>
+                </ThreadPrimitive.If>
+
+                <ThreadPrimitive.Messages>
+                  {({ message }) => (
+                    <>
+                      {message.role === 'user' ? (
+                        <UserMessage key={message.id} />
+                      ) : (
+                        <AssistantMessage key={message.id} />
+                      )}
+                    </>
+                  )}
+                </ThreadPrimitive.Messages>
+              </div>
+              <JumpToLatest />
+            </ThreadPrimitive.Viewport>
+
+            <div className="shrink-0 rounded-t-card border-t border-line bg-surface p-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+              <div className="mx-auto w-full max-w-lg lg:max-w-2xl">
+                <TaskComposer
+                  disabled={ended}
+                  working={working}
+                  offline={connection !== 'connected'}
+                  agentLabel={agentLabel}
+                  models={models}
+                  reasoningLevels={reasoningLevels}
+                  supportsModelSwitch={supportsModelSwitch}
+                  supportsEffort={supportsEffort}
+                  onModelCommand={onModelCommand}
+                  onOpenContext={onOpenContext}
+                />
+              </div>
+            </div>
+          </ThreadPrimitive.Root>
         </div>
       </AssistantRuntimeProvider>
     </TaskInteractionContext.Provider>
@@ -259,7 +288,7 @@ export function TaskConversation(props: TaskConversationProps) {
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-end">
-      <div className="max-w-[85%] rounded-card rounded-br-[6px] bg-hover px-3.5 py-2.5 shadow-hairline">
+      <div className="max-w-[85%] rounded-[20px] rounded-br-[6px] bg-hover px-4 py-2.5 shadow-hairline">
         <MessagePrimitive.Content components={userParts} />
       </div>
     </MessagePrimitive.Root>
@@ -268,21 +297,48 @@ function UserMessage() {
 
 function AssistantMessage() {
   return (
-    <MessagePrimitive.Root className="flex min-w-0">
+    <MessagePrimitive.Root className="flex min-w-0 gap-2.5">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-tint">
+        <Bot className="h-3.5 w-3.5 text-accent" />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         <MessagePrimitive.Content components={assistantParts} />
-        <AuiIf condition={(state) => state.message.status?.type === 'complete'}>
-          <ActionBarPrimitive.Root className="flex h-6 items-center gap-1 self-end text-ink-3">
+        <MessageStreamingDuration />
+        <AuiIf condition={(s) => s.message.status?.type === 'complete'}>
+          <ActionBarPrimitive.Root className="flex h-6 items-center gap-1 self-start text-ink-3">
             <ActionBarPrimitive.Copy
               aria-label="Copy response"
-              className="rounded-control px-2 py-1 text-[10px] transition-colors hover:bg-hover hover:text-ink"
+              className="flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[10.5px] font-medium text-ink-2 shadow-hairline transition-colors hover:bg-hover-2 hover:text-ink"
             >
+              <Copy className="h-3 w-3" />
               Copy
             </ActionBarPrimitive.Copy>
           </ActionBarPrimitive.Root>
         </AuiIf>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+/**
+ * "↓ Jump to latest" pill: appears only when the user has scrolled up away
+ * from the bottom while the conversation is streaming. Clicking it smoothly
+ * returns to the newest message. assistant-ui tracks `isAtBottom`, so this
+ * never fights the user's deliberate scroll position.
+ */
+function JumpToLatest() {
+  const isAtBottom = useThreadViewport((state) => state.isAtBottom)
+  const scrollToBottom = useThreadViewport((state) => state.scrollToBottom)
+  if (isAtBottom) return null
+  return (
+    <button
+      type="button"
+      onClick={() => scrollToBottom({ behavior: 'smooth' })}
+      className="sticky bottom-3 z-10 mx-auto flex items-center gap-1.5 rounded-chip border border-line bg-surface px-3 py-1.5 text-[11px] font-medium text-ink-2 shadow-overlay transition-colors hover:bg-hover-2 hover:text-ink"
+    >
+      <span aria-hidden="true">↓</span>
+      Jump to latest
+    </button>
   )
 }
 

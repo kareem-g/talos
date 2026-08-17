@@ -5,7 +5,7 @@ import type {
   MobileQuestion,
   MobileTaskTranscript,
 } from '../types/mobile'
-import { cleanTerminalText } from './terminalText'
+import { cleanTerminalText, normalizedText } from './terminalText'
 
 /**
  * Shared semantic chat model.
@@ -36,8 +36,14 @@ export interface RealtimeEvent {
 }
 
 export function formatDuration(durationMs: number) {
-  const seconds = Math.round(durationMs / 1000)
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  const totalSeconds = Math.max(1, Math.round(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  // Sub-minute durations read "18s"; minute+ durations pad the seconds so the
+  // readout is stable-width: "1m 12s", "2m 04s". A floor of 1s avoids the
+  // awkward "0.2s" / "0s" for very short generations.
+  if (minutes === 0) return `${seconds}s`
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
 }
 
 export function formatFileChange(payload: Record<string, unknown>) {
@@ -160,7 +166,11 @@ export function buildLiveItems(events: RealtimeEvent[], sessionId: string): Chat
       const semantic = payload.event as MobileAgentEvent | undefined
       if (semantic) {
         const item = agentEventToChatItem(semantic, id)
-        if (item) items.push(item)
+        if (item) {
+          const duplicate = item.kind === 'agent' && items.some((candidate) => candidate.kind === 'agent' && normalizedText(candidate.content) === normalizedText(item.content))
+          const redundantStatus = item.kind === 'thinking' && items.some((candidate) => candidate.kind === 'thinking' && candidate.title === item.title)
+          if (!duplicate && !redundantStatus) items.push(item)
+        }
       }
     } else if (event.type === 'TranscriptChunk') {
       const kind = String(payload.kind || 'stdout')

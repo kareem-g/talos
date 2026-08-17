@@ -1,0 +1,1225 @@
+//! ACP (Agent Client Protocol) support.
+//!
+//! The Agent Client Protocol (https://agentclientprotocol.com) standardizes
+//! communication between coding agents and their clients. Agents that speak
+//! ACP — opencode (`opencode acp`), GitHub Copilot (`copilot --acp`), Gemini
+//! CLI, Cursor, Qwen Code, Kimi, Hermes, … — exchange newline-delimited
+//! JSON-RPC 2.0 over stdio instead of drawing a TUI. That gives us the same
+//! native, ChatGPT-like events for every supported CLI: streamed text deltas,
+//! thoughts, tool calls, plans, and structured permission requests.
+//!
+//! This module owns the client side of the protocol:
+//! - spawns the agent subprocess and keeps it alive for multi-turn chat
+//! - `initialize` + `session/new` handshake
+//! - `session/prompt` per user message (the response ends the turn)
+//! - maps `session/update` notifications onto the shared `AgentEvent` schema
+//!   the frontend already renders natively
+//! - answers `session/request_permission` with the user's decision
+//!
+//! ACP v1 is the negotiated protocol version; the wire shape follows the
+//! schema at schema/v1 of the agent-client-protocol repository.
+
+use crate::agent_events::AgentEvent;
+use crate::websocket::broadcast::BroadcastHub;
+use crate::websocket::WsMessage;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::process::Stdio;
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::time::{timeout, Duration};
+
+const ACP_INIT_TIMEOUT: Duration = Duration::from_secs(8);
+const ACP_PROMPT_TIMEOUT: Duration = Duration::from_secs(60 * 60 * 12);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// One permission option offered by the agent, exactly as received.
+#[derive(Debug, Clone)]
+struct AcpPermissionOption {
+    option_id: String,
+    name: String,
+    kind: String,
+}
+
+/// A pending `session/request_permission` we have surfaced to the UI.
+#[derive(Debug, Clone)]
+struct AcpApproval {
+    /// The JSON-RPC request id from the agent (echoed back verbatim).
+    id: Value,
+    options: Vec<AcpPermissionOption>,
+}
+
+/// Commands sent to the per-process writer task.
+enum Outbound {
+    Request { id: u64, method: String, params: Value },
+    Notification { method: String, params: Value },
+    Response { id: Value, result: Option<Value>, error: Option<Value> },
+    Shutdown,
+}
+
+/// Shared connection state for one ACP subprocess.
+#[derive(Clone)]
+struct AcpConn {
+    tx: mpsc::UnboundedSender<Outbound>,
+    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
+    next_id: Arc<AtomicU64>,
+}
+
+/// Live handle for one agentdeck session backed by an ACP subprocess.
+struct AcpHandle {
+    conn: AcpConn,
+    acp_session_id: std::sync::Mutex<String>,
+    approvals: Arc<Mutex<HashMap<String, AcpApproval>>>,
+    child: Arc<Mutex<Option<Child>>>,
+    mapper: Arc<Mutex<AcpEventMapper>>,
+}
+
+pub struct AcpSessionInfo {
+    pub pid: u32,
+    pub acp_session_id: String,
+    pub version: String,
+}
+
+/// Tracks tool start/finish pairing and thought streaming for one session so
+/// the mapped events read like a clean ChatGPT timeline.
+#[derive(Debug, Default)]
+struct AcpEventMapper {
+    turn: u64,
+    /// toolCallId -> wall-clock start (epoch millis)
+    tool_starts: HashMap<String, u64>,
+    /// messageId of an in-flight thought stream
+    thought_open: Option<String>,
+}
+
+impl AcpEventMapper {
+    fn begin_turn(&mut self) {
+        self.turn = self.turn.saturating_add(1);
+        self.tool_starts.clear();
+        self.thought_open = None;
+    }
+
+    fn map(&mut self, session_id: &str, update: &Value) -> Vec<AgentEvent> {
+        let kind = update.get("sessionUpdate").and_then(Value::as_str).unwrap_or("");
+        let mut events = Vec::new();
+        let source = "acp";
+        match kind {
+            // Streamed / whole assistant message text.
+            "agent_message_chunk" | "agent_message" => {
+                // The answer starts after the reasoning block — close any open
+                // thought first so the UI reasoning chip resolves in place.
+                // (opencode never sends the closing whole `agent_thought`; the
+                // turn just ends, so we close on first answer text too.)
+                if self.thought_open.take().is_some() {
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "thinking_finished",
+                        json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
+                    ));
+                }
+                let text = extract_text_content(update.get("content"));
+                if !text.trim().is_empty() {
+                    let redraw = kind == "agent_message";
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "assistant_text",
+                        json!({
+                            "text": text,
+                            "delta": true,
+                            "redraw": redraw,
+                            "turn": self.turn,
+                            "source": source,
+                        }),
+                    ));
+                }
+            }
+            // Reasoning / thinking streams.
+            "agent_thought_chunk" | "agent_thought" => {
+                let message_id = update.get("messageId").and_then(Value::as_str).unwrap_or("").to_string();
+                if kind == "agent_thought" {
+                    if self.thought_open.as_deref() == Some(message_id.as_str()) {
+                        self.thought_open = None;
+                        events.push(AgentEvent::new(
+                            session_id,
+                            "thinking_finished",
+                            json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
+                        ));
+                    }
+                } else if self.thought_open.is_none() {
+                    self.thought_open = Some(message_id);
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "thinking_started",
+                        json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
+                    ));
+                }
+            }
+            // Tool call create + patch (v1 sends both).
+            "tool_call" | "tool_call_update" => {
+                let tool_id = update.get("toolCallId").and_then(Value::as_str).unwrap_or("").to_string();
+                let tool_kind = update.get("kind").and_then(Value::as_str).unwrap_or("other");
+                let status = update.get("status").and_then(Value::as_str).unwrap_or("pending");
+                let title = update.get("title").and_then(Value::as_str).unwrap_or(tool_kind);
+                let command = extract_command(update);
+                let is_command = tool_kind == "execute" || command.is_some();
+
+                match status {
+                    "pending" | "in_progress" => {
+                        // A bare `pending` update (opencode sends `{cwd}` only)
+                        // carries no display content — wait for the first
+                        // in_progress update with the real command/input.
+                        if status == "pending" && command.is_none() && !has_meaningful_input(update) {
+                            return events;
+                        }
+                        if self.tool_starts.contains_key(&tool_id) {
+                            return events;
+                        }
+                        self.tool_starts.insert(tool_id.clone(), now_millis());
+                        // Surface the command the agent runs in the terminal
+                        // debug view even though there is no PTY.
+                        if let Some(cmd) = command.clone() {
+                            let terminal = format!("$ {}\n", cmd);
+                            events.push(AgentEvent::new(
+                                session_id,
+                                "terminal_output",
+                                json!({ "data": terminal, "source": source }),
+                            ));
+                        }
+                        if is_command {
+                            events.push(AgentEvent::new(
+                                session_id,
+                                "command_started",
+                                json!({
+                                    "command": command.unwrap_or_else(|| title.to_string()),
+                                    "tool_id": tool_id,
+                                    "turn": self.turn,
+                                    "source": source,
+                                }),
+                            ));
+                        } else {
+                            let input = extract_raw_input(update);
+                            events.push(AgentEvent::new(
+                                session_id,
+                                "tool_started",
+                                json!({
+                                    "tool_name": title,
+                                    "tool_id": tool_id,
+                                    "input": input,
+                                    "kind": tool_kind,
+                                    "turn": self.turn,
+                                    "source": source,
+                                }),
+                            ));
+                        }
+                    }
+                    "completed" | "failed" => {
+                        if is_command {
+                            let exit_code = extract_exit_code(update);
+                            let duration = self.tool_starts.remove(&tool_id);
+                            events.push(AgentEvent::new(
+                                session_id,
+                                "command_finished",
+                                json!({
+                                    "command": command.unwrap_or_else(|| title.to_string()),
+                                    "exit_code": exit_code,
+                                    "success": exit_code == Some(0),
+                                    "tool_id": tool_id,
+                                    "duration_ms": duration,
+                                    "turn": self.turn,
+                                    "source": source,
+                                }),
+                            ));
+                        } else {
+                            let duration = self.tool_starts.remove(&tool_id);
+                            let success = status == "completed";
+                            events.push(AgentEvent::new(
+                                session_id,
+                                "tool_finished",
+                                json!({
+                                    "tool_name": title,
+                                    "tool_id": tool_id,
+                                    "success": success,
+                                    "duration_ms": duration,
+                                    "turn": self.turn,
+                                    "source": source,
+                                }),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "plan" => {
+                let steps: Vec<String> = update
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter_map(|entry| entry.get("content").and_then(Value::as_str).map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !steps.is_empty() {
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "plan",
+                        json!({ "title": "Plan", "steps": steps, "turn": self.turn, "source": source }),
+                    ));
+                }
+            }
+            // Diff-style file changes (v1 embeds diffs in tool content; a
+            // standalone `file_change` update is rare but cheap to map).
+            "file_change" => {
+                if let Some(path) = update.get("path").and_then(Value::as_str) {
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "file_edited",
+                        json!({ "path": path, "success": true, "turn": self.turn, "source": source }),
+                    ));
+                }
+            }
+            _ => {
+                // available_commands_update, current_mode_update,
+                // config_option_update, session_info_update, usage_update and
+                // unknown future kinds are ignored — they carry no chat
+                // content and would only add noise.
+            }
+        }
+        events
+    }
+}
+
+/// Build the ACP manager that owns every live ACP subprocess.
+pub struct AcpManager {
+    sessions: Arc<RwLock<HashMap<String, Arc<AcpHandle>>>>,
+    broadcast: BroadcastHub,
+    /// "binary args…" -> probe result (cached so listing/spawn don't re-spawn)
+    probes: Arc<Mutex<HashMap<String, bool>>>,
+}
+
+impl AcpManager {
+    pub fn new(broadcast: BroadcastHub) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            broadcast,
+            probes: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn has_active_session(&self, session_id: &str) -> bool {
+        self.sessions.read().await.contains_key(session_id)
+    }
+
+    /// Cached probe: can `binary` with `args` speak ACP? The probe spawns the
+    /// process, sends `initialize`, and expects a protocolVersion: 1 response.
+    pub async fn probe(&self, binary: &str, args: &[String]) -> bool {
+        let key = format!("{} {}", binary, args.join(" "));
+        if let Some(cached) = self.probes.lock().map(|probes| probes.get(&key).copied()).unwrap_or(None) {
+            return cached;
+        }
+        let supported = probe_acp(binary, args).await;
+        if let Ok(mut probes) = self.probes.lock() {
+            probes.insert(key, supported);
+        }
+        supported
+    }
+
+    /// Forget cached probes (e.g. after config edits). Returns whether any
+    /// entry was removed.
+    pub fn clear_probes(&self) {
+        if let Ok(mut probes) = self.probes.lock() {
+            probes.clear();
+        }
+    }
+
+    /// Spawn an ACP subprocess for `session_id` and complete the
+    /// `initialize` + `session/new` handshake. The process is kept alive so
+    /// follow-up prompts reuse the same conversation.
+    pub async fn spawn_session(
+        &self,
+        session_id: &str,
+        agent: &str,
+        project: Option<&str>,
+        binary: &str,
+        args: &[String],
+    ) -> crate::Result<AcpSessionInfo> {
+        let mut command = Command::new(binary);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Some agent runtimes (opencode's bun) busy-loop when stderr is a
+            // pipe instead of a terminal; null it so the handshake completes.
+            // Agents log to their own files (e.g. opencode.log), so nothing
+            // is lost.
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        if let Some(project) = project {
+            command.current_dir(project);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| crate::AgentDeckError::Pty(format!("Could not start ACP agent {}: {}", binary, error)))?;
+        let pid = child.id().unwrap_or(0);
+
+        let mut stdin: ChildStdin = child.stdin.take().ok_or_else(|| crate::AgentDeckError::Pty("ACP stdin unavailable".to_string()))?;
+        let stdout: ChildStdout = child.stdout.take().ok_or_else(|| crate::AgentDeckError::Pty("ACP stdout unavailable".to_string()))?;
+        let stderr = child.stderr.take();
+
+        let (tx, rx) = mpsc::unbounded_channel::<Outbound>();
+        let conn = AcpConn {
+            tx,
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: Arc::new(AtomicU64::new(1)),
+        };
+        let approvals = Arc::new(Mutex::new(HashMap::new()));
+        let mapper = Arc::new(Mutex::new(AcpEventMapper::default()));
+
+        // Reader task: parses stdout, broadcasts updates, answers agent
+        // requests. It MUST be running before the handshake: opencode (and
+        // other ACP servers) write a burst of startup output to stdout, and
+        // if nobody drains the pipe the child blocks on write before it ever
+        // answers `initialize`. On EOF the subprocess is gone.
+        let handle = Arc::new(AcpHandle {
+            conn: conn.clone(),
+            acp_session_id: std::sync::Mutex::new(String::new()), // filled in below, after session/new
+            approvals: Arc::clone(&approvals),
+            child: Arc::new(Mutex::new(Some(child))),
+            mapper: Arc::clone(&mapper),
+        });
+        self.sessions.write().await.insert(session_id.to_string(), Arc::clone(&handle));
+        let reader = AcpManager::spawn_reader(self.sessions.clone(), self.broadcast.clone(), session_id.to_string(), stdout, Arc::clone(&handle));
+
+        // Writer task: drains the outbound queue into the child's stdin.
+        let writer_session = session_id.to_string();
+        tokio::spawn(async move {
+            writer_task(rx, &mut stdin).await;
+        });
+        let _ = writer_session;
+
+        // Drain stderr so the child never blocks on a full pipe; useful for
+        // diagnosing agent startup failures.
+        if let Some(mut stderr) = stderr {
+            let stderr_session = session_id.to_string();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(&mut stderr);
+                let mut line = String::new();
+                while let Ok(n) = reader.read_line(&mut line).await {
+                    if n == 0 {
+                        break;
+                    }
+                    tracing::debug!("[AgentDeck][ACP][{}] {}", stderr_session, line.trim_end());
+                    line.clear();
+                }
+            });
+        }
+
+        // Handshake: initialize, then create the agent session.
+        let init = send_request(&conn, "initialize", json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": { "name": "agentdeck", "version": env!("CARGO_PKG_VERSION") },
+        }))
+        .await
+        .map_err(|error| crate::AgentDeckError::Pty(format!("ACP initialize failed: {}", error)))?;
+
+        let version = init
+            .get("result")
+            .and_then(|result| result.get("agentInfo"))
+            .and_then(|info| info.get("version"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+
+        let session_new = send_request(&conn, "session/new", json!({
+            "cwd": project.unwrap_or("."),
+            "mcpServers": [],
+        }))
+        .await
+        .map_err(|error| crate::AgentDeckError::Pty(format!("ACP session/new failed: {}", error)))?;
+        let acp_session_id = session_new
+            .get("result")
+            .and_then(|result| result.get("sessionId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| crate::AgentDeckError::Pty("ACP session/new returned no sessionId".to_string()))?
+            .to_string();
+
+        *handle.acp_session_id.lock().unwrap() = acp_session_id.clone();
+
+        tracing::info!(
+            "[AgentDeck][ACP] Session {} ready agent={} pid={} acp_session={}",
+            session_id, agent, pid, acp_session_id
+        );
+        let _ = reader;
+
+        Ok(AcpSessionInfo {
+            pid,
+            acp_session_id,
+            version,
+        })
+    }
+
+    fn spawn_reader(
+        sessions: Arc<RwLock<HashMap<String, Arc<AcpHandle>>>>,
+        broadcast: BroadcastHub,
+        session_id: String,
+        stdout: ChildStdout,
+        handle: Arc<AcpHandle>,
+    ) -> tokio::task::JoinHandle<()> {
+        let conn = handle.conn.clone();
+        let approvals = Arc::clone(&handle.approvals);
+        let mapper = Arc::clone(&handle.mapper);
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        let Ok(msg) = serde_json::from_str::<Value>(trimmed) else {
+                            tracing::debug!("[AgentDeck][ACP][{}] Non-JSON line: {}", session_id, trimmed);
+                            continue;
+                        };
+                        dispatch_message(&session_id, &msg, &conn, &approvals, &mapper, &broadcast).await;
+                    }
+                }
+            }
+            // Process exited (or was killed): deregister and surface the end.
+            sessions.write().await.remove(&session_id);
+            broadcast.broadcast_agent_event(AgentEvent::new(
+                &session_id,
+                "agent_completed",
+                json!({ "source": "acp_process_exit", "state": "exited" }),
+            ));
+            broadcast.broadcast(WsMessage::StateChange {
+                session_id: session_id.clone(),
+                state: "exited".to_string(),
+            });
+        })
+    }
+
+    /// Send a user message into the live ACP session. The turn completes when
+    /// `session/prompt` resolves (stopReason) — the process stays alive.
+    pub async fn send_prompt(&self, session_id: &str, text: &str) -> crate::Result<()> {
+        let handle = Arc::clone(
+            self.sessions
+                .read()
+                .await
+                .get(session_id)
+                .ok_or_else(|| crate::AgentDeckError::Session("ACP session is not running".to_string()))?,
+        );
+        {
+            let mut mapper = handle.mapper.lock().map_err(|_| crate::AgentDeckError::Unknown("ACP mapper poisoned".to_string()))?;
+            mapper.begin_turn();
+        }
+        let conn = handle.conn.clone();
+        let acp_session = handle.acp_session_id.lock().unwrap().clone();
+        let broadcast = self.broadcast.clone();
+        let mapper = Arc::clone(&handle.mapper);
+        let sid = session_id.to_string();
+        let prompt_text = text.to_string();
+        tokio::spawn(async move {
+            let params = json!({
+                "sessionId": acp_session,
+                "prompt": [{ "type": "text", "text": prompt_text }],
+            });
+            match send_request_timeout(&conn, "session/prompt", params, ACP_PROMPT_TIMEOUT).await {
+                Ok(resp) => {
+                    let stop = resp
+                        .get("result")
+                        .and_then(|result| result.get("stopReason"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("end_turn");
+                    // If the turn ended with reasoning still open (e.g. a
+                    // refusal with no answer text), close it so the UI chip
+                    // never stays spinning.
+                    if let Ok(mut mapper) = mapper.lock() {
+                        if mapper.thought_open.take().is_some() {
+                            broadcast.broadcast_agent_event(AgentEvent::new(
+                                &sid,
+                                "thinking_finished",
+                                json!({ "tool_name": "Thinking", "turn": mapper.turn, "source": "acp" }),
+                            ));
+                        }
+                    }
+                    broadcast.broadcast_agent_event(AgentEvent::new(
+                        &sid,
+                        "agent_completed",
+                        json!({ "source": "acp", "stopReason": stop }),
+                    ));
+                    broadcast.broadcast(WsMessage::StateChange {
+                        session_id: sid.clone(),
+                        state: "idle".to_string(),
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!("[AgentDeck][ACP][{}] session/prompt failed: {}", sid, error);
+                    broadcast.broadcast_agent_event(AgentEvent::new(
+                        &sid,
+                        "agent_error",
+                        json!({ "message": error.to_string(), "source": "acp" }),
+                    ));
+                    broadcast.broadcast(WsMessage::StateChange {
+                        session_id: sid,
+                        state: "exited".to_string(),
+                    });
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Resolve a `session/request_permission` with the user's decision and
+    /// respond to the agent with the matching optionId.
+    pub async fn respond_approval(&self, session_id: &str, request_id: &str, decision: &str) -> crate::Result<String> {
+        let handle = Arc::clone(
+            self.sessions
+                .read()
+                .await
+                .get(session_id)
+                .ok_or_else(|| crate::AgentDeckError::Session("ACP session is not running".to_string()))?,
+        );
+        let approval = handle
+            .approvals
+            .lock()
+            .map_err(|_| crate::AgentDeckError::Unknown("ACP approval registry poisoned".to_string()))?
+            .remove(request_id)
+            .ok_or_else(|| crate::AgentDeckError::Session("Approval request not found".to_string()))?;
+
+        let option_id = pick_option_id(&approval.options, decision);
+        let result = json!({ "outcome": "selected", "optionId": option_id });
+        handle
+            .conn
+            .tx
+            .send(Outbound::Response {
+                id: approval.id,
+                result: Some(result),
+                error: None,
+            })
+            .map_err(|_| crate::AgentDeckError::Session("ACP process is gone".to_string()))?;
+
+        self.broadcast.broadcast_agent_event(AgentEvent::new(
+            session_id,
+            "permission_resolved",
+            json!({ "request_id": request_id, "decision": decision }),
+        ));
+        Ok(session_id.to_string())
+    }
+
+    /// Stop the subprocess (best-effort `session/cancel`, then kill).
+    pub async fn kill_session(&self, session_id: &str) -> crate::Result<()> {
+        let mut sessions = self.sessions.write().await;
+        let Some(handle) = sessions.remove(session_id) else {
+            return Err(crate::AgentDeckError::Session(format!(
+                "Session {} is not running",
+                session_id
+            )));
+        };
+        let conn = handle.conn.clone();
+        let acp_session = handle.acp_session_id.lock().unwrap().clone();
+        let _ = conn.tx.send(Outbound::Notification {
+            method: "session/cancel".to_string(),
+            params: json!({ "sessionId": acp_session }),
+        });
+        let _ = conn.tx.send(Outbound::Shutdown);
+        if let Ok(mut child) = handle.child.lock() {
+            if let Some(mut child) = child.take() {
+                let _ = child.start_kill();
+            }
+        }
+        self.broadcast.broadcast(WsMessage::StateChange {
+            session_id: session_id.to_string(),
+            state: "exited".to_string(),
+        });
+        Ok(())
+    }
+}
+
+/// Route one incoming JSON-RPC message from the agent.
+async fn dispatch_message(
+    session_id: &str,
+    msg: &Value,
+    conn: &AcpConn,
+    approvals: &Arc<Mutex<HashMap<String, AcpApproval>>>,
+    mapper: &Arc<Mutex<AcpEventMapper>>,
+    broadcast: &BroadcastHub,
+) {
+    // Response to one of our requests.
+    if let Some(id) = msg.get("id").and_then(Value::as_u64) {
+        if let Some(tx) = conn.pending.lock().ok().and_then(|mut pending| pending.remove(&id)) {
+            let _ = tx.send(msg.clone());
+        }
+        return;
+    }
+
+    let Some(method) = msg.get("method").and_then(Value::as_str) else {
+        return;
+    };
+    let has_id = msg.get("id").is_some();
+
+    if !has_id {
+        // Notification from the agent.
+        if method == "session/update" {
+            let update = msg.pointer("/params/update");
+            if let Some(update) = update {
+                let Ok(mut mapper) = mapper.lock() else {
+                    tracing::error!("[AgentDeck][ACP][{}] mapper poisoned", session_id);
+                    return;
+                };
+                let events = mapper.map(session_id, update);
+                for event in events {
+                    if event.kind == "terminal_output" {
+                        let data = event.payload.get("data").and_then(Value::as_str).unwrap_or("");
+                        broadcast.broadcast(WsMessage::TerminalOutput {
+                            session_id: session_id.to_string(),
+                            data: data.to_string(),
+                        });
+                        continue;
+                    }
+                    broadcast.broadcast_agent_event(event);
+                }
+            }
+        }
+        return;
+    }
+
+    // Request from the agent -> client.
+    match method {
+        "session/request_permission" => {
+            let request_id_value = msg.get("id").cloned().unwrap_or(Value::Null);
+            let request_key = request_id_value.to_string();
+            let params = msg.get("params").cloned().unwrap_or_default();
+            let tool_call = params.get("toolCall").cloned().unwrap_or_default();
+            let tool_title = tool_call.get("title").and_then(Value::as_str).unwrap_or("Tool call");
+            let title = params.get("title").and_then(Value::as_str).unwrap_or("Permission required");
+            let prompt = if tool_title == "Tool call" {
+                title.to_string()
+            } else {
+                format!("{} — {}", title, tool_title)
+            };
+            let options: Vec<AcpPermissionOption> = params
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|options| {
+                    options
+                        .iter()
+                        .filter_map(|option| {
+                            Some(AcpPermissionOption {
+                                option_id: option.get("optionId")?.as_str()?.to_string(),
+                                name: option.get("name")?.as_str()?.to_string(),
+                                kind: option.get("kind").and_then(Value::as_str).unwrap_or("allow_once").to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_else(|| {
+                    vec![
+                        AcpPermissionOption { option_id: "allow".to_string(), name: "Allow".to_string(), kind: "allow_once".to_string() },
+                        AcpPermissionOption { option_id: "deny".to_string(), name: "Deny".to_string(), kind: "reject_once".to_string() },
+                    ]
+                });
+            if let Ok(mut registry) = approvals.lock() {
+                registry.insert(
+                    request_key.clone(),
+                    AcpApproval {
+                        id: request_id_value,
+                        options: options.clone(),
+                    },
+                );
+            }
+            let option_names: Vec<String> = options.iter().map(|option| option.name.clone()).collect();
+            broadcast.broadcast_agent_event(AgentEvent::new(
+                session_id,
+                "permission_required",
+                json!({
+                    "id": request_key,
+                    "prompt": prompt,
+                    "options": option_names,
+                    "risk_level": "medium",
+                    "source": "acp",
+                }),
+            ));
+            broadcast.broadcast(WsMessage::StateChange {
+                session_id: session_id.to_string(),
+                state: "waiting_for_approval".to_string(),
+            });
+        }
+        // We do not advertise fs/terminal/elicitation capabilities, so agents
+        // must not call these; if one does anyway, refuse cleanly.
+        _ => {
+            if let Some(id) = msg.get("id").cloned() {
+                let _ = conn.tx.send(Outbound::Response {
+                    id,
+                    result: None,
+                    error: Some(json!({ "code": -32601, "message": "Method not supported by this client" })),
+                });
+            }
+        }
+    }
+}
+
+/// Send a request and await its response (bounded timeout).
+async fn send_request(conn: &AcpConn, method: &str, params: Value) -> std::result::Result<Value, String> {
+    send_request_timeout(conn, method, params, ACP_INIT_TIMEOUT).await
+}
+
+async fn send_request_timeout(
+    conn: &AcpConn,
+    method: &str,
+    params: Value,
+    duration: Duration,
+) -> std::result::Result<Value, String> {
+    let id = conn.next_id.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = oneshot::channel();
+    conn.pending
+        .lock()
+        .map_err(|_| "pending registry poisoned".to_string())?
+        .insert(id, tx);
+    conn.tx
+        .send(Outbound::Request {
+            id,
+            method: method.to_string(),
+            params,
+        })
+        .map_err(|_| "agent process is gone".to_string())?;
+    let response = timeout(duration, rx)
+        .await
+        .map_err(|_| format!("{} timed out", method))?
+        .map_err(|_| "agent process is gone".to_string())?;
+    if response.get("error").is_some() {
+        Err(format!("{} failed: {}", method, response.get("error").unwrap_or(&Value::Null)))
+    } else {
+        Ok(response)
+    }
+}
+
+async fn writer_task(mut rx: mpsc::UnboundedReceiver<Outbound>, stdin: &mut ChildStdin) {
+    while let Some(outbound) = rx.recv().await {
+        let payload = match outbound {
+            Outbound::Request { id, method, params } => json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+            Outbound::Notification { method, params } => json!({ "jsonrpc": "2.0", "method": method, "params": params }),
+            Outbound::Response { id, result, error } => {
+                let mut payload = json!({ "jsonrpc": "2.0", "id": id });
+                if let Some(result) = result {
+                    payload["result"] = result;
+                } else if let Some(error) = error {
+                    payload["error"] = error;
+                }
+                payload
+            }
+            Outbound::Shutdown => break,
+        };
+        let mut text = serde_json::to_string(&payload).unwrap_or_default();
+        text.push('\n');
+        if stdin.write_all(text.as_bytes()).await.is_err() {
+            break;
+        }
+        if stdin.flush().await.is_err() {
+            break;
+        }
+    }
+    let _ = stdin.shutdown().await;
+}
+
+/// Spawn `binary` with `args`, send `initialize`, and check for a
+/// protocolVersion response. Used to auto-detect ACP support.
+async fn probe_acp(binary: &str, args: &[String]) -> bool {
+    let Ok(mut child) = Command::new(binary)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+    else {
+        return false;
+    };
+    let Some(mut stdin) = child.stdin.take() else { return false };
+    let Some(stdout) = child.stdout.take() else { return false };
+
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": { "name": "agentdeck-probe", "version": "1.0.0" },
+        }
+    });
+    let mut text = serde_json::to_string(&init).unwrap_or_default();
+    text.push('\n');
+    if stdin.write_all(text.as_bytes()).await.is_err() {
+        let _ = child.start_kill();
+        return false;
+    }
+    let _ = stdin.flush().await;
+    // Keep stdin OPEN. Some agents (opencode) treat EOF on stdin as "exit"
+    // and shut down before they ever answer the handshake; the reader loop
+    // below would then see EOF and report "not ACP" even though the agent
+    // supports ACP fine.
+
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let deadline = tokio::time::Instant::now() + PROBE_TIMEOUT;
+    let supported = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break false;
+        }
+        match timeout(remaining, reader.read_line(&mut line)).await {
+            // Only EOF *or error* means the process is gone. A process that
+            // is alive but slow may write nothing for a while — keep waiting
+            // until the deadline.
+            Ok(Ok(0)) | Ok(Err(_)) => break false,
+            Ok(Ok(_)) => {
+                let trimmed = line.trim();
+                let Ok(msg) = serde_json::from_str::<Value>(trimmed) else {
+                    // Banner / noise lines (e.g. opencode's
+                    // "[opencode-mobile] v1.4.0") are not JSON-RPC. Skip them
+                    // instead of treating them as a failure.
+                    line.clear();
+                    continue;
+                };
+                let version = msg.get("result").and_then(|result| result.get("protocolVersion")).and_then(Value::as_i64);
+                if msg.get("id") == Some(&Value::from(0)) && version == Some(1) {
+                    break true;
+                }
+                line.clear();
+            }
+            Err(_) => break false,
+        }
+    };
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    supported
+}
+
+fn now_millis() -> u64 {
+    chrono::Utc::now().timestamp_millis().max(0) as u64
+}
+
+/// Concatenate text content blocks (used by agent_message_* updates).
+///
+/// Agents differ: the v1 schema says `content` is an array of ContentBlocks,
+/// but opencode sends a single block object (`{"type":"text","text":"…"}`)
+/// or the nested `{ "type": "content", "content": { "type": "text", … } }`
+/// shape. Handle all three so streaming text never silently disappears.
+fn extract_text_content(content: Option<&Value>) -> String {
+    let Some(content) = content else { return String::new() };
+    let blocks: Vec<&Value> = match content {
+        Value::Array(blocks) => blocks.iter().collect(),
+        other => vec![other],
+    };
+    blocks
+        .iter()
+        .filter_map(|block| {
+            match block {
+                Value::String(text) => Some(text.clone()),
+                Value::Object(_) => block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .or_else(|| {
+                        // Nested `{ "type": "content", "content": { "type": "text", … } }`
+                        block
+                            .get("content")
+                            .and_then(|inner| inner.get("text"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    }),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Best-effort command string from a tool call's rawInput (string or object).
+fn extract_command(update: &Value) -> Option<String> {
+    let raw_input = extract_raw_input(update)?;
+    if raw_input.starts_with('{') {
+        serde_json::from_str::<Value>(&raw_input)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("command")
+                    .or_else(|| value.get("cmd"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+    } else {
+        Some(raw_input)
+    }
+}
+
+fn extract_raw_input(update: &Value) -> Option<String> {
+    update
+        .get("rawInput")
+        .map(|value| match value {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })
+}
+
+/// True when the rawInput carries something displayable (a command, query,
+/// prompt, …), as opposed to metadata-only objects like `{ "cwd": … }`.
+fn has_meaningful_input(update: &Value) -> bool {
+    match update.get("rawInput") {
+        None => false,
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Object(map)) => map.keys().any(|key| {
+            matches!(key.as_str(), "command" | "cmd" | "input" | "query" | "prompt" | "search" | "path" | "pattern")
+        }),
+        Some(_) => true,
+    }
+}
+
+fn extract_exit_code(update: &Value) -> Option<i32> {
+    update
+        .get("rawOutput")
+        .and_then(|value| {
+            let parsed = value
+                .as_str()
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .unwrap_or_else(|| value.clone());
+            parsed
+                .get("exitCode")
+                .or_else(|| parsed.get("exit_code"))
+                .or_else(|| parsed.get("metadata").and_then(|metadata| metadata.get("exit")))
+                .and_then(Value::as_i64)
+                .map(|code| code as i32)
+        })
+        .or_else(|| {
+            update
+                .get("rawOutput")
+                .and_then(Value::as_str)
+                .and_then(|text| text.trim().parse::<i32>().ok())
+        })
+}
+
+/// Map the user's decision (a label the UI showed) to the agent's optionId.
+fn pick_option_id(options: &[AcpPermissionOption], decision: &str) -> String {
+    let lower = decision.to_lowercase();
+    if let Some(option) = options.iter().find(|option| option.name.eq_ignore_ascii_case(decision)) {
+        return option.option_id.clone();
+    }
+    // Fall back by intent: allow/yes -> allow_once, always -> allow_always,
+    // deny/no -> reject_once, else reject_always.
+    let preferred_kind = if ["allow", "yes", "y", "accept"].contains(&lower.as_str()) {
+        "allow_once"
+    } else if ["always", "allow always"].contains(&lower.as_str()) {
+        "allow_always"
+    } else if ["deny", "no", "n", "reject"].contains(&lower.as_str()) {
+        "reject_once"
+    } else {
+        "reject_always"
+    };
+    options
+        .iter()
+        .find(|option| option.kind == preferred_kind)
+        .map(|option| option.option_id.clone())
+        .or_else(|| options.first().map(|option| option.option_id.clone()))
+        .unwrap_or_else(|| decision.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_agent_message_chunk_to_text_delta() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": "m1",
+            "content": [{ "type": "text", "text": "Hello " }],
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "assistant_text");
+        assert_eq!(events[0].payload["text"], "Hello ");
+        assert_eq!(events[0].payload["delta"], true);
+    }
+
+    #[test]
+    fn pairs_tool_call_start_and_finish() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let start = json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_1",
+            "title": "Reading config",
+            "kind": "read",
+            "status": "in_progress",
+        });
+        let finish = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call_1",
+            "kind": "read",
+            "status": "completed",
+        });
+        let started = mapper.map("s1", &start);
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].kind, "tool_started");
+        assert_eq!(started[0].payload["tool_name"], "Reading config");
+        let finished = mapper.map("s1", &finish);
+        assert_eq!(finished.len(), 1);
+        assert_eq!(finished[0].kind, "tool_finished");
+        assert_eq!(finished[0].payload["success"], true);
+    }
+
+    #[test]
+    fn execute_tools_become_commands() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let start = json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_2",
+            "title": "Run tests",
+            "kind": "execute",
+            "status": "in_progress",
+            "rawInput": { "command": "cargo test" },
+        });
+        let events = mapper.map("s1", &start);
+        assert_eq!(events[0].kind, "terminal_output");
+        assert_eq!(events[1].kind, "command_started");
+        assert_eq!(events[1].payload["command"], "cargo test");
+    }
+
+    #[test]
+    fn maps_plan_update() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                { "content": "Check syntax", "priority": "high", "status": "pending" },
+                { "content": "Run tests", "priority": "medium", "status": "pending" },
+            ],
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "plan");
+        assert_eq!(events[0].payload["steps"][0], "Check syntax");
+    }
+
+    #[test]
+    fn thoughts_open_and_close() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let open = json!({ "sessionUpdate": "agent_thought_chunk", "messageId": "t1", "content": [{ "type": "text", "text": "thinking…" }] });
+        let close = json!({ "sessionUpdate": "agent_thought", "messageId": "t1", "content": [{ "type": "text", "text": "thought done" }] });
+        assert_eq!(mapper.map("s1", &open)[0].kind, "thinking_started");
+        assert_eq!(mapper.map("s1", &close)[0].kind, "thinking_finished");
+    }
+
+    #[test]
+    fn picks_option_by_intent() {
+        let options = vec![
+            AcpPermissionOption { option_id: "a1".to_string(), name: "Allow once".to_string(), kind: "allow_once".to_string() },
+            AcpPermissionOption { option_id: "a2".to_string(), name: "Always allow".to_string(), kind: "allow_always".to_string() },
+            AcpPermissionOption { option_id: "d1".to_string(), name: "Deny once".to_string(), kind: "reject_once".to_string() },
+        ];
+        assert_eq!(pick_option_id(&options, "Allow"), "a1");
+        assert_eq!(pick_option_id(&options, "always"), "a2");
+        assert_eq!(pick_option_id(&options, "No"), "d1");
+        assert_eq!(pick_option_id(&options, "Allow once"), "a1");
+    }
+
+    #[test]
+    fn serializes_outbound_request() {
+        let payload = json!({ "jsonrpc": "2.0", "id": 1, "method": "session/prompt", "params": { "sessionId": "s" } });
+        assert_eq!(payload["method"], "session/prompt");
+    }
+
+    #[test]
+    fn extracts_text_from_single_block_content() {
+        // opencode sends a single block object, not an array.
+        let update = json!({ "sessionUpdate": "agent_message_chunk", "messageId": "m1", "content": { "type": "text", "text": "PONG" } });
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["text"], "PONG");
+    }
+
+    #[test]
+    fn extracts_text_from_nested_content_block() {
+        let update = json!({
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": "m2",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "nested" } }],
+        });
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["text"], "nested");
+    }
+
+    #[test]
+    fn closes_open_thought_when_answer_text_arrives() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let thought = json!({ "sessionUpdate": "agent_thought_chunk", "messageId": "t1", "content": { "type": "text", "text": "think" } });
+        let answer = json!({ "sessionUpdate": "agent_message_chunk", "messageId": "a1", "content": { "type": "text", "text": "Hi" } });
+        assert_eq!(mapper.map("s1", &thought)[0].kind, "thinking_started");
+        let events = mapper.map("s1", &answer);
+        assert_eq!(events[0].kind, "thinking_finished");
+        assert_eq!(events[1].kind, "assistant_text");
+    }
+
+    #[test]
+    fn extracts_exit_code_from_metadata() {
+        let update = json!({ "rawOutput": { "output": "ok\n", "metadata": { "exit": 0 } } });
+        assert_eq!(extract_exit_code(&update), Some(0));
+    }
+
+    /// Live integration check: spawn a real ACP agent through AcpManager
+    /// (the exact path the daemon uses) and confirm the initialize handshake
+    /// completes. Ignored by default; run with
+    /// `cargo test -- --ignored live_acp_spawn_handshakes`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_acp_spawn_handshakes() {
+        let broadcast = crate::websocket::broadcast::BroadcastHub::new();
+        let manager = AcpManager::new(broadcast);
+        let (resolved, _) = crate::agents::detect_agent("opencode")
+            .await
+            .expect("opencode not on PATH");
+        let args = vec!["acp".to_string()];
+        let supported = manager.probe(&resolved, &args).await;
+        eprintln!("probe supported: {}", supported);
+        assert!(supported, "opencode should answer the ACP handshake");
+        let info = manager
+            .spawn_session("live-acp-test", "opencode", Some("/tmp/e2e-proj"), &resolved, &args)
+            .await
+            .expect("spawn_session should complete the handshake");
+        eprintln!("spawned acp_session={} pid={} version={}", info.acp_session_id, info.pid, info.version);
+        assert!(!info.acp_session_id.is_empty());
+        let _ = manager.kill_session("live-acp-test").await;
+    }
+
+    #[test]
+    fn skips_bare_pending_tool_call() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let pending = json!({ "sessionUpdate": "tool_call", "toolCallId": "c1", "title": "bash", "kind": "execute", "status": "pending", "rawInput": { "cwd": "/tmp" } });
+        let in_progress = json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "title": "echo hi", "kind": "execute", "status": "in_progress", "rawInput": { "command": "echo hi" } });
+        assert!(mapper.map("s1", &pending).is_empty());
+        let events = mapper.map("s1", &in_progress);
+        assert_eq!(events[0].kind, "terminal_output");
+        assert_eq!(events[1].kind, "command_started");
+        assert_eq!(events[1].payload["command"], "echo hi");
+    }
+}
