@@ -1,20 +1,20 @@
 /**
- * App shell.
+ * App shell — desktop two-screen architecture.
  *
- * One component tree, two layouts. Mobile shows the list *or* a session; desktop
- * shows both, with a collapsible sidebar. Both render the same `SessionList` and
- * `SessionView` — layout and navigation are the only difference, which is the
- * point: logic is not duplicated per form factor.
- *
- * `dvh` throughout, so mobile browser chrome and the software keyboard cannot
- * push the composer off-screen.
+ * Mobile: list *or* session (dvh, single tree). Desktop: Screen 1 (Management)
+ * with 240–280px sidebar + sessions dashboard, Screen 2 (Session Workspace)
+ * with collapsible 260–320 left, flexible center, 280–360 right.
+ * `route` drives Screen 1 → Screen 2; back preserves filters via localStorage.
  */
 
 import { useEffect, useState } from 'react'
 import { PairButton, PairDeviceLayerContent, PairingScreen } from './components/Pairing'
 import { SessionList } from './components/SessionList'
 import { SessionView } from './components/SessionView'
-import { ChevronLeft, Dot, Dots, EmptyState, IconButton, Layer } from './components/ui'
+import { Dot, Dots, EmptyState, Layer } from './components/ui'
+import { ManagementSidebar } from './components/desktop/ManagementSidebar'
+import { SessionsDashboard } from './components/desktop/SessionsDashboard'
+import { SessionWorkspace } from './components/desktop/SessionWorkspace'
 import { useRoute } from './lib/route'
 import { useStore } from './store'
 import { cn } from './lib/format'
@@ -34,30 +34,7 @@ function useIsDesktop(): boolean {
   return isDesktop
 }
 
-const SIDEBAR_KEY = 'agentdeck-sidebar-collapsed'
-
-/** Sidebar collapse state, persisted so it survives a reload. */
-function useSidebarCollapsed(): [boolean, () => void] {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const toggle = () => {
-    setCollapsed((previous) => {
-      const next = !previous
-      try {
-        localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0')
-      } catch {
-        // Non-fatal: the preference just will not persist.
-      }
-      return next
-    })
-  }
-  return [collapsed, toggle]
-}
+type ManagementNav = 'sessions' | 'settings' | 'help'
 
 /**
  * Connection indicator. Every state is named, and `reconnecting` is distinct
@@ -126,13 +103,29 @@ export default function App() {
   const sessions = useStore((state) => state.sessions)
   const sessionsLoading = useStore((state) => state.sessionsLoading)
   const isDesktop = useIsDesktop()
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+  const [managementNav, setManagementNav] = useState<ManagementNav>('sessions')
   const [pairing, setPairing] = useState(false)
 
   useEffect(() => {
     if (route.name === 'pair') return
     start()
   }, [start, route.name])
+
+  // Desktop global keyboard shortcuts: Cmd/Ctrl+N new session (works on both screens)
+  useEffect(() => {
+    if (!isDesktop) return
+    function onGlobalKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        const state = useStore.getState()
+        const prov = state.providers.find((p) => p.state === 'ready') ?? state.providers[0]
+        if (!prov) return
+        void state.createSession({ agent: prov.id, name: 'New Session' }).then((s) => navigate({ name: 'session', sessionId: s.id }))
+      }
+    }
+    window.addEventListener('keydown', onGlobalKey)
+    return () => window.removeEventListener('keydown', onGlobalKey)
+  }, [isDesktop, navigate])
 
   const selectedId = route.name === 'session' ? route.sessionId : undefined
   // Look the session up by id every render, so a live update re-renders with
@@ -167,80 +160,85 @@ export default function App() {
   )
 
   if (isDesktop) {
+    // Screen 2 — Session Workspace (collapsible left 260–320, center flexible, right 280–360)
+    if (route.name === 'session') {
+      if (selected) {
+        return (
+          <>
+            <SessionWorkspace key={selected.id} session={selected} onBack={() => navigate({ name: 'list' })} />
+            {pairLayer}
+          </>
+        )
+      }
+      if (sessionsLoading) {
+        return (
+          <div className="flex h-dvh items-center justify-center bg-canvas">
+            <Dots label="Opening session…" />
+          </div>
+        )
+      }
+      // stale id handled by effect -> list, but show fallback while redirecting
+      return (
+        <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
+          <ManagementSidebar active={managementNav} onNavigate={setManagementNav} onPair={() => setPairing(true)} />
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState title="Session not found" description="It may have been deleted." />
+          </div>
+          {pairLayer}
+        </div>
+      )
+    }
+
+    // Screen 1 — Sessions & App Management (sidebar 240–280 + dashboard)
     return (
       <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
-        <aside
-          className={cn(
-            'flex shrink-0 flex-col border-r border-line bg-canvas',
-            'transition-[width] duration-200',
-            collapsed ? 'w-14' : 'w-78',
-          )}
-        >
-          <header
-            className={cn(
-              'flex shrink-0 items-center gap-2 py-2.5',
-              collapsed ? 'flex-col px-2' : 'justify-between px-3',
-            )}
-          >
-            <Brand compact={collapsed} />
-            <span className={cn('flex items-center gap-1', collapsed && 'flex-col')}>
-              {collapsed ? null : <PairButton onOpen={() => setPairing(true)} />}
-              <IconButton
-                label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                onClick={toggleCollapsed}
-              >
-                <ChevronLeft
-                  size={15}
-                  className="transition-transform duration-200"
-                  style={collapsed ? { transform: 'rotate(180deg)' } : undefined}
-                />
-              </IconButton>
-            </span>
-          </header>
-
-          {collapsed ? (
-            <>
-              <ConnectionPill state={connection} compact />
-              {/* Collapsed, the sidebar is a rail: the list is unreadable at
-                  56px, so it is replaced by an affordance to expand. */}
-              <button
-                type="button"
-                onClick={toggleCollapsed}
-                title={`${sessions.length} sessions`}
-                className="mx-2 mt-2 flex flex-col items-center gap-0.5 rounded-control py-2 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
-              >
-                <span className="text-[13px] font-medium tabular-nums">{sessions.length}</span>
-                <span className="text-[9px] uppercase tracking-wide">open</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="px-3 pb-2.5">
-                <ConnectionPill state={connection} />
+        <ManagementSidebar active={managementNav} onNavigate={setManagementNav} onPair={() => setPairing(true)} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* subtle connection bar */}
+          <div className="flex h-6 shrink-0 items-center justify-end gap-2 border-b border-line bg-inset px-6">
+            <ConnectionPill state={connection} />
+          </div>
+          {managementNav === 'sessions' ? (
+            <SessionsDashboard />
+          ) : managementNav === 'settings' ? (
+            <div className="flex flex-1 flex-col bg-inset p-6">
+              <h2 className="text-[15px] font-medium text-ink">Settings</h2>
+              <p className="mt-2 max-w-[640px] text-[13px] leading-[1.6] text-ink-3">
+                App settings, provider configuration, and workspace preferences. Provider and model management is available via the sessions dashboard. Full settings UI is coming soon.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPairing(true)}
+                  className="rounded-control border border-line bg-surface px-3 py-2 text-[12.5px] text-ink hover:bg-hover"
+                >
+                  Pair a phone
+                </button>
+                <span className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-ink-3">
+                  {sessions.length} sessions
+                </span>
               </div>
-              <SessionList
-                selectedId={selectedId}
-                onSelect={(session) => navigate({ name: 'session', sessionId: session.id })}
-              />
-            </>
-          )}
-        </aside>
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          {selected ? (
-            <SessionView key={selected.id} session={selected} />
-          ) : selectedId && sessionsLoading ? (
-            <div className="flex flex-1 items-center justify-center">
-              <Dots label="Opening session…" />
             </div>
           ) : (
-            <EmptyState
-              title="Select a session"
-              description="Agents run on this machine. Pick a session to watch it work, or start a new one."
-            />
+            <div className="flex flex-1 flex-col bg-inset p-6">
+              <h2 className="text-[15px] font-medium text-ink">Help</h2>
+              <p className="mt-2 max-w-[640px] text-[13px] leading-[1.6] text-ink-3">
+                AgentDeck runs coding agents on this machine. Create a session, watch the agent stream tool calls and terminal output, and approve actions when prompted. Use the command palette or keyboard shortcuts for quick navigation.
+              </p>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[12.5px] text-ink-2">
+                <li>
+                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Cmd+N</span> New session
+                </li>
+                <li>
+                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Cmd+K</span> Focus search
+                </li>
+                <li>
+                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Esc</span> Close panel / back
+                </li>
+              </ul>
+            </div>
           )}
-        </main>
-
+        </div>
         {pairLayer}
       </div>
     )
