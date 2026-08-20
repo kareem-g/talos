@@ -228,6 +228,17 @@ async fn handle_message(msg: crate::websocket::WsMessage, state: &Arc<AppState>)
         }
         crate::websocket::WsMessage::TerminalResize { session_id, cols, rows } => {
             let (cols, rows) = clamp_terminal_dimensions(cols, rows);
+            // A session with no live PTY — an ACP agent, or one whose process has
+            // exited — has nothing to resize. That is not an error worth showing
+            // the user: it produced a "Session not found" banner every time an
+            // ACP session's terminal view was opened.
+            if !state.pty_manager.has_active_session(&session_id).await {
+                tracing::debug!(
+                    session_id = %session_id,
+                    "Ignoring terminal resize for a session with no live PTY"
+                );
+                return;
+            }
             match state.pty_manager.resize_session(&session_id, cols, rows).await {
                 Ok(()) => {
                     state.broadcast.broadcast(crate::websocket::WsMessage::TerminalResized {
@@ -272,8 +283,8 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         return;
     }
 
-    match state.session_manager.get_session(session_id).await {
-        Ok(Some(_)) => {}
+    let session = match state.session_manager.get_session(session_id).await {
+        Ok(Some(session)) => session,
         _ => {
             state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                 session_id: session_id.to_string(),
@@ -282,6 +293,25 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
             });
             return;
         }
+    };
+
+    // A prompt needs a live agent to receive it. Without this check the session
+    // was marked `running` and the user's message was recorded, but nothing was
+    // listening — the prompt silently vanished and the UI stopped offering the
+    // Resume action that would actually have helped.
+    let has_agent = state.acp_manager.has_active_session(session_id).await
+        || state.pty_manager.has_active_session(session_id).await
+        || state.claude_stream.has_active_session(session_id).await;
+    if !has_agent {
+        state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+            session_id: session_id.to_string(),
+            code: "session_not_running".to_string(),
+            message: format!(
+                "The {} agent is not running. Resume this session to continue.",
+                session.agent
+            ),
+        });
+        return;
     }
 
     state.broadcast.broadcast(crate::websocket::WsMessage::Message {
@@ -308,6 +338,18 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
                 session_id: session_id.to_string(),
                 code: "acp_error".to_string(),
                 message: format!("Failed to send prompt to agent: {}", error),
+            });
+        }
+        return;
+    }
+
+    // Claude (structured stream-json transport) receives follow-ups over stdin.
+    if state.claude_stream.has_active_session(session_id).await {
+        if let Err(error) = state.claude_stream.send_prompt(session_id, &clean_data).await {
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                session_id: session_id.to_string(),
+                code: "claude_error".to_string(),
+                message: format!("Failed to send prompt to Claude: {}", error),
             });
         }
         return;
@@ -446,11 +488,45 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
                 handle_input(state, session_id, data).await;
             }
         }
-        "model_switch" => {
-            state.broadcast.broadcast(crate::websocket::WsMessage::Error {
-                code: "model_switch_unsupported".to_string(),
-                message: "This agent does not support switching during a task".to_string(),
-            });
+        // Change a session's model, mode, effort, or any other dimension the
+        // provider exposes. Previously a hard rejection stub; now it goes through
+        // the same path as `PATCH /api/sessions/{id}/config`, so a change made
+        // over the socket reaches the live agent and every other client hears
+        // about it. The outcome (immediate / next_run / unsupported) is
+        // broadcast by `apply_config` itself.
+        "set_config" | "model_switch" => {
+            let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
+            // `model_switch` is the legacy spelling; treat a bare `model`/`value`
+            // pair as a request against the model dimension.
+            let config_id = params
+                .get("config_id")
+                .or_else(|| params.get("configId"))
+                .and_then(Value::as_str)
+                .unwrap_or("model");
+            let value = params
+                .get("value")
+                .or_else(|| params.get("model"))
+                .and_then(Value::as_str);
+
+            match (session_id.is_empty(), value) {
+                (false, Some(value)) => {
+                    if let Err(error) =
+                        crate::sessions::config::apply_config(state, session_id, config_id, value).await
+                    {
+                        state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                            session_id: session_id.to_string(),
+                            code: "session_unavailable".to_string(),
+                            message: error,
+                        });
+                    }
+                }
+                _ => {
+                    state.broadcast.broadcast(crate::websocket::WsMessage::Error {
+                        code: "invalid_request".to_string(),
+                        message: "set_config requires session_id and value".to_string(),
+                    });
+                }
+            }
         }
         _ => tracing::debug!("[AgentDeck][WS] Unknown command: {}", action),
     }

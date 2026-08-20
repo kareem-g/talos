@@ -217,19 +217,28 @@ pub async fn kill_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // Kill the PTY process
+    // Stop whichever kind of agent this session has.
+    //
+    // Checking only the PTY left ACP subprocesses running while the row said
+    // `exited` — the process stayed alive, and a later resume correctly refused
+    // with "already has a running agent" on a session the user had stopped.
     let pty_killed = state.pty_manager.kill_session(&id).await.is_ok();
+    let acp_killed = state.acp_manager.kill_session(&id).await.is_ok();
+    let claude_killed = state.claude_stream.kill_session(&id).await.is_ok();
 
     // Update session status in DB
-    let status_updated = state.session_manager
+    let status_updated = state
+        .session_manager
         .update_status(&id, SessionStatus::Exited)
         .await
         .is_ok();
 
     Json(json!({
-        "killed": pty_killed || status_updated,
+        "killed": pty_killed || acp_killed || claude_killed || status_updated,
         "session_id": id,
         "pty_killed": pty_killed,
+        "acp_killed": acp_killed,
+        "claude_killed": claude_killed,
         "status_updated": status_updated,
     }))
 }
@@ -316,7 +325,11 @@ pub async fn delete_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    if state.pty_manager.has_active_session(&id).await {
+    // Both agent kinds count as "running": deleting a row while an ACP
+    // subprocess is alive orphans the process with nothing left to stop it.
+    if state.pty_manager.has_active_session(&id).await
+        || state.acp_manager.has_active_session(&id).await
+    {
         return (StatusCode::CONFLICT, Json(json!({ "error": "Stop the running session before deleting it" }))).into_response();
     }
     match state.session_manager.delete_session(&id).await {
@@ -381,12 +394,19 @@ pub async fn resume_session(
     // live PTY, return the current state rather than spawning a second process.
     match session.status {
         SessionStatus::Running | SessionStatus::Starting => {
-            return Json(json!({
-                "success": true,
-                "session_id": id,
-                "status": "already_active",
-                "message": "Session is already running",
-            }));
+            // Only "already active" if a process is genuinely there. After a
+            // daemon restart the row can say running while nothing is — refusing
+            // in that case would make the session permanently unresumable.
+            let live = state.pty_manager.has_active_session(&id).await
+                || state.acp_manager.has_active_session(&id).await;
+            if live {
+                return Json(json!({
+                    "success": true,
+                    "session_id": id,
+                    "status": "already_active",
+                    "message": "Session is already running",
+                }));
+            }
         }
         SessionStatus::NeedsResume | SessionStatus::Exited | SessionStatus::Idle => {}
         other => {
@@ -398,12 +418,15 @@ pub async fn resume_session(
         }
     }
 
-    if state.pty_manager.has_active_session(&id).await {
+    // Guard against a second process for a session that is genuinely live.
+    if state.pty_manager.has_active_session(&id).await
+        || state.acp_manager.has_active_session(&id).await
+    {
         return Json(json!({
             "success": true,
             "session_id": id,
             "status": "already_active",
-            "message": "Session already has an active PTY",
+            "message": "Session already has a running agent",
         }));
     }
 
@@ -421,14 +444,40 @@ pub async fn resume_session(
         }));
     }
 
-    // Build the resume command: reuse the same binary/args as a fresh session,
-    // but append `--resume <session_id>` for the claude agent so the CLI
-    // continues the prior conversation instead of starting a new one.
+    // Resuming needs the *agent's* session id, not ours. For an imported session
+    // that is `external_id`; for one this app created over ACP it is the id the
+    // agent assigned at `session/new`, which spawn now persists to the same
+    // column. Falling back to the local id is correct only for Claude PTY
+    // sessions, where spawn passed `--session-id <local id>`.
+    let resume_target = session.external_id.clone().unwrap_or_else(|| id.clone());
+
+    // An ACP provider must be resumed over ACP. Spawning its TUI under a PTY
+    // instead was the original bug: `opencode --session <id>` launches the
+    // interactive UI, and with our local uuid it exited immediately with
+    // "Invalid session ID".
+    if let Some(launch) = resolve_acp_launch(&state, &session.agent).await {
+        return resume_acp_session(&state, session, launch, resume_target).await;
+    }
+
+    // Claude: resume through the structured stream-json transport. The PTY path
+    // would launch the interactive TUI with `--resume`, which is not a
+    // multi-turn chat transport and loses the conversation.
+    if session.agent == "claude" {
+        return resume_claude_stream_session(&state, session, resume_target).await;
+    }
+
+    // Build the PTY resume command (codex and remaining agents).
+    //
+    // Reuse the same binary/args as a fresh session, then append the provider's
+    // own resume flag. Each CLI spells this differently, and getting it wrong is
+    // worse than not resuming: without the flag the CLI starts a *fresh*
+    // conversation that merely looks resumed.
+    //
+    //   codex     resume <id>          (subcommand, not a flag)
     let cfg = state.config.read().await;
     let configured = match session.agent.as_str() {
         "codex" => cfg.settings().agents.codex.clone(),
         "opencode" => cfg.settings().agents.opencode.clone(),
-        "claude" => cfg.settings().agents.claude.clone(),
         other => {
             let _ = state
                 .session_manager
@@ -444,10 +493,18 @@ pub async fn resume_session(
     drop(cfg);
 
     let mut command = vec![configured.path.clone()];
-    command.extend(configured.args.clone());
-    if session.agent == "claude" {
-        command.push("--resume".to_string());
-        command.push(id.clone());
+    match session.agent.as_str() {
+        "codex" => {
+            command.push("resume".to_string());
+            command.push(resume_target);
+            command.extend(configured.args.clone());
+        }
+        "opencode" => {
+            command.extend(configured.args.clone());
+            command.push("--session".to_string());
+            command.push(resume_target);
+        }
+        _ => unreachable!("agent was validated above"),
     }
 
     // Spawn the PTY. finish_spawn writes hooks settings and broadcasts output.
@@ -464,16 +521,62 @@ pub async fn resume_session(
     .await
     {
         Ok(_resumed) => {
+            // A CLI that rejects the resume exits immediately, so "spawned" alone
+            // is not evidence it worked. Give it a moment, then confirm the
+            // process is still there before claiming success — reporting a
+            // resume that already died is exactly the fake success state to avoid.
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            if !state.pty_manager.has_active_session(&id).await {
+                let _ = state
+                    .session_manager
+                    .update_status(&id, SessionStatus::Error)
+                    .await;
+                return Json(json!({
+                    "success": false,
+                    "session_id": id,
+                    "spawned": false,
+                    "error": format!(
+                        "{} started and exited immediately. Check the Terminal tab for what it reported.",
+                        session.agent
+                    ),
+                }));
+            }
+
             // Clear any stale resume_command now that we're active.
             let _ = state.session_manager.set_resume_command(&id, "").await;
+            // Persist the state as well as broadcasting it. Broadcasting alone
+            // left the database row at `exited`, so a reload — or the first paint
+            // of this very page — showed a Resume button for a session that was
+            // actually running.
+            //
+            // Idle, not running: the agent has reopened the conversation and is
+            // waiting for the first prompt. Leaving it `running` made the
+            // composer show a Stop button and the user's first message appeared
+            // to do nothing — they were clicking what was actually Stop.
+            if let Err(error) = state
+                .session_manager
+                .update_status(&id, SessionStatus::Idle)
+                .await
+            {
+                tracing::warn!(
+                    session_id = %id,
+                    error = %error,
+                    "Could not persist idle status after resume"
+                );
+            }
+            if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
+                state
+                    .broadcast
+                    .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+            }
             state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
                 session_id: id.clone(),
-                state: "starting".to_string(),
+                state: "idle".to_string(),
             });
             Json(json!({
                 "success": true,
                 "session_id": id,
-                "status": "starting",
+                "status": "idle",
                 "spawned": true,
             }))
         }
@@ -487,6 +590,153 @@ pub async fn resume_session(
                 "error": error,
                 "session_id": id,
                 "spawned": false,
+            }))
+        }
+    }
+}
+
+/// Reopen an ACP conversation via `session/load`.
+///
+/// Separate from the PTY path because ACP resume is a protocol call on a fresh
+/// subprocess, not a command-line flag — and because the agent's own refusal
+/// ("unknown session", "does not support session/load") is the useful error to
+/// return.
+async fn resume_acp_session(
+    state: &AppState,
+    session: crate::sessions::Session,
+    launch: AcpLaunch,
+    resume_target: String,
+) -> Json<serde_json::Value> {
+    let id = session.id.clone();
+    match state
+        .acp_manager
+        .resume_session(
+            &id,
+            &session.agent,
+            session.project.as_deref(),
+            &launch.binary,
+            &launch.args,
+            &resume_target,
+        )
+        .await
+    {
+        Ok(info) => {
+            state.session_manager.set_session_pid(&id, info.pid).await;
+            let _ = state.session_manager.set_resume_command(&id, "").await;
+            if let Err(error) = state
+                .session_manager
+                .update_status(&id, SessionStatus::Idle)
+                .await
+            {
+                tracing::warn!(session_id = %id, error = %error, "Could not mark a resumed session idle");
+            }
+            // Idle, not running: the conversation is reopened and waiting for a
+            // prompt. Claiming `running` would show a working indicator for an
+            // agent that is doing nothing.
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: id.clone(),
+                state: "idle".to_string(),
+            });
+            if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
+                state
+                    .broadcast
+                    .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+            }
+            Json(json!({
+                "success": true,
+                "session_id": id,
+                "status": "idle",
+                "spawned": true,
+            }))
+        }
+        Err(error) => {
+            let _ = state
+                .session_manager
+                .update_status(&id, SessionStatus::Error)
+                .await;
+            Json(json!({
+                "success": false,
+                "session_id": id,
+                "spawned": false,
+                // The agent's own words, not a category.
+                "error": match &error {
+                    crate::AgentDeckError::Session(message)
+                    | crate::AgentDeckError::Pty(message) => message.clone(),
+                    other => other.to_string(),
+                },
+            }))
+        }
+    }
+}
+
+/// Resume a Claude session through the structured stream-json transport.
+///
+/// Uses `claude -p --resume <id>` in stream-json mode, which reopens the prior
+/// conversation as a multi-turn chat — unlike the interactive TUI the PTY path
+/// would launch.
+async fn resume_claude_stream_session(
+    state: &AppState,
+    session: crate::sessions::Session,
+    resume_target: String,
+) -> Json<serde_json::Value> {
+    let id = session.id.clone();
+    let cfg = state.config.read().await;
+    let binary = cfg.settings().agents.claude.path.clone();
+    drop(cfg);
+
+    match state
+        .claude_stream
+        .spawn_session(&id, session.project.as_deref(), &binary, Some(&resume_target), None)
+        .await
+    {
+        Ok(info) => {
+            state.session_manager.set_session_pid(&id, info.pid).await;
+            let _ = state.session_manager.set_resume_command(&id, "").await;
+            if let Err(error) = state
+                .session_manager
+                .update_status(&id, SessionStatus::Idle)
+                .await
+            {
+                tracing::warn!(session_id = %id, error = %error, "Could not mark a resumed session idle");
+            }
+            // Persist the (reopened) Claude session id.
+            if let Err(error) = state
+                .session_manager
+                .set_external_id(&id, &info.claude_session_id)
+                .await
+            {
+                tracing::warn!(session_id = %id, error = %error, "Could not persist resumed Claude session id");
+            }
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: id.clone(),
+                state: "idle".to_string(),
+            });
+            if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
+                state
+                    .broadcast
+                    .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+            }
+            Json(json!({
+                "success": true,
+                "session_id": id,
+                "status": "idle",
+                "spawned": true,
+            }))
+        }
+        Err(error) => {
+            let _ = state
+                .session_manager
+                .update_status(&id, SessionStatus::Error)
+                .await;
+            Json(json!({
+                "success": false,
+                "session_id": id,
+                "spawned": false,
+                "error": match &error {
+                    crate::AgentDeckError::Session(message)
+                    | crate::AgentDeckError::Pty(message) => message.clone(),
+                    other => other.to_string(),
+                },
             }))
         }
     }
@@ -954,16 +1204,21 @@ pub async fn mobile_kill_session(
             .into_response();
     }
 
+    // Stop whichever kind of agent this session has — see `kill_session`.
     let pty_killed = state.pty_manager.kill_session(&id).await.is_ok();
+    let acp_killed = state.acp_manager.kill_session(&id).await.is_ok();
+    let claude_killed = state.claude_stream.kill_session(&id).await.is_ok();
     let status_updated = state
         .session_manager
         .update_status(&id, SessionStatus::Exited)
         .await
         .is_ok();
     Json(json!({
-        "killed": pty_killed || status_updated,
+        "killed": pty_killed || acp_killed || claude_killed || status_updated,
         "session_id": id,
         "pty_killed": pty_killed,
+        "acp_killed": acp_killed,
+        "claude_killed": claude_killed,
         "status_updated": status_updated,
     }))
     .into_response()
@@ -1037,14 +1292,30 @@ async fn spawn_session(
     // hermes, goose, … and custom agents) run through the generic ACP
     // client, which streams native structured events instead of a PTY.
     if let Some(launch) = resolve_acp_launch(state, agent).await {
-        return finish_acp_spawn(state, session, project, prompt, launch).await;
+        return finish_acp_spawn(
+            state,
+            session,
+            project,
+            prompt,
+            launch,
+            requested_model,
+            requested_effort,
+        )
+        .await;
+    }
+
+    // Claude: use its structured stream-json transport instead of scraping a
+    // TUI. The PTY path captures chrome as text and loses the real answer —
+    // the terminal view is right and the chat view is wrong. stream-json emits
+    // real text deltas, thinking deltas, and tool events.
+    if agent == "claude" {
+        return finish_claude_stream_spawn(state, session, project, prompt, requested_model, requested_effort).await;
     }
 
     let cfg = state.config.read().await;
     let configured = match agent {
         "codex" => &cfg.settings().agents.codex,
         "opencode" => &cfg.settings().agents.opencode,
-        "claude" => &cfg.settings().agents.claude,
         _ => {
             // Custom configured agents that are not ACP-capable fall back to a
             // plain PTY launch with their own binary/args.
@@ -1089,6 +1360,8 @@ async fn finish_acp_spawn(
     project: Option<&str>,
     prompt: Option<&str>,
     launch: AcpLaunch,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
 ) -> std::result::Result<crate::sessions::Session, String> {
     let info = match state
         .acp_manager
@@ -1107,6 +1380,84 @@ async fn finish_acp_spawn(
 
     state.session_manager.set_session_pid(&session.id, info.pid).await;
 
+    // Persist the agent's own session id. Resuming an ACP session requires the
+    // id the *agent* assigned at `session/new`, not ours — passing the local uuid
+    // gets `Invalid session ID` from the CLI.
+    if let Err(error) = state
+        .session_manager
+        .set_external_id(&session.id, &info.acp_session_id)
+        .await
+    {
+        tracing::warn!(
+            session_id = %session.id,
+            error = %error,
+            "Could not persist the agent session id; this session will not be resumable"
+        );
+    }
+
+    // Apply the requested configuration before the first prompt, so the very
+    // first turn already runs on the model the user chose.
+    //
+    // `model` and `effort` arrive as generic requests; which option ids the agent
+    // actually has comes from its own `session/new` report. Nothing is assumed:
+    // an agent without an `effort` dimension simply has no matching option, and
+    // the request is recorded and reported rather than silently dropped.
+    let requested: Vec<(String, String)> = [("model", requested_model), ("effort", requested_effort)]
+        .into_iter()
+        .filter_map(|(id, value)| value.map(|value| (id.to_string(), value)))
+        .collect();
+
+    for (config_id, value) in requested {
+        // Match by option id, or by category so a provider naming its reasoning
+        // dimension something else still receives the request.
+        let target = info
+            .config_options
+            .iter()
+            .find(|option| option.id == config_id)
+            .or_else(|| {
+                info.config_options
+                    .iter()
+                    .find(|option| option.category.as_deref() == Some(config_id.as_str()))
+            })
+            .map(|option| option.id.clone());
+
+        match target {
+            Some(option_id) => {
+                if let Err(error) = state
+                    .acp_manager
+                    .set_config_option(&session.id, &option_id, &value)
+                    .await
+                {
+                    // A rejected model is not a reason to abandon the session,
+                    // but the user must know their choice did not take effect.
+                    tracing::warn!(
+                        "[AgentDeck][ACP][{}] {} rejected {}={}: {}",
+                        session.id, session.agent, option_id, value, error
+                    );
+                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                        &session.id,
+                        "session_config_rejected",
+                        serde_json::json!({
+                            "config_id": option_id,
+                            "value": value,
+                            "message": error.to_string(),
+                        }),
+                    ));
+                }
+            }
+            None => {
+                tracing::info!(
+                    "[AgentDeck][ACP][{}] {} exposes no '{}' setting; request recorded only",
+                    session.id, session.agent, config_id
+                );
+                let _ = state
+                    .session_manager
+                    .set_pending_config(&session.id, &config_id, &value)
+                    .await;
+            }
+        }
+    }
+
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let clean_prompt = prompt.trim().to_string();
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
@@ -1120,6 +1471,83 @@ async fn finish_acp_spawn(
         });
         state
             .acp_manager
+            .send_prompt(&session.id, &clean_prompt)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    state
+        .session_manager
+        .update_status(&session.id, SessionStatus::Running)
+        .await
+        .map_err(|error| error.to_string())?;
+    let current = state
+        .session_manager
+        .get_session(&session.id)
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap_or(session);
+    state
+        .broadcast
+        .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current.clone() });
+    Ok(current)
+}
+
+/// Claude via structured stream-json rather than a PTY.
+///
+/// `requested_model` is passed as `--model`; effort is not exposed by the
+/// stream-json path in the same way, so it is dropped here (the picker can be
+/// extended later). The first prompt is sent over stdin once the process is up.
+async fn finish_claude_stream_spawn(
+    state: &AppState,
+    session: crate::sessions::Session,
+    project: Option<&str>,
+    prompt: Option<&str>,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
+) -> std::result::Result<crate::sessions::Session, String> {
+    let _ = requested_effort;
+    let cfg = state.config.read().await;
+    let configured = &cfg.settings().agents.claude;
+    let binary = configured.path.clone();
+    drop(cfg);
+
+    let info = state
+        .claude_stream
+        .spawn_session(&session.id, project, &binary, None, requested_model.as_deref())
+        .await
+        .map_err(|error| error.to_string())?;
+
+    state.session_manager.set_session_pid(&session.id, info.pid).await;
+
+    // Persist Claude's own session id so resume targets the right conversation.
+    if let Err(error) = state
+        .session_manager
+        .set_external_id(&session.id, &info.claude_session_id)
+        .await
+    {
+        tracing::warn!(
+            session_id = %session.id,
+            error = %error,
+            "Could not persist the Claude session id; this session will not be resumable"
+        );
+    }
+
+    // Send the initial prompt over stdin. The transport reads the structured
+    // stream and emits normalized events, so the chat view shows real content.
+    if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
+        let clean_prompt = prompt.trim().to_string();
+        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
+            message: crate::agent_events::AgentMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session.id.clone(),
+                role: "user".to_string(),
+                content: clean_prompt.clone(),
+                timestamp: chrono::Utc::now(),
+            },
+        });
+        state
+            .claude_stream
             .send_prompt(&session.id, &clean_prompt)
             .await
             .map_err(|error| error.to_string())?;

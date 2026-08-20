@@ -36,6 +36,10 @@ pub async fn start(
         // Sessions
         .route("/api/sessions", get(crate::api::routes::list_sessions))
         .route("/api/sessions", post(crate::api::routes::create_session))
+        // Sessions that already exist in each CLI's own history. `discover` is
+        // read-only; `sync` adopts them and is idempotent.
+        .route("/api/sessions/discover", get(crate::api::sync::discover_sessions))
+        .route("/api/sessions/sync", post(crate::api::sync::sync_sessions))
         .route("/api/sessions/{id}", get(crate::api::routes::get_session).delete(crate::api::routes::delete_session))
         .route("/api/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
         .route("/api/sessions/{id}/attach", post(crate::api::routes::attach_session))
@@ -44,9 +48,22 @@ pub async fn start(
         .route("/api/sessions/{id}/restore", post(crate::api::routes::restore_session))
         .route("/api/sessions/{id}/fork", post(crate::api::routes::fork_session))
         .route("/api/sessions/{id}/resume", post(crate::api::routes::resume_session))
+        // Session configuration: model, mode, effort, or any dimension the
+        // provider exposes. PATCH returns whether the change actually applied.
+        .route(
+            "/api/sessions/{id}/config",
+            get(crate::api::providers::get_session_config)
+                .patch(crate::api::providers::patch_session_config),
+        )
 
         // Agents
         .route("/api/agents", get(crate::api::routes::list_agents))
+
+        // Providers: discovery, capabilities, and real model lists. The
+        // frontend renders these verbatim and hardcodes no CLI or model.
+        .route("/api/providers", get(crate::api::providers::list_providers))
+        .route("/api/providers/refresh", post(crate::api::providers::refresh_providers))
+        .route("/api/providers/{id}", get(crate::api::providers::get_provider))
 
         // Attachments (multipart upload)
         .route("/api/attachments/upload", post(crate::api::routes::upload_attachment))

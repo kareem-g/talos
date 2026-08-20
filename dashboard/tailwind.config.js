@@ -1,136 +1,87 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
-  content: [
-    './index.html',
-    './src/**/*.{js,ts,jsx,tsx}',
-  ],
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      /**
+       * Color names match the Beautiful UI collection's tokens so components
+       * carried over from `beautifului-collection/` work unmodified. Values are
+       * complete colors rather than HSL channels, because those components also
+       * reference the CSS vars directly in inline styles.
+       */
       colors: {
-        // Beautiful UI collection palette (see index.css — mapped onto the app theme).
-        // These vars hold complete colors because the saved components also use
-        // them directly in inline styles (var(--ink), var(--line), …).
+        canvas: 'var(--canvas)',
+        inset: 'var(--inset)',
+        field: 'var(--field)',
+        surface: 'var(--surface)',
+        hover: 'var(--hover)',
+        'hover-2': 'var(--hover-2)',
+
         ink: 'var(--ink)',
         'ink-2': 'var(--ink-2)',
         'ink-3': 'var(--ink-3)',
-        canvas: 'var(--canvas)',
-        field: 'var(--field)',
-        inset: 'var(--inset)',
-        hover: 'var(--hover)',
-        'hover-2': 'var(--hover-2)',
+
         line: 'var(--line)',
         'line-strong': 'var(--line-strong)',
+
+        accent: 'var(--accent)',
+        'accent-ink': 'var(--accent-ink)',
+        'accent-tint': 'var(--accent-tint)',
+
         green: 'var(--green)',
         'green-tint': 'var(--green-tint)',
         red: 'var(--red)',
         'red-tint': 'var(--red-tint)',
         orange: 'var(--orange)',
         'orange-tint': 'var(--orange-tint)',
-        'accent-ink': 'var(--accent-ink)',
-        'accent-tint': 'var(--accent-tint)',
-        background: 'hsl(var(--background))',
-        surface: 'hsl(var(--surface))',
-        'surface-hover': 'hsl(var(--surface-hover))',
-        'surface-active': 'hsl(var(--surface-active))',
-        border: 'hsl(var(--border))',
-        'border-hover': 'hsl(var(--border-hover))',
-        text: 'hsl(var(--text))',
-        'text-muted': 'hsl(var(--text-muted))',
-        'text-dim': 'hsl(var(--text-dim))',
-        accent: 'hsl(var(--accent))',
-        'accent-hover': 'hsl(var(--accent-hover))',
-        success: 'hsl(var(--success))',
-        warning: 'hsl(var(--warning))',
-        error: 'hsl(var(--error))',
-        info: 'hsl(var(--info))',
-        terminal: {
-          bg: 'hsl(var(--terminal-bg))',
-          fg: 'hsl(var(--terminal-fg))',
-          green: 'hsl(var(--terminal-green))',
-          yellow: 'hsl(var(--terminal-yellow))',
-          red: 'hsl(var(--terminal-red))',
-          blue: 'hsl(var(--terminal-blue))',
-          magenta: 'hsl(var(--terminal-magenta))',
-          cyan: 'hsl(var(--terminal-cyan))',
-        },
+
+        'term-bg': 'var(--term-bg)',
+        'term-fg': 'var(--term-fg)',
       },
-      // Fractional + extended steps used throughout the Beautiful UI collection
-      // (size-4.5, h-5.5, h-7.5, max-w-95, h-37, …).
+      borderRadius: {
+        card: '12px',
+        control: '8px',
+        chip: '999px',
+      },
+      boxShadow: {
+        btn: 'var(--shadow-btn)',
+        hairline: 'var(--shadow-hairline)',
+        card: 'var(--shadow-card)',
+        raised: 'var(--shadow-raised)',
+        overlay: 'var(--shadow-overlay)',
+      },
+      /* Fractional steps the collection's components use (h-5.5, size-4.5, h-37…). */
       spacing: {
         '4.5': '1.125rem',
         '5.5': '1.375rem',
         '6.5': '1.625rem',
         '7.5': '1.875rem',
         '8.5': '2.125rem',
-        '9.5': '2.375rem',
         '11.5': '2.875rem',
         '15': '3.75rem',
-        '17': '4.25rem',
-        '19': '4.75rem',
         '30': '7.5rem',
         '37': '9.25rem',
         '68': '17rem',
-        '72': '18rem',
         '78': '19.5rem',
-        '80': '20rem',
         '86': '21.5rem',
-        '88': '22rem',
         '95': '23.75rem',
-        '105': '26.25rem',
-        '110': '27.5rem',
-        '120': '30rem',
       },
       maxWidth: {
-        '72': '18rem',
-        '78': '19.5rem',
         '80': '20rem',
         '86': '21.5rem',
         '95': '23.75rem',
-        '105': '26.25rem',
-        '110': '27.5rem',
-        '120': '30rem',
-      },
-      borderRadius: {
-        card: '14px',
-        control: '8px',
-        chip: '999px',
-      },
-      boxShadow: {
-        btn: '0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04)',
-        hairline: 'inset 0 1px 0 rgba(255,255,255,0.045)',
-        card: '0 1px 3px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03)',
-        raised: '0 8px 24px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.03)',
-        overlay: '0 16px 48px rgba(0,0,0,0.55)',
       },
       fontFamily: {
-        sans: ['Inter', 'SF Pro Display', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
-      },
-      transitionDuration: {
-        250: '250ms',
-        400: '400ms',
-        600: '600ms',
-      },
-      animation: {
-        'fade-in': 'fadeIn 0.15s ease-out',
-        'slide-up': 'slideUp 0.2s ease-out',
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'glow': 'glow 2s ease-in-out infinite alternate',
-      },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(8px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        glow: {
-          '0%': { boxShadow: '0 0 5px hsl(var(--accent) / 0.3)' },
-          '100%': { boxShadow: '0 0 20px hsl(var(--accent) / 0.6)' },
-        },
+        sans: [
+          'Inter',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'SF Pro Text',
+          'system-ui',
+          'sans-serif',
+        ],
+        mono: ['JetBrains Mono', 'SF Mono', 'ui-monospace', 'Cascadia Code', 'monospace'],
       },
     },
   },

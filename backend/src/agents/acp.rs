@@ -75,12 +75,19 @@ struct AcpHandle {
     approvals: Arc<Mutex<HashMap<String, AcpApproval>>>,
     child: Arc<Mutex<Option<Child>>>,
     mapper: Arc<Mutex<AcpEventMapper>>,
+    /// The agent's own config dimensions (model, mode, and whatever else it
+    /// exposes), as last reported by `session/new` or
+    /// `session/set_config_option`. This is the authoritative live state: the
+    /// agent tells us what is selected, we never assume.
+    config_options: Arc<Mutex<Vec<crate::providers::ConfigOption>>>,
 }
 
 pub struct AcpSessionInfo {
     pub pid: u32,
     pub acp_session_id: String,
     pub version: String,
+    /// Config dimensions the agent reported at session creation.
+    pub config_options: Vec<crate::providers::ConfigOption>,
 }
 
 /// Tracks tool start/finish pairing and thought streaming for one session so
@@ -99,6 +106,16 @@ impl AcpEventMapper {
         self.turn = self.turn.saturating_add(1);
         self.tool_starts.clear();
         self.thought_open = None;
+    }
+
+    /// Wall time a tool ran, in milliseconds.
+    ///
+    /// `tool_starts` holds a *start timestamp*, so the elapsed time is the
+    /// difference — returning the stored value emitted an epoch millisecond
+    /// count, which rendered as "20674 days".
+    fn elapsed_since_start(&mut self, tool_id: &str) -> Option<u64> {
+        let started = self.tool_starts.remove(tool_id)?;
+        Some(now_millis().saturating_sub(started))
     }
 
     fn map(&mut self, session_id: &str, update: &Value) -> Vec<AgentEvent> {
@@ -136,9 +153,32 @@ impl AcpEventMapper {
                 }
             }
             // Reasoning / thinking streams.
+            //
+            // The chunk's *text* is the point: without it a client can only
+            // render a label, so the reasoning trace expands to nothing. Each
+            // chunk is forwarded as a `thinking_delta` alongside the
+            // started/finished pair.
             "agent_thought_chunk" | "agent_thought" => {
                 let message_id = update.get("messageId").and_then(Value::as_str).unwrap_or("").to_string();
+                let text = extract_text_content(update.get("content"));
+
                 if kind == "agent_thought" {
+                    // A whole thought closes the stream. Its content is the
+                    // complete text, so it replaces the accumulated deltas
+                    // rather than appending — otherwise agents that send both
+                    // chunks and a final whole thought double the trace.
+                    if !text.is_empty() {
+                        events.push(AgentEvent::new(
+                            session_id,
+                            "thinking_delta",
+                            json!({
+                                "text": text,
+                                "delta": false,
+                                "turn": self.turn,
+                                "source": source,
+                            }),
+                        ));
+                    }
                     if self.thought_open.as_deref() == Some(message_id.as_str()) {
                         self.thought_open = None;
                         events.push(AgentEvent::new(
@@ -147,13 +187,27 @@ impl AcpEventMapper {
                             json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
                         ));
                     }
-                } else if self.thought_open.is_none() {
-                    self.thought_open = Some(message_id);
-                    events.push(AgentEvent::new(
-                        session_id,
-                        "thinking_started",
-                        json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
-                    ));
+                } else {
+                    if self.thought_open.is_none() {
+                        self.thought_open = Some(message_id);
+                        events.push(AgentEvent::new(
+                            session_id,
+                            "thinking_started",
+                            json!({ "tool_name": "Thinking", "turn": self.turn, "source": source }),
+                        ));
+                    }
+                    if !text.is_empty() {
+                        events.push(AgentEvent::new(
+                            session_id,
+                            "thinking_delta",
+                            json!({
+                                "text": text,
+                                "delta": true,
+                                "turn": self.turn,
+                                "source": source,
+                            }),
+                        ));
+                    }
                 }
             }
             // Tool call create + patch (v1 sends both).
@@ -217,7 +271,7 @@ impl AcpEventMapper {
                     "completed" | "failed" => {
                         if is_command {
                             let exit_code = extract_exit_code(update);
-                            let duration = self.tool_starts.remove(&tool_id);
+                            let duration = self.elapsed_since_start(&tool_id);
                             events.push(AgentEvent::new(
                                 session_id,
                                 "command_finished",
@@ -232,7 +286,7 @@ impl AcpEventMapper {
                                 }),
                             ));
                         } else {
-                            let duration = self.tool_starts.remove(&tool_id);
+                            let duration = self.elapsed_since_start(&tool_id);
                             let success = status == "completed";
                             events.push(AgentEvent::new(
                                 session_id,
@@ -346,6 +400,40 @@ impl AcpManager {
         binary: &str,
         args: &[String],
     ) -> crate::Result<AcpSessionInfo> {
+        self.start(session_id, agent, project, binary, args, None).await
+    }
+
+    /// Reopen a conversation the agent already has, via `session/load`.
+    ///
+    /// `resume_id` is the agent's own session id. Requires the agent to advertise
+    /// the `loadSession` capability; opencode does, and the handshake reports it.
+    pub async fn resume_session(
+        &self,
+        session_id: &str,
+        agent: &str,
+        project: Option<&str>,
+        binary: &str,
+        args: &[String],
+        resume_id: &str,
+    ) -> crate::Result<AcpSessionInfo> {
+        self.start(session_id, agent, project, binary, args, Some(resume_id))
+            .await
+    }
+
+    /// Spawn the subprocess and either create a session or load an existing one.
+    ///
+    /// The two paths share everything except the final handshake call, so they
+    /// are one function — duplicating the spawn, reader, and writer setup is how
+    /// the resume path would silently drift from the working one.
+    async fn start(
+        &self,
+        session_id: &str,
+        agent: &str,
+        project: Option<&str>,
+        binary: &str,
+        args: &[String],
+        resume_id: Option<&str>,
+    ) -> crate::Result<AcpSessionInfo> {
         let mut command = Command::new(binary);
         command
             .args(args)
@@ -360,9 +448,27 @@ impl AcpManager {
         if let Some(project) = project {
             command.current_dir(project);
         }
-        let mut child = command
-            .spawn()
-            .map_err(|error| crate::AgentDeckError::Pty(format!("Could not start ACP agent {}: {}", binary, error)))?;
+        let mut child = command.spawn().map_err(|error| {
+            // `spawn` reports ENOENT for both a missing binary and a missing
+            // `current_dir`, and the bare OS message ("No such file or
+            // directory") does not say which — it read as though opencode were
+            // not installed when the project directory had been deleted.
+            if error.kind() == std::io::ErrorKind::NotFound {
+                if let Some(project) = project {
+                    if !std::path::Path::new(project).is_dir() {
+                        return crate::AgentDeckError::Session(format!(
+                            "The project directory {} does not exist",
+                            project
+                        ));
+                    }
+                }
+                return crate::AgentDeckError::Session(format!(
+                    "Could not find the {} executable ({})",
+                    agent, binary
+                ));
+            }
+            crate::AgentDeckError::Session(format!("Could not start {}: {}", agent, error))
+        })?;
         let pid = child.id().unwrap_or(0);
 
         let mut stdin: ChildStdin = child.stdin.take().ok_or_else(|| crate::AgentDeckError::Pty("ACP stdin unavailable".to_string()))?;
@@ -389,6 +495,7 @@ impl AcpManager {
             approvals: Arc::clone(&approvals),
             child: Arc::new(Mutex::new(Some(child))),
             mapper: Arc::clone(&mapper),
+            config_options: Arc::new(Mutex::new(Vec::new())), // filled in from session/new
         });
         self.sessions.write().await.insert(session_id.to_string(), Arc::clone(&handle));
         let reader = AcpManager::spawn_reader(self.sessions.clone(), self.broadcast.clone(), session_id.to_string(), stdout, Arc::clone(&handle));
@@ -434,24 +541,86 @@ impl AcpManager {
             .unwrap_or("unknown")
             .to_string();
 
-        let session_new = send_request(&conn, "session/new", json!({
-            "cwd": project.unwrap_or("."),
-            "mcpServers": [],
-        }))
-        .await
-        .map_err(|error| crate::AgentDeckError::Pty(format!("ACP session/new failed: {}", error)))?;
-        let acp_session_id = session_new
-            .get("result")
-            .and_then(|result| result.get("sessionId"))
+        // Resuming requires the agent to support `session/load`. Attempting it
+        // regardless would fail with a confusing protocol error, so the
+        // capability is checked and reported plainly.
+        if resume_id.is_some() {
+            let supports_load = init
+                .pointer("/result/agentCapabilities/loadSession")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !supports_load {
+                return Err(crate::AgentDeckError::Session(format!(
+                    "{} cannot reopen a previous session ({} does not support session/load)",
+                    agent, binary
+                )));
+            }
+        }
+
+        // Create a new conversation, or reopen the one the agent already has.
+        let (method, params) = match resume_id {
+            Some(resume_id) => (
+                "session/load",
+                json!({
+                    "sessionId": resume_id,
+                    "cwd": project.unwrap_or("."),
+                    "mcpServers": [],
+                }),
+            ),
+            None => (
+                "session/new",
+                json!({
+                    "cwd": project.unwrap_or("."),
+                    "mcpServers": [],
+                }),
+            ),
+        };
+
+        let session_new = send_request(&conn, method, params)
+            .await
+            .map_err(|error| crate::AgentDeckError::Session(format!("ACP {} failed: {}", method, error)))?;
+        // The agent may answer with a JSON-RPC error (auth needed, unsupported
+        // client, unknown session, …). Its wording is the most useful thing we can
+        // show, so it is surfaced rather than reduced to "no sessionId".
+        if let Some(message) = session_new
+            .get("error")
+            .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
-            .ok_or_else(|| crate::AgentDeckError::Pty("ACP session/new returned no sessionId".to_string()))?
-            .to_string();
+        {
+            return Err(crate::AgentDeckError::Session(message.to_string()));
+        }
+        let result = session_new.get("result");
+        // `session/load` echoes no sessionId — the caller already supplied it.
+        let acp_session_id = match resume_id {
+            Some(resume_id) => resume_id.to_string(),
+            None => result
+                .and_then(|result| result.get("sessionId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::AgentDeckError::Session(
+                        "ACP session/new returned no sessionId".to_string(),
+                    )
+                })?
+                .to_string(),
+        };
+
+        // Config dimensions come straight from the agent. opencode reports
+        // `model` (with every configured provider's models) and `mode`
+        // (build/plan) here; another agent may report something else entirely,
+        // and it flows through untouched.
+        let config_options = result
+            .map(crate::providers::acp_probe::parse_config_options)
+            .unwrap_or_default();
+        if let Ok(mut stored) = handle.config_options.lock() {
+            *stored = config_options.clone();
+        }
 
         *handle.acp_session_id.lock().unwrap() = acp_session_id.clone();
 
         tracing::info!(
-            "[AgentDeck][ACP] Session {} ready agent={} pid={} acp_session={}",
-            session_id, agent, pid, acp_session_id
+            "[AgentDeck][ACP] Session {} ready agent={} pid={} acp_session={} options={}",
+            session_id, agent, pid, acp_session_id,
+            config_options.iter().map(|option| option.id.as_str()).collect::<Vec<_>>().join(",")
         );
         let _ = reader;
 
@@ -459,6 +628,7 @@ impl AcpManager {
             pid,
             acp_session_id,
             version,
+            config_options,
         })
     }
 
@@ -612,6 +782,78 @@ impl AcpManager {
             json!({ "request_id": request_id, "decision": decision }),
         ));
         Ok(session_id.to_string())
+    }
+
+    /// The agent's current config dimensions for a live session.
+    ///
+    /// Returns what the agent last told us, not what we asked for — if a change
+    /// silently failed, this reflects the failure.
+    pub async fn config_options(&self, session_id: &str) -> Option<Vec<crate::providers::ConfigOption>> {
+        let handle = Arc::clone(self.sessions.read().await.get(session_id)?);
+        handle.config_options.lock().ok().map(|options| options.clone())
+    }
+
+    /// Change one config dimension on a live session.
+    ///
+    /// This is the real mechanism behind model and mode switching: ACP's
+    /// `session/set_config_option` applies immediately to the running agent and
+    /// returns the full updated option set, which we store as the new truth.
+    ///
+    /// Two details are easy to get wrong and were established against a live
+    /// agent: the parameter is `configId` (not `optionId`, which fails with
+    /// `-32602 Invalid params`), and the response carries `configOptions`, so
+    /// there is no need to re-query.
+    ///
+    /// `value` is passed through byte-for-byte. Model ids like
+    /// `localllm/downloaded:Jackrong/MLX-…` must not be reinterpreted on the way.
+    pub async fn set_config_option(
+        &self,
+        session_id: &str,
+        config_id: &str,
+        value: &str,
+    ) -> crate::Result<Vec<crate::providers::ConfigOption>> {
+        let handle = Arc::clone(
+            self.sessions
+                .read()
+                .await
+                .get(session_id)
+                .ok_or_else(|| crate::AgentDeckError::Session("ACP session is not running".to_string()))?,
+        );
+        let acp_session = handle.acp_session_id.lock().unwrap().clone();
+        let response = send_request(
+            &handle.conn,
+            "session/set_config_option",
+            json!({
+                "sessionId": acp_session,
+                "configId": config_id,
+                "value": value,
+            }),
+        )
+        .await
+        .map_err(|error| crate::AgentDeckError::Session(error.to_string()))?;
+
+        // The agent's refusal is more informative than a generic failure.
+        if let Some(message) = response
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+        {
+            return Err(crate::AgentDeckError::Session(message.to_string()));
+        }
+
+        let options = response
+            .get("result")
+            .map(crate::providers::acp_probe::parse_config_options)
+            .unwrap_or_default();
+        if options.is_empty() {
+            return Err(crate::AgentDeckError::Session(
+                "Agent accepted the change but reported no configuration back".to_string(),
+            ));
+        }
+        if let Ok(mut stored) = handle.config_options.lock() {
+            *stored = options.clone();
+        }
+        Ok(options)
     }
 
     /// Stop the subprocess (best-effort `session/cancel`, then kill).
@@ -794,10 +1036,18 @@ async fn send_request_timeout(
         .await
         .map_err(|_| format!("{} timed out", method))?
         .map_err(|_| "agent process is gone".to_string())?;
-    if response.get("error").is_some() {
-        Err(format!("{} failed: {}", method, response.get("error").unwrap_or(&Value::Null)))
-    } else {
-        Ok(response)
+    match response.get("error") {
+        // Report the agent's own sentence, not the JSON-RPC envelope around it.
+        // Agents write genuinely useful messages here ("unknown config option:
+        // warp-drive", "Please run `auggie login`"), and those go straight to the
+        // user — wrapping them in a serialized error object buries the one part
+        // that helps.
+        Some(error) => Err(error
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{} failed: {}", method, error))),
+        None => Ok(response),
     }
 }
 
@@ -1078,6 +1328,43 @@ mod tests {
         assert_eq!(finished[0].payload["success"], true);
     }
 
+    /// `duration_ms` must be *elapsed* time, not the stored start timestamp.
+    /// Emitting the timestamp rendered as "20674 days" in the UI.
+    #[test]
+    fn tool_duration_is_elapsed_not_a_timestamp() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        mapper.map(
+            "s1",
+            &json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "title": "Reading config",
+                "kind": "read",
+                "status": "in_progress",
+            }),
+        );
+        let finished = mapper.map(
+            "s1",
+            &json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "kind": "read",
+                "status": "completed",
+            }),
+        );
+        let duration = finished[0].payload["duration_ms"]
+            .as_u64()
+            .expect("a finished tool reports its duration");
+        // A tool that started microseconds ago cannot have run for hours; the
+        // epoch-timestamp bug produced ~1.79e12 here.
+        assert!(
+            duration < 60_000,
+            "duration_ms should be elapsed milliseconds, got {}",
+            duration
+        );
+    }
+
     #[test]
     fn execute_tools_become_commands() {
         let mut mapper = AcpEventMapper::default();
@@ -1120,7 +1407,65 @@ mod tests {
         let open = json!({ "sessionUpdate": "agent_thought_chunk", "messageId": "t1", "content": [{ "type": "text", "text": "thinking…" }] });
         let close = json!({ "sessionUpdate": "agent_thought", "messageId": "t1", "content": [{ "type": "text", "text": "thought done" }] });
         assert_eq!(mapper.map("s1", &open)[0].kind, "thinking_started");
-        assert_eq!(mapper.map("s1", &close)[0].kind, "thinking_finished");
+        let closing = mapper.map("s1", &close);
+        assert!(closing.iter().any(|event| event.kind == "thinking_finished"));
+    }
+
+    /// The reasoning *text* must reach the client. Emitting only
+    /// started/finished leaves a UI able to render a label and nothing else, so
+    /// the trace expands to an empty box.
+    #[test]
+    fn thought_chunks_carry_their_text_as_deltas() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+
+        let first = json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "messageId": "t1",
+            "content": [{ "type": "text", "text": "The user wants " }]
+        });
+        let events = mapper.map("s1", &first);
+        assert_eq!(events[0].kind, "thinking_started");
+        assert_eq!(events[1].kind, "thinking_delta");
+        assert_eq!(events[1].payload["text"], "The user wants ");
+        assert_eq!(events[1].payload["delta"], true);
+
+        // A second chunk appends, and must not re-open the thought.
+        let second = json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "messageId": "t1",
+            "content": [{ "type": "text", "text": "a terminal." }]
+        });
+        let events = mapper.map("s1", &second);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "thinking_delta");
+        assert_eq!(events[0].payload["text"], "a terminal.");
+    }
+
+    /// An agent sending chunks *and* a final whole thought must not double the
+    /// trace: the whole thought is flagged as a replacement.
+    #[test]
+    fn whole_thought_replaces_rather_than_appends() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        mapper.map(
+            "s1",
+            &json!({ "sessionUpdate": "agent_thought_chunk", "messageId": "t1", "content": [{ "type": "text", "text": "partial" }] }),
+        );
+
+        let events = mapper.map(
+            "s1",
+            &json!({ "sessionUpdate": "agent_thought", "messageId": "t1", "content": [{ "type": "text", "text": "partial and complete" }] }),
+        );
+        let delta = events
+            .iter()
+            .find(|event| event.kind == "thinking_delta")
+            .expect("the closing thought carries its text");
+        assert_eq!(delta.payload["text"], "partial and complete");
+        assert_eq!(
+            delta.payload["delta"], false,
+            "a whole thought must replace the accumulated chunks, not append to them"
+        );
     }
 
     #[test]

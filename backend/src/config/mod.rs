@@ -96,6 +96,14 @@ pub struct AppState {
     /// speak ACP (opencode, copilot, gemini, cursor, qwen, …). These agents
     /// stream native structured events instead of a PTY.
     pub acp_manager: Arc<AcpManager>,
+    /// Structured Claude transport (`claude -p --output-format stream-json`).
+    /// Replaces PTY scraping for Claude so the chat view shows real content
+    /// instead of TUI chrome.
+    pub claude_stream: Arc<crate::agents::claude_stream::ClaudeStreamManager>,
+    /// Provider discovery: what agent CLIs this machine can actually run, with
+    /// their real models and config dimensions. Cached with a TTL because a
+    /// probe spawns processes.
+    pub providers: Arc<crate::providers::ProviderRegistry>,
     pub devices: Arc<DeviceStore>,
     pub hook_tokens: Arc<RwLock<HashMap<String, String>>>,
     pub hook_starts: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,

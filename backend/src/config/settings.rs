@@ -61,6 +61,15 @@ pub struct AgentsConfig {
     /// like the built-in catalog.
     #[serde(default)]
     pub custom: Vec<crate::agents::catalog::CustomAgent>,
+    /// Providers registered by the user for the discovery layer. Unlike
+    /// `custom` above, these carry an explicit transport and are probed through
+    /// the same path as the built-in catalog, so a company-internal CLI is
+    /// indistinguishable from a shipped one downstream.
+    ///
+    /// `env` here stays server-side: it is where API keys live, and it is never
+    /// serialized to a client.
+    #[serde(default)]
+    pub providers: Vec<crate::providers::CustomProvider>,
 }
 
 impl AgentBinary {
@@ -299,6 +308,7 @@ impl Default for Settings {
                 },
                 auto_detect: true,
                 custom: vec![],
+                providers: vec![],
             },
             worktree: WorktreeConfig {
                 enabled: true,

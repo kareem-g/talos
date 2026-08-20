@@ -57,17 +57,39 @@ impl Daemon {
         let broadcast = BroadcastHub::new();
         let pty_manager = Arc::new(PtyManager::new(broadcast.clone()));
         let acp_manager = Arc::new(crate::agents::acp::AcpManager::new(broadcast.clone()));
+        let claude_stream = Arc::new(crate::agents::claude_stream::ClaudeStreamManager::new(broadcast.clone()));
         let state = Arc::new(AppState {
             config: Arc::clone(&self.config),
             session_manager: Arc::clone(&session_manager),
             pty_manager,
             acp_manager,
+            claude_stream,
+            providers: Arc::new(crate::providers::ProviderRegistry::new()),
             devices,
             hook_tokens: Arc::new(RwLock::new(std::collections::HashMap::new())),
             hook_starts: Arc::new(RwLock::new(std::collections::HashMap::new())),
             broadcast,
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
         });
+
+        // Reconcile sessions left mid-flight by a previous run.
+        //
+        // Agent processes do not survive a daemon restart, but their rows do —
+        // so every `running`/`starting` session in the database is stale. Left
+        // alone they show as "Working" forever, with no Resume offered and a
+        // composer whose prompts go nowhere. Marking them resumable is what
+        // makes the state honest.
+        match session_manager.mark_orphaned_sessions_resumable().await {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(
+                "[AgentDeck][Session] Marked {} session(s) from a previous run as resumable",
+                count
+            ),
+            Err(error) => tracing::error!(
+                "[AgentDeck][Session] Could not reconcile sessions from a previous run: {}",
+                error
+            ),
+        }
 
         // Persist terminal bytes and semantic streams into separate stores.
         {

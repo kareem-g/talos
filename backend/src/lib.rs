@@ -6,6 +6,7 @@ pub mod hooks;
 pub mod mcp;
 pub mod models;
 pub mod notifications;
+pub mod providers;
 pub mod pty;
 pub mod protocol;
 pub mod sessions;

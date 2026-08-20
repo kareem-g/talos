@@ -2,433 +2,286 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Design tokens — Beautiful UI collection vocabulary, high-contrast dark.
+ *
+ * Token *names* are the collection's (`--ink`, `--canvas`, `--surface`,
+ * `--field`, `--hover`, `--line`, …) so components carried over from
+ * `beautifului-collection/` work unmodified. The *values* are re-tuned for a
+ * dark, high-contrast surface.
+ *
+ * Contrast against `--canvas`:
+ *   --ink     ≈17:1  body text (past WCAG AAA)
+ *   --ink-2   ≈7.9:1 secondary text
+ *   --ink-3   ≈4.7:1 timestamps, hints (AA floor)
+ *
+ * The previous palette put secondary text at 60% and tertiary at 40% lightness
+ * over a 7% base — under 4.5:1. Legible on a bright desktop panel, not on a
+ * phone outdoors. Every step here is brighter, and elevation is carried by
+ * lightness (canvas → surface → hover) because shadows barely register on
+ * near-black.
+ */
 @layer base {
   :root {
-    --background: 0 0% 7%;
-    --surface: 0 0% 10%;
-    --surface-hover: 0 0% 13%;
-    --surface-active: 0 0% 15%;
-    --border: 0 0% 18%;
-    --border-hover: 0 0% 25%;
-    --text: 0 0% 90%;
-    --text-muted: 0 0% 60%;
-    --text-dim: 0 0% 40%;
-    --accent: 220 90% 56%;
-    --accent-hover: 220 90% 62%;
-    --success: 142 76% 36%;
-    --warning: 38 92% 50%;
-    --error: 0 84% 60%;
-    --info: 199 89% 48%;
-    --terminal-bg: 0 0% 5%;
-    --terminal-fg: 0 0% 85%;
-    --terminal-green: 142 70% 45%;
-    --terminal-yellow: 38 92% 50%;
-    --terminal-red: 0 84% 60%;
-    --terminal-blue: 217 91% 60%;
-    --terminal-magenta: 291 70% 50%;
-    --terminal-cyan: 187 85% 43%;
-  }
-}
+    /* Surfaces, recessed to raised. */
+    --canvas: #08090b;
+    --inset: #0a0c0f;
+    --field: #0e1014;
+    --surface: #14171c;
+    --hover-2: #171a20;
+    --hover: #1d2128;
 
-@layer base {
+    /* Text. */
+    --ink: #f2f4f7;
+    --ink-2: #aab2be;
+    --ink-3: #737c89;
+
+    /* Hairlines. */
+    --line: #23272e;
+    --line-strong: #343a43;
+
+    /* Accent: --accent fills, --accent-ink is accent-colored text. */
+    --accent: #4c8dff;
+    --accent-ink: #7fb0ff;
+    --accent-tint: rgba(76, 141, 255, 0.14);
+
+    --green: #3ddc84;
+    --green-tint: rgba(61, 220, 132, 0.13);
+    --red: #ff6b6b;
+    --red-tint: rgba(255, 107, 107, 0.13);
+    --orange: #ffbb33;
+    --orange-tint: rgba(255, 187, 51, 0.13);
+
+    /* Terminal: near-black so ANSI colors keep their punch. */
+    --term-bg: #050607;
+    --term-fg: #e6e9ee;
+
+    /* Elevation. Subtle, since lightness does most of the work. */
+    --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+    --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    --shadow-overlay: 0 18px 52px rgba(0, 0, 0, 0.7);
+  }
+
   * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-text antialiased;
-    font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-    min-width: 320px;
-  }
-  code, pre, .font-mono {
-    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  }
-}
-
-@layer components {
-  .mobile-app {
-    background:
-      radial-gradient(circle at 100% 0%, hsl(var(--accent) / 0.045), transparent 28rem),
-      hsl(var(--background));
-    -webkit-tap-highlight-color: transparent;
+    border-color: var(--line);
   }
 
-  .mobile-app button,
-  .mobile-app textarea,
-  .mobile-app select {
-    touch-action: manipulation;
-  }
-
-  .mobile-app input,
-  .mobile-app textarea,
-  .mobile-app select {
-    font-size: 16px;
-  }
-
-  .mobile-app button:focus-visible,
-  .mobile-app input:focus-visible,
-  .mobile-app select:focus-visible,
-  .mobile-app textarea:focus-visible {
-    outline: 2px solid hsl(var(--accent));
-    outline-offset: 2px;
-  }
-
-  .mobile-terminal {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    height: 100dvh;
-    overscroll-behavior: none;
-  }
-
-  .mobile-terminal__header,
-  .mobile-terminal__controls {
-    position: relative;
-    z-index: 2;
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .mobile-terminal__viewport {
-    min-height: 0;
-    overflow: hidden;
-    contain: layout paint;
-  }
-
-  .mobile-terminal__viewport .xterm,
-  .mobile-terminal__viewport .xterm-viewport,
-  .mobile-terminal__viewport .xterm-screen {
-    width: 100%;
+  html,
+  body,
+  #root {
     height: 100%;
   }
 
-  .mobile-terminal__viewport .xterm-viewport {
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    touch-action: pan-x pan-y;
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Stop iOS inflating text in landscape. */
+    -webkit-text-size-adjust: 100%;
+    /* No grey flash on tap. */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
   }
 
-  .mobile-terminal__controls {
-    position: relative;
-    z-index: 2;
-    width: 100%;
-    max-width: 100%;
-    overflow: visible;
+  code,
+  pre,
+  kbd,
+  .font-mono {
+    font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    font-variant-ligatures: none;
   }
 
-  @media (min-width: 640px) {
-    .mobile-app input,
-    .mobile-app select {
-      font-size: inherit;
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-tint);
+  }
+}
+
+/* Reused base classes from the collection. */
+@layer components {
+  .primitive-card-pad {
+    padding: 0.75rem 0.875rem;
+  }
+
+  .primitive-card-footer {
+    padding: 0.5rem 0.625rem 0.5rem 0.875rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .primitive-icon-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 5px;
+    color: var(--ink-3);
+    transition: background-color 100ms, color 100ms;
+  }
+  .primitive-icon-button:hover:enabled {
+    background: var(--hover);
+    color: var(--ink-2);
+  }
+  .primitive-icon-button:disabled {
+    opacity: 0.35;
+  }
+
+  /* Scrollbars: recessive on pointer devices, absent on touch. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  @media (pointer: coarse) {
+    .scroll-thin::-webkit-scrollbar {
+      width: 0;
+      height: 0;
     }
   }
 }
 
-/* ============================================================================
- * AI-NATIVE LAYER — Beautiful UI motion + tokens adapted to AgentDeck.
- * Keeps the app's existing HSL token system (theme stays coherent) and adds the
- * semantic animation language collected from beautifului.dev.
- * ========================================================================== */
-@layer base {
-  :root {
-    /* Semantic AI accents layered on top of the existing theme tokens. */
-    --ai-ink-3: hsl(var(--text-dim));          /* most-muted foreground   */
-    --ai-ink-2: hsl(var(--text-muted));        /* muted foreground        */
-    --ai-line: hsl(var(--border));             /* hairline separator      */
-    --ai-line-strong: hsl(var(--border-hover));
-    --ai-surface: hsl(var(--surface));
-    --ai-surface-2: hsl(var(--surface-hover));
-    --ai-canvas: hsl(var(--background));
-    --ai-accent-tint: hsl(var(--accent) / 0.12);
-    --ai-green-tint: hsl(var(--success) / 0.12);
-    --ai-red-tint: hsl(var(--error) / 0.12);
-    --ai-orange: hsl(var(--warning));
-    --ai-green: hsl(var(--success));
-    --ai-red: hsl(var(--error));
-    --ai-accent: hsl(var(--accent));
-
-    /* Beautiful UI collection palette — the exact token names the saved
-       components reference via var(--*) and Tailwind utilities. Values are
-       mapped onto AgentDeck's dark theme so the collection renders natively. */
-    --ink: hsl(var(--text));                   /* primary foreground      */
-    --ink-2: hsl(var(--text-muted));           /* secondary foreground    */
-    --ink-3: hsl(var(--text-dim));             /* muted foreground        */
-    --canvas: hsl(var(--background));          /* app background          */
-    --field: hsl(var(--surface-hover));        /* input/control wells     */
-    --inset: hsl(0 0% 11.5%);                  /* recessed insets         */
-    --hover: hsl(var(--surface-hover));        /* hover wash              */
-    --hover-2: hsl(var(--surface-active));     /* stronger hover wash     */
-    --line: hsl(var(--border));                /* hairline separator      */
-    --line-strong: hsl(var(--border-hover));   /* emphasized separator    */
-    --accent-ink: hsl(0 0% 100%);              /* text on accent          */
-    --accent-tint: hsl(var(--accent) / 0.12);
-    --green: hsl(var(--terminal-green));
-    --green-tint: hsl(var(--terminal-green) / 0.12);
-    --red: hsl(var(--error));
-    --red-tint: hsl(var(--error) / 0.12);
-    --orange: hsl(var(--warning));
-    --orange-tint: hsl(var(--warning) / 0.12);
-
-    /* Elevation tokens — same values as the Tailwind shadow-* utilities, also
-       exposed as vars because saved components use var(--shadow-*) inline. */
-    --shadow-btn: 0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-    --shadow-hairline: inset 0 1px 0 rgba(255,255,255,0.045);
-    --shadow-card: 0 1px 3px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
-    --shadow-raised: 0 8px 24px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.03);
-    --shadow-overlay: 0 16px 48px rgba(0,0,0,0.55);
-  }
-}
-
-/* Keyframes the saved Beautiful UI components reference by name from inline
-   styles. Kept global (outside layers) so they are always emitted. */
-@keyframes shimmer-text {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
-}
+/* Shared keyframes the collection's components reference. */
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes pop-in {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes stream-in {
-  from { opacity: 0; filter: blur(4px); }
-  to { opacity: 1; filter: blur(0); }
-}
-@keyframes pixel-on {
-  0% { opacity: 0.15; }
-  100% { opacity: 1; }
-}
-@keyframes eq-bounce {
-  0%, 100% { transform: scaleY(0.35); }
-  50% { transform: scaleY(1); }
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    opacity: 0;
+  }
 }
 
-@layer components {
-  /* Shared primitives the collection components apply as plain classes. */
-  .primitive-card-pad {
-    @apply rounded-card bg-surface p-3 shadow-card;
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
-  .primitive-card-bar {
-    @apply flex items-center gap-2 border-b border-line px-3 py-2;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
   }
-  .primitive-card-footer {
-    @apply flex items-center gap-2 border-t border-line px-3 py-2;
+}
+
+@keyframes stream-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
   }
-  .primitive-icon-button {
-    @apply flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink-2;
+}
+
+@keyframes shimmer-text {
+  to {
+    background-position: -200% 0;
   }
-  .primitive-table-cell {
-    @apply px-3 py-2 text-[12px];
+}
+
+@keyframes caret-blink {
+  to {
+    opacity: 0;
   }
-  .animated-underline {
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    text-decoration-color: hsl(var(--line-strong));
-    text-decoration-thickness: 1px;
-    transition: text-decoration-color 150ms ease, color 150ms ease;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
   }
-  .animated-underline:hover {
-    text-decoration-color: hsl(var(--ink));
+  50% {
+    opacity: 0.45;
   }
-  .source-avatar {
-    object-fit: cover;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
   }
-  .filter-status-todo { @apply bg-orange-tint text-orange; }
-  .filter-status-progress { @apply bg-accent-tint text-accent; }
-  .filter-status-done { @apply bg-green-tint text-green; }
+}
+
+@keyframes sheet-in-mobile {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 @layer utilities {
-  /* Shimmering text used by loading + streaming headers. */
-  .ai-shimmer-text {
-    background-image: linear-gradient(
+  /* Streaming caret, appended to the trailing text run. */
+  .caret::after {
+    content: '';
+    display: inline-block;
+    width: 0.45em;
+    height: 1.05em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: var(--accent);
+    animation: caret-blink 1.1s steps(2, start) infinite;
+  }
+
+  .breathe {
+    animation: breathe 1.8s ease-in-out infinite;
+  }
+
+  /* Shimmer used for in-flight labels ("Thinking…"). */
+  .shimmer {
+    background: linear-gradient(
       90deg,
-      hsl(var(--text-dim)) 35%,
-      hsl(var(--text)) 50%,
-      hsl(var(--text-dim)) 65%
+      var(--ink-3) 0%,
+      var(--ink) 45%,
+      var(--ink-3) 90%
     );
     background-size: 200% 100%;
-    background-clip: text;
     -webkit-background-clip: text;
+    background-clip: text;
     color: transparent;
-    animation: ai-shimmer 1.4s linear infinite;
+    animation: shimmer-text 2.2s linear infinite;
   }
 
-  .ai-hairline {
-    box-shadow: inset 0 1px 0 0 hsl(var(--accent) / 0.06);
+  .animate-sheet {
+    animation: sheet-in 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  @media (max-width: 639px) {
+    .animate-sheet {
+      animation: sheet-in-mobile 220ms cubic-bezier(0.23, 1, 0.32, 1);
+    }
   }
 
-  .ai-muted-check {
-    color: hsl(var(--success));
+  .animate-fade {
+    animation: fade-in 140ms ease-out;
   }
 
-  .ai-scroll-thin::-webkit-scrollbar {
-    height: 6px;
-    width: 6px;
-  }
-  .ai-scroll-thin::-webkit-scrollbar-thumb {
-    background: hsl(var(--border-hover));
-    border-radius: 999px;
+  .animate-up {
+    animation: fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
   }
 
-  .ai-reduced-motion {
-    animation: none !important;
-    transition: none !important;
-  }
-
-  /* Hide scrollbars but keep scrolling — used by the mobile command bar. */
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
-
-@layer keyframes {
-  @keyframes ai-shimmer {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
-  }
-  /* Word resolve out of blur (streaming text). */
-  @keyframes ai-stream-in {
-    from { opacity: 0; filter: blur(4px); }
-    to { opacity: 1; filter: blur(0); }
-  }
-  /* Gentle rise for list rows. */
-  @keyframes ai-fade-up {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  /* Soft scale-in for popped elements. */
-  @keyframes ai-pop-in {
-    from { opacity: 0; transform: scale(0.96); }
-    to { opacity: 1; transform: scale(1); }
-  }
-  /* Pixel-grid loader cells. */
-  @keyframes ai-pixel-on {
-    0% { opacity: 0.15; }
-    100% { opacity: 1; }
-  }
-  /* Blinking caret for streaming composition. */
-  @keyframes ai-caret {
-    0%, 49% { opacity: 1; }
-    50%, 100% { opacity: 0; }
-  }
-}
-
-/* Respect prefers-reduced-motion globally for the AI layer. */
-@media (prefers-reduced-motion: reduce) {
-  .ai-shimmer-text,
-  [data-ai-anim] {
-    animation: none !important;
-  }
-}
-
-/* ============================================================================
- * XTERM MOBILE — keep the raw PTY terminal well-behaved on touch screens.
- * ========================================================================== */
-
-/* The terminal viewport is the scroll region on mobile; page scrolling is
- * disabled inside the terminal screen so touch drags always scroll the
- * terminal output instead of bouncing the page (no pull-to-refresh here). */
-.xterm .xterm-viewport {
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border-hover)) transparent;
-}
-
-/* xterm's hidden input textarea must not trigger page-level panning when the
- * keyboard opens; keep gestures scoped to the terminal surface. */
-.xterm .xterm-screen {
-  touch-action: pan-x pan-y;
-}
-
-/* The terminal textarea is an invisible full-size layer; make sure taps pass
- * through to focus it without any browser chrome interference. */
-.xterm .xterm-helper-textarea {
-  touch-action: none;
-}
-
-/* ============================================================================
- * MARKDOWN — ChatGPT-style typography for assistant messages.
- * The `.aui-markdown` class wraps every assistant text part.
- * ========================================================================== */
-
-.aui-markdown {
-  font-size: 13.5px;
-  line-height: 1.65;
-  color: var(--ink);
-}
-.aui-markdown > :first-child { margin-top: 0; }
-.aui-markdown > :last-child { margin-bottom: 0; }
-.aui-markdown p { margin: 0.55rem 0; }
-.aui-markdown ul { list-style: disc; padding-left: 1.3rem; margin: 0.55rem 0; }
-.aui-markdown ol { list-style: decimal; padding-left: 1.3rem; margin: 0.55rem 0; }
-.aui-markdown li { margin: 0.22rem 0; }
-.aui-markdown li > p { margin: 0.2rem 0; }
-.aui-markdown h1, .aui-markdown h2, .aui-markdown h3,
-.aui-markdown h4, .aui-markdown h5, .aui-markdown h6 {
-  font-weight: 650;
-  color: var(--ink);
-  line-height: 1.3;
-  margin: 1rem 0 0.4rem;
-}
-.aui-markdown h1 { font-size: 1.18em; }
-.aui-markdown h2 { font-size: 1.1em; }
-.aui-markdown h3 { font-size: 1.03em; }
-.aui-markdown h4 { font-size: 1em; }
-.aui-markdown a {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.aui-markdown strong { font-weight: 650; color: var(--ink); }
-.aui-markdown blockquote {
-  margin: 0.6rem 0;
-  padding: 0.15rem 0 0.15rem 0.8rem;
-  border-left: 3px solid var(--line-strong);
-  color: var(--ink-2);
-}
-.aui-markdown hr {
-  margin: 1rem 0;
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-.aui-markdown table {
-  margin: 0.6rem 0;
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.95em;
-}
-.aui-markdown th, .aui-markdown td {
-  border: 1px solid var(--line);
-  padding: 0.35rem 0.6rem;
-  text-align: left;
-}
-.aui-markdown th { background: var(--field); font-weight: 600; }
-.aui-markdown :not(pre) > code {
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--field);
-  padding: 0.1rem 0.35rem;
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  font-size: 0.9em;
-  color: var(--ink);
-}
-.aui-markdown pre { margin: 0.6rem 0; }

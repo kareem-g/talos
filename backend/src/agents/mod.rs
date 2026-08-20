@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod catalog;
 pub mod claude;
+pub mod claude_stream;
 pub mod codex;
 pub mod opencode;
 pub mod stream;

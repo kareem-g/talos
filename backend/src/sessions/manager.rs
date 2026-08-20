@@ -48,6 +48,8 @@ impl SessionManager {
             cost: None,
             tokens_used: None,
             resume_command: None,
+            external_id: None,
+            source: "agentdeck".to_string(),
         };
 
         sqlx::query(
@@ -69,6 +71,129 @@ impl SessionManager {
         self.active_sessions.write().await.insert(session.id.clone(), session.clone());
 
         Ok(session)
+    }
+
+    /// Adopt a session that already exists in a CLI's own history.
+    ///
+    /// Idempotent by `(agent, external_id)`: importing twice returns the existing
+    /// row rather than creating a duplicate, so a user can press Sync repeatedly
+    /// without accumulating copies. The status is `NeedsResume` because the
+    /// session is real but not running — the user resumes it to continue.
+    pub async fn import_session(
+        &self,
+        agent: &str,
+        external_id: &str,
+        name: &str,
+        project: Option<&str>,
+        updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(Session, bool)> {
+        if let Some(existing) = self.find_by_external_id(agent, external_id).await? {
+            return Ok((existing, false));
+        }
+
+        let now = chrono::Utc::now();
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            agent: agent.to_string(),
+            project: project.map(str::to_string),
+            branch: None,
+            status: SessionStatus::NeedsResume,
+            worktree_path: None,
+            created_at: updated_at.unwrap_or(now),
+            updated_at: updated_at.unwrap_or(now),
+            cost: None,
+            tokens_used: None,
+            resume_command: None,
+            external_id: Some(external_id.to_string()),
+            source: agent.to_string(),
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO sessions
+                (id, name, agent, project, status, created_at, updated_at, external_id, source)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+        )
+        .bind(&session.id)
+        .bind(&session.name)
+        .bind(&session.agent)
+        .bind(&session.project)
+        .bind("needs_resume")
+        .bind(&session.created_at)
+        .bind(&session.updated_at)
+        .bind(&session.external_id)
+        .bind(&session.source)
+        .execute(&self.pool)
+        .await?;
+
+        Ok((session, true))
+    }
+
+    /// The local row for a provider's session id, if this app has one.
+    pub async fn find_by_external_id(
+        &self,
+        agent: &str,
+        external_id: &str,
+    ) -> Result<Option<Session>> {
+        let row: Option<SessionRow> =
+            sqlx::query_as("SELECT * FROM sessions WHERE agent = ?1 AND external_id = ?2")
+                .bind(agent)
+                .bind(external_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(Session::from))
+    }
+
+    /// Every `(agent, external_id)` pair already imported, for marking discovery
+    /// results without a query per candidate.
+    pub async fn imported_external_ids(&self) -> Result<Vec<(String, String)>> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT agent, external_id FROM sessions WHERE external_id IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Record the CLI's own session id for a session this app created.
+    ///
+    /// ACP agents assign their own id at `session/new` (opencode:
+    /// `ses_ff0133d52ffe…`), and that id — not ours — is what resuming requires.
+    /// Without persisting it, resume passed the local uuid and the CLI answered
+    /// `Invalid session ID`.
+    pub async fn set_external_id(&self, id: &str, external_id: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET external_id = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(external_id)
+            .bind(chrono::Utc::now())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut active = self.active_sessions.write().await;
+        if let Some(session) = active.get_mut(id) {
+            session.external_id = Some(external_id.to_string());
+        }
+        Ok(())
+    }
+
+    /// Mark sessions left `running`/`starting` by a previous daemon run as
+    /// resumable, returning how many were changed.
+    ///
+    /// Agent processes die with the daemon but their rows persist, so on startup
+    /// every such row is stale. Leaving them alone showed sessions as "Working"
+    /// indefinitely with no way to continue them — the status has to reflect that
+    /// nothing is running.
+    pub async fn mark_orphaned_sessions_resumable(&self) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE sessions SET status = 'needs_resume', updated_at = ?1 \
+             WHERE status IN ('running', 'starting')",
+        )
+        .bind(chrono::Utc::now())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
@@ -132,6 +257,40 @@ impl SessionManager {
         }
 
         self.record_state(id, status_str, None, "session_manager", None).await
+    }
+
+    /// Record a requested provider config value (model, mode, effort, …) for a
+    /// session.
+    ///
+    /// This is a *request*, not a claim about the live agent. It is stored so a
+    /// choice made while the agent is stopped survives a restart and is applied
+    /// when the session next spawns. `config_id` and `value` are both opaque
+    /// provider strings and are never parsed — a model id may contain slashes
+    /// and colons.
+    pub async fn set_pending_config(&self, id: &str, config_id: &str, value: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO session_config (session_id, config_id, value, updated_at) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(session_id, config_id) DO UPDATE SET value = ?3, updated_at = ?4",
+        )
+        .bind(id)
+        .bind(config_id)
+        .bind(value)
+        .bind(chrono::Utc::now())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Every requested config value for a session, as `(config_id, value)`.
+    pub async fn pending_config(&self, id: &str) -> Result<Vec<(String, String)>> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT config_id, value FROM session_config WHERE session_id = ?1 ORDER BY config_id",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     /// Store the command the UI should show for resuming this session. Only
@@ -238,7 +397,7 @@ impl SessionManager {
         if self.get_session(id).await?.is_none() {
             return Err(crate::AgentDeckError::Session("Session not found".to_string()));
         }
-        for table in ["transcripts", "messages", "agent_events", "terminal_output", "approvals", "questions", "agent_state"] {
+        for table in ["transcripts", "messages", "agent_events", "terminal_output", "approvals", "questions", "agent_state", "session_config"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?1"))
                 .bind(id)
                 .execute(&self.pool)
@@ -708,6 +867,8 @@ struct SessionRow {
     cost: Option<f64>,
     tokens_used: Option<i64>,
     resume_command: Option<String>,
+    external_id: Option<String>,
+    source: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -737,6 +898,8 @@ impl From<SessionRow> for Session {
             cost: row.cost,
             tokens_used: row.tokens_used.and_then(|value| u64::try_from(value).ok()),
             resume_command: row.resume_command,
+            external_id: row.external_id,
+            source: row.source.unwrap_or_else(|| "agentdeck".to_string()),
         }
     }
 }

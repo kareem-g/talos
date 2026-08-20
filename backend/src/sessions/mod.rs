@@ -1,5 +1,8 @@
+pub mod config;
+pub mod discovery;
 pub mod manager;
 pub mod state;
+pub mod transcripts;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +22,18 @@ pub struct Session {
     /// Populated by the backend when status is `needs_resume`. Lets the UI show
     /// the command without the frontend ever parsing terminal text.
     pub resume_command: Option<String>,
+    /// The CLI's own session id, when this row was imported from a provider's
+    /// history rather than created here. Opaque; used to resume the real session.
+    #[serde(default)]
+    pub external_id: Option<String>,
+    /// How this row arrived: `agentdeck` for locally created, or the provider id
+    /// it was imported from.
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "agentdeck".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +65,8 @@ impl Default for Session {
             cost: None,
             tokens_used: None,
             resume_command: None,
+            external_id: None,
+            source: default_source(),
         }
     }
 }

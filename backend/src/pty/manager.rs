@@ -95,10 +95,23 @@ impl PtyManager {
             session_id, agent, command, project
         );
 
-        let mut child = pair
-            .slave
-            .spawn_command(command_builder)
-            .map_err(|error| crate::AgentDeckError::Pty(error.to_string()))?;
+        let mut child = pair.slave.spawn_command(command_builder).map_err(|error| {
+            // The underlying error is an opaque ENOENT naming neither the binary
+            // nor the directory. Check the likely cause so the user is told
+            // which one it is.
+            if let Some(project) = project {
+                if !std::path::Path::new(project).is_dir() {
+                    return crate::AgentDeckError::Session(format!(
+                        "The project directory {} does not exist",
+                        project
+                    ));
+                }
+            }
+            crate::AgentDeckError::Session(format!(
+                "Could not start {} ({}): {}",
+                agent, command[0], error
+            ))
+        })?;
 
         let session = PtySession {
             id: id.clone(),
