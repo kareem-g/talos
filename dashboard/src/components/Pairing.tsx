@@ -11,9 +11,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Check, Dots, IconButton, Close } from './ui'
+import { Button, Check, CopyButton, Dots, IconButton, Close } from './ui'
 import { ApiError, pairingApi, setDeviceToken } from '@/lib/api'
 import { cn } from '@/lib/format'
+import { formatFingerprint } from '@/lib/pairing'
 
 /* ── QR rendering ──────────────────────────────────────────────────────────
  * `qrcode.react` is already a dependency and renders to SVG, which stays crisp
@@ -110,8 +111,45 @@ export function PairDeviceLayerContent() {
                 <span aria-hidden>·</span>
                 {/* Shown so the phone's displayed fingerprint can be compared
                     out of band, confirming nothing intercepted the exchange. */}
-                <span className="font-mono">{offer.fingerprint}</span>
+                <span className="font-mono">{formatFingerprint(offer.fingerprint)}</span>
               </div>
+              {offer.endpoint ? (
+                <div className="flex max-w-80 flex-col items-center gap-1.5 rounded-control border border-line bg-inset px-3 py-2">
+                  <span className="inline-flex items-center gap-1.5 text-[11px]">
+                    <span
+                      className={cn(
+                        'rounded-chip px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                        offer.endpoint.source === 'cloudflare'
+                          ? 'bg-accent-tint text-accent-ink'
+                          : offer.endpoint.source === 'tailnet_magic_dns' || offer.endpoint.source === 'tailnet_ipv4' || offer.endpoint.source === 'tailnet_ipv6'
+                            ? 'bg-green-tint text-green'
+                            : offer.endpoint.source === 'lan'
+                              ? 'bg-orange-tint text-orange'
+                              : 'bg-field text-ink-3',
+                      )}
+                    >
+                      {offer.endpoint.source === 'cloudflare'
+                        ? 'Cloudflare'
+                        : offer.endpoint.source === 'tailnet_magic_dns'
+                          ? 'Tailnet'
+                          : offer.endpoint.source === 'tailnet_ipv4'
+                            ? 'Tailnet IPv4'
+                            : offer.endpoint.source === 'tailnet_ipv6'
+                              ? 'Tailnet IPv6'
+                              : offer.endpoint.source === 'lan'
+                                ? 'LAN'
+                                : offer.endpoint.source}
+                    </span>
+                    <span className="font-mono text-ink-3">{offer.endpoint.host}</span>
+                    {offer.endpoint.secure ? <span className="text-green">· secure</span> : null}
+                    {!offer.endpoint.reachable ? <span className="text-orange">· unreachable</span> : null}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="max-w-48 truncate font-mono text-[11px] text-ink-3">{offer.qr_data}</span>
+                    <CopyButton value={offer.qr_data} label="Copy" />
+                  </span>
+                </div>
+              ) : null}
             </>
           )}
         </>

@@ -71,6 +71,7 @@ function ConnectionPill({ state, compact }: { state: ConnectionState; compact?: 
     connected: 'Connected',
     reconnecting: 'Reconnecting',
     disconnected: 'Disconnected',
+    offline: 'Offline',
     unauthorized: 'Not paired',
     error: 'Connection error',
   }

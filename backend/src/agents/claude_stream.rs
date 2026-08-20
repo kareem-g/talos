@@ -418,9 +418,9 @@ mod tests {
         let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hi"}},"session_id":"abc"}"#;
         let value: Value = serde_json::from_str(line).expect("valid");
         assert_eq!(value["type"], "stream_event");
-        assert_eq!(value["event"]["event"]["type"], "content_block_delta");
-        assert_eq!(value["event"]["event"]["delta"]["type"], "text_delta");
-        assert_eq!(value["event"]["event"]["delta"]["text"], "Hi");
+        assert_eq!(value["event"]["type"], "content_block_delta");
+        assert_eq!(value["event"]["delta"]["type"], "text_delta");
+        assert_eq!(value["event"]["delta"]["text"], "Hi");
     }
 
     #[test]

@@ -29,12 +29,15 @@ export function TerminalView({
   output,
   onInput,
   onResize,
+  onClear,
   interactive,
   transport,
+  connectionState,
 }: {
   output: string
   onInput: (data: string) => void
   onResize: (cols: number, rows: number) => void
+  onClear?: () => void
   /**
    * Whether this session's terminal accepts keystrokes. False for an ACP session
    * (piped stdio, no PTY) and for one whose process has exited. Output is shown
@@ -43,6 +46,7 @@ export function TerminalView({
   interactive: boolean
   /** Used only to explain *why* input is unavailable. */
   transport?: string
+  connectionState?: string
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -145,8 +149,69 @@ export function TerminalView({
     })
   }, [output])
 
+  function handleClear() {
+    termRef.current?.clear()
+    // Keep writtenRef at current output length so new data appends correctly
+    // but visual buffer is empty until next write
+    if (onClear) onClear()
+  }
+
+  function handleCopy() {
+    // Copy visible terminal buffer
+    const term = termRef.current
+    if (term) {
+      const text = term.getSelection() || output.slice(-4096)
+      navigator.clipboard?.writeText(text).catch(() => undefined)
+    } else if (output) {
+      navigator.clipboard?.writeText(output.slice(-8192)).catch(() => undefined)
+    }
+  }
+
+  const isReconnecting = connectionState === 'reconnecting' || connectionState === 'connecting' || connectionState === 'offline'
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-term-bg">
+      {/* Terminal toolbar: clear, copy, interrupt, connection hint */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-2 py-1.5">
+        <span className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleClear}
+            className="rounded-control bg-field px-2 py-1 font-mono text-[10.5px] text-ink-2 shadow-hairline hover:bg-hover hover:text-ink"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="rounded-control bg-field px-2 py-1 font-mono text-[10.5px] text-ink-2 shadow-hairline hover:bg-hover hover:text-ink"
+          >
+            Copy
+          </button>
+          {interactive ? (
+            <button
+              type="button"
+              onClick={() => onInput('\x03')}
+              className="rounded-control bg-red-tint px-2 py-1 font-mono text-[10.5px] font-bold text-red hover:bg-red-tint"
+              title="Send Ctrl+C (interrupt)"
+            >
+              Ctrl+C
+            </button>
+          ) : null}
+        </span>
+        <span className="flex items-center gap-1.5">
+          {isReconnecting ? (
+            <span className="inline-flex items-center gap-1 rounded-chip bg-orange-tint px-1.5 py-0.5 text-[10.5px] text-orange">
+              <span className="size-1.5 rounded-full bg-orange breathe" aria-hidden />
+              Reconnecting
+            </span>
+          ) : null}
+          <span className="hidden font-mono text-[10.5px] text-ink-3 sm:inline">
+            {interactive ? 'Interactive' : transport === 'acp' ? 'ACP' : 'View only'}
+          </span>
+        </span>
+      </div>
+
       {/*
         The host element is always mounted, never conditionally rendered: xterm
         attaches to it in an effect that does not re-run on output changes, so

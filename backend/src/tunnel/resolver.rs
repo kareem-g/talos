@@ -1,0 +1,241 @@
+//! Reachable endpoint resolver — single source for pairing QR and diagnostics.
+//!
+//! Priority (spec § TAILNET_REMOTE_CONTROL_PROMPT):
+//!   Explicit advertise_base_url → Cloudflare hostname → MagicDNS (`tailscale status --json` self DNSName)
+//!   → Tailscale IPv4 (`ip -4 addr show tailscale0`) → Tailscale IPv6 (`ip -6 ... tailscale0`)
+//!   → LAN (`hostname -I`) → localhost fallback.
+//!
+//! IPv6 addrs are bracketed in URLs `[fd7a::1]`.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointSource {
+    Explicit,
+    Cloudflare,
+    TailnetMagicDns,
+    TailnetIpv4,
+    TailnetIpv6,
+    Lan,
+    Localhost,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReachableEndpoint {
+    pub base_url: String,
+    pub source: EndpointSource,
+    pub host: String,
+    pub port: u16,
+    pub secure: bool,
+    pub reachable: bool,
+}
+
+/// Try `tailscale status --json` and extract `Self.DNSName` + `Self.Online` + tailnet name.
+async fn magic_dns() -> Option<String> {
+    let output = tokio::process::Command::new("tailscale")
+        .args(["status", "--json"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let dns = v.pointer("/Self/DNSName")?.as_str()?.trim_end_matches('.');
+    let online = v.pointer("/Self/Online")?.as_bool().unwrap_or(false);
+    if !online || dns.is_empty() {
+        return None;
+    }
+    // Require a tailnet-qualified name (contains dot)
+    if !dns.contains('.') {
+        return None;
+    }
+    Some(dns.to_string())
+}
+
+async fn tailscale_ip_v4() -> Option<String> {
+    let output = tokio::process::Command::new("ip")
+        .args(["-4", "-o", "addr", "show", "dev", "tailscale0"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        for token in line.split_whitespace() {
+            let addr = token.split('/').next().unwrap_or(token);
+            if addr.parse::<std::net::Ipv4Addr>().is_ok() && !addr.starts_with("127.") {
+                return Some(addr.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn tailscale_ip_v6() -> Option<String> {
+    let output = tokio::process::Command::new("ip")
+        .args(["-6", "-o", "addr", "show", "dev", "tailscale0"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        for token in line.split_whitespace() {
+            let addr = token.split('/').next().unwrap_or(token);
+            if addr.parse::<std::net::Ipv6Addr>().is_ok() && addr != "::1" {
+                return Some(addr.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn lan_ip() -> Option<String> {
+    let output = tokio::process::Command::new("hostname")
+        .arg("-I")
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for token in stdout.split_whitespace() {
+        let addr = token.split('/').next().unwrap_or(token);
+        if addr.parse::<std::net::Ipv4Addr>().is_ok() && !addr.starts_with("127.") {
+            return Some(addr.to_string());
+        }
+    }
+    None
+}
+
+fn bracket_host(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{}]", host)
+    } else {
+        host.to_string()
+    }
+}
+
+/// Resolve a reachable endpoint for this daemon.
+///
+/// `port` is the daemon's listening port. `cloudflare_host` when Some wins over
+/// raw IPs. `tailscale_hostname` is the configured `agentdeck` tailnet host — used
+/// only as fallback before probing MagicDNS; MagicDNS from `tailscale status --json` wins.
+pub async fn resolve_endpoint(
+    port: u16,
+    cloudflare_host: Option<&str>,
+    tailscale_enabled: bool,
+    tailscale_hostname: Option<&str>,
+    advertise_base_url: Option<&str>,
+) -> ReachableEndpoint {
+    if let Some(url) = advertise_base_url {
+        let trimmed = url.trim_end_matches('/');
+        // Determine secure from scheme
+        let secure = trimmed.starts_with("https://");
+        // Extract host for display
+        let host = trimmed
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(trimmed)
+            .to_string();
+        return ReachableEndpoint {
+            base_url: trimmed.to_string(),
+            source: EndpointSource::Explicit,
+            host,
+            port,
+            secure,
+            reachable: true,
+        };
+    }
+
+    if let Some(host) = cloudflare_host {
+        if !host.trim().is_empty() {
+            return ReachableEndpoint {
+                base_url: format!("https://{}", host.trim()),
+                source: EndpointSource::Cloudflare,
+                host: host.trim().to_string(),
+                port,
+                secure: true,
+                reachable: true,
+            };
+        }
+    }
+
+    if tailscale_enabled {
+        if let Some(dns) = magic_dns().await {
+            return ReachableEndpoint {
+                base_url: format!("http://{}:{}", dns, port),
+                source: EndpointSource::TailnetMagicDns,
+                host: dns,
+                port,
+                secure: false,
+                reachable: true,
+            };
+        }
+        if let Some(ip) = tailscale_ip_v4().await {
+            return ReachableEndpoint {
+                base_url: format!("http://{}:{}", ip, port),
+                source: EndpointSource::TailnetIpv4,
+                host: ip,
+                port,
+                secure: false,
+                reachable: true,
+            };
+        }
+        if let Some(ip) = tailscale_ip_v6().await {
+            let bh = bracket_host(&ip);
+            return ReachableEndpoint {
+                base_url: format!("http://{}:{}", bh, port),
+                source: EndpointSource::TailnetIpv6,
+                host: ip,
+                port,
+                secure: false,
+                reachable: true,
+            };
+        }
+        // If tailscale is enabled but we couldn't determine an IP, still report
+        // the configured hostname as last tailscale attempt before falling back to LAN.
+        if let Some(hostname) = tailscale_hostname {
+            if !hostname.trim().is_empty() && hostname.contains('.') {
+                // MagicDNS-style hostname already supplied
+                return ReachableEndpoint {
+                    base_url: format!("http://{}:{}", hostname.trim(), port),
+                    source: EndpointSource::TailnetMagicDns,
+                    host: hostname.trim().to_string(),
+                    port,
+                    secure: false,
+                    reachable: false,
+                };
+            }
+        }
+    }
+
+    if let Some(ip) = lan_ip().await {
+        return ReachableEndpoint {
+            base_url: format!("http://{}:{}", ip, port),
+            source: EndpointSource::Lan,
+            host: ip,
+            port,
+            secure: false,
+            reachable: true,
+        };
+    }
+
+    ReachableEndpoint {
+        base_url: format!("http://localhost:{}", port),
+        source: EndpointSource::Localhost,
+        host: "localhost".to_string(),
+        port,
+        secure: false,
+        reachable: true,
+    }
+}

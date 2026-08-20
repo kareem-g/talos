@@ -1799,8 +1799,68 @@ pub async fn tunnel_status(
     }))
 }
 
+pub async fn tunnel_diagnostics(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+    let cloudflare_host = if cfg.settings().tunnel.cloudflare.enabled {
+        cfg.settings().tunnel.cloudflare.hostname.clone()
+    } else {
+        None
+    };
+    let tailscale_enabled = cfg.settings().tunnel.tailscale.enabled;
+    let tailscale_hostname = cfg.settings().tunnel.tailscale.hostname.clone();
+    let port = cfg.settings().server.port;
+    drop(cfg);
+
+    let endpoint = crate::tunnel::resolver::resolve_endpoint(
+        port,
+        cloudflare_host.as_deref(),
+        tailscale_enabled,
+        Some(&tailscale_hostname),
+        None,
+    )
+    .await;
+
+    // Try to enrich with tailscale status --json diagnostics
+    let tailscale_diag = if tailscale_enabled {
+        let status_json = tokio::process::Command::new("tailscale")
+            .args(["status", "--json"])
+            .output()
+            .await
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    serde_json::from_slice::<serde_json::Value>(&o.stdout).ok()
+                } else {
+                    None
+                }
+            });
+        if let Some(v) = status_json {
+            json!({
+                "enabled": true,
+                "self_dns": v.pointer("/Self/DNSName").and_then(|x| x.as_str()),
+                "self_online": v.pointer("/Self/Online").and_then(|x| x.as_bool()),
+                "tailnet": v.pointer("/Self/DNSName").and_then(|x| x.as_str()).and_then(|dns| dns.split('.').nth(1)).unwrap_or(""),
+                "peer_count": v.pointer("/Peer").and_then(|p| p.as_object()).map(|m| m.len()).unwrap_or(0),
+            })
+        } else {
+            json!({ "enabled": true, "reachable": endpoint.source == crate::tunnel::resolver::EndpointSource::TailnetIpv4 || endpoint.source == crate::tunnel::resolver::EndpointSource::TailnetMagicDns })
+        }
+    } else {
+        json!({ "enabled": false })
+    };
+
+    Json(json!({
+        "endpoint": endpoint,
+        "tailscale": tailscale_diag,
+        "cloudflare": cloudflare_host.map(|h| json!({ "enabled": true, "hostname": h, "url": format!("https://{}", h) })).unwrap_or(json!({ "enabled": false })),
+    }))
+}
+
 // ===== PAIRING =====
 
+#[allow(dead_code)]
 async fn reachable_host(fallback: &str, interface: Option<&str>) -> String {
     let output = if let Some(interface) = interface {
         tokio::process::Command::new("ip")
@@ -1840,10 +1900,6 @@ pub async fn initiate_pairing(
     let offer_secret = random_secret();
     let fingerprint = format!("{}", &hash_secret(&offer_secret)[..12]);
 
-    let local_hostname = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "localhost".to_string());
-
     let cfg = state.config.read().await;
     let cloudflare_host = if cfg.settings().tunnel.cloudflare.enabled {
         cfg.settings().tunnel.cloudflare.hostname.clone()
@@ -1855,19 +1911,18 @@ pub async fn initiate_pairing(
     let port = cfg.settings().server.port;
     drop(cfg);
 
-    let base_url = if let Some(host) = cloudflare_host {
-        format!("https://{}", host)
-    } else if tailscale_enabled {
-        let host = reachable_host(&tailscale_hostname, Some("tailscale0")).await;
-        format!("http://{}:{}", host, port)
-    } else {
-        let host = reachable_host(&local_hostname, None).await;
-        format!("http://{}:{}", host, port)
-    };
+    let endpoint = crate::tunnel::resolver::resolve_endpoint(
+        port,
+        cloudflare_host.as_deref(),
+        tailscale_enabled,
+        Some(&tailscale_hostname),
+        None,
+    )
+    .await;
 
     let qr_data = format!(
         "{}/mobile/pair?offer={}&secret={}",
-        base_url, offer_id, offer_secret
+        endpoint.base_url, offer_id, offer_secret
     );
 
     let expires_at = chrono::Utc::now() + chrono::Duration::minutes(2);
@@ -1885,6 +1940,7 @@ pub async fn initiate_pairing(
         "fingerprint": fingerprint,
         "expires_at": expires_at.to_rfc3339(),
         "status": "waiting_for_device",
+        "endpoint": endpoint,
     }))
 }
 

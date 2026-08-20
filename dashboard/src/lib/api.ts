@@ -233,6 +233,14 @@ export interface PairingOffer {
   fingerprint: string
   expires_at: string
   status: string
+  endpoint?: {
+    base_url: string
+    source: string
+    host: string
+    port: number
+    secure: boolean
+    reachable: boolean
+  }
 }
 
 export interface PairedDevice {

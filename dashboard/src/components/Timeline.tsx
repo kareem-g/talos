@@ -80,15 +80,18 @@ const Turn = memo(function Turn({
   )
 })
 
-/** Live activity line. Present only while the agent is actually working. */
+/** Live activity — Zcode-style: state label + mono detail on second line. */
 function ActivityLine({ activity }: { activity: Activity }) {
+  const hasDetail = Boolean(activity.detail)
   return (
-    <div className="flex items-center gap-2 py-0.5">
-      <Dots />
-      <span className="min-w-0 truncate text-[12px]">
-        <span className="shimmer">{activity.label}</span>
-        {activity.detail ? (
-          <span className="ml-1.5 font-mono text-[11.5px] text-ink-3">{activity.detail}</span>
+    <div className="flex items-start gap-2.5 rounded-card border border-line/60 bg-surface/60 px-3 py-2.5 shadow-card animate-up">
+      <span className="mt-1 flex shrink-0">
+        <Dots />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[12px] font-medium leading-none text-ink shimmer">{activity.label}</span>
+        {hasDetail ? (
+          <span className="mt-1 block truncate font-mono text-[11.5px] leading-none text-ink-3">{activity.detail}</span>
         ) : null}
       </span>
     </div>

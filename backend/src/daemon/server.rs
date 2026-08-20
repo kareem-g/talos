@@ -75,6 +75,7 @@ pub async fn start(
 
         // Tunnel
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))
+        .route("/api/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
 
         // Pairing
         .route("/api/pair", post(crate::api::routes::initiate_pairing))

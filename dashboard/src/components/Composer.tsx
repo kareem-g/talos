@@ -17,6 +17,14 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, StopIcon } from './ui'
 import { cn } from '@/lib/format'
 
+function AttachIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.19 9.19a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+    </svg>
+  )
+}
+
 const MAX_HEIGHT_PX = 168
 
 /** Coarse pointer means touch: Enter must not send. */
@@ -27,6 +35,7 @@ function isTouchPrimary(): boolean {
 export function Composer({
   onSend,
   onStop,
+  onInterrupt,
   working,
   disabled,
   placeholder,
@@ -34,6 +43,7 @@ export function Composer({
 }: {
   onSend: (text: string) => void
   onStop?: () => void
+  onInterrupt?: () => void
   /** True while the agent is running: send becomes stop. */
   working?: boolean
   disabled?: boolean
@@ -99,24 +109,50 @@ export function Composer({
             style={{ maxHeight: MAX_HEIGHT_PX }}
           />
 
-          <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1.5">
-            <div className="scroll-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">
-              {controls}
-            </div>
-
-            {working && onStop ? (
+           <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
               <button
                 type="button"
-                onClick={onStop}
-                aria-label="Stop the agent"
-                className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full',
-                  'bg-red-tint text-red transition-[background-color,transform] duration-150',
-                  'hover:bg-red-tint active:scale-95',
-                )}
+                aria-label="Attach file"
+                title="Attach file (coming soon)"
+                disabled
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-hover text-ink-3 opacity-60 transition-colors hover:bg-hover hover:text-ink-2"
               >
-                <StopIcon />
+                <AttachIcon />
               </button>
+              <div className="scroll-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">{controls}</div>
+            </div>
+
+            {working ? (
+              <span className="flex shrink-0 items-center gap-1.5">
+                {onInterrupt ? (
+                  <button
+                    type="button"
+                    onClick={onInterrupt}
+                    aria-label="Interrupt"
+                    title="Interrupt (Ctrl+C)"
+                    className={cn(
+                      'flex size-8 items-center justify-center rounded-full',
+                      'bg-hover text-ink-2 transition-[background-color,transform] duration-150',
+                      'hover:bg-line-strong hover:text-ink active:scale-95',
+                    )}
+                  >
+                    <span className="font-mono text-[10px] font-bold">^C</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Stop the agent"
+                  className={cn(
+                    'flex size-8 items-center justify-center rounded-full',
+                    'bg-red-tint text-red transition-[background-color,transform] duration-150',
+                    'hover:bg-red-tint active:scale-95',
+                  )}
+                >
+                  <StopIcon />
+                </button>
+              </span>
             ) : (
               <button
                 type="button"

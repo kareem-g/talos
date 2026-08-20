@@ -42,6 +42,7 @@ class SocketClient {
   /** Frames queued while the socket is down, flushed on reconnect. */
   private outbox: ClientFrame[] = []
   private closedByUs = false
+  private lifecycleAttached = false
 
   getState(): ConnectionState {
     return this.state
@@ -62,7 +63,35 @@ class SocketClient {
     if (this.cursor === null || eventId > this.cursor) this.cursor = eventId
   }
 
+  private attachLifecycle(): void {
+    if (this.lifecycleAttached || typeof window === 'undefined') return
+    this.lifecycleAttached = true
+    // App background/foreground — immediately reconnect when user returns
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (this.state === 'disconnected' || this.state === 'offline' || this.state === 'error' || this.state === 'reconnecting') {
+          this.connect()
+        }
+      }
+    })
+    window.addEventListener('online', () => {
+      if (this.state === 'offline' || this.state === 'disconnected' || this.state === 'error') this.connect()
+    })
+    window.addEventListener('offline', () => {
+      this.setState('offline')
+    })
+    window.addEventListener('focus', () => {
+      if (this.state === 'disconnected' || this.state === 'offline' || this.state === 'error') this.connect()
+    })
+  }
+
   connect(): void {
+    this.attachLifecycle()
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.setState('offline')
+      this.scheduleReconnect()
+      return
+    }
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return
     this.closedByUs = false
     this.clearTimer()
@@ -120,7 +149,11 @@ class SocketClient {
         this.setState('idle')
         return
       }
-      this.setState('disconnected')
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        this.setState('offline')
+      } else {
+        this.setState('disconnected')
+      }
       this.scheduleReconnect()
     }
 
@@ -167,6 +200,19 @@ class SocketClient {
     this.send({
       type: 'Command',
       payload: { action: 'stop', params: { session_id: sessionId } },
+    })
+  }
+
+  /** Interrupt current command (SIGINT) — distinct from Stop. */
+  interruptSession(sessionId: string): void {
+    this.send({
+      type: 'Command',
+      payload: { action: 'interrupt', params: { session_id: sessionId } },
+    })
+    // Also send raw ^C to PTY for immediate effect
+    this.send({
+      type: 'TerminalInput',
+      payload: { session_id: sessionId, data: '\x03' },
     })
   }
 
@@ -217,6 +263,15 @@ class SocketClient {
 
   private scheduleReconnect(): void {
     if (this.closedByUs || this.reconnectTimer !== null) return
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.setState('offline')
+      // Retry when navigator comes back online; also poll after backoff in case event missed
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
+        this.connect()
+      }, 5000)
+      return
+    }
     const delay = BACKOFF[Math.min(this.attempt, BACKOFF.length - 1)]
     this.attempt += 1
     this.setState('reconnecting')

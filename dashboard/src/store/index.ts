@@ -315,7 +315,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
   /** Connect the socket and wire frames into the store. Idempotent. */
   start() {
-    socket.onState((connection) => set({ connection }))
+    let previous: ConnectionState = 'idle'
+    socket.onState((connection) => {
+      const wasOffline = previous === 'reconnecting' || previous === 'disconnected' || previous === 'offline' || previous === 'error'
+      previous = connection
+      set({ connection })
+      if (connection === 'connected' && wasOffline) {
+        // Resynchronize with backend truth after interruption — replay covers events but
+        // Session rows may have changed (status, new sessions) while we were away.
+        void get().loadSessions()
+      }
+    })
     socket.onFrame((frame) => handleFrame(frame, set, get))
     socket.connect()
     void get().loadProviders()

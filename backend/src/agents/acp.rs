@@ -856,6 +856,29 @@ impl AcpManager {
         Ok(options)
     }
 
+    /// Interrupt without killing (SIGINT equivalent for ACP).
+    pub async fn interrupt_session(&self, session_id: &str) -> crate::Result<()> {
+        let sessions = self.sessions.read().await;
+        let handle = sessions.get(session_id).ok_or_else(|| {
+            crate::AgentDeckError::Session(format!("Session {} is not running", session_id))
+        })?;
+        let acp_session = handle.acp_session_id.lock().unwrap().clone();
+        let _ = handle.conn.tx.send(Outbound::Notification {
+            method: "session/cancel".to_string(),
+            params: json!({ "sessionId": acp_session }),
+        });
+        self.broadcast.broadcast(WsMessage::StateChange {
+            session_id: session_id.to_string(),
+            state: "running".to_string(),
+        });
+        self.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+            session_id,
+            "agent_stopped",
+            json!({ "reason": "interrupted", "source": "interrupt" }),
+        ));
+        Ok(())
+    }
+
     /// Stop the subprocess (best-effort `session/cancel`, then kill).
     pub async fn kill_session(&self, session_id: &str) -> crate::Result<()> {
         let mut sessions = self.sessions.write().await;

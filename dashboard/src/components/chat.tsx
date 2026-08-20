@@ -225,11 +225,25 @@ function stepIcon(kind: string | undefined, name: string) {
  * chevron on hover, bold label, inline chip for the argument, expanding to the
  * detail behind a left rule.
  */
+function prettyToolLabel(part: ToolPart | CommandPart): string {
+  if (part.kind === 'command') return 'Run command'
+  const hint = `${part.toolKind ?? ''} ${part.name}`.toLowerCase()
+  if (/edit|write|patch|create|update/.test(hint)) return 'Edit file'
+  if (/read|open|view|fetch|cat/.test(hint)) return 'Read file'
+  if (/search|grep|find|glob/.test(hint)) return 'Search'
+  if (/exec|bash|shell|terminal/.test(hint)) return 'Run command'
+  // Fallback: humanize tool name
+  return part.name
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim() || 'Tool'
+}
+
 export function Step({ part }: { part: ToolPart | CommandPart }) {
   const [open, setOpen] = useState(false)
 
   const isCommand = part.kind === 'command'
-  const label = isCommand ? 'Run' : part.name
+  const label = prettyToolLabel(part)
   const chip = isCommand ? part.command : (part.input ?? '')
   const detail = part.output
   const expandable = Boolean(detail || (!isCommand && part.input))

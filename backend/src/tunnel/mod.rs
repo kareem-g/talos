@@ -1,5 +1,6 @@
 pub mod tailscale;
 pub mod cloudflare;
+pub mod resolver;
 
 use crate::Result;
 use serde::{Deserialize, Serialize};

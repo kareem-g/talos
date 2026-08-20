@@ -95,7 +95,8 @@ export type ClientFrame =
 /**
  * Connection lifecycle. `reconnecting` is distinct from `connecting` so the UI
  * can say "Reconnecting…" while preserving state, rather than looking like a
- * fresh page load.
+ * fresh page load. `offline` is the navigator.onLine false state — kept distinct
+ * so the UI can show "Offline" instead of generic disconnected.
  */
 export type ConnectionState =
   | 'idle'
@@ -103,6 +104,7 @@ export type ConnectionState =
   | 'connected'
   | 'reconnecting'
   | 'disconnected'
+  | 'offline'
   | 'unauthorized'
   | 'error'
 

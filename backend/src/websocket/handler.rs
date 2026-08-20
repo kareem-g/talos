@@ -385,13 +385,42 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
 
 async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
     match action {
+        "interrupt" => {
+            if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
+                if state.acp_manager.has_active_session(session_id).await {
+                    let _ = state.acp_manager.interrupt_session(session_id).await;
+                } else if state.pty_manager.has_active_session(session_id).await {
+                    let _ = state.pty_manager.send_input(session_id, "\x03").await;
+                    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                        session_id: session_id.to_string(),
+                        state: "running".to_string(),
+                    });
+                } else if state.claude_stream.has_active_session(session_id).await {
+                    // Claude stream has no graceful interrupt; treat as stop placeholder
+                    let _ = state.claude_stream.kill_session(session_id).await;
+                    let _ = state.session_manager.update_status(
+                        session_id,
+                        crate::sessions::SessionStatus::Exited,
+                    ).await;
+                }
+            }
+        }
         "stop" | "kill" => {
             if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
                 // ACP sessions are stopped by cancelling + killing the
                 // subprocess; PTY sessions by signalling the process.
+                let mut killed = false;
                 if state.acp_manager.has_active_session(session_id).await {
-                    let _ = state.acp_manager.kill_session(session_id).await;
-                } else {
+                    killed = state.acp_manager.kill_session(session_id).await.is_ok();
+                }
+                if state.pty_manager.has_active_session(session_id).await {
+                    killed = state.pty_manager.kill_session(session_id).await.is_ok() || killed;
+                }
+                if state.claude_stream.has_active_session(session_id).await {
+                    killed = state.claude_stream.kill_session(session_id).await.is_ok() || killed;
+                }
+                if !killed {
+                    // Fallback: try PTY kill anyway for imported sessions
                     let _ = state.pty_manager.kill_session(session_id).await;
                 }
                 let _ = state.session_manager.update_status(
