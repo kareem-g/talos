@@ -45,9 +45,11 @@ pub struct CustomAgent {
 }
 
 /// Well-known CLIs that speak ACP. The command is the one configured in
-/// editors (opencode: `opencode acp`, copilot: `copilot --acp`, …).
+/// editors (opencode: `opencode acp`, copilot: `copilot --acp`,
+/// grok: `grok agent stdio` per xAI's agent-mode docs, …).
 pub const ACP_CATALOG: &[(&str, &str, &str, &[&str], &[&str])] = &[
     ("opencode", "OpenCode", "opencode", &["acp"], &["chat", "code", "plan", "auto", "native_ui"]),
+    ("grok", "Grok Build", "grok", &["agent", "stdio"], &["chat", "code", "plan", "auto", "native_ui"]),
     ("copilot", "GitHub Copilot", "copilot", &["--acp"], &["chat", "code", "native_ui"]),
     ("gemini", "Gemini CLI", "gemini", &["--acp"], &["chat", "code", "plan", "native_ui"]),
     ("cursor", "Cursor", "cursor-agent", &["--acp"], &["chat", "code", "native_ui"]),

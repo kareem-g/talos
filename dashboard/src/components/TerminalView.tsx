@@ -33,6 +33,7 @@ export function TerminalView({
   interactive,
   transport,
   connectionState,
+  fontSize: fontSizeProp = 12,
 }: {
   output: string
   onInput: (data: string) => void
@@ -47,6 +48,8 @@ export function TerminalView({
   /** Used only to explain *why* input is unavailable. */
   transport?: string
   connectionState?: string
+  /** Font size in px. Changing it recreates the instance (xterm cannot resize live). */
+  fontSize?: number
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -64,7 +67,7 @@ export function TerminalView({
       cursorBlink: interactive,
       disableStdin: !interactive,
       fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
-      fontSize: 12,
+      fontSize: fontSizeProp,
       lineHeight: 1.4,
       scrollback: 5000,
       // Matches the app's terminal tokens; near-black keeps ANSI colors punchy.
@@ -124,8 +127,8 @@ export function TerminalView({
       writtenRef.current = 0
     }
     // Recreating on `interactive` change is intentional: stdin cannot be toggled
-    // on a live instance.
-  }, [interactive, onInput, onResize])
+    // on a live instance. Font size likewise requires a fresh instance.
+  }, [interactive, onInput, onResize, fontSizeProp])
 
   // Write only what is new, batched to one frame.
   useEffect(() => {

@@ -21,14 +21,18 @@ import {
   AlertIcon,
   Check,
   ChevronDown,
+  Circle,
   CopyButton,
   Dots,
   FileIcon,
   PencilIcon,
+  Search,
   Sparkle,
   Terminal,
 } from './ui'
 import { cn, formatDuration } from '@/lib/format'
+import { decisionLabel, describeApproval } from '@/lib/approvals'
+import { describeTool } from '@/lib/tools'
 import type {
   ApprovalPart,
   CommandPart,
@@ -37,6 +41,8 @@ import type {
   PlanPart,
   ReasoningPart,
   ToolPart,
+  TurnSummaryPart,
+  UsagePart,
 } from '@/types/conversation'
 
 /**
@@ -211,40 +217,25 @@ export function Reasoning({ part }: { part: ReasoningPart }) {
 
 /* ── Tool / command steps ────────────────────────────────────────────────── */
 
-/** Icon by the provider's own tool-kind hint, falling back to a generic glyph. */
-function stepIcon(kind: string | undefined, name: string) {
-  const hint = `${kind ?? ''} ${name}`.toLowerCase()
-  if (/edit|write|patch|create/.test(hint)) return <PencilIcon />
-  if (/read|open|view|fetch/.test(hint)) return <FileIcon />
-  if (/exec|bash|shell|run|command|terminal/.test(hint)) return <Terminal />
+/** Icon by the humanizer's glyph family, falling back to a generic glyph. */
+function stepIcon(glyph: string) {
+  if (glyph === 'edit') return <PencilIcon />
+  if (glyph === 'read' || glyph === 'file') return <FileIcon />
+  if (glyph === 'run') return <Terminal />
+  if (glyph === 'search') return <Search size={13} />
   return <Sparkle />
 }
 
 /**
- * One agent step, in the collection's ToolChips row shape: icon that swaps to a
- * chevron on hover, bold label, inline chip for the argument, expanding to the
- * detail behind a left rule.
+ * One agent step: verb + the argument that matters, expanding to the raw
+ * input/output. The inline chip shows a file name, a command, or a query —
+ * never a JSON dump; the raw payload stays behind the chevron.
  */
-function prettyToolLabel(part: ToolPart | CommandPart): string {
-  if (part.kind === 'command') return 'Run command'
-  const hint = `${part.toolKind ?? ''} ${part.name}`.toLowerCase()
-  if (/edit|write|patch|create|update/.test(hint)) return 'Edit file'
-  if (/read|open|view|fetch|cat/.test(hint)) return 'Read file'
-  if (/search|grep|find|glob/.test(hint)) return 'Search'
-  if (/exec|bash|shell|terminal/.test(hint)) return 'Run command'
-  // Fallback: humanize tool name
-  return part.name
-    .replace(/[_-]/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim() || 'Tool'
-}
-
 export function Step({ part }: { part: ToolPart | CommandPart }) {
   const [open, setOpen] = useState(false)
 
   const isCommand = part.kind === 'command'
-  const label = prettyToolLabel(part)
-  const chip = isCommand ? part.command : (part.input ?? '')
+  const summary = describeTool(part)
   const detail = part.output
   const expandable = Boolean(detail || (!isCommand && part.input))
   const failed = part.status === 'failed'
@@ -274,11 +265,7 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
                   open && 'opacity-0',
                 )}
               >
-                {failed ? (
-                <AlertIcon size={13} />
-              ) : (
-                stepIcon(part.kind === 'tool' ? part.toolKind : 'command', label)
-              )}
+                {failed ? <AlertIcon size={13} /> : stepIcon(summary.glyph)}
               </span>
               {expandable ? (
                 <ChevronDown
@@ -294,9 +281,9 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
           )}
         </span>
 
-        <span className="shrink-0 text-[12.5px] font-medium text-ink">{label}</span>
+        <span className="shrink-0 text-[12.5px] font-medium text-ink">{summary.label}</span>
 
-        {chip ? (
+        {summary.arg ? (
           <span
             className={cn(
               'inline-flex h-5.5 min-w-0 flex-1 items-center truncate rounded-chip bg-field px-1.5',
@@ -304,8 +291,9 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
               'transition-colors duration-100',
               expandable && 'group-hover/row:bg-hover',
             )}
+            title={isCommand ? part.command : part.input}
           >
-            {chip}
+            {summary.arg}
           </span>
         ) : (
           <span className="flex-1" />
@@ -371,20 +359,153 @@ export function FileChips({ files }: { files: FileChangePart[] }) {
 
 /* ── Plan ────────────────────────────────────────────────────────────────── */
 
+/**
+ * Plan steps with live status when the agent reports it (Grok Build and ACP
+ * agents do): a check for completed, a pulsing marker for in-progress, a hollow
+ * dot pending. Statuses come from `entries`; agents without them render the
+ * classic numbered list.
+ */
 export function Plan({ part }: { part: PlanPart }) {
+  const entries: Array<{ content: string; status?: string }> =
+    part.entries ?? part.steps.map((content) => ({ content }))
+  const hasStatus = entries.some((entry) => entry.status !== undefined)
+
   return (
-    <div className="animate-up overflow-hidden rounded-card bg-surface shadow-card">
-      <div className="primitive-card-pad">
-        <p className="pb-1.5 text-[12.5px] font-medium text-ink">{part.title ?? 'Plan'}</p>
-        <ol className="flex flex-col gap-1">
-          {part.steps.map((step, index) => (
-            <li key={index} className="flex gap-2 text-[12px] leading-[1.6] text-ink-2">
-              <span className="shrink-0 tabular-nums text-ink-3">{index + 1}.</span>
-              <span className="min-w-0">{step}</span>
-            </li>
-          ))}
+    <div className="animate-up overflow-hidden rounded-xl border border-line/40 bg-surface/80 shadow-card">
+      <div className="px-4 py-3">
+        <p className="pb-2 text-[12.5px] font-semibold text-ink">{part.title ?? 'Plan'}</p>
+        <ol className="flex flex-col gap-1.5">
+          {entries.map((entry, index) => {
+            const status = entry.status ?? (hasStatus ? 'pending' : undefined)
+            const done = status === 'completed'
+            const active = status === 'in_progress'
+            return (
+              <li
+                key={index}
+                className={cn(
+                  'flex gap-2.5 text-[12px] leading-[1.6]',
+                  done ? 'text-ink-3' : active ? 'text-ink' : 'text-ink-2',
+                )}
+              >
+                {status !== undefined ? (
+                  <span className="mt-[3px] flex size-[13px] shrink-0 items-center justify-center">
+                    {done ? (
+                      <Check size={11} className="text-green" />
+                    ) : active ? (
+                      <span className="size-[7px] rounded-full border border-accent border-t-transparent breathe" />
+                    ) : (
+                      <Circle size={11} className="text-line-strong" />
+                    )}
+                  </span>
+                ) : (
+                  <span className="shrink-0 tabular-nums text-ink-3">{index + 1}.</span>
+                )}
+                <span className="min-w-0">{entry.content}</span>
+              </li>
+            )
+          })}
         </ol>
       </div>
+    </div>
+  )
+}
+
+/* ── Usage ───────────────────────────────────────────────────────────────── */
+
+function formatTokens(count: number | undefined): string | null {
+  if (count === undefined || count <= 0) return null
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 10_000) return `${Math.round(count / 1000)}k`
+  if (count >= 1_000) return `${(count / 1000).toFixed(1)}k`
+  return String(count)
+}
+
+/**
+ * The turn's token meter: compact stat chips that update in place as usage
+ * events stream in. Rendered at the end of a turn — accounting, not prose.
+ */
+export function UsageMeter({ part }: { part: UsagePart }) {
+  const input = formatTokens(part.inputTokens)
+  const output = formatTokens(part.outputTokens)
+  if (input === null && output === null && part.costUsd === undefined) return null
+
+  return (
+    <div className="animate-up mt-0.5 flex flex-wrap items-center gap-1.5">
+      {input !== null ? (
+        <span
+          title={`${part.inputTokens} input tokens`}
+          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-field px-1.5 text-[11px] tabular-nums text-ink-3 shadow-hairline"
+        >
+          <span aria-hidden>↑</span>
+          {input}
+        </span>
+      ) : null}
+      {output !== null ? (
+        <span
+          title={`${part.outputTokens} output tokens`}
+          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-field px-1.5 text-[11px] tabular-nums text-ink-3 shadow-hairline"
+        >
+          <span aria-hidden>↓</span>
+          {output}
+        </span>
+      ) : null}
+      {part.costUsd !== undefined ? (
+        <span
+          title="Estimated cost"
+          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-accent-tint px-1.5 text-[11px] tabular-nums text-accent-ink shadow-hairline"
+        >
+          ${part.costUsd < 0.01 && part.costUsd > 0 ? part.costUsd.toFixed(4) : part.costUsd.toFixed(2)}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/* ── Turn summary ────────────────────────────────────────────────────────── */
+
+const STOP_REASONS: Record<string, string> = {
+  end_turn: 'Completed',
+  complete: 'Completed',
+  completed: 'Completed',
+  stop_sequence: 'Stopped',
+  max_tokens: 'Token limit reached',
+  max_turns: 'Turn limit reached',
+  cancelled: 'Cancelled',
+  interrupted: 'Interrupted',
+  refusal: 'Refused',
+}
+
+/** End-of-turn card: why the turn stopped and what it cost. */
+export function TurnSummary({ part }: { part: TurnSummaryPart }) {
+  const reason = part.stopReason ? STOP_REASONS[part.stopReason] ?? part.stopReason : undefined
+  const input = formatTokens(part.inputTokens)
+  const output = formatTokens(part.outputTokens)
+
+  const stats: string[] = []
+  if (input !== null || output !== null) {
+    stats.push(`${input ?? '0'} in · ${output ?? '0'} out`)
+  }
+  if (part.durationMs !== undefined) stats.push(formatDuration(part.durationMs))
+  if (part.costUsd !== undefined) {
+    stats.push(`$${part.costUsd < 0.01 && part.costUsd > 0 ? part.costUsd.toFixed(4) : part.costUsd.toFixed(2)}`)
+  }
+
+  const failed = /error|refus|max_tokens|max_turns/i.test(part.stopReason ?? '')
+
+  return (
+    <div className="animate-up flex items-center gap-1.5 pt-0.5 text-[11px] text-ink-3">
+      {failed ? (
+        <AlertIcon size={11} className="shrink-0 text-orange" />
+      ) : (
+        <Check size={11} className="shrink-0 text-green" />
+      )}
+      <span>{reason ?? 'Turn complete'}</span>
+      {stats.length > 0 ? (
+        <>
+          <span aria-hidden className="text-ink-3/50">·</span>
+          <span className="tabular-nums">{stats.join(' · ')}</span>
+        </>
+      ) : null}
     </div>
   )
 }
@@ -392,11 +513,9 @@ export function Plan({ part }: { part: PlanPart }) {
 /* ── Approval ────────────────────────────────────────────────────────────── */
 
 /**
- * The collection's ApprovalCard: question, pill choices, footer.
- *
- * Option labels come from the agent — never invented. Once resolved the card
- * stays visible showing the decision, rather than disappearing and leaving the
- * transcript unexplained.
+ * The permission card — premium dark redesign.
+ * Clean card with clear hierarchy: context code, question, and action buttons.
+ * Resolved approvals collapse to a single quiet line.
  */
 export function Approval({
   part,
@@ -406,61 +525,82 @@ export function Approval({
   onRespond: (requestId: string, decision: string) => void
 }) {
   const resolved = part.decision !== undefined
-  const options = part.options.length > 0 ? part.options : ['allow', 'deny']
+  const view = describeApproval(part.prompt, part.options)
   const risky = /high|critical/i.test(part.riskLevel ?? '')
+
+  const emphasis = (kind: 'allow' | 'deny' | 'other', index: number) => {
+    if (kind === 'deny') return 'bg-transparent text-red border border-red/30 hover:bg-red/[0.06]'
+    if (index === 0 || kind === 'allow') return 'bg-accent text-canvas shadow-btn hover:bg-accent-ink'
+    return 'bg-surface border border-line text-ink-2 hover:bg-hover hover:border-line-strong hover:text-ink'
+  }
+
+  if (resolved) {
+    return (
+      <div
+        data-approval-id={part.requestId}
+        className="animate-up flex items-center gap-2 rounded-xl border border-line/50 bg-surface/60 px-3 py-2 text-[11.5px] text-ink-3"
+      >
+        {part.decision && /deny|reject|no\b/i.test(part.decision) ? (
+          <AlertIcon size={12} className="shrink-0 text-orange" />
+        ) : (
+          <Check size={12} className="shrink-0 text-green" />
+        )}
+        <span className="shrink-0 font-medium text-ink-2">{decisionLabel(part.decision!)}</span>
+        <span aria-hidden className="text-ink-3/40">·</span>
+        <span className="min-w-0 flex-1 truncate">{view.context ?? view.question}</span>
+      </div>
+    )
+  }
 
   return (
     <div
+      data-approval-id={part.requestId}
       className={cn(
-        'animate-up overflow-hidden rounded-card shadow-card',
-        resolved ? 'bg-surface' : risky ? 'bg-red-tint' : 'bg-surface',
+        'animate-up overflow-hidden rounded-xl border bg-surface shadow-card',
+        risky ? 'border-red/25 border-l-2 border-l-red' : 'border-orange/25 border-l-2 border-l-orange',
       )}
+      role="alert"
+      aria-label="Approval required"
     >
-      <div className="primitive-card-pad">
-        <div className="flex items-start gap-2">
-          {!resolved ? (
-            <AlertIcon
-              size={14}
-              className={cn('mt-[3px] shrink-0', risky ? 'text-red' : 'text-orange')}
-            />
-          ) : (
-            <Check size={14} className="mt-[3px] shrink-0 text-green" />
-          )}
-          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.6] text-ink">
-            {part.prompt}
-          </p>
+      {/* Context code block */}
+      {view.context ? (
+        <div className="border-b border-line/40 bg-inset/40 px-4 py-2.5">
+          <code className="block truncate font-mono text-[11.5px] leading-none text-ink-2">
+            {view.context}
+          </code>
         </div>
-        {part.riskLevel && !resolved ? (
-          <p className="mt-1.5 pl-6 text-[11px] text-ink-3">Risk: {part.riskLevel}</p>
-        ) : null}
+      ) : null}
+
+      <div className="flex items-start gap-3 px-4 pb-3 pt-3.5">
+        <AlertIcon size={15} className={cn('mt-[2px] shrink-0', risky ? 'text-red' : 'text-orange')} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold text-ink">
+            {view.question}
+          </p>
+          {part.riskLevel ? (
+            <p className="mt-1 text-[11px] text-ink-3">Risk: {part.riskLevel}</p>
+          ) : null}
+        </div>
       </div>
 
-      <div className="primitive-card-footer flex items-center justify-between gap-2">
-        {resolved ? (
-          <span className="text-[11.5px] text-ink-3">
-            Responded <span className="font-mono text-ink-2">{part.decision}</span>
-          </span>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {options.map((option, index) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => onRespond(part.requestId, option)}
-                className={cn(
-                  'inline-flex min-h-8 items-center rounded-chip px-3 text-[12px] font-medium',
-                  'transition-[background-color,transform] duration-150 active:scale-[0.97]',
-                  index === 0
-                    ? 'bg-accent text-canvas shadow-btn hover:bg-accent-ink'
-                    : 'bg-hover text-ink-2 hover:bg-line-strong hover:text-ink',
-                )}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {view.options.length > 0 ? (
+        <div className="flex flex-wrap gap-2 border-t border-line/40 bg-inset/30 px-4 py-3">
+          {view.options.map((option, index) => (
+            <button
+              key={`${option.value}-${index}`}
+              type="button"
+              onClick={() => onRespond(part.requestId, option.value)}
+              className={cn(
+                'inline-flex min-h-8 items-center rounded-lg px-4 text-[12px] font-medium',
+                'transition-all duration-150 active:scale-[0.97]',
+                emphasis(option.kind, index),
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -469,11 +609,16 @@ export function Approval({
 
 export function ErrorCard({ message }: { message: string }) {
   return (
-    <div className="animate-up flex items-start gap-2 rounded-card bg-red-tint p-3 shadow-card">
-      <AlertIcon size={14} className="mt-[2px] shrink-0 text-red" />
-      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.6] text-ink">
-        {message}
-      </p>
+    <div className="animate-up overflow-hidden rounded-xl border border-red/20 bg-red/[0.03] shadow-card">
+      <div className="flex items-start gap-3 px-4 pb-3 pt-3.5">
+        <AlertIcon size={14} className="mt-[2px] shrink-0 text-red" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold text-red">Agent error</p>
+          <p className="mt-1 min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.6] text-ink-2">
+            {message}
+          </p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -506,6 +651,10 @@ export function Part({
       return <Plan part={part} />
     case 'approval':
       return <Approval part={part} onRespond={onRespond} />
+    case 'usage':
+      return <UsageMeter part={part} />
+    case 'turn_summary':
+      return <TurnSummary part={part} />
     case 'error':
       return <ErrorCard message={part.message} />
     case 'file':

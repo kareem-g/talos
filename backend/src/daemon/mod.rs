@@ -68,6 +68,8 @@ impl Daemon {
             devices,
             hook_tokens: Arc::new(RwLock::new(std::collections::HashMap::new())),
             hook_starts: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            permissions: Arc::new(crate::permissions::PermissionBroker::default()),
+            pi_stream: Arc::new(crate::agents::pi_stream::PiStreamManager::new()),
             broadcast,
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
         });

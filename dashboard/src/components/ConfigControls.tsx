@@ -30,7 +30,19 @@ const SOURCE_NOTES: Record<string, string> = {
 
 function currentLabel(option: ConfigOption): string {
   const current = option.currentValue
-  if (!current) return 'Not set'
+  if (!current) {
+    // Flag-driven providers (claude/codex) never report a live currentValue,
+    // so "Not set" looks broken when a model *is* running. Fall back to the
+    // provider's single model or the first choice as an implicit default,
+    // keeping the honest "Not set" only when there is truly nothing to show.
+    if (option.id === 'model' || option.category === 'model') {
+      if (option.choices.length === 1) return option.choices[0].name
+      // If the backend sent choices but no current, treat the first choice as
+      // the provider's default rather than showing a dead "Not set".
+      if (option.choices.length > 0) return option.choices[0].name
+    }
+    return 'Not set'
+  }
   return option.choices.find((choice) => choice.value === current)?.name ?? current
 }
 
@@ -81,9 +93,9 @@ export function ConfigControl({
         disabled={disabled}
         aria-label={`${option.name}: ${currentLabel(option)}`}
         className={cn(
-          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5',
-          'text-[11.5px] shadow-btn transition-colors duration-100',
-          'enabled:hover:bg-hover disabled:opacity-40',
+          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
+          'text-[11.5px] transition-all duration-150',
+          'enabled:hover:bg-hover enabled:hover:border-line-strong disabled:opacity-40',
         )}
       >
         <span className="shrink-0 text-ink-3">{option.name}</span>
@@ -273,9 +285,7 @@ export function ConfigBar({
       ))}
       {live === false ? (
         <Chip tone="orange">
-          <span title="The agent is not running, so these are the provider's options rather than its live state.">
-            not live
-          </span>
+          <span title="The agent is not running — changes apply on the next turn.">applies next turn</span>
         </Chip>
       ) : null}
     </div>

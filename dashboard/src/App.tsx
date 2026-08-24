@@ -1,24 +1,30 @@
 /**
- * App shell — desktop two-screen architecture.
+ * App shell — one control station, three surfaces.
  *
- * Mobile: list *or* session (dvh, single tree). Desktop: Screen 1 (Management)
- * with 240–280px sidebar + sessions dashboard, Screen 2 (Session Workspace)
- * with collapsible 260–320 left, flexible center, 280–360 right.
- * `route` drives Screen 1 → Screen 2; back preserves filters via localStorage.
+ * Desktop: a slim icon rail (Sessions · Remote · Settings) beside full-height
+ * screens; a session opens into the two-pane workspace. Mobile: same screens
+ * under a bottom tab bar, with a session taking over the whole screen and the
+ * bar hidden — thumb reach beats navigation chrome there.
+ *
+ * The redesign rule this shell enforces: the *home screen* is a control
+ * station (what's running, what needs me), not a file manager for sessions.
  */
 
-import { useEffect, useState } from 'react'
-import { PairButton, PairDeviceLayerContent, PairingScreen } from './components/Pairing'
-import { SessionList } from './components/SessionList'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { PairingScreen } from './components/Pairing'
+import { StationHome } from './components/home/StationHome'
+import { RemoteScreen } from './components/remote/RemoteScreen'
+import { SettingsScreen } from './components/settings/SettingsScreen'
 import { SessionView } from './components/SessionView'
-import { Dot, Dots, EmptyState, Layer } from './components/ui'
-import { ManagementSidebar } from './components/desktop/ManagementSidebar'
-import { SessionsDashboard } from './components/desktop/SessionsDashboard'
 import { SessionWorkspace } from './components/desktop/SessionWorkspace'
+import { Dot, Dots, IconButton } from './components/ui'
 import { useRoute } from './lib/route'
-import { useStore } from './store'
+import { getConversation, useStore } from './store'
+import { sessionUIState } from './lib/sessionState'
 import { cn } from './lib/format'
-import type { ConnectionState } from './types/protocol'
+import { notifyOnBackground } from './lib/notify'
+import { socket } from './lib/socket'
+import type { ConnectionState } from '@/types/protocol'
 
 /** Matches Tailwind's `lg` breakpoint. */
 function useIsDesktop(): boolean {
@@ -34,14 +40,68 @@ function useIsDesktop(): boolean {
   return isDesktop
 }
 
-type ManagementNav = 'sessions' | 'settings' | 'help'
+type Screen = 'home' | 'remote' | 'settings'
+
+const SCREENS: Array<{ id: Screen; label: string }> = [
+  { id: 'home', label: 'Sessions' },
+  { id: 'remote', label: 'Remote' },
+  { id: 'settings', label: 'Settings' },
+]
+
+/* ── Nav glyphs ──────────────────────────────────────────────────────────── */
+
+function HomeGlyph({ active }: { active?: boolean }) {
+  return (
+    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
+    </svg>
+  )
+}
+
+function RemoteGlyph({ active }: { active?: boolean }) {
+  return (
+    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
+      <path d="M11 18h2" />
+      <rect x="10" y="6" width="4" height="4" rx="1" />
+    </svg>
+  )
+}
+
+function SettingsGlyph({ active }: { active?: boolean }) {
+  return (
+    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="3" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.3 : 0} />
+      <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" />
+    </svg>
+  )
+}
+
+const GLYPHS: Record<Screen, (props: { active?: boolean }) => React.ReactNode> = {
+  home: HomeGlyph,
+  remote: RemoteGlyph,
+  settings: SettingsGlyph,
+}
+
+function BrandMark({ compact }: { compact?: boolean }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/15">
+        <span className="font-mono text-[12px] font-bold text-accent-ink">A</span>
+      </span>
+      {compact ? null : (
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">AgentDeck</span>
+      )}
+    </span>
+  )
+}
 
 /**
- * Connection indicator. Every state is named, and `reconnecting` is distinct
- * from `connecting`: during a reconnect the UI keeps its state, so calling it
- * "Connecting" would misrepresent what is happening.
+ * Connection indicator. Every state is named; `reconnecting` stays distinct
+ * from `connecting` because during a reconnect the UI still shows its state.
  */
-function ConnectionPill({ state, compact }: { state: ConnectionState; compact?: boolean }) {
+function ConnectionPill({ state }: { state: ConnectionState }) {
   const labels: Record<ConnectionState, string> = {
     idle: 'Offline',
     connecting: 'Connecting',
@@ -53,29 +113,13 @@ function ConnectionPill({ state, compact }: { state: ConnectionState; compact?: 
     error: 'Connection error',
   }
   const tone =
-    state === 'connected'
-      ? 'green'
-      : state === 'connecting' || state === 'reconnecting'
-        ? 'orange'
-        : 'red'
+    state === 'connected' ? 'green' : state === 'connecting' || state === 'reconnecting' ? 'orange' : 'red'
   const pulse = state === 'connecting' || state === 'reconnecting'
-
-  if (compact) {
-    // Collapsed sidebar: the dot alone, with the state in its tooltip.
-    return (
-      <span role="status" title={labels[state]} className="flex items-center justify-center py-1">
-        <Dot tone={tone} pulse={pulse} />
-      </span>
-    )
-  }
-
   return (
     <span
       role="status"
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-chip bg-surface px-2 py-1',
-        'text-[11px] text-ink-2 shadow-btn',
-      )}
+      title={labels[state]}
+      className="inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface/80 px-2.5 py-1 text-[11px] text-ink-2"
     >
       <Dot tone={tone} pulse={pulse} />
       {labels[state]}
@@ -83,16 +127,44 @@ function ConnectionPill({ state, compact }: { state: ConnectionState; compact?: 
   )
 }
 
-function Brand({ compact }: { compact?: boolean }) {
+/** Floating cue when any agent is blocked on you — the station's pager. */
+function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
+  const sessions = useStore((state) => state.sessions)
+  const connection = useStore((state) => state.connection)
+  // Derive outside the selector: `.filter` in a zustand v5 selector returns a
+  // fresh array every call, which useSyncExternalStore reads as "changed" on
+  // every render — an infinite update loop. Selecting the stable `sessions`
+  // reference and filtering here renders exactly once per real change.
+  // Include transcript-level approvals: a session can hold a permission card
+  // while status is still `running`.
+  const blocked = useMemo(
+    () =>
+      sessions.filter((session) => {
+        const uiState = sessionUIState(session, getConversation(session.id), connection)
+        return uiState === 'approval' || uiState === 'input' || uiState === 'failed'
+      }),
+    [sessions, connection],
+  )
+  if (blocked.length === 0) return null
   return (
-    <span className="flex items-center gap-2">
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-accent-tint">
-        <span className="font-mono text-[11px] font-medium text-accent-ink">A</span>
-      </span>
-      {compact ? null : (
-        <span className="text-[13px] font-medium tracking-[-0.01em] text-ink">AgentDeck</span>
+    <button
+      type="button"
+      onClick={() => onOpen(blocked[0].id)}
+      className={cn(
+        'animate-up fixed bottom-20 left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 lg:bottom-5 lg:left-auto lg:right-5 lg:translate-x-0 lg:max-w-none',
+        'inline-flex min-h-12 items-center gap-2.5 rounded-full bg-surface border border-line px-5 py-2.5',
+        'text-[13px] font-semibold text-ink shadow-overlay backdrop-blur-xl',
+        'transition-transform duration-150 active:scale-[0.97]',
       )}
-    </span>
+    >
+      <span className="size-2 shrink-0 rounded-full bg-accent breathe" aria-hidden />
+      <span className="min-w-0 max-w-40 truncate sm:max-w-56">
+        {blocked.length === 1 ? blocked[0].name : `${blocked.length} agents need you`}
+      </span>
+      <span className="hidden shrink-0 text-[11px] font-medium uppercase tracking-[0.1em] opacity-60 sm:inline">
+        Tap to open
+      </span>
+    </button>
   )
 }
 
@@ -102,179 +174,253 @@ export default function App() {
   const connection = useStore((state) => state.connection)
   const sessions = useStore((state) => state.sessions)
   const sessionsLoading = useStore((state) => state.sessionsLoading)
+  const [screen, setScreen] = useState<Screen>('home')
   const isDesktop = useIsDesktop()
-  const [managementNav, setManagementNav] = useState<ManagementNav>('sessions')
-  const [pairing, setPairing] = useState(false)
 
   useEffect(() => {
     if (route.name === 'pair') return
     start()
   }, [start, route.name])
 
-  // Desktop global keyboard shortcuts: Cmd/Ctrl+N new session (works on both screens)
+  /** System alerts while backgrounded: approvals and completions page you. */
   useEffect(() => {
-    if (!isDesktop) return
+    return socket.onFrame((frame) => {
+      const nameFor = (sessionId: string) =>
+        useStore.getState().sessions.find((session) => session.id === sessionId)?.name ?? 'A session'
+      if (frame.type === 'ApprovalRequest') {
+        notifyOnBackground('Approval needed', frame.payload.request.prompt.slice(0, 120))
+      } else if (frame.type === 'StateChange') {
+        if (frame.payload.state === 'waiting_for_approval') {
+          notifyOnBackground('Approval needed', nameFor(frame.payload.session_id))
+        } else if (frame.payload.state === 'completed') {
+          notifyOnBackground('Task finished', nameFor(frame.payload.session_id))
+        }
+      }
+    })
+  }, [])
+
+  // Global keyboard shortcut: Cmd/Ctrl+N starts a session from anywhere.
+  useEffect(() => {
     function onGlobalKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         const state = useStore.getState()
         const prov = state.providers.find((p) => p.state === 'ready') ?? state.providers[0]
         if (!prov) return
-        void state.createSession({ agent: prov.id, name: 'New Session' }).then((s) => navigate({ name: 'session', sessionId: s.id }))
+        void state.createSession({ agent: prov.id }).then((s) =>
+          navigate({ name: 'session', sessionId: s.id }),
+        )
       }
     }
     window.addEventListener('keydown', onGlobalKey)
     return () => window.removeEventListener('keydown', onGlobalKey)
-  }, [isDesktop, navigate])
+  }, [navigate])
+
+  // Route → screen sync: opening a session from anywhere lands on its view.
+  const openSessionFrom = useCallback(
+    (sessionId: string) => navigate({ name: 'session', sessionId }),
+    [navigate],
+  )
 
   const selectedId = route.name === 'session' ? route.sessionId : undefined
-  // Look the session up by id every render, so a live update re-renders with
-  // fresh data rather than a copy captured at click time.
+  // Look the session up live so updates re-render with fresh data.
   const selected = sessions.find((session) => session.id === selectedId)
 
-  // A URL naming a session that does not exist (deleted, or a stale bookmark)
-  // must not leave a blank screen. Wait for the first load before deciding.
+  // A URL naming a missing session must not blank-screen; wait for first load.
   useEffect(() => {
     if (selectedId && !selected && !sessionsLoading && sessions.length > 0) {
       replace({ name: 'list' })
     }
   }, [selectedId, selected, sessionsLoading, sessions.length, replace])
 
+  /* ── Pairing takeover ──────────────────────────────────────────────────── */
   if (route.name === 'pair') {
     return (
       <PairingScreen
         offerId={route.offerId}
         secret={route.secret}
-        onPaired={() => {
-          // Clear the credentials from the URL so they are not left in history.
-          replace({ name: 'list' })
-        }}
+        onPaired={() => replace({ name: 'list' })}
       />
     )
   }
 
-  const pairLayer = (
-    <Layer open={pairing} onClose={() => setPairing(false)} title="Pair a device" size="sm">
-      <PairDeviceLayerContent />
-    </Layer>
-  )
-
-  if (isDesktop) {
-    // Screen 2 — Session Workspace (collapsible left 260–320, center flexible, right 280–360)
-    if (route.name === 'session') {
-      if (selected) {
-        return (
-          <>
-            <SessionWorkspace key={selected.id} session={selected} onBack={() => navigate({ name: 'list' })} />
-            {pairLayer}
-          </>
-        )
-      }
-      if (sessionsLoading) {
-        return (
-          <div className="flex h-dvh items-center justify-center bg-canvas">
-            <Dots label="Opening session…" />
-          </div>
-        )
-      }
-      // stale id handled by effect -> list, but show fallback while redirecting
+  /* ── Session screens ───────────────────────────────────────────────────── */
+  if (route.name === 'session' && selected) {
+    if (!isDesktop) {
       return (
-        <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
-          <ManagementSidebar active={managementNav} onNavigate={setManagementNav} onPair={() => setPairing(true)} />
-          <div className="flex flex-1 items-center justify-center">
-            <EmptyState title="Session not found" description="It may have been deleted." />
-          </div>
-          {pairLayer}
+        <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
+          <SessionView
+            key={selected.id}
+            session={selected}
+            onBack={() => navigate({ name: 'list' })}
+          />
         </div>
       )
     }
-
-    // Screen 1 — Sessions & App Management (sidebar 240–280 + dashboard)
     return (
+      // A session is a full-screen takeover: no shell chrome, the whole
+      // viewport is the workspace. Switching sessions happens inside its own
+      // left rail, not by leaving to the dashboard.
       <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
-        <ManagementSidebar active={managementNav} onNavigate={setManagementNav} onPair={() => setPairing(true)} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* subtle connection bar */}
-          <div className="flex h-6 shrink-0 items-center justify-end gap-2 border-b border-line bg-inset px-6">
-            <ConnectionPill state={connection} />
-          </div>
-          {managementNav === 'sessions' ? (
-            <SessionsDashboard />
-          ) : managementNav === 'settings' ? (
-            <div className="flex flex-1 flex-col bg-inset p-6">
-              <h2 className="text-[15px] font-medium text-ink">Settings</h2>
-              <p className="mt-2 max-w-[640px] text-[13px] leading-[1.6] text-ink-3">
-                App settings, provider configuration, and workspace preferences. Provider and model management is available via the sessions dashboard. Full settings UI is coming soon.
-              </p>
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPairing(true)}
-                  className="rounded-control border border-line bg-surface px-3 py-2 text-[12.5px] text-ink hover:bg-hover"
-                >
-                  Pair a phone
-                </button>
-                <span className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-ink-3">
-                  {sessions.length} sessions
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col bg-inset p-6">
-              <h2 className="text-[15px] font-medium text-ink">Help</h2>
-              <p className="mt-2 max-w-[640px] text-[13px] leading-[1.6] text-ink-3">
-                AgentDeck runs coding agents on this machine. Create a session, watch the agent stream tool calls and terminal output, and approve actions when prompted. Use the command palette or keyboard shortcuts for quick navigation.
-              </p>
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-[12.5px] text-ink-2">
-                <li>
-                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Cmd+N</span> New session
-                </li>
-                <li>
-                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Cmd+K</span> Focus search
-                </li>
-                <li>
-                  <span className="font-mono text-[11px] bg-field rounded px-1.5 py-0.5">Esc</span> Close panel / back
-                </li>
-              </ul>
-            </div>
-          )}
-        </div>
-        {pairLayer}
+        <SessionWorkspace
+          key={selected.id}
+          session={selected}
+          onBack={() => navigate({ name: 'list' })}
+          onOpenSession={(id) => navigate({ name: 'session', sessionId: id })}
+        />
+      </div>
+    )
+  }
+  if (route.name === 'session' && sessionsLoading) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-canvas">
+        <Dots label="Opening session…" />
+      </div>
+    )
+    // A stale id falls through to the shell while the effect redirects.
+  }
+
+  /* ── Screens shell ─────────────────────────────────────────────────────── */
+  const body =
+    screen === 'remote' ? (
+      <RemoteScreen />
+    ) : screen === 'settings' ? (
+      <SettingsScreen />
+    ) : (
+      <StationHome
+        onOpenSession={(session) => openSessionFrom(session.id)}
+      />
+    )
+
+  if (isDesktop) {
+    return (
+      <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
+        <Rail screen={screen} onScreen={setScreen} connection={connection} />
+        <main className="flex min-w-0 flex-1 flex-col">{body}</main>
+        <AttentionPill onOpen={openSessionFrom} />
       </div>
     )
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
-      {selected ? (
-        <SessionView
-          key={selected.id}
-          session={selected}
-          onBack={() => navigate({ name: 'list' })}
-        />
-      ) : selectedId && sessionsLoading ? (
+    <div className="home-scope flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
+      <header
+        className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3"
+        style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+      >
+        <BrandMark compact />
+        <ConnectionPill state={connection} />
+      </header>
+
+      {route.name === 'session' && !selected && sessionsLoading ? (
         <div className="flex flex-1 items-center justify-center">
           <Dots label="Opening session…" />
         </div>
       ) : (
-        <>
-          <header
-            className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5"
-            style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top))' }}
-          >
-            <Brand />
-            <span className="flex items-center gap-1.5">
-              <ConnectionPill state={connection} />
-              <PairButton onOpen={() => setPairing(true)} />
-            </span>
-          </header>
-          <SessionList
-            selectedId={selectedId}
-            onSelect={(session) => navigate({ name: 'session', sessionId: session.id })}
-          />
-        </>
+        <main className="flex min-h-0 flex-1 flex-col">{body}</main>
       )}
-      {pairLayer}
+
+      <AttentionPill onOpen={openSessionFrom} />
+
+      {/* Bottom tab bar */}
+      <nav
+        aria-label="Main"
+        className="z-30 flex shrink-0 items-stretch border-t border-line/60 bg-canvas/95 backdrop-blur-xl"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {SCREENS.map((entry) => {
+          const Glyph = GLYPHS[entry.id]
+          const active = screen === entry.id
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              aria-current={active ? 'page' : undefined}
+              onClick={() => setScreen(entry.id)}
+              className={cn(
+                'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 transition-colors duration-100',
+                active ? 'text-accent-ink' : 'text-ink-3 hover:text-ink-2',
+              )}
+            >
+              <Glyph active={active} />
+              <span className="text-[10px] font-medium">{entry.label}</span>
+            </button>
+          )
+        })}
+      </nav>
     </div>
+  )
+}
+
+/** Desktop icon rail — brand up top, screens mid, connection low. */
+function Rail({
+  screen,
+  onScreen,
+  connection,
+}: {
+  screen: Screen
+  onScreen: (screen: Screen) => void
+  connection: ConnectionState
+}) {
+  return (
+    <aside className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line/60 bg-canvas py-3">
+      <button
+        type="button"
+        aria-label="Sessions"
+        onClick={() => onScreen('home')}
+        className="mb-3 transition-transform duration-150 hover:scale-105 active:scale-95"
+      >
+        <BrandMark compact />
+      </button>
+
+      <div className="flex flex-1 flex-col items-center gap-1">
+        {SCREENS.map((entry) => {
+          const Glyph = GLYPHS[entry.id]
+          const active = screen === entry.id
+          return (
+            <IconButton
+              key={entry.id}
+              label={entry.label}
+              onClick={() => onScreen(entry.id)}
+              tone={active ? 'accent' : 'ghost'}
+              className={cn(active && 'glow-accent')}
+            >
+              <Glyph active={active} />
+            </IconButton>
+          )
+        })}
+      </div>
+
+      {/* Compact connection dot — the pill overflows the 56px rail */}
+      <span
+        role="status"
+        title={
+          (
+            {
+              idle: 'Offline',
+              connecting: 'Connecting',
+              connected: 'Connected',
+              reconnecting: 'Reconnecting',
+              disconnected: 'Disconnected',
+              offline: 'Offline',
+              unauthorized: 'Not paired',
+              error: 'Connection error',
+            } as const
+          )[connection]
+        }
+        className="flex size-7 items-center justify-center rounded-full bg-surface border border-line/40"
+      >
+        <Dot
+          tone={
+            connection === 'connected'
+              ? 'green'
+              : connection === 'connecting' || connection === 'reconnecting'
+                ? 'orange'
+                : 'red'
+          }
+          pulse={connection === 'connecting' || connection === 'reconnecting'}
+        />
+      </span>
+    </aside>
   )
 }

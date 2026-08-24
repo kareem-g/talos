@@ -22,6 +22,61 @@ pub struct HookQuery {
     pub token: String,
 }
 
+/// Permission decision callback from the per-session MCP permission server.
+///
+/// The MCP half (see `permissions::run_mcp_server`) posts here while Claude is
+/// blocked on its tool call; this handler broadcasts the approval card and
+/// holds the connection open until the user answers over the WebSocket.
+pub async fn handle_permission_request(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HookQuery>,
+    Json(body): Json<Value>,
+) -> Response {
+    let authorized = state
+        .hook_tokens
+        .read()
+        .await
+        .get(&query.session_id)
+        .map(|token| token == &query.token)
+        .unwrap_or(false);
+    tracing::info!(session_id=%query.session_id, authorized, "[AgentDeck][Permissions] callback");
+    if !authorized {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid hook token" })))
+            .into_response();
+    }
+
+    let tool_name = body
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown_tool")
+        .to_string();
+    let input = body.get("input").cloned().unwrap_or(json!({}));
+
+    let outcome = crate::permissions::request_user_decision(
+        &state,
+        crate::permissions::PermissionQuery {
+            session_id: query.session_id.clone(),
+            tool_name,
+            input,
+        },
+    )
+    .await;
+
+    tracing::debug!(
+        session_id = %query.session_id,
+        allowed = %outcome.allowed,
+        waited_ms = %outcome.waited_ms,
+        "[AgentDeck][Permissions] decision delivered"
+    );
+
+    Json(if outcome.allowed {
+        json!({ "behavior": "allow", "updatedInput": outcome.input })
+    } else {
+        json!({ "behavior": "deny", "message": outcome.reason })
+    })
+    .into_response()
+}
+
 pub async fn handle_claude_hook(
     State(state): State<Arc<AppState>>,
     Query(query): Query<HookQuery>,

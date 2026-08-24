@@ -50,19 +50,28 @@ const Turn = memo(function Turn({
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
+    const time = new Date(message.createdAt)
     return (
-      <div className="flex justify-end">
-        <div
-          className={cn(
-            'max-w-[86%] rounded-card rounded-br-[5px] bg-surface px-3 py-2 shadow-card',
-            'transition-opacity duration-200',
-            // A quiet cue that the server has not confirmed it yet.
-            message.optimistic && 'opacity-60',
-          )}
-        >
-          <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
-            {text}
-          </p>
+      <div className="group flex justify-end">
+        <div className="flex max-w-[86%] flex-col items-end">
+          <time
+            dateTime={message.createdAt}
+            title={Number.isNaN(time.getTime()) ? undefined : time.toLocaleString()}
+            className="mb-0.5 pr-0.5 font-mono text-[10px] text-ink-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          >
+            {Number.isNaN(time.getTime()) ? '' : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </time>
+          <div
+            className={cn(
+              'rounded-2xl rounded-br-md bg-accent/[0.08] border border-accent/[0.12] px-3.5 py-2.5',
+              'transition-opacity duration-200',
+              message.optimistic && 'opacity-60',
+            )}
+          >
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
+              {text}
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -80,18 +89,18 @@ const Turn = memo(function Turn({
   )
 })
 
-/** Live activity — Zcode-style: state label + mono detail on second line. */
+/** Live activity — premium dark: state label + mono detail on second line. */
 function ActivityLine({ activity }: { activity: Activity }) {
   const hasDetail = Boolean(activity.detail)
   return (
-    <div className="flex items-start gap-2.5 rounded-card border border-line/60 bg-surface/60 px-3 py-2.5 shadow-card animate-up">
+    <div className="flex items-start gap-3 rounded-xl border border-line/40 bg-surface/60 px-4 py-3 shadow-card animate-up">
       <span className="mt-1 flex shrink-0">
         <Dots />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[12px] font-medium leading-none text-ink shimmer">{activity.label}</span>
         {hasDetail ? (
-          <span className="mt-1 block truncate font-mono text-[11.5px] leading-none text-ink-3">{activity.detail}</span>
+          <span className="mt-1.5 block truncate font-mono text-[11.5px] leading-none text-ink-3">{activity.detail}</span>
         ) : null}
       </span>
     </div>
@@ -129,9 +138,13 @@ export function Timeline({
     >
       <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3.5 px-4 py-4">
         {empty ? (
-          <p className="py-10 text-center text-[12.5px] text-ink-3">
-            Send a message to start this session.
-          </p>
+          <div className="flex flex-col items-center gap-1.5 py-14 text-center">
+            <p className="text-[12.5px] font-medium text-ink-2">The transcript is empty.</p>
+            <p className="max-w-[36ch] text-[12px] leading-[1.6] text-ink-3">
+              Send the first message below — the agent's work, tool calls, and
+              approvals will stream here.
+            </p>
+          </div>
         ) : null}
         {conversation.messages.map((message) => (
           <Turn key={message.id} message={message} onRespond={onRespond} />

@@ -4,6 +4,7 @@ pub mod claude;
 pub mod claude_stream;
 pub mod codex;
 pub mod opencode;
+pub mod pi_stream;
 pub mod stream;
 
 use crate::pty::parser::ParsedOutput;

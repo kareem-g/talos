@@ -69,6 +69,38 @@ export interface PlanPart {
   kind: 'plan'
   title?: string
   steps: string[]
+  /**
+   * Live step status, when the agent reports it (Grok Build and other ACP
+   * agents do): "pending" | "in_progress" | "completed". Parallel to `steps`
+   * and possibly shorter — a missing entry renders as pending.
+   */
+  entries?: Array<{ content: string; status?: string }>
+}
+
+/**
+ * Token/cost accounting for a turn, when the agent reports usage
+ * (`usage_update` in ACP; Grok's headless `usage` events map here too).
+ */
+export interface UsagePart {
+  kind: 'usage'
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  costUsd?: number
+}
+
+/**
+ * End-of-turn summary: why the turn stopped plus what it cost. Built from an
+ * `agent_completed` / `end` event's payload when it carries any of these
+ * fields — absent fields mean the agent did not report them.
+ */
+export interface TurnSummaryPart {
+  kind: 'turn_summary'
+  stopReason?: string
+  inputTokens?: number
+  outputTokens?: number
+  costUsd?: number
+  durationMs?: number
 }
 
 /** A permission request awaiting the user. */
@@ -96,6 +128,8 @@ export type MessagePart =
   | FileChangePart
   | PlanPart
   | ApprovalPart
+  | UsagePart
+  | TurnSummaryPart
   | ErrorPart
 
 export type MessageRole = 'user' | 'assistant'
@@ -142,6 +176,13 @@ export interface Conversation {
   /** Raw terminal bytes, for the terminal view. Kept out of the chat. */
   terminal: string
   /**
+   * Slash commands the agent announced (`commands_available`). Rendered as
+   * tappable chips by the composer, not as transcript rows.
+   */
+  commands: string[]
+  /** The agent's current mode (e.g. Grok's build/plan), when reported. */
+  mode?: { id: string; modes: Array<{ id: string; name?: string }> }
+  /**
    * Highest `event_id` applied. Sent as the replay cursor on reconnect so the
    * server resends only what was missed.
    */
@@ -155,6 +196,7 @@ export function emptyConversation(sessionId: string): Conversation {
     sessionId,
     messages: [],
     terminal: '',
+    commands: [],
     lastEventId: 0,
     seenEvents: new Set(),
   }

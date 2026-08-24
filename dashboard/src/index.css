@@ -3,65 +3,78 @@
 @tailwind utilities;
 
 /**
- * Design tokens — Beautiful UI collection vocabulary, high-contrast dark.
- *
- * Token *names* are the collection's (`--ink`, `--canvas`, `--surface`,
- * `--field`, `--hover`, `--line`, …) so components carried over from
- * `beautifului-collection/` work unmodified. The *values* are re-tuned for a
- * dark, high-contrast surface.
+ * Design tokens — Grok × Apple premium dark.
+ * Deep navy-charcoal surfaces, cool blue accent, subdued status palette.
+ * Inspired by Grok's dark UI and Apple's SF aesthetic: maximum contrast
+ * for text, minimal color for chrome, premium feel through restraint.
  *
  * Contrast against `--canvas`:
- *   --ink     ≈17:1  body text (past WCAG AAA)
- *   --ink-2   ≈7.9:1 secondary text
- *   --ink-3   ≈4.7:1 timestamps, hints (AA floor)
- *
- * The previous palette put secondary text at 60% and tertiary at 40% lightness
- * over a 7% base — under 4.5:1. Legible on a bright desktop panel, not on a
- * phone outdoors. Every step here is brighter, and elevation is carried by
- * lightness (canvas → surface → hover) because shadows barely register on
- * near-black.
+ *   --ink     ≈18:1  body text (past WCAG AAA)
+ *   --ink-2   ≈7:1   secondary text
+ *   --ink-3   ≈4.6:1 timestamps, hints (AA floor)
  */
 @layer base {
   :root {
-    /* Surfaces, recessed to raised. */
-    --canvas: #08090b;
-    --inset: #0a0c0f;
-    --field: #0e1014;
-    --surface: #14171c;
-    --hover-2: #171a20;
-    --hover: #1d2128;
+    /* Surfaces — deep charcoal with blue undertone, no green. */
+    --canvas: #09090b;
+    --inset: #0c0c0f;
+    --field: #111114;
+    --surface: #151518;
+    --hover-2: #1a1a1f;
+    --hover: #1f1f25;
 
     /* Text. */
-    --ink: #f2f4f7;
-    --ink-2: #aab2be;
-    --ink-3: #737c89;
+    --ink: #f0f0f2;
+    --ink-2: #9e9ea8;
+    --ink-3: #686878;
 
     /* Hairlines. */
-    --line: #23272e;
-    --line-strong: #343a43;
+    --line: #1e1e25;
+    --line-strong: #2a2a33;
 
-    /* Accent: --accent fills, --accent-ink is accent-colored text. */
-    --accent: #4c8dff;
-    --accent-ink: #7fb0ff;
-    --accent-tint: rgba(76, 141, 255, 0.14);
+    /* Primary accent — cool blue, not green. */
+    --accent: #5b8def;
+    --accent-ink: #7ba4f7;
+    --accent-tint: rgba(91, 141, 239, 0.12);
+    --accent-2: #4a7de0;
 
-    --green: #3ddc84;
-    --green-tint: rgba(61, 220, 132, 0.13);
-    --red: #ff6b6b;
-    --red-tint: rgba(255, 107, 107, 0.13);
-    --orange: #ffbb33;
-    --orange-tint: rgba(255, 187, 51, 0.13);
+    /* Status hues — muted and premium. */
+    --green: #34d399;
+    --green-tint: rgba(52, 211, 153, 0.10);
+    --red: #f87171;
+    --red-tint: rgba(248, 113, 113, 0.10);
+    --orange: #fb923c;
+    --orange-tint: rgba(251, 146, 60, 0.10);
 
-    /* Terminal: near-black so ANSI colors keep their punch. */
-    --term-bg: #050607;
-    --term-fg: #e6e9ee;
+    /* Border-strength status colors. */
+    --green-border: rgba(52, 211, 153, 0.30);
+    --red-border: rgba(248, 113, 113, 0.30);
+    --orange-border: rgba(251, 146, 60, 0.30);
 
-    /* Elevation. Subtle, since lightness does most of the work. */
-    --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.035);
-    --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.035);
-    --shadow-overlay: 0 18px 52px rgba(0, 0, 0, 0.7);
+    /* Agent identity hues. */
+    --agent-green: #34d399;
+    --agent-purple: #a78bfa;
+    --agent-blue: #60a5fa;
+    --agent-orange: #fb923c;
+    --agent-yellow: #facc15;
+    --agent-pink: #f472b6;
+
+    /* Terminal: true black. */
+    --term-bg: #050506;
+    --term-fg: #e0e0e4;
+
+    /* Elevation — subtle, Apple-style. */
+    --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255,255,255,0.02);
+    --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.45);
+    --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.03);
+  }
+
+  .home-scope {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
   }
 
   * {
@@ -78,7 +91,8 @@
     margin: 0;
     background: var(--canvas);
     color: var(--ink);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui,
+      sans-serif;
     font-size: 13px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -88,6 +102,25 @@
     /* No grey flash on tap. */
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior-y: none;
+  }
+
+  /* Atmosphere: subtle grain texture for depth. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(91, 141, 239, 0.03) 0%,
+      transparent 60%
+    );
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
   }
 
   code,
@@ -273,6 +306,23 @@
 
   .animate-up {
     animation: fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .grad-accent {
+    background-image: none;
+    background-color: var(--accent);
+  }
+
+  .grad-text {
+    background-image: none;
+    background-clip: initial;
+    -webkit-background-clip: initial;
+    color: var(--ink);
+  }
+
+  /* Soft blue glow for active nav and live marks. */
+  .glow-accent {
+    box-shadow: 0 0 0 1px var(--accent-tint), 0 4px 20px -6px rgba(91, 141, 239, 0.4);
   }
 
   @media (prefers-reduced-motion: reduce) {

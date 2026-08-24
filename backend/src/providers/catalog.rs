@@ -48,8 +48,20 @@ pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry { id: "hermes",   name: "Hermes",         binary: "hermes",       args: &["--acp"], transport: Transport::Acp },
     CatalogEntry { id: "goose",    name: "Goose",          binary: "goose",        args: &["--acp"], transport: Transport::Acp },
     CatalogEntry { id: "augment",  name: "Augment",        binary: "auggie",       args: &["--acp"], transport: Transport::Acp },
-    CatalogEntry { id: "claude",   name: "Claude Code",    binary: "claude",       args: &[],        transport: Transport::Pty },
+    // Claude runs through the structured stream-json transport (see
+    // agents::claude_stream), not a scraped TUI — the registry must say so or
+    // config changes get refused with "runs as a terminal session".
+    CatalogEntry { id: "claude",   name: "Claude Code",    binary: "claude",       args: &[],        transport: Transport::StreamJson },
+    // Pi: verified headless NDJSON (`pi -p --mode json`), one process per
+    // turn, continuity via pi's own session store. See agents::pi_stream.
+    CatalogEntry { id: "pi",       name: "Pi",             binary: "pi",           args: &[],        transport: Transport::StreamJson },
     CatalogEntry { id: "codex",    name: "Codex CLI",      binary: "codex",        args: &[],        transport: Transport::Pty },
+    // ChatGPT CLI aliases the Codex binary (same adapter family).
+    CatalogEntry { id: "chatgpt",  name: "ChatGPT CLI",    binary: "codex",        args: &[],        transport: Transport::Pty },
+    // Terminal-tier providers (Vamp matrix): no verified machine-readable
+    // mode yet, so they stay PTY/TUI-only by design.
+    CatalogEntry { id: "cmd",      name: "CommandCode",    binary: "cmd",          args: &[],        transport: Transport::Pty },
+    CatalogEntry { id: "aider",    name: "Aider",          binary: "aider",        args: &[],        transport: Transport::Pty },
 ];
 
 pub fn entry_for(id: &str) -> Option<&'static CatalogEntry> {
@@ -125,9 +137,14 @@ mod tests {
             assert!(ids.insert(entry.id), "duplicate catalog id: {}", entry.id);
         }
         // Two entries launching the same binary+args would probe redundantly.
+        // Documented aliases are the exception: ChatGPT CLI *is* Codex, and
+        // probing it twice is cheaper than a special case elsewhere.
         let mut launches = HashSet::new();
         for entry in CATALOG {
             let launch = format!("{} {}", entry.binary, entry.args.join(" "));
+            if entry.id == "chatgpt" {
+                continue; // documented alias of codex — see the matrix note
+            }
             assert!(launches.insert(launch.clone()), "duplicate launch recipe: {}", launch);
         }
     }

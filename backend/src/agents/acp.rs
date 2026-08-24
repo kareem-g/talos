@@ -316,13 +316,79 @@ impl AcpEventMapper {
                             .collect()
                     })
                     .unwrap_or_default();
+                // Entries carry a live status ("pending" | "in_progress" |
+                // "completed"), which is what lets the UI draw progress rather
+                // than a flat list. Agents that omit status render as before.
+                let entries: Vec<Value> = update
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|entry| {
+                                let content = entry.get("content").and_then(Value::as_str)?;
+                                Some(json!({
+                                    "content": content,
+                                    "status": entry.get("status").and_then(Value::as_str).unwrap_or("pending"),
+                                }))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 if !steps.is_empty() {
                     events.push(AgentEvent::new(
                         session_id,
                         "plan",
-                        json!({ "title": "Plan", "steps": steps, "turn": self.turn, "source": source }),
+                        json!({ "title": "Plan", "steps": steps, "entries": entries, "turn": self.turn, "source": source }),
                     ));
                 }
+            }
+            // Slash commands the agent can run (Grok Build and other ACP
+            // agents announce these). Forwarded so the composer can offer them;
+            // stored as conversation state on the client, never as chat rows.
+            "available_commands_update" => {
+                let commands: Vec<String> = update
+                    .get("availableCommands")
+                    .and_then(Value::as_array)
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|entry| entry.get("name").and_then(Value::as_str).map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !commands.is_empty() {
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "commands_available",
+                        json!({ "commands": commands, "source": source }),
+                    ));
+                }
+            }
+            // Mode switches (e.g. Grok's build/plan/fast modes) are semantic
+            // state: shown as a chip, not lost among unknown updates.
+            "current_mode_update" => {
+                let mode_id = update.get("currentModeId").and_then(Value::as_str).unwrap_or("");
+                if !mode_id.is_empty() {
+                    let modes: Vec<Value> = update
+                        .get("availableModes")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    events.push(AgentEvent::new(
+                        session_id,
+                        "mode_changed",
+                        json!({ "mode_id": mode_id, "modes": modes, "source": source }),
+                    ));
+                }
+            }
+            // Token/cost accounting when an agent reports it (usage_update or
+            // a bare usage payload). Passed through for the usage meter.
+            "usage_update" => {
+                let mut payload = update.clone();
+                if let Some(object) = payload.as_object_mut() {
+                    object.remove("sessionUpdate");
+                    object.insert("source".to_string(), json!(source));
+                }
+                events.push(AgentEvent::new(session_id, "usage", payload));
             }
             // Diff-style file changes (v1 embeds diffs in tool content; a
             // standalone `file_change` update is rare but cheap to map).
@@ -336,10 +402,10 @@ impl AcpEventMapper {
                 }
             }
             _ => {
-                // available_commands_update, current_mode_update,
-                // config_option_update, session_info_update, usage_update and
-                // unknown future kinds are ignored — they carry no chat
-                // content and would only add noise.
+                // config_option_update, session_info_update and unknown future
+                // kinds are ignored — they carry no chat content and would only
+                // add noise. available_commands, mode and usage updates are
+                // mapped above.
             }
         }
         events
@@ -1421,6 +1487,68 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "plan");
         assert_eq!(events[0].payload["steps"][0], "Check syntax");
+        // Entries keep their live status so the UI can draw progress.
+        assert_eq!(events[0].payload["entries"][0]["content"], "Check syntax");
+        assert_eq!(events[0].payload["entries"][0]["status"], "pending");
+    }
+
+    /// Slash-command announcements become a `commands_available` event the
+    /// composer can consume — not chat noise.
+    #[test]
+    fn maps_available_commands_update() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+                { "name": "review", "description": "Review changes" },
+                { "name": "plan" },
+            ],
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "commands_available");
+        assert_eq!(events[0].payload["commands"][0], "review");
+        assert_eq!(events[0].payload["commands"][1], "plan");
+    }
+
+    #[test]
+    fn maps_current_mode_update() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "current_mode_update",
+            "currentModeId": "build",
+            "availableModes": [
+                { "id": "build", "name": "Build" },
+                { "id": "plan", "name": "Plan" },
+            ],
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events[0].kind, "mode_changed");
+        assert_eq!(events[0].payload["mode_id"], "build");
+        assert_eq!(events[0].payload["modes"].as_array().unwrap().len(), 2);
+
+        // An empty mode id carries no information; emit nothing.
+        let empty = json!({ "sessionUpdate": "current_mode_update", "currentModeId": "" });
+        assert!(mapper.map("s1", &empty).is_empty());
+    }
+
+    #[test]
+    fn maps_usage_update() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "usage_update",
+            "inputTokens": 120,
+            "outputTokens": 45,
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events[0].kind, "usage");
+        assert_eq!(events[0].payload["inputTokens"], 120);
+        // The envelope key is stripped so the client cannot mistake it for a
+        // nested update.
+        assert!(events[0].payload.get("sessionUpdate").is_none());
     }
 
     #[test]

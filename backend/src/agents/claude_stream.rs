@@ -37,6 +37,8 @@ struct ClaudeHandle {
     tx: mpsc::UnboundedSender<Outbound>,
     child: Arc<Mutex<Option<Child>>>,
     session_id: Arc<Mutex<String>>,
+    /// Bounded tail of stderr, readable for as long as the handle lives.
+    stderr_tail: Arc<Mutex<String>>,
 }
 
 pub struct ClaudeStreamInfo {
@@ -64,8 +66,18 @@ impl ClaudeStreamManager {
         self.sessions.read().await.contains_key(session_id)
     }
 
-    /// Spawn `claude -p` in stream-json mode. `resume_id` continues a prior
-    /// conversation; when `None`, a fresh one is created.
+    /// Spawn `claude` in bidirectional stream-json mode. `resume_id` continues
+    /// a prior conversation; when `None`, a fresh one is created.
+    ///
+    /// Why `--input-format stream-json`: plain `-p --print` treats stdin as a
+    /// one-shot prompt and exits when no input arrives ("Input must be
+    /// provided"), so a session created before the user typed anything died on
+    /// the spawn pad and every create/resume timed out waiting for an `init`
+    /// that never came. In stream-json input mode Claude stays alive reading
+    /// JSONL messages, emits its full event stream, and keeps serving turns —
+    /// verified against claude 2.1.220 (init after first input, alive between
+    /// turns, exits rc=1 with "No conversation found" on stderr for a bad
+    /// resume target).
     pub async fn spawn_session(
         &self,
         session_id: &str,
@@ -73,23 +85,34 @@ impl ClaudeStreamManager {
         binary: &str,
         resume_id: Option<&str>,
         model: Option<&str>,
+        extra_args: &[String],
     ) -> crate::Result<ClaudeStreamInfo> {
         let mut command = Command::new(binary);
         command
             .arg("-p")
+            .arg("--input-format=stream-json")
             .arg("--output-format=stream-json")
             .arg("--verbose")
             .arg("--include-partial-messages")
             .arg("--print")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Kept: a silent failure here was indistinguishable from a hang —
+            // the CLI's actual complaint ("No conversation found …") is the
+            // single most useful debugging fact for resume problems.
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         if let Some(model) = model {
             command.arg("--model").arg(model);
         }
         if let Some(resume_id) = resume_id {
             command.arg("--resume").arg(resume_id);
+        }
+        // Permission bridge and any future per-session flags. Passed by the
+        // caller because the MCP config file needs the daemon's port+token,
+        // which this layer should not know about.
+        for arg in extra_args {
+            command.arg(arg);
         }
         if let Some(project) = project {
             command.current_dir(project);
@@ -106,15 +129,40 @@ impl ClaudeStreamManager {
         let stdout = child.stdout.take().ok_or_else(|| {
             crate::AgentDeckError::Session("Claude stdout unavailable".to_string())
         })?;
+        let stderr = child.stderr.take();
 
         let (tx, rx) = mpsc::unbounded_channel::<Outbound>();
         let child = Arc::new(Mutex::new(Some(child)));
         let claude_session_id = Arc::new(Mutex::new(String::new()));
+        // Bounded tail of everything Claude writes to stderr, surfaced verbatim
+        // if the process dies during startup.
+        let stderr_tail = Arc::new(Mutex::new(String::new()));
+
+        if let Some(stderr) = stderr {
+            let tail = stderr_tail.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    let mut buf = tail.lock().await;
+                    buf.push_str(&line);
+                    if buf.len() > 4000 {
+                        *buf = buf[buf.len() - 4000..].to_string();
+                    }
+                }
+            });
+        }
 
         let handle = Arc::new(ClaudeHandle {
             tx,
             child: child.clone(),
             session_id: claude_session_id.clone(),
+            stderr_tail: stderr_tail.clone(),
         });
         self.sessions.write().await.insert(session_id.to_string(), Arc::clone(&handle));
 
@@ -124,7 +172,13 @@ impl ClaudeStreamManager {
         let sessions = self.sessions.clone();
         let thought_open = Arc::new(Mutex::new(false));
         let turn = Arc::new(AtomicU64::new(0));
+        // Streaming tool inputs arrive as JSON fragments keyed by block index;
+        // accumulated here so each tool card gets its full input exactly once
+        // at block close instead of one junk card per fragment.
+        let tool_inputs: Arc<Mutex<HashMap<i64, (String, String)>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let reader_session_id = claude_session_id.clone();
+        let eof_tail = stderr_tail.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
@@ -149,10 +203,13 @@ impl ClaudeStreamManager {
                     &reader_session_id,
                     &thought_open,
                     &turn,
+                    &tool_inputs,
                 )
                 .await;
             }
             // EOF: the process exited.
+            let tail = eof_tail.lock().await.trim().to_string();
+            tracing::info!(session_id = %reader_session, stderr = %tail, "Claude stream process exited");
             sessions.write().await.remove(&reader_session);
             let mut thought = thought_open.lock().await;
             if *thought {
@@ -179,23 +236,78 @@ impl ClaudeStreamManager {
             writer_task(rx, &mut stdin).await;
         });
 
-        // Wait for the `init` event to learn Claude's session id. It arrives
-        // first, quickly.
-        let claude_id = timeout(Duration::from_secs(15), async {
-            loop {
-                let id = claude_session_id.lock().await.clone();
-                if !id.is_empty() {
-                    return id;
+        // Exit-code supervisor: records HOW the process ended (code vs
+        // signal), because an empty stderr says nothing about a silent death.
+        {
+            let sup_child = child.clone();
+            let sup_sid = session_id.to_string();
+            let sup_tail = stderr_tail.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let outcome = if let Ok(mut guard) = sup_child.try_lock() {
+                        match guard.as_mut() {
+                            Some(process) => process.try_wait().ok().flatten(),
+                            None => break,
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(status) = outcome {
+                        let tail = sup_tail.lock().await.trim().to_string();
+                        tracing::info!(session_id = %sup_sid, ?status, stderr = %tail, "Claude process exit details");
+                        break;
+                    }
                 }
-                tokio::time::sleep(Duration::from_millis(50)).await;
+            });
+        }
+
+        // Startup liveness check — deliberately NOT a wait for the `init`
+        // event. In stream-json input mode Claude emits nothing until the
+        // first user message arrives (verified on 2.1.220), so blocking on
+        // init here would time out for every session created without an
+        // initial prompt. What matters at spawn time is only: did the process
+        // stay up? A bad resume target, a dead binary, or a auth failure all
+        // exit within seconds, and stderr now says why.
+        let startup = std::time::Instant::now();
+        loop {
+            if let Ok(mut guard) = child.try_lock() {
+                if let Some(process) = guard.as_mut() {
+                    match process.try_wait() {
+                        Ok(Some(_status)) => {
+                            let tail = stderr_tail.lock().await.trim().to_string();
+                            self.sessions.write().await.remove(session_id);
+                            let reason = if tail.is_empty() {
+                                "no output".to_string()
+                            } else {
+                                tail.lines().last().unwrap_or("").to_string()
+                            };
+                            return Err(crate::AgentDeckError::Session(format!(
+                                "Claude exited during startup: {reason}"
+                            )));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            return Err(crate::AgentDeckError::Session(format!(
+                                "Could not query Claude process: {error}"
+                            )));
+                        }
+                    }
+                } else {
+                    break;
+                }
             }
-        })
-        .await
-        .map_err(|_| crate::AgentDeckError::Session("Claude did not report a session id".to_string()))?;
+            if startup.elapsed() >= Duration::from_secs(4) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
 
         Ok(ClaudeStreamInfo {
             pid,
-            claude_session_id: claude_id,
+            // Usually empty at this point; the reader fills it in once the
+            // first turn starts and callers poll `claude_session_id`.
+            claude_session_id: claude_session_id.lock().await.clone(),
         })
     }
 
@@ -241,15 +353,59 @@ impl ClaudeStreamManager {
         let id = handle.session_id.lock().await.clone();
         (!id.is_empty()).then_some(id)
     }
+
+    /// Give the process `secs` to prove it stays up. Returns the captured
+    /// stderr tail when it died within the window, None when it is alive.
+    ///
+    /// Spawn-time liveness cannot catch a resume target that fails *after*
+    /// the first prompt attempt or a moment into loading — this is the second
+    /// gate that turns "reported success, secretly dead" into an actionable
+    /// error message.
+    pub async fn stderr_if_dead(
+        &self,
+        session_id: &str,
+        secs: u64,
+    ) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        loop {
+            if !self.has_active_session(session_id).await {
+                // The EOF task may have removed the handle; grab the tail via
+                // a fresh lookup before it is gone.
+                let sessions = self.sessions.read().await;
+                let tail = if let Some(handle) = sessions.get(session_id) {
+                    handle.stderr_tail.lock().await.clone()
+                } else {
+                    String::new()
+                };
+                drop(sessions);
+                return Some(tail.trim().to_string());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
 }
 
 async fn writer_task(mut rx: mpsc::UnboundedReceiver<Outbound>, stdin: &mut ChildStdin) {
     while let Some(outbound) = rx.recv().await {
         match outbound {
             Outbound::Prompt { text, done } => {
-                let mut payload = text;
-                payload.push('\n');
-                if stdin.write_all(payload.as_bytes()).await.is_ok() {
+                // The input side is `--input-format stream-json`: each message
+                // is a JSONL user turn, not a raw text line. Raw lines made
+                // older CLIs treat stdin as a one-shot prompt and exit.
+                let payload = json!({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [{ "type": "text", "text": text }],
+                    },
+                });
+                let mut line = payload.to_string();
+                line.push('\n');
+                if stdin.write_all(line.as_bytes()).await.is_ok() {
                     let _ = stdin.flush().await;
                 }
                 let _ = done.send(());
@@ -268,6 +424,7 @@ async fn handle_claude_line(
     claude_session_id: &Arc<Mutex<String>>,
     thought_open: &Arc<Mutex<bool>>,
     turn: &Arc<AtomicU64>,
+    tool_inputs: &Arc<Mutex<HashMap<i64, (String, String)>>>,
 ) {
     let type_field = value.get("type").and_then(Value::as_str);
     let source = "claude-stream";
@@ -314,6 +471,11 @@ async fn handle_claude_line(
                                 .and_then(|b| b.get("id"))
                                 .and_then(Value::as_str)
                                 .unwrap_or("");
+                            let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
+                            tool_inputs
+                                .lock()
+                                .await
+                                .insert(index, (id.to_string(), String::new()));
                             broadcast.broadcast_agent_event(AgentEvent::new(
                                 session_id,
                                 "tool_started",
@@ -348,16 +510,19 @@ async fn handle_claude_line(
                             }
                         }
                         Some("input_json_delta") => {
-                            // Tool input is streamed as JSON; surface the raw
-                            // fragment so the card shows something is happening.
-                            let partial = delta.get("partial_json").and_then(Value::as_str).unwrap_or("");
-                            let id = ""; // tool id is on the block_start; good enough for activity
+                            // Accumulate the fragment against its block index.
+                            // Emitting per-fragment events created one junk
+                            // tool card per chunk — the visible "tool calling
+                            // is broken" bug. One `tool_input` event lands at
+                            // block close instead.
+                            let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
+                            let partial =
+                                delta.get("partial_json").and_then(Value::as_str).unwrap_or("");
                             if !partial.is_empty() {
-                                broadcast.broadcast_agent_event(AgentEvent::new(
-                                    session_id,
-                                    "tool_activity",
-                                    json!({ "input": partial, "tool_id": id, "turn": current_turn, "source": source }),
-                                ));
+                                let mut inputs = tool_inputs.lock().await;
+                                if let Some(entry) = inputs.get_mut(&index) {
+                                    entry.1.push_str(partial);
+                                }
                             }
                         }
                         _ => {}
@@ -365,6 +530,19 @@ async fn handle_claude_line(
                 }
                 Some("content_block_stop") => {
                     let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
+                    // A finished tool_use block publishes its complete input.
+                    if let Some((tool_id, accumulated)) = tool_inputs.lock().await.remove(&index) {
+                        broadcast.broadcast_agent_event(AgentEvent::new(
+                            session_id,
+                            "tool_input",
+                            json!({
+                                "tool_id": tool_id,
+                                "input": accumulated,
+                                "turn": current_turn,
+                                "source": source,
+                            }),
+                        ));
+                    }
                     // index 0 is usually the thinking block.
                     if index == 0 {
                         let mut thought = thought_open.lock().await;
@@ -379,25 +557,109 @@ async fn handle_claude_line(
                     }
                 }
                 Some("message_delta") => {
-                    let stop = event
-                        .get("delta")
-                        .and_then(|d| d.get("stop_reason"))
-                        .and_then(Value::as_str);
-                    if let Some(reason) = stop {
-                        if reason == "end_turn" {
-                            broadcast.broadcast_agent_event(AgentEvent::new(
-                                session_id,
-                                "agent_completed",
-                                json!({ "source": source, "stopReason": reason }),
-                            ));
-                        }
-                    }
+                    // Stop reason is not announced here: the final `result`
+                    // envelope reports it with real accounting attached, and
+                    // announcing twice produced duplicate turn-summary cards.
                 }
                 _ => {}
             }
         }
-        // Ignore the periodic full `assistant` messages and the final `result`
-        // envelope; the stream events already carried everything.
+        // The final `result` envelope closes each turn with authoritative
+        // accounting: stop reason, token usage, wall time, cost. Streamed
+        // deltas already carried the content, so this only publishes the
+        // numbers the UI's usage meter and turn-summary cards render.
+        Some("result") => {
+            let is_error = value.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            let num = |key: &str| value.get(key).and_then(Value::as_f64);
+            let usage = value.get("usage");
+            let usage_num = |key: &str| {
+                usage.and_then(|u| u.get(key)).and_then(Value::as_u64).unwrap_or(0)
+            };
+
+            if is_error {
+                let detail = value.get("result").and_then(Value::as_str).unwrap_or(
+                    value.get("subtype").and_then(Value::as_str).unwrap_or("the turn failed"),
+                );
+                broadcast.broadcast_agent_event(AgentEvent::new(
+                    session_id,
+                    "agent_error",
+                    json!({ "message": detail, "turn": current_turn, "source": source }),
+                ));
+            }
+
+            broadcast.broadcast_agent_event(AgentEvent::new(
+                session_id,
+                "usage",
+                json!({
+                    "input_tokens": usage_num("input_tokens"),
+                    "output_tokens": usage_num("output_tokens"),
+                    "cache_read_tokens": usage_num("cache_read_input_tokens"),
+                    "cost_usd": num("total_cost_usd"),
+                    "source": source,
+                }),
+            ));
+            broadcast.broadcast_agent_event(AgentEvent::new(
+                session_id,
+                "agent_completed",
+                json!({
+                    "stop_reason": value.get("stop_reason").cloned().unwrap_or(Value::Null),
+                    "input_tokens": usage_num("input_tokens"),
+                    "output_tokens": usage_num("output_tokens"),
+                    "cost_usd": num("total_cost_usd"),
+                    "duration_ms": num("duration_ms").map(|ms| ms as u64),
+                    "turn": current_turn,
+                    "source": source,
+                }),
+            ));
+        }
+        // Tool results arrive as `user` messages containing tool_result
+        // blocks. Without this, tool cards stayed "running" forever — the
+        // stream never says a tool finished anywhere else.
+        Some("user") => {
+            let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array) else {
+                return;
+            };
+            for block in blocks {
+                if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                    continue;
+                }
+                let tool_id = block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if tool_id.is_empty() {
+                    continue;
+                }
+                let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+                // Result content is either a plain string or an array of
+                // content blocks; flatten the text ones for the card.
+                let output = match block.get("content") {
+                    Some(Value::String(text)) => text.clone(),
+                    Some(Value::Array(parts)) => parts
+                        .iter()
+                        .filter_map(|part| part.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    _ => String::new(),
+                };
+                let output = if output.is_empty() {
+                    "(no output)".to_string()
+                } else {
+                    output.chars().take(8000).collect()
+                };
+                broadcast.broadcast_agent_event(AgentEvent::new(
+                    session_id,
+                    "tool_finished",
+                    json!({
+                        "tool_id": tool_id,
+                        "success": !is_error,
+                        "output": output,
+                        "turn": current_turn,
+                        "source": source,
+                    }),
+                ));
+            }
+        }
         _ => {}
     }
 

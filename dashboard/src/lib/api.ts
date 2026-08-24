@@ -205,6 +205,72 @@ export const sessionsApi = {
     }),
 }
 
+export interface DirListing {
+  path: string
+  exists: boolean
+  home: string
+  parent?: string | null
+  roots: Array<{ name: string; path: string }>
+  entries: Array<{ name: string; path: string; dir?: boolean }>
+}
+
+/** Workspace browsing for the project picker and the @context menu. */
+export interface TunnelState {
+  kind: string
+  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  url?: string | null
+  ip?: string | null
+  error?: string | null
+}
+
+/** Native tunnel control — bring Tailscale / Cloudflare up from the UI. */
+export const tunnelApi = {
+  status: () => request<{ tailscale: unknown; cloudflare: unknown }>('/api/tunnel/status'),
+  start: (kind: 'tailscale' | 'cloudflare') =>
+    request<TunnelState>(`/api/tunnel/${kind}/start`, { method: 'POST' }),
+  stop: (kind: 'tailscale' | 'cloudflare') =>
+    request<TunnelState>(`/api/tunnel/${kind}/stop`, { method: 'POST' }),
+}
+
+export interface WorktreeInfo {
+  name?: string
+  path?: string
+  branch?: string
+  head?: string
+  [key: string]: unknown
+}
+
+export interface WorkspaceOverview {
+  worktrees?: WorktreeInfo[]
+  changed_files?: Array<{ path: string; status?: string; [key: string]: unknown }>
+  diffs?: Record<string, string>
+  [key: string]: unknown
+}
+
+/** Session-scoped workspace data for the right-side panels. */
+export const sessionWorkspaceApi = {
+  overview: (sessionId: string) =>
+    request<WorkspaceOverview>(
+      `/api/workspace/overview?session=${encodeURIComponent(sessionId)}`,
+    ),
+  worktrees: (project: string) =>
+    request<{ worktrees: WorktreeInfo[] }>(
+      `/api/worktrees?project=${encodeURIComponent(project)}`,
+    ),
+}
+
+export const workspaceApi = {
+  dirs: (path?: string, files = false) =>
+    request<DirListing>(
+      `/api/workspace/dirs?${[
+        path ? `path=${encodeURIComponent(path)}` : '',
+        files ? 'files=1' : '',
+      ]
+        .filter(Boolean)
+        .join('&')}`,
+    ),
+}
+
 export const configApi = {
   /** Current dimensions. `live: true` means these came from the running agent. */
   get: (sessionId: string) =>
@@ -257,6 +323,22 @@ export const pairingApi = {
   offer: () => request<PairingOffer>('/api/pair', { method: 'POST' }),
 
   /**
+   * Where this machine is reachable from — Tailnet / Cloudflare / LAN —
+   * without minting an offer. Read-only; powers the Remote screen.
+   */
+  endpoint: () =>
+    request<{
+      endpoint: {
+        base_url: string
+        source: string
+        host: string
+        port: number
+        secure: boolean
+        reachable: boolean
+      }
+    }>('/api/pair/endpoint'),
+
+  /**
    * Complete pairing from the phone.
    *
    * `deviceKey` is an opaque per-device value; the server stores it and returns a
@@ -283,4 +365,19 @@ export const pairingApi = {
     request<{ device: { id: string; name: string }; desktop: { name: string; version: string } }>(
       '/api/mobile/me',
     ),
+}
+
+export interface PairedDeviceInfo {
+  id: string
+  name: string
+  fingerprint: string
+  paired_at: string
+  last_seen?: string | null
+}
+
+/** Paired remote controls. Management stays in the browser — no app needed. */
+export const devicesApi = {
+  list: () => request<{ devices: PairedDeviceInfo[] }>('/api/devices'),
+  revoke: (id: string) =>
+    request<{ revoked: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

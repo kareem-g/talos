@@ -146,6 +146,8 @@ export function sessionStatusToAgentState(status: SessionStatus): AgentState {
       return 'ready'
     case 'needs_resume':
       return 'stopped'
+    case 'resuming':
+      return 'working'
     case 'error':
       return 'failed'
     case 'archived':

@@ -21,6 +21,7 @@
 pub mod acp_probe;
 pub mod catalog;
 pub mod discovery;
+pub mod native;
 pub mod registry;
 pub mod types;
 

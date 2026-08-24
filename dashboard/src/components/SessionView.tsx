@@ -14,12 +14,11 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Composer } from './Composer'
-import { ConfigBar, ConfigControl } from './ConfigControls'
+import { SessionPanels } from './SessionPanels'
+import { StateZone } from './StateZone'
 import { TerminalView } from './TerminalView'
 import { Timeline } from './Timeline'
 import {
-  Button,
   ChevronLeft,
   Dot,
   IconButton,
@@ -27,26 +26,19 @@ import {
   MessageIcon,
   Notice,
   Segmented,
+  StatusPill,
   Terminal as TerminalIcon,
 } from './ui'
 import { getConversation, useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
-import { agentDisplayFor, modelChipLabel } from '@/lib/remote'
+import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { agentStateDisplay } from '@/types/remote'
-import { isActive, type Session } from '@/types/session'
+import { agentDisplayFor } from '@/lib/remote'
+import type { Session } from '@/types/session'
 import { useRoute } from '@/lib/route'
 import { cn } from '@/lib/format'
 
 type Tab = 'chat' | 'terminal'
-
-/** Play glyph for the resume action. */
-function PlayIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden>
-      <path d="M8 5.5v13l11-6.5z" />
-    </svg>
-  )
-}
 
 function LayersIcon({ size = 14 }: { size?: number }) {
   return (
@@ -86,13 +78,11 @@ export function SessionView({
 
   const openSession = useStore((state) => state.openSession)
   const sendPrompt = useStore((state) => state.sendPrompt)
-  const stopSession = useStore((state) => state.stopSession)
-  const resumeSession = useStore((state) => state.resumeSession)
   const setConfig = useStore((state) => state.setConfig)
   const respondToApproval = useStore((state) => state.respondToApproval)
   const dismissNotice = useStore((state) => state.dismissNotice)
-  const [resuming, setResuming] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [panelsOpen, setPanelsOpen] = useState(false)
   const { navigate } = useRoute()
 
   // Hydrate once per session. History replays through the same reducer as live
@@ -118,40 +108,24 @@ export function SessionView({
    * over piped stdio does not).
    */
   const interactiveTerminal = config?.interactiveTerminal === true
-  const working = isActive(session.status)
 
-  /**
-   * Whether this session can be restarted.
-   *
-   * A session with no live agent: `needs_resume` (the common case for imported
-   * sessions) or `exited`. NOT `idle` — an idle session has a live agent waiting
-   * for a prompt and should show the composer so the user can type, not a Resume
-   * banner asking them to start something that is already started.
-   */
-  const resumable = session.status === 'needs_resume' || session.status === 'exited'
-
+  const uiState = sessionUIState(session, conversation, connection)
+  const stateDisplay = uiStateDisplay(uiState)
+  // Keep the live detail (file being edited etc.) that `deriveAgentState`
+  // refines; merge it with the single StatusPill rather than a second dot.
+  // `conversation` is a stable object mutated in place, so the activity
+  // reference is the real signal; the lint rule cannot see that.
+  const activity = conversation.activity
   const agentDisplay = useMemo(
     () => agentDisplayFor(session, conversation, connection),
-    [session, conversation.activity, connection],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session, activity, connection],
   )
 
   const modelOption = useMemo(
     () => config?.options.find((o) => o.id === 'model' || o.category === 'model'),
     [config],
   )
-  const modelLabel = useMemo(
-    () => modelChipLabel(provider, modelOption?.currentValue),
-    [provider, modelOption?.currentValue],
-  )
-
-  async function resume() {
-    setResuming(true)
-    try {
-      await resumeSession(session.id)
-    } finally {
-      setResuming(false)
-    }
-  }
 
   const connectionTone =
     connection === 'connected' ? 'green' : connection === 'connecting' || connection === 'reconnecting' ? 'orange' : 'red'
@@ -162,7 +136,7 @@ export function SessionView({
     <div className="flex min-h-0 flex-1 flex-col bg-canvas">
       {/* ── Compact remote-control header ─────────────────────────────────── */}
       <header
-        className="flex shrink-0 flex-col gap-1 border-b border-line bg-canvas px-2.5 py-2"
+        className="flex shrink-0 flex-col gap-1 border-b border-line/60 bg-canvas px-2.5 py-2"
         style={onBack ? { paddingTop: 'max(0.5rem, env(safe-area-inset-top))' } : undefined}
       >
         {/* Row 1: navigation + title + model + actions */}
@@ -177,32 +151,18 @@ export function SessionView({
             <p className="truncate text-[13px] font-medium leading-tight tracking-[-0.01em] text-ink">
               {session.name}
             </p>
-            {/* Subtitle: agent state + detail + project */}
+            {/* Single status pill: the one source of truth for this screen. */}
             <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-none text-ink-3">
-              <span className="inline-flex items-center gap-1 truncate">
-                <Dot tone={agentDisplay.tone} pulse={agentDisplay.pulse} />
-                <span className={agentDisplay.tone === 'green' ? 'text-green' : agentDisplay.tone === 'orange' ? 'text-orange' : undefined}>
-                  {agentDisplay.label}
-                </span>
-                {agentDisplay.detail ? (
-                  <span className="hidden truncate font-mono text-ink-3 sm:inline">{agentDisplay.detail}</span>
-                ) : null}
-              </span>
+              <StatusPill label={stateDisplay.label} tone={stateDisplay.tone} pulse={stateDisplay.pulse} detail={agentDisplay.detail} />
               {session.project ? (
                 <>
-                  <span aria-hidden className="shrink-0 text-ink-3/60">
-                    ·
-                  </span>
-                  <span className="hidden truncate font-mono sm:inline">
-                    {session.project.split('/').pop() ?? session.project}
-                  </span>
+                  <span aria-hidden className="shrink-0 text-ink-3/60">·</span>
+                  <span className="hidden truncate font-mono sm:inline">{session.project.split('/').pop() ?? session.project}</span>
                 </>
               ) : null}
               {showConnectionInline ? (
                 <>
-                  <span aria-hidden className="shrink-0 text-ink-3/60">
-                    ·
-                  </span>
+                  <span aria-hidden className="shrink-0 text-ink-3/60">·</span>
                   <span className="inline-flex items-center gap-1 shrink-0">
                     <Dot tone={connectionTone as 'green' | 'orange' | 'red'} pulse={connectionPulse} />
                     <span className="text-[11px] capitalize">{connection}</span>
@@ -212,33 +172,12 @@ export function SessionView({
             </div>
           </div>
 
-          {/* Model chip — compact, provider-agnostic, taps to picker */}
-          {modelOption ? (
-            <div className="shrink-0">
-              <ConfigControl
-                option={modelOption}
-                source={provider?.modelsSource}
-                onChange={(value) => void setConfig(session.id, modelOption.id, value)}
-                disabled={connection !== 'connected'}
-              />
-            </div>
-          ) : modelLabel ? (
-            <span className="hidden max-w-32 truncate rounded-chip bg-surface px-2 py-1 text-[11px] font-medium text-ink-2 shadow-btn sm:inline-flex">
-              {modelLabel}
-            </span>
-          ) : null}
-
-          {resumable ? (
-            <Button
-              variant="primary"
-              onClick={() => void resume()}
-              disabled={resuming || connection !== 'connected'}
-              className="shrink-0"
-            >
-              <PlayIcon />
-              {resuming ? 'Resuming…' : 'Resume'}
-            </Button>
-          ) : null}
+          <IconButton label="Session details" onClick={() => setPanelsOpen(true)} className="-mr-1 shrink-0">
+            <svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <path d="M7 8h10M7 12h6M7 16h4" />
+            </svg>
+          </IconButton>
 
           {/* Session switcher (mobile) */}
           {onBack ? (
@@ -271,54 +210,15 @@ export function SessionView({
             conversation={conversation}
             onRespond={(requestId, decision) => respondToApproval(session.id, requestId, decision)}
           />
-
-          {/*
-             A stopped session has no agent to receive a prompt, so the composer
-             would silently swallow one. Offer the action that actually works
-             instead of an input that appears to work.
-           */}
-          {resumable ? (
-            <div
-              className="shrink-0 px-3 pb-3 pt-1.5"
-              style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-            >
-              <div className="mx-auto flex w-full max-w-[46rem] items-center gap-3 rounded-[18px] border border-line bg-surface px-3.5 py-3 shadow-raised">
-                <p className="min-w-0 flex-1 text-[12px] leading-[1.6] text-ink-2">
-                  {session.source && session.source !== 'agentdeck'
-                    ? `This session was imported from ${provider?.name ?? session.agent}. Resume it to continue the conversation.`
-                    : 'The agent has stopped. Resume it to continue this conversation.'}
-                </p>
-                <Button
-                  variant="primary"
-                  onClick={() => void resume()}
-                  disabled={resuming || connection !== 'connected'}
-                  className="shrink-0"
-                >
-                  <PlayIcon />
-                  {resuming ? 'Resuming…' : 'Resume'}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Composer
-              onSend={(text) => sendPrompt(session.id, text)}
-              onStop={() => void stopSession(session.id)}
-              onInterrupt={() => socket.interruptSession(session.id)}
-              working={working}
-              disabled={connection !== 'connected'}
-              placeholder={connection !== 'connected' ? 'Waiting for connection…' : 'Message the agent…'}
-              controls={
-                config ? (
-                  <ConfigBar
-                    options={config.options}
-                    live={config.live}
-                    modelsSource={provider?.modelsSource}
-                    onChange={(configId, value) => void setConfig(session.id, configId, value)}
-                  />
-                ) : null
-              }
-            />
-          )}
+          <StateZone
+            session={session}
+            conversation={conversation}
+            connection={connection}
+            config={config}
+            provider={provider}
+            onSend={(t) => sendPrompt(session.id, t)}
+            onSetConfig={(id, v) => void setConfig(session.id, id, v)}
+          />
         </>
       ) : (
         <TerminalView
@@ -330,6 +230,23 @@ export function SessionView({
           onResize={(cols, rows) => socket.resizeTerminal(session.id, cols, rows)}
         />
       )}
+
+      {/* Details / git changes / worktrees — right-panel parity on mobile */}
+      <Layer open={panelsOpen} onClose={() => setPanelsOpen(false)} title="Session details" size="md">
+        <SessionPanels
+          sessionId={session.id}
+          facts={{
+            createdAt: session.created_at,
+            updatedAt: session.updated_at,
+            project: session.project,
+            branch: session.branch,
+            agentName: provider?.name ?? session.agent,
+            statusLabel: stateDisplay.label,
+            modelValue: modelOption?.currentValue ?? undefined,
+            worktreePath: (session as { worktree_path?: string | null }).worktree_path ?? null,
+          }}
+        />
+      </Layer>
 
       {/* Session switcher bottom sheet (mobile) */}
       {onBack ? (

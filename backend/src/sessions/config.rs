@@ -114,6 +114,27 @@ pub async fn apply_config(
         return apply_acp_config(state, session_id, &session.agent, config_id, value).await;
     }
 
+    // Claude model changes are handled end-to-end here so the answer is
+    // always truthful:
+    //   live process  → restart it on its native resume id (Immediate)
+    //   stopped       → record the choice for the next start (NextRun)
+    // The generic branches below cannot express this split.
+    if session.agent == "claude" && config_id == "model" {
+        if state.claude_stream.has_active_session(session_id).await {
+            return crate::api::routes::respawn_claude_with_model(state, session_id, value).await;
+        }
+        let _ = state.session_manager.set_pending_config(session_id, "model", value).await;
+        let mut config = crate::sessions::config::read_config(state, session_id).await?;
+        if let Some(option) = config.options.iter_mut().find(|option| option.id == "model") {
+            option.current_value = Some(value.to_string());
+        }
+        let applied = crate::providers::types::ConfigApplied::NextRun {
+            reason: "Model applies the next time this session starts (press Resume).".to_string(),
+        };
+        broadcast_config(state, session_id, &applied, &config);
+        return Ok((applied, config));
+    }
+
     let current = read_config(state, session_id).await?;
     let known = current.options.iter().find(|option| option.id == config_id);
 

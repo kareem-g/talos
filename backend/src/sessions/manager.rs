@@ -293,6 +293,17 @@ impl SessionManager {
         Ok(rows)
     }
 
+    /// Drop one consumed request. Applied-at-spawn values are removed so a
+    /// stale choice cannot silently override a newer explicit one.
+    pub async fn clear_pending_config(&self, id: &str, config_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM session_config WHERE session_id = ?1 AND config_id = ?2")
+            .bind(id)
+            .bind(config_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Store the command the UI should show for resuming this session. Only
     /// meaningful when the status is `needs_resume`.
     pub async fn set_resume_command(&self, id: &str, resume_command: &str) -> Result<()> {

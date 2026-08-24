@@ -408,7 +408,10 @@ pub async fn resume_session(
                 }));
             }
         }
-        SessionStatus::NeedsResume | SessionStatus::Exited | SessionStatus::Idle => {}
+        // Error is resumable by design: it means "the last attempt failed",
+        // not "this session is dead". Refusing here is what made a single
+        // failed resume permanently unresumable.
+        SessionStatus::NeedsResume | SessionStatus::Exited | SessionStatus::Idle | SessionStatus::Error => {}
         other => {
             return Json(json!({
                 "success": false,
@@ -457,6 +460,29 @@ pub async fn resume_session(
     // "Invalid session ID".
     if let Some(launch) = resolve_acp_launch(&state, &session.agent).await {
         return resume_acp_session(&state, session, launch, resume_target).await;
+    }
+
+    // Pi keeps no resident process: a "resume" just re-opens the conversation
+    // for new prompts; pi's own session store provides continuity.
+    if session.agent == "pi" {
+        let _ = state
+            .session_manager
+            .update_status(&id, SessionStatus::Idle)
+            .await;
+        if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+        }
+        state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+            session_id: id.clone(),
+            state: "idle".to_string(),
+        });
+        return Json(json!({
+            "success": true,
+            "session_id": id,
+            "status": "idle",
+            "spawned": false,
+            "message": "Pi starts on demand with the next message",
+        }));
     }
 
     // Claude: resume through the structured stream-json transport. The PTY path
@@ -684,49 +710,99 @@ async fn resume_claude_stream_session(
     let binary = cfg.settings().agents.claude.path.clone();
     drop(cfg);
 
+    let (effective_model, permission_args) =
+        claude_spawn_config(state, &id, None, None).await;
     match state
         .claude_stream
-        .spawn_session(&id, session.project.as_deref(), &binary, Some(&resume_target), None)
+        .spawn_session(&id, session.project.as_deref(), &binary, Some(&resume_target), effective_model.as_deref(), &permission_args)
+        .await
+    {
+        Err(error) if is_missing_conversation(&error) => {
+            // Claude resumes are scoped to the project directory, so an
+            // external_id recorded under another cwd (or cleared CLI history)
+            // is genuinely unresumable. Refusing forever is worse than
+            // continuing: start a fresh conversation and say so.
+            tracing::warn!(session_id = %id, %error, "resume target missing; starting a fresh Claude conversation");
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                session_id: id.clone(),
+                code: "resume_target_missing".to_string(),
+                message: "The original Claude conversation could not be found — a new one was started instead.".to_string(),
+            });
+            resume_claude_stream_inner(state, session, None).await
+        }
+        result => match result {
+            Ok(info) => {
+                clear_claude_spawn_config(state, &id).await;
+                if !info.claude_session_id.is_empty() {
+                    persist_claude_external_id(state, &id, &info.claude_session_id).await;
+                } else {
+                    spawn_claude_id_watcher(state, &id);
+                }
+                mark_resumed_idle(state, session).await
+            }
+            Err(error) => {
+                let _ = state
+                    .session_manager
+                    .update_status(&id, SessionStatus::Idle)
+                    .await;
+                Json(json!({
+                    "success": false,
+                    "session_id": id,
+                    "spawned": false,
+                    "error": match &error {
+                        crate::AgentDeckError::Session(message)
+                        | crate::AgentDeckError::Pty(message) => message.clone(),
+                        other => other.to_string(),
+                    },
+                }))
+            }
+        },
+    }
+}
+
+/// Does this spawn error mean the `--resume` target no longer exists?
+fn is_missing_conversation(error: &crate::AgentDeckError) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("no conversation found")
+}
+
+/// A resumed-but-not-yet-prompted session is idle: alive, waiting for input.
+async fn resume_claude_stream_inner(
+    state: &AppState,
+    session: crate::sessions::Session,
+    resume_id: Option<String>,
+) -> Json<serde_json::Value> {
+    let id = session.id.clone();
+    let cfg = state.config.read().await;
+    let binary = cfg.settings().agents.claude.path.clone();
+    drop(cfg);
+
+    // A model chosen while the session was stopped must survive the restart.
+    let (effective_model, permission_args) =
+        claude_spawn_config(state, &id, None, None).await;
+    match state
+        .claude_stream
+        .spawn_session(&id, session.project.as_deref(), &binary, resume_id.as_deref(), effective_model.as_deref(), &permission_args)
         .await
     {
         Ok(info) => {
+            clear_claude_spawn_config(state, &id).await;
             state.session_manager.set_session_pid(&id, info.pid).await;
-            let _ = state.session_manager.set_resume_command(&id, "").await;
-            if let Err(error) = state
-                .session_manager
-                .update_status(&id, SessionStatus::Idle)
-                .await
-            {
-                tracing::warn!(session_id = %id, error = %error, "Could not mark a resumed session idle");
+            // A fresh conversation invalidates the stale external id.
+            if resume_id.is_none() {
+                let _ = state.session_manager.set_external_id(&id, "").await;
             }
-            // Persist the (reopened) Claude session id.
-            if let Err(error) = state
-                .session_manager
-                .set_external_id(&id, &info.claude_session_id)
-                .await
-            {
-                tracing::warn!(session_id = %id, error = %error, "Could not persist resumed Claude session id");
+            if !info.claude_session_id.is_empty() {
+                persist_claude_external_id(state, &id, &info.claude_session_id).await;
+            } else {
+                spawn_claude_id_watcher(state, &id);
             }
-            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
-                session_id: id.clone(),
-                state: "idle".to_string(),
-            });
-            if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
-                state
-                    .broadcast
-                    .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
-            }
-            Json(json!({
-                "success": true,
-                "session_id": id,
-                "status": "idle",
-                "spawned": true,
-            }))
+            mark_resumed_idle(state, session).await
         }
         Err(error) => {
             let _ = state
                 .session_manager
-                .update_status(&id, SessionStatus::Error)
+                .update_status(&id, SessionStatus::Idle)
                 .await;
             Json(json!({
                 "success": false,
@@ -740,6 +816,34 @@ async fn resume_claude_stream_session(
             }))
         }
     }
+}
+
+/// Shared tail of a successful claude resume: idle status + broadcast.
+async fn mark_resumed_idle(state: &AppState, session: crate::sessions::Session) -> Json<serde_json::Value> {
+    let id = session.id.clone();
+    let _ = state.session_manager.set_resume_command(&id, "").await;
+    if let Err(error) = state
+        .session_manager
+        .update_status(&id, SessionStatus::Idle)
+        .await
+    {
+        tracing::warn!(session_id = %id, error = %error, "Could not mark a resumed session idle");
+    }
+    if let Ok(Some(current)) = state.session_manager.get_session(&id).await {
+        state
+            .broadcast
+            .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+    }
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: id.clone(),
+        state: "idle".to_string(),
+    });
+    Json(json!({
+        "success": true,
+        "session_id": id,
+        "status": "idle",
+        "spawned": true,
+    }))
 }
 
 // ===== AGENTS =====
@@ -826,7 +930,7 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
             };
             // PTY agents: if config declares no models, discover them from the
             // CLI's own --help output (never hardcoded in the binary).
-            let models = if acp_supported {
+            let mut models = if acp_supported {
                 models
             } else if models.is_empty() {
                 crate::agents::detect_agent_models(&resolved_path)
@@ -837,6 +941,20 @@ async fn available_agents(state: &AppState) -> Vec<serde_json::Value> {
             } else {
                 models
             };
+            // paseo-style native detection: whatever the user configured in
+            // each CLI's own settings file is a real, selectable model —
+            // including custom gateway routes. Duplicates keep the first.
+            if !acp_supported {
+                for native in crate::providers::native::models_for(&id) {
+                    if !models.iter().any(|existing| existing.id == native.id) {
+                        models.push(crate::config::settings::AgentModel {
+                            id: native.id.clone(),
+                            name: native.id,
+                            tag: Some(native.note),
+                        });
+                    }
+                }
+            }
             AgentProbeResult {
                 id,
                 name,
@@ -1312,6 +1430,34 @@ async fn spawn_session(
         return finish_claude_stream_spawn(state, session, project, prompt, requested_model, requested_effort).await;
     }
 
+    // Pi: on-demand one-shot turns — no resident process at creation. The
+    // first prompt (whenever the user sends it) spawns `pi -p --mode json`.
+    if agent == "pi" {
+        let status = if prompt.filter(|p| !p.trim().is_empty()).is_some() {
+            SessionStatus::Running
+        } else {
+            SessionStatus::Idle
+        };
+        state
+            .session_manager
+            .update_status(&session.id, status)
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Some(first) = prompt.filter(|p| !p.trim().is_empty()) {
+            spawn_pi_turn(state, &session, first.trim()).await?;
+        }
+        let current = state
+            .session_manager
+            .get_session(&session.id)
+            .await
+            .map_err(|error| error.to_string())?
+            .unwrap_or(session);
+        state
+            .broadcast
+            .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current.clone() });
+        return Ok(current);
+    }
+
     let cfg = state.config.read().await;
     let configured = match agent {
         "codex" => &cfg.settings().agents.codex,
@@ -1498,6 +1644,312 @@ async fn finish_acp_spawn(
 /// `requested_model` is passed as `--model`; effort is not exposed by the
 /// stream-json path in the same way, so it is dropped here (the picker can be
 /// extended later). The first prompt is sent over stdin once the process is up.
+/// Build the `--mcp-config`/`--permission-prompt-tool` args that give a
+/// claude-stream session an interactive approval path.
+///
+/// The MCP server is this same binary re-invoked on stdio; it calls back to
+/// `/api/hooks/permission` with the session's hook token. Reuses the hook
+/// token when one exists so there is exactly one secret per session.
+async fn claude_permission_args(state: &AppState, session_id: &str) -> Vec<String> {
+    let Some(exe) = std::env::current_exe().ok().map(|p| p.to_string_lossy().to_string()) else {
+        return Vec::new();
+    };
+    let port = state.config.read().await.settings().server.port;
+    let token = {
+        let mut tokens = state.hook_tokens.write().await;
+        tokens
+            .get(session_id)
+            .cloned()
+            .unwrap_or_else(|| {
+                let token = crate::auth::devices::random_secret();
+                tokens.insert(session_id.to_string(), token.clone());
+                token
+            })
+    };
+
+    let dir = std::env::temp_dir().join("agentdeck").join("claude-mcp");
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(session_id = %session_id, error = %error, "Could not create MCP config dir; permissions will auto-deny");
+        return Vec::new();
+    }
+    let config_path = dir.join(format!("{session_id}.json"));
+    let config = json!({
+        "mcpServers": {
+            "agentdeck": {
+                "command": exe,
+                "args": ["__permission-mcp"],
+                "env": {
+                    "AGENTDECK_URL": format!("http://127.0.0.1:{port}"),
+                    "AGENTDECK_TOKEN": token,
+                    "AGENTDECK_SESSION": session_id,
+                },
+            }
+        }
+    });
+    if let Err(error) = std::fs::write(&config_path, config.to_string()) {
+        tracing::warn!(session_id = %session_id, error = %error, "Could not write MCP config; permissions will auto-deny");
+        return Vec::new();
+    }
+
+    vec![
+        "--mcp-config".to_string(),
+        config_path.to_string_lossy().to_string(),
+        "--permission-prompt-tool".to_string(),
+        "mcp__agentdeck__request_permission".to_string(),
+    ]
+}
+
+/// Resolve the effective model/effort plus extra args for a claude-stream
+/// spawn. Precedence: this request's explicit choice, then a value the user
+/// picked while the session was stopped (pending config). Callers consume the
+/// pending values via [`clear_claude_spawn_config`] once the spawn succeeds.
+async fn claude_spawn_config(
+    state: &AppState,
+    session_id: &str,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
+) -> (Option<String>, Vec<String>) {
+    let pending: Vec<(String, String)> = state
+        .session_manager
+        .pending_config(session_id)
+        .await
+        .unwrap_or_default();
+    let pick = |key: &str| {
+        pending
+            .iter()
+            .find(|(config_id, _)| config_id == key)
+            .map(|(_, value)| value.clone())
+    };
+    let model = requested_model.or_else(|| pick("model"));
+    let effort = requested_effort.or_else(|| pick("effort"));
+
+    let mut extra = claude_permission_args(state, session_id).await;
+    if let Some(effort) = effort.as_deref() {
+        if !effort.trim().is_empty() {
+            extra.push("--effort".to_string());
+            extra.push(effort.to_string());
+        }
+    }
+    (model, extra)
+}
+
+/// Drop the one-shot config values that were just applied at spawn.
+async fn clear_claude_spawn_config(state: &AppState, session_id: &str) {
+    for key in ["model", "effort"] {
+        let _ = state.session_manager.clear_pending_config(session_id, key).await;
+    }
+}
+
+/// Fresh-spawn tail for a model switch whose resume target was unusable.
+async fn finish_fresh_claude_after_switch(
+    state: &AppState,
+    session_id: &str,
+    project: Option<&str>,
+    model: &str,
+) -> Result<(crate::providers::types::ConfigApplied, crate::sessions::config::SessionConfig), String> {
+    let cfg = state.config.read().await;
+    let binary = cfg.settings().agents.claude.path.clone();
+    drop(cfg);
+
+    let (effective_model, extra_args) =
+        claude_spawn_config(state, session_id, Some(model.to_string()), None).await;
+    let info = state
+        .claude_stream
+        .spawn_session(session_id, project, &binary, None, effective_model.as_deref(), &extra_args)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    state.session_manager.set_session_pid(session_id, info.pid).await;
+    if !info.claude_session_id.is_empty() {
+        persist_claude_external_id(state, session_id, &info.claude_session_id).await;
+    } else {
+        spawn_claude_id_watcher(state, session_id);
+    }
+    let _ = state
+        .session_manager
+        .update_status(session_id, SessionStatus::Idle)
+        .await;
+
+    let mut config = crate::sessions::config::read_config(state, session_id).await?;
+    for option in config.options.iter_mut() {
+        if option.id == "model" {
+            option.current_value = Some(model.to_string());
+        }
+    }
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "idle".to_string(),
+    });
+    if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
+        state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+    }
+    Ok((crate::providers::types::ConfigApplied::Immediate, config))
+}
+
+/// Restart a live claude-stream session on a new model, preserving the
+/// conversation through the CLI's native resume.
+///
+/// This is what makes the UI model picker *real* for running sessions: the
+/// old headless process is stopped (its model was fixed at spawn), and a new
+/// one starts with `--resume <claude session id> --model <choice>` plus all
+/// permission/config args. The AgentDeck session id never changes, so every
+/// connected device keeps its transcript and state.
+pub(crate) async fn respawn_claude_with_model(
+    state: &AppState,
+    session_id: &str,
+    model: &str,
+) -> Result<(crate::providers::types::ConfigApplied, crate::sessions::config::SessionConfig), String> {
+    let session = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let cfg = state.config.read().await;
+    let binary = cfg.settings().agents.claude.path.clone();
+    drop(cfg);
+
+    // Stop the current process. Its conversation lives in Claude's own store,
+    // keyed by the external id — not in this process.
+    let _ = state.claude_stream.kill_session(session_id).await;
+    let resume_target = session.external_id.clone();
+
+    let (effective_model, extra_args) =
+        claude_spawn_config(state, session_id, Some(model.to_string()), None).await;
+
+    match state
+        .claude_stream
+        .spawn_session(
+            session_id,
+            session.project.as_deref(),
+            &binary,
+            resume_target.as_deref().filter(|id| !id.is_empty()),
+            effective_model.as_deref(),
+            &extra_args,
+        )
+        .await
+    {
+        Ok(info) => {
+            clear_claude_spawn_config(state, session_id).await;
+            state.session_manager.set_session_pid(session_id, info.pid).await;
+
+            // Second gate: prove the restarted process actually stays up.
+            // Any early death gets ONE fresh retry (new conversation, same
+            // model) before failing honestly — transient gateway/proxy
+            // failures otherwise look like our bug.
+            tracing::info!(session_id = %session_id, "model-switch liveness check");
+            if let Some(tail) = state.claude_stream.stderr_if_dead(session_id, 3).await {
+                tracing::warn!(session_id = %session_id, %tail, "restarted Claude died early; retrying fresh");
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                    session_id: session_id.to_string(),
+                    code: "resume_target_missing".to_string(),
+                    message: format!(
+                        "The previous conversation did not survive the switch{} — continuing fresh with {model}.",
+                        if tail.is_empty() { String::new() } else { format!(" ({tail})") }
+                    ),
+                });
+                let _ = state.session_manager.set_external_id(session_id, "").await;
+                return finish_fresh_claude_after_switch(state, session_id, session.project.as_deref(), model).await;
+            }
+
+            if !info.claude_session_id.is_empty() {
+                persist_claude_external_id(state, session_id, &info.claude_session_id).await;
+            } else {
+                spawn_claude_id_watcher(state, session_id);
+            }
+            if let Err(error) = state
+                .session_manager
+                .update_status(session_id, SessionStatus::Idle)
+                .await
+            {
+                tracing::warn!(session_id = %session_id, error = %error, "Could not mark a model-switched session idle");
+            }
+
+            let mut config = crate::sessions::config::read_config(state, session_id).await?;
+            for option in config.options.iter_mut() {
+                if option.id == "model" {
+                    option.current_value = Some(model.to_string());
+                }
+            }
+            // Every connected device must see the new process reality.
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: session_id.to_string(),
+                state: "idle".to_string(),
+            });
+            if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+            }
+            tracing::info!(session_id = %session_id, %model, "Claude restarted with new model");
+            Ok((crate::providers::types::ConfigApplied::Immediate, config))
+        }
+        Err(error) => {
+            let message = match &error {
+                crate::AgentDeckError::Session(message)
+                | crate::AgentDeckError::Pty(message) => message.clone(),
+                other => other.to_string(),
+            };
+            // The switch failed; keep the process gone but leave the pending
+            // choice recorded so the next explicit resume retries with it.
+            let _ = state.session_manager.set_pending_config(session_id, "model", model).await;
+            let _ = state
+                .session_manager
+                .update_status(session_id, SessionStatus::Idle)
+                .await;
+            Err(format!("Model switch failed: {message}"))
+        }
+    }
+}
+
+/// One Pi turn: record the user message, run the headless process to
+/// completion, then return the session to idle. Spawned as a task by the WS
+/// input handler so the socket is never blocked on a turn.
+pub(crate) async fn spawn_pi_turn(
+    state: &AppState,
+    session: &crate::sessions::Session,
+    prompt: &str,
+) -> Result<(), String> {
+    let Some((binary, _version)) = crate::agents::detect_agent("pi").await else {
+        return Err("Pi CLI is not installed".to_string());
+    };
+
+    state.broadcast.broadcast(crate::websocket::WsMessage::Message {
+        message: crate::agent_events::AgentMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session.id.clone(),
+            role: "user".to_string(),
+            content: prompt.to_string(),
+            timestamp: chrono::Utc::now(),
+        },
+    });
+    state
+        .session_manager
+        .update_status(&session.id, SessionStatus::Running)
+        .await
+        .map_err(|error| error.to_string())?;
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session.id.clone(),
+        state: "running".to_string(),
+    });
+
+    let result = state
+        .pi_stream
+        .run_turn(state, &session.id, session.project.as_deref(), &binary, prompt)
+        .await;
+    crate::agents::pi_stream::persist_pi_session_id(state, &session.id).await;
+
+    let status = if result.is_ok() { SessionStatus::Idle } else { SessionStatus::Error };
+    let _ = state.session_manager.update_status(&session.id, status).await;
+    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+        session_id: session.id.clone(),
+        state: if result.is_ok() { "idle".to_string() } else { "error".to_string() },
+    });
+    if let Ok(Some(current)) = state.session_manager.get_session(&session.id).await {
+        state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+    }
+    result
+}
+
 async fn finish_claude_stream_spawn(
     state: &AppState,
     session: crate::sessions::Session,
@@ -1506,35 +1958,45 @@ async fn finish_claude_stream_spawn(
     requested_model: Option<String>,
     requested_effort: Option<String>,
 ) -> std::result::Result<crate::sessions::Session, String> {
-    let _ = requested_effort;
+    // `requested_effort` is honored below via extra args, matching the PTY
+    // path's flag handling.
     let cfg = state.config.read().await;
     let configured = &cfg.settings().agents.claude;
     let binary = configured.path.clone();
     drop(cfg);
 
+    // Honor custom model configuration (explicit request > pending choice).
+    let (effective_model, permission_args) =
+        claude_spawn_config(state, &session.id, requested_model.clone(), requested_effort.clone()).await;
     let info = state
         .claude_stream
-        .spawn_session(&session.id, project, &binary, None, requested_model.as_deref())
+        .spawn_session(
+            &session.id,
+            project,
+            &binary,
+            None,
+            effective_model.as_deref(),
+            &permission_args,
+        )
         .await
         .map_err(|error| error.to_string())?;
+
+    clear_claude_spawn_config(state, &session.id).await;
 
     state.session_manager.set_session_pid(&session.id, info.pid).await;
 
     // Persist Claude's own session id so resume targets the right conversation.
-    if let Err(error) = state
-        .session_manager
-        .set_external_id(&session.id, &info.claude_session_id)
-        .await
-    {
-        tracing::warn!(
-            session_id = %session.id,
-            error = %error,
-            "Could not persist the Claude session id; this session will not be resumable"
-        );
+    // In stream-json input mode the id arrives with the first turn, so when it
+    // is not known yet a watcher stores it the moment the stream reports it.
+    if !info.claude_session_id.is_empty() {
+        persist_claude_external_id(state, &session.id, &info.claude_session_id).await;
+    } else {
+        spawn_claude_id_watcher(state, &session.id);
     }
 
     // Send the initial prompt over stdin. The transport reads the structured
     // stream and emits normalized events, so the chat view shows real content.
+    let mut prompted = false;
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let clean_prompt = prompt.trim().to_string();
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
@@ -1551,11 +2013,16 @@ async fn finish_claude_stream_spawn(
             .send_prompt(&session.id, &clean_prompt)
             .await
             .map_err(|error| error.to_string())?;
+        prompted = true;
     }
 
+    // A session spawned without an initial prompt is live but idle — it is
+    // waiting for its first message, not working. Marking it Running made the
+    // composer show Stop and the user's first message appeared to do nothing.
+    let status = if prompted { SessionStatus::Running } else { SessionStatus::Idle };
     state
         .session_manager
-        .update_status(&session.id, SessionStatus::Running)
+        .update_status(&session.id, status)
         .await
         .map_err(|error| error.to_string())?;
     let current = state
@@ -1568,6 +2035,44 @@ async fn finish_claude_stream_spawn(
         .broadcast
         .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current.clone() });
     Ok(current)
+}
+
+/// Store Claude's real session id once, with a log line on failure.
+async fn persist_claude_external_id(state: &AppState, session_id: &str, claude_id: &str) {
+    if claude_id.is_empty() {
+        return;
+    }
+    if let Err(error) = state.session_manager.set_external_id(session_id, claude_id).await {
+        tracing::warn!(
+            session_id = %session_id,
+            error = %error,
+            "Could not persist the Claude session id; this session will not be resumable"
+        );
+    }
+}
+
+/// Poll the live transport until Claude reports its session id (it arrives with
+/// the first turn), then persist it. Bounded; a silent failure is fine because
+/// resume simply falls back to fresh spawns.
+fn spawn_claude_id_watcher(state: &AppState, session_id: &str) {
+    let manager = state.claude_stream.clone();
+    let sessions = state.session_manager.clone();
+    let session_id = session_id.to_string();
+    tokio::spawn(async move {
+        for _ in 0..400 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            match manager.claude_session_id(&session_id).await {
+                Some(claude_id) => {
+                    if let Err(error) = sessions.set_external_id(&session_id, &claude_id).await {
+                        tracing::warn!(session_id = %session_id, error = %error, "watcher could not persist Claude session id");
+                    }
+                    return;
+                }
+                None => return, // transport gone; nothing to persist
+            }
+        }
+        tracing::warn!(session_id = %session_id, "Claude never reported a session id; resume will start fresh");
+    });
 }
 
 async fn finish_spawn(
@@ -1745,6 +2250,77 @@ pub async fn remove_mcp(
 }
 
 // ===== TUNNEL =====
+/// POST /api/tunnel/{kind}/start — bring a tunnel up from the UI.
+pub async fn tunnel_start(
+    State(state): State<Arc<AppState>>,
+    Path(kind): Path<String>,
+) -> Response {
+    run_tunnel_action(&state, &kind, true).await
+}
+
+/// POST /api/tunnel/{kind}/stop
+pub async fn tunnel_stop(
+    State(state): State<Arc<AppState>>,
+    Path(kind): Path<String>,
+) -> Response {
+    run_tunnel_action(&state, &kind, false).await
+}
+
+async fn run_tunnel_action(state: &Arc<AppState>, kind: &str, start: bool) -> Response {
+    let cfg = state.config.read().await;
+    let settings = cfg.settings().tunnel.clone();
+    drop(cfg);
+
+    let info = match kind {
+        "tailscale" => {
+            let provider =
+                crate::tunnel::tailscale::TailscaleProvider::new(
+                    settings.tailscale.hostname.clone(),
+                );
+            if start {
+                crate::tunnel::TunnelProvider::start(&provider).await
+            } else {
+                let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
+                crate::tunnel::TunnelProvider::status(&provider).await
+            }
+        }
+        "cloudflare" => {
+            let token = settings.cloudflare.token.clone().unwrap_or_default();
+            let hostname = settings.cloudflare.hostname.clone();
+            let provider = crate::tunnel::cloudflare::CloudflareProvider::new(token, hostname);
+            if start {
+                crate::tunnel::TunnelProvider::start(&provider).await
+            } else {
+                let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
+                crate::tunnel::TunnelProvider::status(&provider).await
+            }
+        }
+        other => {
+            return Json(json!({ "error": format!("Unknown tunnel kind: {other}") })).into_response();
+        }
+    };
+
+    match info {
+        Ok(info) => Json(json!({
+            "kind": kind,
+            "status": match info.status {
+                crate::tunnel::TunnelStatus::Disconnected => "disconnected",
+                crate::tunnel::TunnelStatus::Connecting => "connecting",
+                crate::tunnel::TunnelStatus::Connected => "connected",
+                crate::tunnel::TunnelStatus::Error(_) => "error",
+            },
+            "url": info.url,
+            "ip": info.ip,
+            "error": match info.status {
+                crate::tunnel::TunnelStatus::Error(message) => Some(message),
+                _ => None,
+            },
+        }))
+        .into_response(),
+        Err(error) => Json(json!({ "error": error.to_string() })).into_response(),
+    }
+}
+
 pub async fn tunnel_status(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
@@ -1891,6 +2467,29 @@ async fn reachable_host(fallback: &str, interface: Option<&str>) -> String {
                 })
         })
         .unwrap_or_else(|| fallback.to_string())
+}
+
+/// The endpoint a phone would connect through, without minting an offer.
+///
+/// Read-only companion to `initiate_pairing`: the Remote screen shows where
+/// this machine is reachable (Tailnet / Cloudflare / LAN) and how healthy that
+/// path is, without burning a two-minute pairing offer just to look.
+pub async fn pairing_endpoint(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+    let cloudflare_host = if cfg.settings().tunnel.cloudflare.enabled {
+        cfg.settings().tunnel.cloudflare.hostname.clone()
+    } else {
+        None
+    };
+    let tailscale_enabled = cfg.settings().tunnel.tailscale.enabled;
+    let tailscale_hostname = cfg.settings().tunnel.tailscale.hostname.clone();
+    let port = cfg.settings().server.port;
+    drop(cfg);
+
+    let endpoint =
+        crate::tunnel::resolver::resolve_endpoint(port, cloudflare_host.as_deref(), tailscale_enabled, Some(&tailscale_hostname), None)
+            .await;
+    Json(json!({ "endpoint": endpoint }))
 }
 
 pub async fn initiate_pairing(
@@ -2160,6 +2759,84 @@ pub async fn upload_attachment(
 }
 
 // ===== WORKSPACE (worktrees + changed files + diffs) =====
+
+/// List subdirectories of a path for the new-session project picker.
+///
+/// No `path` param returns the home directory plus common project roots that
+/// actually exist, so the picker opens somewhere useful instead of `/`.
+/// Read-only and unprivileged by design: this daemon runs as the user, and a
+/// directory listing reveals nothing the user's own shell cannot.
+pub async fn workspace_dirs(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    let requested = params.get("path").filter(|p| !p.is_empty());
+    let target = match requested {
+        Some(path) => std::path::PathBuf::from(path),
+        None => std::path::PathBuf::from(&home),
+    };
+
+    let exists = target.is_dir();
+    let path = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.clone());
+
+    // Common roots offered as shortcuts when no explicit path is given.
+    let mut roots: Vec<serde_json::Value> = Vec::new();
+    if requested.is_none() {
+        for candidate in ["Documents", "projects", "Projects", "code", "dev", "src"] {
+            let dir = std::path::Path::new(&home).join(candidate);
+            if dir.is_dir() {
+                roots.push(json!({
+                    "name": format!("~/{candidate}"),
+                    "path": dir.to_string_lossy(),
+                }));
+            }
+        }
+    }
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    if exists {
+        // `files=1` also lists regular files — the @context composer needs
+        // them; the directory picker does not.
+        let want_files = params.get("files").map(|v| v == "1").unwrap_or(false);
+        let mut collected: Vec<(String, String, bool)> = Vec::new();
+        if let Ok(mut reader) = tokio::fs::read_dir(&path).await {
+            while let Ok(Some(entry)) = reader.next_entry().await {
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false)
+                    || entry.path().is_dir();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') || name == "node_modules" || name == "target" {
+                    continue;
+                }
+                if !is_dir && !want_files {
+                    continue;
+                }
+                collected.push((name, entry.path().to_string_lossy().to_string(), is_dir));
+            }
+        }
+        collected.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        entries.extend(collected.into_iter().map(|(name, path, is_dir)| {
+            json!({ "name": name, "path": path, "dir": is_dir })
+        }));
+    }
+
+    let parent = path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| !p.is_empty() && p != "/");
+
+    Json(json!({
+        "path": path.to_string_lossy(),
+        "exists": exists,
+        "home": home,
+        "parent": parent,
+        "roots": roots,
+        "entries": entries,
+    }))
+    .into_response()
+}
 
 /// Real worktree listing + changed files for a session's project, derived
 /// from actual git state. Query param `session` or `project` selects the

@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { ConfigControl } from './ConfigControls'
+import { DirPicker } from './DirPicker'
 import { SyncIcon, SyncLayer } from './SyncSessions'
 import {
   Button,
@@ -34,7 +35,8 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   waiting_for_input: 'Needs input',
   waiting_for_approval: 'Needs approval',
   idle: 'Idle',
-  needs_resume: 'Resumable',
+  needs_resume: 'Needs resume',
+  resuming: 'Resuming...',
   error: 'Failed',
   archived: 'Archived',
   exited: 'Stopped',
@@ -48,6 +50,7 @@ export function StatusDot({ status }: { status: SessionStatus }) {
   if (isActive(status)) return <Dot tone="green" pulse />
   if (isBlocked(status)) return <Dot tone="orange" />
   if (status === 'error') return <Dot tone="red" />
+  if (status === 'resuming') return <Dot tone="orange" pulse />
   return <Dot tone="dim" />
 }
 
@@ -132,14 +135,17 @@ function ProviderBadge({ provider }: { provider: Provider }) {
  * has no idea which dimensions exist. A provider reporting one shows one; one
  * reporting three shows three.
  */
-function NewSessionLayer({
+export function NewSessionLayer({
   open,
   onClose,
   onCreated,
+  initialProvider,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (session: Session) => void
+  /** Pre-select an agent — used by quick-launch buttons on the home screen. */
+  initialProvider?: string
 }) {
   const providers = useStore((state) => state.providers)
   const providersLoading = useStore((state) => state.providersLoading)
@@ -151,6 +157,7 @@ function NewSessionLayer({
   const [providerId, setProviderId] = useState<string>()
   const [project, setProject] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
   /** Chosen values, keyed by the provider's own option ids. */
   const [values, setValues] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -160,10 +167,20 @@ function NewSessionLayer({
   const unavailable = useMemo(() => providers.filter((p) => p.state !== 'ready'), [providers])
   const selected = providers.find((provider) => provider.id === providerId)
 
-  // Default to the first ready provider so the form is immediately usable.
+  // Default to the requested provider, else the first ready one, so the form
+  // is immediately usable.
   useEffect(() => {
-    if (!providerId && ready.length > 0) setProviderId(ready[0].id)
-  }, [providerId, ready])
+    if (providerId) return
+    const wanted = initialProvider ? ready.find((provider) => provider.id === initialProvider) : undefined
+    const fallback = ready.length > 0 ? ready[0].id : undefined
+    const next = wanted?.id ?? fallback
+    if (next) setProviderId(next)
+  }, [providerId, ready, initialProvider])
+
+  // Re-openings with a new quick-launch target must win over a stale choice.
+  useEffect(() => {
+    if (open && initialProvider) setProviderId(initialProvider)
+  }, [open, initialProvider])
 
   // Reset chosen values when the provider changes: another provider's model id
   // is meaningless here.
@@ -307,11 +324,20 @@ function NewSessionLayer({
 
       <section className="flex flex-col gap-2 px-2.5 pb-1 pt-2">
         <label className="block">
-          <span className="block pb-1.5 text-[11.5px] text-ink-3">Project directory</span>
+          <span className="flex items-center justify-between pb-1.5">
+            <span className="text-[11.5px] text-ink-3">Project directory</span>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="rounded-[6px] px-1.5 py-0.5 text-[11px] text-accent-ink transition-colors hover:bg-hover-2"
+            >
+              Browse…
+            </button>
+          </span>
           <TextField
             value={project}
             onChange={(changeEvent) => setProject(changeEvent.target.value)}
-            placeholder="/path/to/project"
+            placeholder="/path/to/project — or browse"
           />
         </label>
         <label className="block">
@@ -325,6 +351,11 @@ function NewSessionLayer({
           />
         </label>
       </section>
+      <DirPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={setProject}
+      />
     </Layer>
   )
 }

@@ -5,10 +5,7 @@ export default {
   theme: {
     extend: {
       /**
-       * Color names match the Beautiful UI collection's tokens so components
-       * carried over from `beautifului-collection/` work unmodified. Values are
-       * complete colors rather than HSL channels, because those components also
-       * reference the CSS vars directly in inline styles.
+       * Color tokens matching the premium dark Grok×Apple design system.
        */
       colors: {
         canvas: 'var(--canvas)',
@@ -35,13 +32,16 @@ export default {
         'red-tint': 'var(--red-tint)',
         orange: 'var(--orange)',
         'orange-tint': 'var(--orange-tint)',
+        'green-border': 'var(--green-border)',
+        'red-border': 'var(--red-border)',
+        'orange-border': 'var(--orange-border)',
 
         'term-bg': 'var(--term-bg)',
         'term-fg': 'var(--term-fg)',
       },
       borderRadius: {
-        card: '12px',
-        control: '8px',
+        card: '16px',
+        control: '999px',
         chip: '999px',
       },
       boxShadow: {
@@ -51,7 +51,6 @@ export default {
         raised: 'var(--shadow-raised)',
         overlay: 'var(--shadow-overlay)',
       },
-      /* Fractional steps the collection's components use (h-5.5, size-4.5, h-37…). */
       spacing: {
         '4.5': '1.125rem',
         '5.5': '1.375rem',
@@ -74,7 +73,7 @@ export default {
       },
       fontFamily: {
         sans: [
-          'Inter',
+          'IBM Plex Sans',
           '-apple-system',
           'BlinkMacSystemFont',
           'SF Pro Text',

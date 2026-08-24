@@ -295,6 +295,26 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         }
     };
 
+    // Pi runs on-demand: every prompt is its own headless turn. Route before
+    // the live-agent guard — there is intentionally no resident process.
+    if session.agent == "pi" {
+        let state = Arc::clone(state);
+        let session = session.clone();
+        let prompt = clean_data.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                crate::api::routes::spawn_pi_turn(&state, &session, &prompt).await
+            {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                    session_id: session.id.clone(),
+                    code: "pi_turn_failed".to_string(),
+                    message: error,
+                });
+            }
+        });
+        return;
+    }
+
     // A prompt needs a live agent to receive it. Without this check the session
     // was marked `running` and the user's message was recorded, but nothing was
     // listening — the prompt silently vanished and the UI stopped offering the
@@ -433,6 +453,25 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             let request_id = params.get("request_id").and_then(Value::as_str).unwrap_or("");
             let decision = params.get("decision").and_then(Value::as_str).unwrap_or("deny");
             let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
+            // Claude stream permissions are decided through the permission
+            // broker: the MCP server is blocked on an HTTP round-trip holding
+            // this exact request id, and the answer unblocks the agent.
+            if state.permissions.resolve(request_id, decision.to_string()).await {
+                let _ = state.session_manager.resolve_approval(request_id, decision).await;
+                if !session_id.is_empty() {
+                    let session_id = session_id.to_string();
+                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                        &session_id,
+                        "permission_resolved",
+                        serde_json::json!({ "request_id": request_id, "decision": decision }),
+                    ));
+                    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                        session_id,
+                        state: "running".to_string(),
+                    });
+                }
+                return;
+            }
             // ACP approvals are structured protocol requests: respond with the
             // chosen optionId instead of typing a keystroke into a TUI.
             if !session_id.is_empty() && state.acp_manager.has_active_session(session_id).await {

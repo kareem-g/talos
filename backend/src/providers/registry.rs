@@ -23,6 +23,7 @@
 use super::acp_probe;
 use super::catalog::{self, CATALOG};
 use super::discovery;
+use super::native;
 use super::types::{
     ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model, ProviderCapabilities,
     ProviderDescriptor, ProviderState, Transport,
@@ -317,7 +318,7 @@ async fn probe_acp_provider(
 async fn probe_flag_provider(candidate: &Candidate, executable: String) -> ProviderDescriptor {
     let version = read_version(&executable).await;
 
-    let (models, models_source) = match candidate.id.as_str() {
+    let (mut models, mut models_source) = match candidate.id.as_str() {
         "opencode" => {
             let models = discovery::opencode_models(&executable).await;
             let source = (!models.is_empty()).then_some(DiscoverySource::CliCommand);
@@ -330,7 +331,27 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
         }
     };
 
-    let config_options = vec![model_config_option(&models)];
+    // paseo-style native detection: models the user configured in the CLI's
+    // own settings file are real and usually what actually runs — a custom
+    // gateway route must appear under its true name. Native entries win the
+    // spot over a same-id discovery guess, so their tag stays attached.
+    let native = native::models_for(&candidate.id);
+    if !native.is_empty() {
+        for model in &native {
+            models.retain(|existing| existing.id != model.id);
+        }
+        let source = DiscoverySource::UserConfig;
+        for item in native {
+            let mut model = Model::opaque(item.id.clone(), source);
+            model.tag = Some(item.note);
+            models.push(model);
+        }
+        if models_source.is_none() {
+            models_source = Some(source);
+        }
+    }
+
+    let config_options = vec![model_config_option(&models, candidate.transport, &candidate.id)];
 
     ProviderDescriptor {
         id: candidate.id.clone(),
@@ -356,7 +377,14 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
 /// `StartOnly` because the flag is fixed at spawn; changing it mid-session
 /// requires a new process, and claiming otherwise would be a lie the UI passes
 /// on to the user.
-fn model_config_option(models: &[Model]) -> ConfigOption {
+fn model_config_option(models: &[Model], transport: Transport, agent_id: &str) -> ConfigOption {
+    // Claude's stream-json process can be restarted on its native resume id,
+    // so a model switch is genuinely immediate — not "next run" marketing.
+    let mutability = if agent_id == "claude" && transport == Transport::StreamJson {
+        ConfigMutability::Live
+    } else {
+        ConfigMutability::StartOnly
+    };
     ConfigOption {
         id: "model".to_string(),
         name: "Model".to_string(),
@@ -372,7 +400,7 @@ fn model_config_option(models: &[Model]) -> ConfigOption {
             })
             .collect(),
         allows_custom_value: true,
-        mutability: ConfigMutability::StartOnly,
+        mutability,
     }
 }
 
@@ -466,7 +494,7 @@ mod tests {
 
     #[test]
     fn flag_providers_accept_undiscovered_models() {
-        let option = model_config_option(&[Model::opaque("sonnet", DiscoverySource::CliHelp)]);
+        let option = model_config_option(&[Model::opaque("sonnet", DiscoverySource::CliHelp)], crate::providers::types::Transport::Acp, "opencode");
         assert!(
             option.allows_custom_value,
             "claude/codex take an arbitrary --model, so the list must not be a whitelist"
@@ -475,7 +503,7 @@ mod tests {
         assert_eq!(option.choices.len(), 1);
 
         // No discovered models at all still yields a usable free-text option.
-        let empty = model_config_option(&[]);
+        let empty = model_config_option(&[], crate::providers::types::Transport::StreamJson, "claude");
         assert!(empty.choices.is_empty());
         assert!(empty.allows_custom_value);
     }

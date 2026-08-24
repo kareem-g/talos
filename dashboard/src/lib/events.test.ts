@@ -401,3 +401,131 @@ describe('robustness', () => {
     expect(conversation.terminal.length).toBeLessThanOrEqual(512 * 1024)
   })
 })
+
+describe('GrokBot event types', () => {
+  /** Raw Grok streaming-json vocabulary renders through the same paths. */
+  it('maps raw grok kinds: text, thought, tool_call, end', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('thought', { text: 'pondering ' }))
+    applyAgentEvent(conversation, event('text', { text: 'Answer ' }))
+    applyAgentEvent(conversation, event('tool_call', { id: 't1', name: 'read_file', status: 'in_progress' }))
+    applyAgentEvent(conversation, event('tool_call_update', { id: 't1', status: 'completed', result: 'contents' }))
+    applyAgentEvent(conversation, event('text', { text: 'done' }))
+    applyAgentEvent(conversation, event('end', {}))
+
+    expect(assistantText(conversation)).toBe('Answer done')
+    const turn = conversation.messages[0]
+    const tool = turn.parts.find((part) => part.kind === 'tool') as { name: string; output?: string; status: string }
+    expect(tool.name).toBe('read_file')
+    expect(tool.output).toBe('contents')
+    expect(tool.status).toBe('ok')
+    // `end` seals the turn.
+    expect(turn.streaming).toBe(false)
+    // Thought text is present as reasoning.
+    const reasoning = turn.parts.find((part) => part.kind === 'reasoning') as { text: string }
+    expect(reasoning.text).toBe('pondering ')
+  })
+
+  it('merges usage updates into one meter', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('usage', { input_tokens: 100 }))
+    applyAgentEvent(conversation, event('usage', { input_tokens: 150, outputTokens: 40, cost_usd: 0.02 }))
+
+    const turn = conversation.messages[0]
+    const meters = turn.parts.filter((part) => part.kind === 'usage')
+    expect(meters).toHaveLength(1)
+    const meter = meters[0] as { inputTokens?: number; outputTokens?: number; costUsd?: number }
+    expect(meter.inputTokens).toBe(150)
+    expect(meter.outputTokens).toBe(40)
+    expect(meter.costUsd).toBe(0.02)
+  })
+
+  it('builds a turn summary from a completion that reports data', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('assistant_text', { text: 'hi', delta: true }))
+    applyAgentEvent(
+      conversation,
+      event('agent_completed', { stop_reason: 'end_turn', input_tokens: 10, output_tokens: 5 }, { duration_ms: 4200 }),
+    )
+
+    const turn = conversation.messages[0]
+    const summary = turn.parts.find((part) => part.kind === 'turn_summary') as {
+      stopReason?: string
+      inputTokens?: number
+      outputTokens?: number
+      durationMs?: number
+    }
+    expect(summary.stopReason).toBe('end_turn')
+    expect(summary.inputTokens).toBe(10)
+    expect(summary.durationMs).toBe(4200)
+    expect(turn.streaming).toBe(false)
+  })
+
+  it('adds no summary card for a bare completion', () => {
+    // An empty "Turn complete" row is noise. Most agents complete silently.
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('assistant_text', { text: 'hi', delta: true }))
+    applyAgentEvent(conversation, event('agent_completed', {}))
+
+    const turn = conversation.messages[0]
+    expect(turn.parts.some((part) => part.kind === 'turn_summary')).toBe(false)
+  })
+
+  it('stores announced slash commands and mode on the conversation', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('commands_available', { commands: ['/review', '/plan'] }))
+    applyAgentEvent(conversation, event('mode_changed', { mode_id: 'build', modes: [{ id: 'build', name: 'Build' }] }))
+
+    expect(conversation.commands).toEqual(['/review', '/plan'])
+    expect(conversation.mode?.id).toBe('build')
+    // Neither kind may leak into the transcript.
+    expect(conversation.messages).toHaveLength(0)
+  })
+
+  it('renders plan step statuses when entries carry them', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(
+      conversation,
+      event('plan', {
+        title: 'Plan',
+        steps: ['One', 'Two'],
+        entries: [
+          { content: 'One', status: 'completed' },
+          { content: 'Two', status: 'in_progress' },
+        ],
+      }),
+    )
+
+    const plan = conversation.messages[0].parts.find((part) => part.kind === 'plan') as {
+      entries?: Array<{ content: string; status?: string }>
+    }
+    expect(plan.entries).toHaveLength(2)
+    expect(plan.entries?.[0]).toEqual({ content: 'One', status: 'completed' })
+    expect(plan.entries?.[1].status).toBe('in_progress')
+  })
+
+  it('marks a grok tool failed by status string', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('tool_call', { id: 'x1', name: 'bash', status: 'in_progress' }))
+    applyAgentEvent(conversation, event('tool_call_update', { id: 'x1', status: 'failed' }))
+
+    const tool = conversation.messages[0].parts.find((part) => part.kind === 'tool') as { status: string }
+    expect(tool.status).toBe('failed')
+  })
+
+  it('fills tool input once from a tool_input event without spawning cards', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('tool_started', { tool_id: 'tu_1', tool_name: 'Bash' }))
+    applyAgentEvent(conversation, event('tool_input', { tool_id: 'tu_1', input: '{"command":"ls -la"}' }))
+    // A late duplicate must not double-apply or create new parts.
+    applyAgentEvent(conversation, event('tool_finished', { tool_id: 'tu_1', success: true, output: 'ok' }))
+
+    const turn = conversation.messages[0]
+    const tools = turn.parts.filter((part) => part.kind === 'tool')
+    expect(tools).toHaveLength(1)
+    const tool = tools[0] as { input?: string; output?: string; status: string }
+    expect(tool.input).toContain('ls -la')
+    expect(tool.output).toBe('ok')
+    expect(turn.streaming).toBe(true) // turn continues after the tool
+  })
+})

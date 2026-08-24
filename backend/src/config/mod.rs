@@ -107,6 +107,10 @@ pub struct AppState {
     pub devices: Arc<DeviceStore>,
     pub hook_tokens: Arc<RwLock<HashMap<String, String>>>,
     pub hook_starts: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
+    /// In-flight Claude tool-permission decisions (`--permission-prompt-tool`).
+    pub permissions: Arc<crate::permissions::PermissionBroker>,
+    /// Pi CLI one-shot semantic turns (`pi -p --mode json`).
+    pub pi_stream: Arc<crate::agents::pi_stream::PiStreamManager>,
     pub broadcast: BroadcastHub,
     pub transcript_tails: Option<Arc<TranscriptTails>>,
 }

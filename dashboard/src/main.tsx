@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { registerSW } from './lib/pwa'
 import './index.css'
 
 const root = document.getElementById('root')!
@@ -11,6 +12,8 @@ window.addEventListener('error', (errorEvent) => {
   if (root.childElementCount > 0) return
   root.textContent = `Startup error: ${errorEvent.message}\n\n${errorEvent.error?.stack ?? ''}`
 })
+
+registerSW()
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>

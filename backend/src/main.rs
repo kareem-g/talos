@@ -3,6 +3,16 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> agentdeck_backend::Result<()> {
+    // Hidden helper mode: re-invoked by the daemon as Claude's
+    // `--permission-prompt-tool` MCP server. Runs on stdio and exits when the
+    // pipe closes; never touches config, logging, or the daemon lifecycle.
+    if std::env::args().nth(1).as_deref() == Some("__permission-mcp") {
+        agentdeck_backend::permissions::run_mcp_server()
+            .await
+            .map_err(|error| agentdeck_backend::AgentDeckError::Io(error))?;
+        return Ok(());
+    }
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

@@ -24,6 +24,8 @@ import type {
   ReasoningPart,
   TextPart,
   ToolPart,
+  TurnSummaryPart,
+  UsagePart,
 } from '@/types/conversation'
 
 /** Read a string field from an untyped payload. */
@@ -54,10 +56,66 @@ function text(payload: Record<string, unknown>, key: string): string | undefined
   }
 }
 
+/**
+ * Map a provider-native event kind onto the canonical kind the reducer speaks.
+ *
+ * Grok Build (and agents modeled on it) use a slightly different vocabulary —
+ * `text`, `thought`, `tool_call`, `tool_call_update`, `usage`,
+ * `available_commands`, `end` — whether arriving through ACP mapping or raw
+ * headless streaming-json. Normalizing here means every alias flows through the
+ * exact same code path as the canonical kinds, with no duplicated logic to
+ * drift.
+ */
+function normalizeKind(kind: string, payload: Record<string, unknown>): string {
+  switch (kind) {
+    case 'text':
+      return 'assistant_text'
+    case 'thought':
+      return 'thinking_delta'
+    case 'turn_end':
+    case 'end':
+      return 'agent_completed'
+    case 'available_commands':
+      return 'commands_available'
+    case 'tool_call':
+    case 'tool_call_update': {
+      // One vocabulary covers start and finish; status decides which.
+      const status = str(payload, 'status') ?? 'in_progress'
+      return status === 'completed' || status === 'failed' ? 'tool_finished' : 'tool_started'
+    }
+    default:
+      return kind
+  }
+}
+
+/** Read a numeric field that may be named in snake_case or camelCase. */
+function numAny(payload: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = num(payload, key)
+    if (value !== undefined) return value
+  }
+  // camelCase fallback: input_tokens → inputTokens
+  for (const key of keys) {
+    const camel = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    const value = num(payload, camel)
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
 function stringList(payload: Record<string, unknown>, key: string): string[] {
   const value = payload[key]
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+/** Read a string field that may be named differently per provider. */
+function strAny(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = str(payload, key)
+    if (value !== undefined) return value
+  }
+  return undefined
 }
 
 /**
@@ -190,7 +248,8 @@ export function applyAgentEvent(
     conversation.lastEventId = envelopeEventId
   }
 
-  const { kind, payload } = event
+  const { kind: rawKind, payload } = event
+  const kind = normalizeKind(rawKind, payload)
   const label = activityFor(kind, payload)
   if (label) {
     conversation.activity = {
@@ -202,20 +261,18 @@ export function applyAgentEvent(
 
   switch (kind) {
     case 'assistant_text': {
-      const content = str(payload, 'text')
+      const content = str(payload, 'text') ?? str(payload, 'content')
       if (!content) return true
       const turn = currentTurn(conversation, event)
       const part = openTextPart(turn)
       // The backend distinguishes these three cases explicitly. This is the
-      // whole reason no prefix-matching is needed.
-      if (bool(payload, 'delta')) {
-        part.text += content
-      } else if (bool(payload, 'redraw')) {
+      // whole reason no prefix-matching is needed. A payload carrying *neither*
+      // flag is a non-canonical source (raw Grok streaming-json), where chunks
+      // are increments — appending is the only non-lossy reading.
+      if (bool(payload, 'delta') === false || bool(payload, 'redraw')) {
         part.text = content
       } else {
-        // A whole message: replace rather than append, so a resend of the same
-        // turn does not double it.
-        part.text = content
+        part.text += content
       }
       return true
     }
@@ -251,40 +308,67 @@ export function applyAgentEvent(
     case 'tool_started':
     case 'tool_activity': {
       const turn = currentTurn(conversation, event)
-      const toolId = str(payload, 'tool_id') ?? `tool-${event.event_id}`
+      // Grok names these id/name; canonical events use tool_id/tool_name.
+      const toolId = strAny(payload, 'tool_id', 'toolCallId', 'call_id', 'id') ?? `tool-${event.event_id}`
       // A re-delivered start must not create a second card.
       if (findByToolId(turn, toolId)) return false
       const part: ToolPart = {
         kind: 'tool',
         toolId,
-        name: str(payload, 'tool_name') ?? 'Tool',
-        toolKind: str(payload, 'kind'),
-        input: text(payload, 'input') ?? text(payload, 'tool_input'),
+        name: strAny(payload, 'tool_name', 'name', 'title') ?? 'Tool',
+        toolKind: strAny(payload, 'kind', 'tool_kind', 'type'),
+        input: text(payload, 'input') ?? text(payload, 'tool_input') ?? text(payload, 'rawInput'),
         status: 'running',
       }
       turn.parts.push(part)
       return true
     }
 
-    case 'tool_finished': {
+    case 'tool_input': {
+      // The complete input for a streaming tool call, published once at block
+      // close. Fills in the card created by tool_started.
       const turn = currentTurn(conversation, event)
       const toolId = str(payload, 'tool_id')
       const part = toolId ? findByToolId(turn, toolId) : undefined
+      if (part && part.kind === 'tool') {
+        const input = text(payload, 'input')
+        if (input) {
+          try {
+            // Parsed JSON reads far better than an escaped string blob.
+            part.input = JSON.stringify(JSON.parse(input), null, 1)
+          } catch {
+            part.input = input
+          }
+        }
+        return true
+      }
+      return false
+    }
+
+    case 'tool_finished': {
+      const turn = currentTurn(conversation, event)
+      const toolId = strAny(payload, 'tool_id', 'toolCallId', 'call_id', 'id')
+      const part = toolId ? findByToolId(turn, toolId) : undefined
       if (!part) return false
-      part.status = bool(payload, 'success') === false ? 'failed' : 'ok'
-      part.output = text(payload, 'output')
-      part.durationMs = event.duration_ms ?? num(payload, 'duration_ms')
+      // Canonical events carry a boolean `success`; raw Grok updates carry a
+      // string `status`. Either may declare the failure.
+      part.status =
+        bool(payload, 'success') === false || str(payload, 'status') === 'failed'
+          ? 'failed'
+          : 'ok'
+      part.output = text(payload, 'output') ?? text(payload, 'result') ?? text(payload, 'content')
+      part.durationMs = event.duration_ms ?? numAny(payload, 'duration_ms')
       return true
     }
 
     case 'command_started': {
       const turn = currentTurn(conversation, event)
-      const toolId = str(payload, 'tool_id') ?? `cmd-${event.event_id}`
+      const toolId = strAny(payload, 'tool_id', 'toolCallId', 'call_id', 'id') ?? `cmd-${event.event_id}`
       if (findByToolId(turn, toolId)) return false
       const part: CommandPart = {
         kind: 'command',
         toolId,
-        command: str(payload, 'command') ?? '',
+        command: strAny(payload, 'command', 'cmd') ?? '',
         status: 'running',
       }
       turn.parts.push(part)
@@ -293,14 +377,14 @@ export function applyAgentEvent(
 
     case 'command_finished': {
       const turn = currentTurn(conversation, event)
-      const toolId = str(payload, 'tool_id')
+      const toolId = strAny(payload, 'tool_id', 'toolCallId', 'call_id', 'id')
       const part = toolId ? findByToolId(turn, toolId) : undefined
       if (!part || part.kind !== 'command') return false
-      const exitCode = num(payload, 'exit_code')
+      const exitCode = numAny(payload, 'exit_code')
       part.exitCode = exitCode
       part.status = exitCode === undefined ? 'ok' : exitCode === 0 ? 'ok' : 'failed'
-      part.output = text(payload, 'output')
-      part.durationMs = event.duration_ms ?? num(payload, 'duration_ms')
+      part.output = text(payload, 'output') ?? text(payload, 'result')
+      part.durationMs = event.duration_ms ?? numAny(payload, 'duration_ms')
       return true
     }
 
@@ -314,11 +398,89 @@ export function applyAgentEvent(
 
     case 'plan': {
       const turn = currentTurn(conversation, event)
+      // Entries carry per-step status (Grok Build, ACP agents); plain strings
+      // remain the fallback for agents that do not.
+      let entries: Array<{ content: string; status?: string }> = []
+      const rawEntries = payload['entries']
+      if (Array.isArray(rawEntries)) {
+        for (const entry of rawEntries) {
+          if (entry && typeof entry === 'object') {
+            const record = entry as Record<string, unknown>
+            const content = str(record, 'content')
+            if (content) entries.push({ content, status: str(record, 'status') })
+          } else if (typeof entry === 'string') {
+            entries.push({ content: entry })
+          }
+        }
+      }
+      if (entries.length === 0) {
+        entries = stringList(payload, 'steps').map((content) => ({ content }))
+      }
+      if (entries.length === 0) return true
       turn.parts.push({
         kind: 'plan',
         title: str(payload, 'title'),
-        steps: stringList(payload, 'steps'),
+        steps: entries.map((entry) => entry.content),
+        entries,
       })
+      return true
+    }
+
+    /**
+     * Token/cost accounting. Merges into a trailing usage part so a stream of
+     * updates renders as one meter that ticks up, not one card per event.
+     */
+    case 'usage': {
+      const turn = currentTurn(conversation, event)
+      const incoming: UsagePart = {
+        kind: 'usage',
+        inputTokens: numAny(payload, 'input_tokens', 'prompt_tokens', 'tokens_in'),
+        outputTokens: numAny(payload, 'output_tokens', 'completion_tokens', 'tokens_out'),
+        cacheReadTokens: numAny(payload, 'cache_read_tokens', 'cache_tokens'),
+        costUsd: numAny(payload, 'cost_usd', 'cost'),
+      }
+      const last = turn.parts[turn.parts.length - 1]
+      if (last?.kind === 'usage') {
+        if (incoming.inputTokens !== undefined) last.inputTokens = incoming.inputTokens
+        if (incoming.outputTokens !== undefined) last.outputTokens = incoming.outputTokens
+        if (incoming.cacheReadTokens !== undefined) last.cacheReadTokens = incoming.cacheReadTokens
+        if (incoming.costUsd !== undefined) last.costUsd = incoming.costUsd
+        return true
+      }
+      if (
+        incoming.inputTokens === undefined &&
+        incoming.outputTokens === undefined &&
+        incoming.costUsd === undefined
+      ) {
+        return false
+      }
+      turn.parts.push(incoming)
+      return true
+    }
+
+    /** Slash commands the agent can run — composer chips, not transcript rows. */
+    case 'commands_available': {
+      const commands = stringList(payload, 'commands')
+      if (commands.length === 0) return false
+      conversation.commands = commands.slice(0, 40)
+      return true
+    }
+
+    /** The agent switched mode (e.g. Grok build ↔ plan). Shown as a chip. */
+    case 'mode_changed': {
+      const modeId = strAny(payload, 'mode_id', 'currentModeId', 'mode')
+      if (!modeId) return false
+      const rawModes = payload['modes']
+      const modes = Array.isArray(rawModes)
+        ? rawModes
+            .filter((mode) => mode && typeof mode === 'object')
+            .map((mode) => {
+              const record = mode as Record<string, unknown>
+              return { id: str(record, 'id') ?? '', name: str(record, 'name') }
+            })
+            .filter((mode) => mode.id !== '')
+        : []
+      conversation.mode = { id: modeId, modes }
       return true
     }
 
@@ -371,6 +533,34 @@ export function applyAgentEvent(
     case 'agent_completed':
     case 'agent_stopped': {
       const last = conversation.messages[conversation.messages.length - 1]
+      // A completion that reports cost/tokens/stop-reason earns a summary
+      // card. A bare completion (the common case) adds nothing — an empty
+      // "Turn complete" row is noise, not information.
+      const summary: TurnSummaryPart = {
+        kind: 'turn_summary',
+        stopReason: strAny(payload, 'stop_reason', 'reason', 'stopReason'),
+        inputTokens: numAny(payload, 'input_tokens', 'prompt_tokens', 'tokens_in'),
+        outputTokens: numAny(payload, 'output_tokens', 'completion_tokens', 'tokens_out'),
+        costUsd: numAny(payload, 'cost_usd', 'cost'),
+        durationMs: event.duration_ms ?? numAny(payload, 'duration_ms'),
+      }
+      if (
+        summary.stopReason !== undefined ||
+        summary.inputTokens !== undefined ||
+        summary.outputTokens !== undefined ||
+        summary.costUsd !== undefined
+      ) {
+        if (last?.role === 'assistant') {
+          // Attach to the turn that just finished — including one already
+          // sealed by an earlier completion event, which must not spawn a
+          // fresh streaming turn holding only a summary card.
+          last.parts.push(summary)
+        } else {
+          const turn = currentTurn(conversation, event)
+          turn.parts.push(summary)
+          finishTurn(turn)
+        }
+      }
       if (last?.role === 'assistant' && last.streaming) finishTurn(last)
       conversation.activity = undefined
       return true

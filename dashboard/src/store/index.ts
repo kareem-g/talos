@@ -66,6 +66,9 @@ interface StoreState {
   /** Transient per-session notices (a declined model change, an agent error). */
   notices: Record<string, string | undefined>
 
+  /** Starred session ids (local-only, persisted to localStorage). */
+  starred: string[]
+
   loadProviders: (refresh?: boolean) => Promise<void>
   loadSessions: () => Promise<void>
   /** Sessions in each CLI's own history that this app does not have yet. */
@@ -88,6 +91,10 @@ interface StoreState {
   setConfig: (sessionId: string, configId: string, value: string) => Promise<ConfigApplied>
   respondToApproval: (sessionId: string, requestId: string, decision: string) => void
   dismissNotice: (sessionId: string) => void
+  /** Toggle star for a session (local-only). */
+  toggleStar: (sessionId: string) => void
+  /** Check if a session is starred. */
+  isStarred: (sessionId: string) => boolean
   start: () => void
 }
 
@@ -100,6 +107,15 @@ export const useStore = create<StoreState>((set, get) => ({
   configs: {},
   revisions: {},
   notices: {},
+  starred: (() => {
+    try {
+      const raw = localStorage.getItem('agentdeck-starred')
+      if (!raw) return []
+      return JSON.parse(raw) as string[]
+    } catch {
+      return []
+    }
+  })(),
 
   async loadProviders(refresh = false) {
     set({ providersLoading: true, providersError: undefined })
@@ -200,11 +216,45 @@ export const useStore = create<StoreState>((set, get) => ({
   async createSession(input) {
     const session = await sessionsApi.create(input)
     set((state) => ({ sessions: upsertSession(state.sessions, session) }))
+    // Optimistically seed the model so the chip doesn't flash "Not set" while
+    // the flag-driven provider (claude/codex) returns a descriptor with
+    // current_value: null. The authoritative value arrives via configApi.get
+    // or the session_config_changed broadcast and replaces this.
+    if (input.model) {
+      const optimistic = get().providers.find((p) => p.id === input.agent)
+      const descriptor = optimistic?.configOptions.find((o) => o.id === 'model' || o.category === 'model')
+      if (descriptor) {
+        const existing = get().configs[session.id]
+        if (!existing) {
+          const patched: SessionConfig = {
+            sessionId: session.id,
+            agent: input.agent,
+            transport: 'acp',
+            options: [
+              { ...descriptor, currentValue: input.model },
+              ...((optimistic?.configOptions.filter((o) => o.id !== 'model' && o.category !== 'model') ?? []) as SessionConfig['options']),
+            ],
+            live: false,
+            interactiveTerminal: false,
+          }
+          set((state) => ({ configs: { ...state.configs, [session.id]: patched } }))
+        }
+      }
+    }
     // A brand-new session has no history to fetch, but it does have config the
     // agent just reported at handshake.
     configApi
       .get(session.id)
-      .then((config) => set((state) => ({ configs: { ...state.configs, [session.id]: config } })))
+      .then((config) => {
+        // Merge the creation-time model when the backend descriptor still has
+        // currentValue: null (flag providers). Otherwise the chip would flip
+        // back to "Not set" one frame after creation.
+        if (input.model) {
+          const modelOpt = config.options.find((o) => o.id === 'model' || o.category === 'model')
+          if (modelOpt && !modelOpt.currentValue) modelOpt.currentValue = input.model
+        }
+        set((state) => ({ configs: { ...state.configs, [session.id]: config } }))
+      })
       .catch(() => undefined)
     return session
   },
@@ -235,15 +285,40 @@ export const useStore = create<StoreState>((set, get) => ({
   /**
    * Restart the agent for a stopped or imported session.
    *
-   * Returns whether the agent is now starting. The authoritative status arrives
-   * via `SessionUpdate`, so nothing is optimistically set here — a resume that
-   * fails must not leave the UI claiming the session is running.
+   * Returns whether the agent is now starting. Optimistically sets status to
+   * 'resuming' to prevent double-clicks, then the authoritative status arrives
+   * via `SessionUpdate`. On error, reverts to 'needs_resume' with a notice.
    */
   async resumeSession(sessionId) {
+    const session = get().sessions.find((s) => s.id === sessionId)
+    if (!session) {
+      setNotice(set, sessionId, 'Session not found')
+      return false
+    }
+    
+    // Guard: if already resuming or running, no-op
+    if (session.status === 'resuming' || session.status === 'running' || session.status === 'starting') {
+      return false
+    }
+
+    // Optimistically set to 'resuming'
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, status: 'resuming' as SessionStatus } : s
+      ),
+    }))
+
     try {
       const result = await sessionsApi.resume(sessionId);
       if (result.status === 'already_active') {
         setNotice(set, sessionId, result.message ?? 'This session is already running.')
+        // Backend says already running, update to running
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, status: 'running' as SessionStatus } : s
+          ),
+        }))
+        return true
       }
       // The backend moved the session to `idle`/`running`, but the store still
       // holds the `exited` we loaded at page open — so the UI would keep showing
@@ -251,20 +326,32 @@ export const useStore = create<StoreState>((set, get) => ({
       // the composer returns immediately, without waiting for a WS frame.
       if (result.success) {
         set((state) => ({
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId
               ? {
-                  ...session,
+                  ...s,
                   status: (result.status === 'running' ? 'running' : 'idle') as SessionStatus,
                 }
-              : session,
+              : s,
           ),
         }));
+      } else {
+        // Resume failed, revert to needs_resume
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, status: 'needs_resume' as SessionStatus } : s
+          ),
+        }))
       }
       return result.success
     } catch (error) {
       // The backend explains refusals in the body; `request` surfaces that as
-      // the error message.
+      // the error message. Revert to needs_resume on error.
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId ? { ...s, status: 'needs_resume' as SessionStatus } : s
+        ),
+      }))
       setNotice(
         set,
         sessionId,
@@ -311,6 +398,27 @@ export const useStore = create<StoreState>((set, get) => ({
 
   dismissNotice(sessionId) {
     set((state) => ({ notices: { ...state.notices, [sessionId]: undefined } }))
+  },
+
+  toggleStar(sessionId) {
+    set((state) => {
+      const starred = new Set(state.starred)
+      if (starred.has(sessionId)) {
+        starred.delete(sessionId)
+      } else {
+        starred.add(sessionId)
+      }
+      try {
+        localStorage.setItem('agentdeck-starred', JSON.stringify([...starred]))
+      } catch {
+      /* storage may be unavailable */
+    }
+      return { starred: [...starred] }
+    })
+  },
+
+  isStarred(sessionId) {
+    return get().starred.includes(sessionId)
   },
 
   /** Connect the socket and wire frames into the store. Idempotent. */
@@ -404,6 +512,27 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
 
     case 'SessionUpdate': {
       set((state) => ({ sessions: upsertSession(state.sessions, frame.payload.session) }))
+      // An update that marks a session terminal (imported as needs_resume,
+      // agent exited, archived) must clear the activity line — StateChange
+      // alone can lag or never arrive for imports.
+      {
+        const status = frame.payload.session.status
+        if (status === 'exited' || status === 'error' || status === 'needs_resume' || status === 'archived') {
+          const conversation = conversations.get(frame.payload.session.id)
+          if (conversation) {
+            sealConversation(conversation)
+            bump(set, frame.payload.session.id)
+          }
+        } else if (status === 'idle') {
+          const conversation = conversations.get(frame.payload.session.id)
+          if (conversation) {
+            // A turn finished and the agent is awaiting the next message — stop
+            // the spinner, but don't lock the composer (idle still accepts input).
+            sealConversation(conversation)
+            bump(set, frame.payload.session.id)
+          }
+        }
+      }
       return
     }
 
@@ -423,9 +552,15 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
           session.id === frame.payload.session_id ? { ...session, status } : session,
         ),
       }))
-      // A finished session must not leave the conversation streaming: the
-      // activity line and any open text part would spin forever.
-      if (status === 'exited' || status === 'error' || status === 'idle') {
+      // A finished — or newly idle/terminal — session must not leave the
+      // activity line and any open text part spinning forever.
+      if (
+        status === 'exited' ||
+        status === 'error' ||
+        status === 'idle' ||
+        status === 'needs_resume' ||
+        status === 'archived'
+      ) {
         const conversation = conversations.get(frame.payload.session_id)
         if (conversation) {
           sealConversation(conversation)

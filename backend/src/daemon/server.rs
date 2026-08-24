@@ -75,10 +75,13 @@ pub async fn start(
 
         // Tunnel
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))
+        .route("/api/tunnel/{kind}/start", post(crate::api::routes::tunnel_start))
+        .route("/api/tunnel/{kind}/stop", post(crate::api::routes::tunnel_stop))
         .route("/api/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
 
         // Pairing
         .route("/api/pair", post(crate::api::routes::initiate_pairing))
+        .route("/api/pair/endpoint", get(crate::api::routes::pairing_endpoint))
         .route("/api/pair/verify", post(crate::api::routes::verify_pairing))
         .route("/api/devices", get(crate::api::routes::list_devices))
         .route("/api/devices/{id}", delete(crate::api::routes::revoke_device))
@@ -91,12 +94,14 @@ pub async fn start(
         .route("/api/worktrees", get(crate::api::routes::list_worktrees))
         .route("/api/workspace/overview", get(crate::api::routes::workspace_overview))
         .route("/api/workspace/file", get(crate::api::routes::workspace_file))
+        .route("/api/workspace/dirs", get(crate::api::routes::workspace_dirs))
 
         // Notifications
         .route("/api/notifications/test", post(crate::api::routes::send_test_notification))
 
         // Local provider hook ingestion. Hook tokens are validated by the handler.
         .route("/api/hooks/claude", post(crate::hooks::server::handle_claude_hook))
+        .route("/api/hooks/permission", post(crate::hooks::server::handle_permission_request))
 
         .nest("/api/mobile", mobile_api)
 

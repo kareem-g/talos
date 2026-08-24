@@ -73,6 +73,15 @@ export function Check({ className, size = 13 }: IconProps) {
   )
 }
 
+/** Hollow circle — a pending plan step. */
+export function Circle({ className, size = 13 }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="8.5" />
+    </svg>
+  )
+}
+
 export function Plus({ className, size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
@@ -161,12 +170,10 @@ export function AlertIcon({ className, size = 14 }: IconProps) {
 type ButtonVariant = 'primary' | 'surface' | 'ghost' | 'danger'
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  // `hover:bg-accent-ink` rather than an opacity modifier: `bg-accent/90` is a
-  // no-op against a bare `var()` color, so it would silently not apply.
-  primary: 'bg-accent text-canvas font-medium shadow-btn enabled:hover:bg-accent-ink',
-  surface: 'bg-surface text-ink shadow-btn enabled:hover:bg-hover',
-  ghost: 'text-ink-2 enabled:hover:bg-hover-2 enabled:hover:text-ink',
-  danger: 'bg-red-tint text-red enabled:hover:bg-red-tint',
+  primary: 'bg-accent text-canvas font-semibold enabled:hover:bg-accent-ink shadow-sm',
+  surface: 'bg-surface border border-line/60 text-ink enabled:hover:bg-hover enabled:hover:border-line-strong',
+  ghost: 'border border-line/40 text-ink-2 enabled:hover:bg-hover-2 enabled:hover:text-ink',
+  danger: 'bg-red/[0.06] text-red enabled:hover:bg-red/[0.10] border border-red/20',
 }
 
 export function Button({
@@ -216,10 +223,10 @@ export function IconButton({
       title={label}
       {...rest}
       className={cn(
-        'flex size-9 shrink-0 items-center justify-center rounded-control',
+        'flex size-9 shrink-0 items-center justify-center rounded-full',
         'transition-colors duration-100 disabled:opacity-35',
         tone === 'accent'
-          ? 'bg-accent text-canvas shadow-btn enabled:hover:bg-accent-ink'
+          ? 'bg-accent/15 text-accent-ink enabled:hover:bg-accent/25'
           : 'text-ink-3 enabled:hover:bg-hover-2 enabled:hover:text-ink',
         className,
       )}
@@ -253,8 +260,8 @@ export function Chip({
   return (
     <span
       className={cn(
-        'inline-flex h-5.5 min-w-0 max-w-full items-center truncate rounded-chip px-1.5',
-        'text-[11.5px] shadow-hairline',
+        'inline-flex h-5.5 min-w-0 max-w-full items-center truncate rounded-md px-1.5',
+        'text-[11.5px]',
         tones[tone ?? 'default'],
         mono && 'font-mono',
         className,
@@ -285,6 +292,51 @@ export function Dot({
       aria-hidden
       className={cn('size-[7px] shrink-0 rounded-full', tones[tone], pulse && 'breathe')}
     />
+  )
+}
+
+/**
+ * The one status pill. Headers and rosters all render state through this, so
+ * a given state looks — and reads — the same everywhere. Tone follows the
+ * traffic-light discipline: green alive, amber needs-you, red failed, dim ended.
+ */
+export function StatusPill({
+  label,
+  tone,
+  pulse,
+  detail,
+  className,
+}: {
+  label: string
+  tone: 'green' | 'orange' | 'red' | 'dim'
+  pulse?: boolean
+  /** Optional mono detail (the file being edited, the command running). */
+  detail?: string
+  className?: string,
+}) {
+  const tones = {
+    green: 'text-green',
+    orange: 'text-orange',
+    red: 'text-red',
+    dim: 'text-ink-3',
+  } as const
+  return (
+    <span
+      className={cn(
+        'inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-full border border-line/40 bg-surface/80 px-2',
+        'text-[11px] font-medium',
+        tones[tone],
+        className,
+      )}
+    >
+      <Dot tone={tone} pulse={pulse} />
+      <span className="shrink-0 whitespace-nowrap">{label}</span>
+      {detail ? (
+        <span className="hidden min-w-0 truncate font-mono text-[10.5px] font-normal text-ink-3 md:inline">
+          {detail}
+        </span>
+      ) : null}
+    </span>
   )
 }
 
@@ -356,7 +408,7 @@ export function Layer({
         aria-labelledby={titleId}
       >
         <div
-          className="absolute inset-0 animate-fade bg-black/65 backdrop-blur-[2px]"
+          className="absolute inset-0 animate-fade bg-black/65 backdrop-blur-[3px]"
           onClick={onClose}
           aria-hidden
         />
@@ -365,12 +417,12 @@ export function Layer({
           tabIndex={-1}
           className={cn(
             'animate-sheet relative flex max-h-[88dvh] w-full flex-col overflow-hidden',
-            'border border-line bg-surface shadow-overlay outline-none',
-            'rounded-t-[18px] sm:rounded-card',
+            'border border-line/60 bg-surface shadow-overlay outline-none',
+            'rounded-t-2xl sm:rounded-2xl',
             widths[size],
           )}
         >
-          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3.5 py-2.5">
+          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line/40 px-3.5 py-2.5">
             <h2 id={titleId} className="text-[13px] font-medium text-ink">
               {title}
             </h2>
@@ -385,7 +437,7 @@ export function Layer({
 
           {footer ? (
             <div
-              className="shrink-0 border-t border-line p-2.5"
+              className="shrink-0 border-t border-line/40 p-2.5"
               style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}
             >
               {footer}
@@ -477,8 +529,8 @@ export function TextField({
   return (
     <div
       className={cn(
-        'flex min-h-9 items-center gap-2 rounded-control border border-line bg-field px-2.5',
-        'transition-colors duration-100 focus-within:border-line-strong',
+        'flex min-h-9 items-center gap-2 rounded-xl border border-line/50 bg-surface/80 px-2.5',
+        'transition-colors duration-150 focus-within:border-accent/30 focus-within:bg-surface',
         className,
       )}
     >
@@ -547,8 +599,8 @@ export function Notice({
       className={cn(
         'flex shrink-0 items-start gap-2 border-b px-3.5 py-2 text-[11.5px] leading-[1.6]',
         tone === 'error'
-          ? 'border-red-tint bg-red-tint text-ink'
-          : 'border-orange-tint bg-orange-tint text-ink',
+          ? 'border-red/20 bg-red/[0.04] text-ink'
+          : 'border-orange/20 bg-orange/[0.04] text-ink',
       )}
     >
       <AlertIcon
@@ -581,7 +633,7 @@ export function Segmented<T extends string>({
   return (
     <div
       role="tablist"
-      className="flex shrink-0 items-center gap-0.5 rounded-control border border-line bg-inset p-0.5"
+      className="flex shrink-0 items-center gap-0.5 rounded-xl border border-line/50 bg-surface/60 p-0.5"
     >
       {options.map((option) => (
         <button
@@ -590,10 +642,10 @@ export function Segmented<T extends string>({
           aria-selected={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            'inline-flex min-h-7 items-center gap-1.5 rounded-[6px] px-2 text-[11.5px]',
-            'transition-colors duration-100',
+            'inline-flex min-h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px]',
+            'transition-all duration-150',
             value === option.value
-              ? 'bg-surface text-ink shadow-btn'
+              ? 'bg-hover text-ink border border-line/40'
               : 'text-ink-3 hover:text-ink-2',
           )}
         >
