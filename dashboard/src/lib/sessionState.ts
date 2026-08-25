@@ -98,7 +98,21 @@ export function sessionUIState(
   if (status === 'waiting_for_input') return 'input'
   if (status === 'resuming') return 'resuming'
   if (status === 'starting') return 'starting'
-  if (status === 'running') return 'working'
+  if (status === 'running') {
+    // Backend status can lag — a `running` session whose last turn is
+    // completed (no activity, last message not streaming) is actually idle
+    // and should show the send arrow, not stop.
+    if (conversation) {
+      const last = conversation.messages[conversation.messages.length - 1]
+      const isStreaming = last?.streaming === true
+      const hasActivity = !!conversation.activity
+      // If nothing is streaming and no activity, the agent is waiting for input
+      if (!isStreaming && !hasActivity && !hasOpenApprovals(conversation)) {
+        return 'ready'
+      }
+    }
+    return 'working'
+  }
   if (status === 'needs_resume') return 'paused'
   if (status === 'error') return 'failed'
   if (status === 'exited') return 'ended'

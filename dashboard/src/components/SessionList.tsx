@@ -12,6 +12,7 @@ import { DirPicker } from './DirPicker'
 import { SyncIcon, SyncLayer } from './SyncSessions'
 import {
   Button,
+  Check,
   Chip,
   Dot,
   Dots,
@@ -21,7 +22,6 @@ import {
   Plus,
   Row,
   Search,
-  SectionLabel,
   TextField,
 } from './ui'
 import { useStore } from '@/store'
@@ -140,12 +140,14 @@ export function NewSessionLayer({
   onClose,
   onCreated,
   initialProvider,
+  initialProject,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (session: Session) => void
   /** Pre-select an agent — used by quick-launch buttons on the home screen. */
   initialProvider?: string
+  initialProject?: string
 }) {
   const providers = useStore((state) => state.providers)
   const providersLoading = useStore((state) => state.providersLoading)
@@ -153,7 +155,9 @@ export function NewSessionLayer({
   const loadProviders = useStore((state) => state.loadProviders)
   const createSession = useStore((state) => state.createSession)
   const setConfig = useStore((state) => state.setConfig)
+  const sessions = useStore((state) => state.sessions)
 
+  const [step, setStep] = useState<1 | 2>(1)
   const [providerId, setProviderId] = useState<string>()
   const [project, setProject] = useState('')
   const [prompt, setPrompt] = useState('')
@@ -166,6 +170,20 @@ export function NewSessionLayer({
   const ready = useMemo(() => providers.filter((p) => p.state === 'ready'), [providers])
   const unavailable = useMemo(() => providers.filter((p) => p.state !== 'ready'), [providers])
   const selected = providers.find((provider) => provider.id === providerId)
+  const recentWorkspaces = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const s of sessions) if (s.project) map.set(s.project, (map.get(s.project) ?? 0) + 1)
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p]) => p)
+  }, [sessions])
+
+  // Reset to step 1 on open, and apply initial project/provider
+  useEffect(() => {
+    if (!open) return
+    setStep(1)
+    setError(undefined)
+    if (initialProject) setProject(initialProject)
+    else if (!project && recentWorkspaces[0]) setProject(recentWorkspaces[0])
+  }, [open, initialProject, recentWorkspaces])
 
   // Default to the requested provider, else the first ready one, so the form
   // is immediately usable.
@@ -181,6 +199,9 @@ export function NewSessionLayer({
   useEffect(() => {
     if (open && initialProvider) setProviderId(initialProvider)
   }, [open, initialProvider])
+  useEffect(() => {
+    if (open && initialProject) setProject(initialProject)
+  }, [open, initialProject])
 
   // Reset chosen values when the provider changes: another provider's model id
   // is meaningless here.
@@ -227,130 +248,171 @@ export function NewSessionLayer({
 
   if (!open) return null
 
+  const canGoNext = true // workspace is optional (inbox)
+  const canStart = !!selected && !busy
+
   return (
     <Layer
       open
       onClose={onClose}
-      title="New session"
+      title={step === 1 ? 'New workspace session' : `Start in ${project ? project.split('/').pop() : 'Inbox'}`}
       size="lg"
       footer={
         <div className="flex flex-col gap-2">
+          {/* Step indicator */}
+          <div className="flex items-center justify-center gap-1.5 pb-1">
+            <span className={cn('h-1 w-8 rounded-full transition-colors', step === 1 ? 'bg-white' : 'bg-white/20')} />
+            <span className={cn('h-1 w-8 rounded-full transition-colors', step === 2 ? 'bg-white' : 'bg-white/20')} />
+            <span className="ml-2 font-mono text-[11px] text-ink-3">Step {step} of 2</span>
+          </div>
           {error ? <p className="text-[11.5px] text-red">{error}</p> : null}
-          <Button
-            variant="primary"
-            onClick={() => void create()}
-            disabled={!selected || busy}
-            className="min-h-10 w-full"
-          >
-            {busy ? 'Starting…' : 'Start session'}
-          </Button>
+          <div className="flex gap-2">
+            {step === 2 ? (
+              <Button variant="surface" onClick={() => setStep(1)} className="min-h-10 flex-1">
+                Back
+              </Button>
+            ) : null}
+            {step === 1 ? (
+              <Button variant="primary" onClick={() => setStep(2)} disabled={!canGoNext} className="min-h-10 flex-1">
+                Next — choose agent
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={() => void create()} disabled={!canStart} className="min-h-10 flex-1">
+                {busy ? 'Starting…' : 'Start session'}
+              </Button>
+            )}
+          </div>
         </div>
       }
     >
-      <section>
-        <div className="flex items-center justify-between pr-1">
-          <SectionLabel>Agent</SectionLabel>
-          <button
-            type="button"
-            onClick={() => void loadProviders(true)}
-            className="rounded-[6px] px-1.5 py-1 text-[11px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
-          >
-            Rescan
+      {step === 1 ? (
+        <div className="flex flex-col gap-4 px-1 py-1">
+          <div className="space-y-1 px-1">
+            <h3 className="text-[13px] font-semibold text-white">Where should the agent work?</h3>
+            <p className="font-mono text-[11px] leading-[1.5] text-zinc-400">Each workspace is an isolated folder & branch. Pick a project or use Inbox for quick tasks.</p>
+          </div>
+
+          <label className="block space-y-2">
+            <span className="flex items-center justify-between">
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-400">Project directory</span>
+              <button type="button" onClick={() => setPickerOpen(true)} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[11px] text-zinc-300 transition hover:bg-white/10">
+                Browse…
+              </button>
+            </span>
+            <TextField value={project} onChange={(e) => setProject(e.target.value)} placeholder="/path/to/project — or leave empty for Inbox" className="bg-black/20" />
+            <span className="block font-mono text-[10px] text-zinc-500">Leave empty to use Inbox. You can change this later.</span>
+          </label>
+
+          {recentWorkspaces.length > 0 ? (
+            <div className="space-y-1.5">
+              <span className="px-1 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-400">Recent workspaces</span>
+              <div className="grid gap-1.5">
+                {recentWorkspaces.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setProject(p)}
+                    className={cn('flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition', project === p ? 'border-white/20 bg-white/10' : 'border-white/10 bg-white/[0.02] hover:bg-white/5')}
+                  >
+                    <span className="flex size-7 items-center justify-center rounded-lg bg-white/5 text-zinc-400">⌘</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-white">{p.split('/').pop()}</span>
+                      <span className="block truncate font-mono text-[11px] text-zinc-500">{p}</span>
+                    </span>
+                    {project === p ? <Check size={14} className="text-white" /> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <button type="button" onClick={() => setProject('')} className={cn('rounded-xl border px-3 py-2.5 text-left transition', !project ? 'border-white/20 bg-white/10' : 'border-white/5 bg-transparent hover:bg-white/5')}>
+            <span className="block text-[12.5px] font-medium text-white">Inbox — no folder</span>
+            <span className="block font-mono text-[11px] text-zinc-500">Quick tasks, no git worktree</span>
           </button>
         </div>
-
-        {providersLoading && providers.length === 0 ? (
-          <div className="px-2.5 py-3">
-            <Dots label="Detecting installed agents…" />
+      ) : (
+        <div className="flex flex-col gap-4 px-1 py-1">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="flex size-6 items-center justify-center rounded-full bg-white text-[10px] font-bold text-black">↗</span>
+              <span className="truncate font-mono text-[11px] text-zinc-300">{project || 'Inbox — no folder'}</span>
+              <button type="button" onClick={() => setStep(1)} className="ml-auto font-mono text-[11px] text-white underline decoration-white/20 underline-offset-4 hover:decoration-white/40">
+                Change
+              </button>
+            </div>
           </div>
-        ) : null}
-        {providersError ? (
-          <p className="px-2.5 py-2 text-[11.5px] text-red">{providersError}</p>
-        ) : null}
 
-        {ready.map((provider) => (
-          <Row
-            key={provider.id}
-            selected={provider.id === providerId}
-            onSelect={() => setProviderId(provider.id)}
-            primary={provider.name}
-            secondary={provider.version}
-            trailing={<ProviderBadge provider={provider} />}
-          />
-        ))}
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400">Agent</span>
+              <button type="button" onClick={() => void loadProviders(true)} className="rounded-full bg-white/5 px-2 py-1 font-mono text-[11px] text-zinc-400 hover:bg-white/10">
+                Rescan
+              </button>
+            </div>
+            {providersLoading && providers.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <Dots label="Detecting agents…" />
+              </div>
+            ) : null}
+            {providersError ? <p className="rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 font-mono text-[11.5px] text-red-400">{providersError}</p> : null}
+            <div className="grid gap-1.5">
+              {ready.map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  onClick={() => setProviderId(provider.id)}
+                  className={cn('flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition', providerId === provider.id ? 'border-white bg-white text-black' : 'border-white/10 bg-white/[0.03] hover:bg-white/5 hover:border-white/15')}
+                >
+                  <span className={cn('flex size-8 items-center justify-center rounded-lg text-[11px] font-bold', providerId === provider.id ? 'bg-black text-white' : 'bg-white/10 text-white')}>{provider.name[0]}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className={cn('block text-[13px] font-semibold', providerId === provider.id ? 'text-black' : 'text-white')}>{provider.name}</span>
+                    <span className={cn('block truncate font-mono text-[11px]', providerId === provider.id ? 'text-black/60' : 'text-zinc-500')}>{provider.version ?? provider.id} · {provider.models.length} models</span>
+                  </span>
+                  {providerId === provider.id ? <Check size={16} className="text-black" /> : <span className="size-2 rounded-full bg-white/20" />}
+                </button>
+              ))}
+            </div>
+            {ready.length === 0 && !providersLoading ? (
+              <p className="rounded-xl border border-white/5 bg-black/20 px-3 py-3 font-mono text-[12px] leading-[1.6] text-zinc-500">No agent is ready. Install one to continue.</p>
+            ) : null}
+            {unavailable.length > 0 ? (
+              <details className="rounded-xl border border-white/5 bg-black/10">
+                <summary className="cursor-pointer list-none px-3 py-2 font-mono text-[11px] text-zinc-500 hover:text-zinc-300">{unavailable.length} unavailable</summary>
+                <div className="space-y-1 p-2 pt-0">
+                  {unavailable.map((p) => (
+                    <Row key={p.id} disabled primary={p.name} secondary={providerExplanation(p)} trailing={<ProviderBadge provider={p} />} />
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </section>
 
-        {ready.length === 0 && !providersLoading ? (
-          <p className="px-2.5 py-3 text-[12px] leading-[1.6] text-ink-3">
-            No agent CLI is ready on this machine. Install one, or check the list below for what
-            needs attention.
-          </p>
-        ) : null}
+          {options.length > 0 ? (
+            <section className="space-y-2 rounded-xl border border-white/5 bg-black/20 p-3">
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400">Model & settings</span>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {options.map((option) => (
+                  <ConfigControl key={option.id} option={option} source={option.id === 'model' ? selected?.modelsSource : undefined} onChange={(v) => setValues((prev) => ({ ...prev, [option.id]: v }))} />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
-        {unavailable.length > 0 ? (
-          <details>
-            <summary className="cursor-pointer list-none px-2.5 py-2 text-[11.5px] text-ink-3 transition-colors hover:text-ink-2">
-              {unavailable.length} unavailable
-            </summary>
-            {unavailable.map((provider) => (
-              <Row
-                key={provider.id}
-                disabled
-                primary={provider.name}
-                secondary={providerExplanation(provider)}
-                trailing={<ProviderBadge provider={provider} />}
-              />
-            ))}
-          </details>
-        ) : null}
-      </section>
+          <label className="block space-y-2">
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400">First message — what should the agent do?</span>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={4}
+              placeholder="e.g., Fix the auth bug, add tests for the new API, or just say hi to keep it warm…"
+              className="min-h-[96px] w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-[13px] leading-[1.6] text-white outline-none transition placeholder:text-zinc-500 focus:border-white/20 focus:bg-black/40"
+            />
+            <span className="block font-mono text-[10px] text-zinc-500">Leave empty to start an empty session — you can send the first message later.</span>
+          </label>
+        </div>
+      )}
 
-      {options.length > 0 ? (
-        <section>
-          <SectionLabel>Settings</SectionLabel>
-          <div className="flex flex-wrap gap-1.5 px-2.5 pb-1">
-            {options.map((option) => (
-              <ConfigControl
-                key={option.id}
-                option={option}
-                source={option.id === 'model' ? selected?.modelsSource : undefined}
-                onChange={(value) =>
-                  setValues((previous) => ({ ...previous, [option.id]: value }))
-                }
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="flex flex-col gap-2 px-2.5 pb-1 pt-2">
-        <label className="block">
-          <span className="flex items-center justify-between pb-1.5">
-            <span className="text-[11.5px] text-ink-3">Project directory</span>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="rounded-[6px] px-1.5 py-0.5 text-[11px] text-accent-ink transition-colors hover:bg-hover-2"
-            >
-              Browse…
-            </button>
-          </span>
-          <TextField
-            value={project}
-            onChange={(changeEvent) => setProject(changeEvent.target.value)}
-            placeholder="/path/to/project — or browse"
-          />
-        </label>
-        <label className="block">
-          <span className="block pb-1.5 text-[11.5px] text-ink-3">First message</span>
-          <textarea
-            value={prompt}
-            onChange={(changeEvent) => setPrompt(changeEvent.target.value)}
-            rows={3}
-            placeholder="What should the agent do?"
-            className="w-full resize-none rounded-control border border-line bg-field px-2.5 py-2 text-[12.5px] leading-[1.6] text-ink outline-none transition-colors focus:border-line-strong placeholder:text-ink-3"
-          />
-        </label>
-      </section>
       <DirPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}

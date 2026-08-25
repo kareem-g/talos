@@ -513,10 +513,21 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
 /* ── Approval ────────────────────────────────────────────────────────────── */
 
 /**
- * The permission card — premium dark redesign.
- * Clean card with clear hierarchy: context code, question, and action buttons.
- * Resolved approvals collapse to a single quiet line.
+ * Permission card — dark, sleep UI.
+ * The agent is "sleeping" while waiting for your approval — dim, quiet, with a
+ * moon/Zzz motif and a clear wake-up action. Resolved cards stay minimal.
  */
+function SleepIcon({ size = 16, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+      <path d="M17 5l1 1" />
+      <path d="M19 7l-1 1" opacity={0.6} />
+      <text x="14" y="14" fontFamily="JetBrains Mono, monospace" fontSize="6" fill="currentColor" stroke="none" opacity={0.5}>Z</text>
+    </svg>
+  )
+}
+
 export function Approval({
   part,
   onRespond,
@@ -527,27 +538,44 @@ export function Approval({
   const resolved = part.decision !== undefined
   const view = describeApproval(part.prompt, part.options)
   const risky = /high|critical/i.test(part.riskLevel ?? '')
+  // Keep track of multi-select state locally
+  const [selected, setSelected] = useState<string[]>([])
 
-  const emphasis = (kind: 'allow' | 'deny' | 'other', index: number) => {
-    if (kind === 'deny') return 'bg-transparent text-red border border-red/30 hover:bg-red/[0.06]'
-    if (index === 0 || kind === 'allow') return 'bg-accent text-canvas shadow-btn hover:bg-accent-ink'
-    return 'bg-surface border border-line text-ink-2 hover:bg-hover hover:border-line-strong hover:text-ink'
+  const isMulti = !!view.multiSelect
+
+  const toggleSelect = (value: string) => {
+    setSelected((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]))
+  }
+
+  const handleSelect = (value: string) => {
+    if (isMulti) {
+      toggleSelect(value)
+    } else {
+      onRespond(part.requestId, value)
+    }
+  }
+
+  const handleMultiSubmit = () => {
+    if (selected.length === 0) return
+    // For multi-select, send JSON array string so backend can parse it
+    const decision = selected.length === 1 ? selected[0] : JSON.stringify(selected)
+    onRespond(part.requestId, decision)
   }
 
   if (resolved) {
     return (
       <div
         data-approval-id={part.requestId}
-        className="animate-up flex items-center gap-2 rounded-xl border border-line/50 bg-surface/60 px-3 py-2 text-[11.5px] text-ink-3"
+        className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-[#111113]/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
       >
         {part.decision && /deny|reject|no\b/i.test(part.decision) ? (
-          <AlertIcon size={12} className="shrink-0 text-orange" />
+          <AlertIcon size={12} className="shrink-0 text-amber-500" />
         ) : (
-          <Check size={12} className="shrink-0 text-green" />
+          <Check size={12} className="shrink-0 text-emerald-500" />
         )}
-        <span className="shrink-0 font-medium text-ink-2">{decisionLabel(part.decision!)}</span>
-        <span aria-hidden className="text-ink-3/40">·</span>
-        <span className="min-w-0 flex-1 truncate">{view.context ?? view.question}</span>
+        <span className="shrink-0 font-medium text-zinc-200">{decisionLabel(part.decision!)}</span>
+        <span aria-hidden className="text-white/20">·</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{view.header ?? view.context ?? view.question}</span>
       </div>
     )
   }
@@ -556,49 +584,127 @@ export function Approval({
     <div
       data-approval-id={part.requestId}
       className={cn(
-        'animate-up overflow-hidden rounded-xl border bg-surface shadow-card',
-        risky ? 'border-red/25 border-l-2 border-l-red' : 'border-orange/25 border-l-2 border-l-orange',
+        'animate-up overflow-hidden rounded-2xl border shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)]',
+        'bg-[#0a0a0c] backdrop-blur-xl',
+        risky ? 'border-red-900/30' : 'border-zinc-800',
       )}
       role="alert"
-      aria-label="Approval required"
+      aria-label="Approval required — agent sleeping"
     >
-      {/* Context code block */}
-      {view.context ? (
-        <div className="border-b border-line/40 bg-inset/40 px-4 py-2.5">
-          <code className="block truncate font-mono text-[11.5px] leading-none text-ink-2">
-            {view.context}
-          </code>
+      {/* Sleep header — dark, quiet */}
+      <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2">
+        <SleepIcon size={14} className="shrink-0 text-zinc-500" />
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Agent sleeping</span>
+        <span className="h-2 w-px bg-white/10" aria-hidden />
+        <span className={cn('rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium', risky ? 'bg-red-500/15 text-red-400 ring-1 ring-red-500/20' : 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/15')}>
+          {risky ? 'high risk' : view.header ? view.header : 'needs approval'}
+        </span>
+        <span className="ml-auto hidden items-center gap-1 font-mono text-[10px] text-zinc-600 sm:inline-flex">
+          <span className="size-1.5 rounded-full bg-amber-500/60 animate-pulse" aria-hidden />
+          waiting for you
+        </span>
+      </div>
+
+      {/* Header as context if present and different from question */}
+      {view.header && view.header !== view.question ? (
+        <div className="border-b border-white/[0.04] bg-black/20 px-4 py-2">
+          <span className="font-mono text-[11px] font-medium tracking-[0.06em] text-zinc-400">{view.header}</span>
         </div>
       ) : null}
 
-      <div className="flex items-start gap-3 px-4 pb-3 pt-3.5">
-        <AlertIcon size={15} className={cn('mt-[2px] shrink-0', risky ? 'text-red' : 'text-orange')} />
+      {/* Context — mono, dim, like a terminal trace */}
+      {view.context ? (
+        <div className="border-b border-white/[0.04] bg-black/20 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 font-mono text-[10px] leading-none text-zinc-600">›</span>
+            <code className="block min-w-0 flex-1 break-all font-mono text-[11.5px] leading-[1.5] text-zinc-300">
+              {view.context}
+            </code>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex items-start gap-3 px-4 pb-3 pt-4">
+        <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-xl', risky ? 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20' : 'bg-zinc-900 text-zinc-400 ring-1 ring-white/10')}>
+          <SleepIcon size={16} />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[12px] font-semibold text-ink">
+          <p className="text-[13px] font-medium leading-[1.5] text-white">
             {view.question}
           </p>
+          {isMulti ? (
+            <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-400 ring-1 ring-white/5">
+              Select {selected.length > 0 ? `${selected.length} selected` : 'one or more'} — {view.options.length} options
+            </p>
+          ) : null}
           {part.riskLevel ? (
-            <p className="mt-1 text-[11px] text-ink-3">Risk: {part.riskLevel}</p>
+            <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-400 ring-1 ring-white/5">
+              <span className="size-1 rounded-full bg-amber-500" aria-hidden /> Risk: {part.riskLevel}
+            </p>
+          ) : null}
+          {!isMulti ? (
+            <p className="mt-2 font-mono text-[11px] leading-[1.5] text-zinc-500">
+              Choose an action to wake the agent. Your choice is recorded and the agent will continue automatically.
+            </p>
           ) : null}
         </div>
       </div>
 
       {view.options.length > 0 ? (
-        <div className="flex flex-wrap gap-2 border-t border-line/40 bg-inset/30 px-4 py-3">
-          {view.options.map((option, index) => (
-            <button
-              key={`${option.value}-${index}`}
-              type="button"
-              onClick={() => onRespond(part.requestId, option.value)}
-              className={cn(
-                'inline-flex min-h-8 items-center rounded-lg px-4 text-[12px] font-medium',
-                'transition-all duration-150 active:scale-[0.97]',
-                emphasis(option.kind, index),
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="border-t border-white/[0.06] bg-white/[0.02] px-4 py-3">
+          <div className="flex flex-col gap-2">
+            {view.options.map((option, index) => {
+              const active = isMulti ? selected.includes(option.value) : false
+              return (
+                <button
+                  key={`${option.value}-${index}`}
+                  type="button"
+                  onClick={() => handleSelect(option.value)}
+                  className={cn(
+                    'group flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left',
+                    'transition-all duration-150 active:scale-[0.99]',
+                    active
+                      ? 'border-white bg-white text-black'
+                      : isMulti
+                        ? 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/15'
+                        : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold',
+                      active
+                        ? 'border-black bg-black text-white'
+                        : isMulti
+                          ? 'border-white/20 bg-transparent text-zinc-500 group-hover:border-white/30'
+                          : 'border-white/15 bg-white/5 text-zinc-400',
+                    )}
+                  >
+                    {isMulti ? (active ? '✓' : '') : index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={cn('block text-[13px] font-medium', active ? 'text-black' : 'text-zinc-200')}>{option.label}</span>
+                    {option.description ? (
+                      <span className={cn('mt-0.5 block font-mono text-[11px] leading-[1.4]', active ? 'text-black/60' : 'text-zinc-500')}>{option.description}</span>
+                    ) : null}
+                  </span>
+                  {!isMulti ? (
+                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]', active ? 'bg-black/10 text-black' : 'bg-white/5 text-zinc-500')}>
+                      {option.kind === 'allow' ? 'allow' : option.kind === 'deny' ? 'deny' : 'choose'}
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+          {isMulti ? (
+            <div className="mt-3 flex items-center justify-between">
+              <span className="font-mono text-[11px] text-zinc-500">{selected.length} of {view.options.length} selected</span>
+              <button type="button" disabled={selected.length === 0} onClick={handleMultiSubmit} className="inline-flex min-h-9 items-center justify-center rounded-full bg-white px-5 text-[13px] font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed">
+                Confirm {selected.length > 0 ? `(${selected.length})` : ''}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

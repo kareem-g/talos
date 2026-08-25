@@ -29,7 +29,7 @@ import {
   StatusPill,
   Terminal as TerminalIcon,
 } from './ui'
-import { getConversation, useConversation, useStore } from '@/store'
+import { useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { agentStateDisplay } from '@/types/remote'
@@ -85,12 +85,12 @@ export function SessionView({
   const [panelsOpen, setPanelsOpen] = useState(false)
   const { navigate } = useRoute()
 
-  // Hydrate once per session. History replays through the same reducer as live
-  // events, so reopening cannot produce a different conversation than watching.
+  // Hydrate on every session switch. The store now clears and
+  // replays history in chronological order, so a second open fixes
+  // the "all user bubbles first" layout and ensures the sidebar
+  // selection always loads fresh transcript.
   useEffect(() => {
-    if (getConversation(session.id).messages.length === 0) {
-      void openSession(session.id)
-    }
+    void openSession(session.id)
   }, [session.id, openSession])
 
   const provider = useMemo(

@@ -170,7 +170,7 @@ export function SessionWorkspace({
   }, [notes, session.id])
 
   useEffect(() => {
-    if (getConversation(session.id).messages.length === 0) void openSession(session.id)
+    void openSession(session.id)
   }, [session.id, openSession])
 
   useEffect(() => {
@@ -243,20 +243,22 @@ export function SessionWorkspace({
   }, [leftCollapsed, rightCollapsed])
 
   /**
-   * Other sessions for the left switcher: needs-you first, then live, then
-   * everything else by recency — the same ranking the dashboard uses, so the
-   * rail always answers "where else should I be?"
+   * Workspace-scoped switcher: only sessions from the same project (workspace)
+   * as the current session. This keeps the sidebar focused — the image reference
+   * shows each workspace's own session list, not the whole app. Inbox sessions
+   * (project == null) only see other inbox sessions.
    */
   const switcherSessions = useMemo(() => {
+    const currentProject = session.project ?? null
     return sessions
-      .filter((s) => s.status !== 'archived')
+      .filter((s) => s.status !== 'archived' && (s.project ?? null) === currentProject)
       .map((s) => ({ session: s, uiState: sessionUIState(s, getConversation(s.id), connection) }))
       .sort(
         (a, b) =>
           uiStateRank(a.uiState) - uiStateRank(b.uiState) ||
           b.session.updated_at.localeCompare(a.session.updated_at),
       )
-  }, [sessions, connection])
+  }, [sessions, connection, session.project])
 
   return (
     <div className="flex h-dvh min-w-0 flex-1 flex-col bg-canvas text-ink">

@@ -187,8 +187,52 @@ export const useStore = create<StoreState>((set, get) => ({
         configApi.get(sessionId).catch(() => undefined),
       ])
 
-      for (const message of history.messages) applyMessage(conversation, message)
-      for (const event of history.events) applyAgentEvent(conversation, event)
+      // Clear any stale state before replay — handles refresh and
+      // switching sessions where the Map entry already exists but is
+      // from a previous (maybe partial) load. Without this, a second
+      // openSession would append duplicates and keep the old mis-ordered
+      // 7-user-then-4-assistant layout seen in the screenshot.
+      conversation.messages.length = 0
+      conversation.seenEvents.clear()
+      conversation.lastEventId = 0
+      conversation.terminal = ''
+      conversation.activity = undefined
+      conversation.commands = []
+      conversation.mode = undefined
+
+      // Merge messages (user) and events (assistant deltas) into a single
+      // chronological stream. The backend stores them in two tables ordered
+      // separately (messages by timestamp, events by sequence), so replaying
+      // them in two separate loops loses interleaving and produces the
+      // "all user bubbles first, then all assistant" bug.
+      type HistoryItem =
+        | { kind: 'message'; timestamp: string; message: (typeof history.messages)[number] }
+        | { kind: 'event'; timestamp: string; event: (typeof history.events)[number] }
+      const merged: HistoryItem[] = [
+        ...history.messages.map((m) => ({
+          kind: 'message' as const,
+          timestamp: m.timestamp,
+          message: m,
+        })),
+        ...history.events.map((e) => ({
+          kind: 'event' as const,
+          timestamp: e.timestamp,
+          event: e,
+        })),
+      ]
+      merged.sort((a, b) => {
+        const ta = new Date(a.timestamp).getTime()
+        const tb = new Date(b.timestamp).getTime()
+        if (ta !== tb) return ta - tb
+        // Same timestamp: keep user messages before assistant events for that turn
+        if (a.kind !== b.kind) return a.kind === 'message' ? -1 : 1
+        return 0
+      })
+
+      for (const item of merged) {
+        if (item.kind === 'message') applyMessage(conversation, item.message)
+        else applyAgentEvent(conversation, item.event)
+      }
       for (const chunk of history.terminal_output) appendTerminal(conversation, chunk.data)
 
       // A turn left streaming by history (the agent stopped while we were away)
@@ -473,6 +517,12 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
         const options = event.payload.options
         if (Array.isArray(options)) {
           const existing = get().configs[event.session_id]
+          const normalized = (options as SessionConfig['options']).map((o) => ({
+            ...o,
+            choices: o.choices ?? [],
+            allowsCustomValue: o.allowsCustomValue ?? false,
+            mutability: o.mutability ?? 'live',
+          }))
           set((state) => ({
             configs: {
               ...state.configs,
@@ -480,7 +530,7 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
                 sessionId: event.session_id,
                 agent: existing?.agent ?? '',
                 transport: existing?.transport ?? 'acp',
-                options: options as SessionConfig['options'],
+                options: normalized,
                 live: event.payload.live === true,
                 // Not carried by this event; preserve what the session reported.
                 interactiveTerminal: existing?.interactiveTerminal ?? false,

@@ -13,7 +13,7 @@
 import { memo, useEffect, useRef } from 'react'
 import { Part } from './chat'
 import { FileChips } from './chat'
-import { Dots } from './ui'
+import LoadingState from './LoadingState'
 import { cn } from '@/lib/format'
 import type {
   Activity,
@@ -89,20 +89,17 @@ const Turn = memo(function Turn({
   )
 })
 
-/** Live activity — premium dark: state label + mono detail on second line. */
+/** Live activity — pixel-grid loader with shimmer + elapsed */
 function ActivityLine({ activity }: { activity: Activity }) {
   const hasDetail = Boolean(activity.detail)
   return (
     <div className="flex items-start gap-3 rounded-xl border border-line/40 bg-surface/60 px-4 py-3 shadow-card animate-up">
-      <span className="mt-1 flex shrink-0">
-        <Dots />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[12px] font-medium leading-none text-ink shimmer">{activity.label}</span>
+      <div className="min-w-0 flex-1">
+        <LoadingState label={activity.label} variant="Drive" since={activity.since} />
         {hasDetail ? (
           <span className="mt-1.5 block truncate font-mono text-[11.5px] leading-none text-ink-3">{activity.detail}</span>
         ) : null}
-      </span>
+      </div>
     </div>
   )
 }

@@ -73,20 +73,75 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
         });
     }
 
-    // Not a live ACP session: describe what the provider offers so a picker can
+    // Claude stream-json: live means the process is still in memory.
+    // We treat waiting/running as live even if the map is briefly stale,
+    // but Idle only counts as live when the process is actually there.
+    let has_claude_process = state.claude_stream.has_active_session(session_id).await;
+    let is_claude_live = if session.agent == "claude" {
+        has_claude_process
+            || matches!(
+                session.status,
+                crate::sessions::SessionStatus::Running
+                    | crate::sessions::SessionStatus::WaitingForApproval
+                    | crate::sessions::SessionStatus::WaitingForInput
+                    | crate::sessions::SessionStatus::Starting
+            )
+    } else {
+        false
+    };
+    if is_claude_live {
+        let custom = {
+            let config = state.config.read().await;
+            config.settings().agents.providers.clone()
+        };
+        let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
+        if let Some(mut provider) = state.providers.get(&session.agent, &custom, &cwd).await {
+            // Overlay any pending model choice so the chip shows what will run next,
+            // and mark it live so the UI doesn't show "applies next turn".
+            if let Ok(pending) = state.session_manager.pending_config(session_id).await {
+                for (key, val) in pending {
+                    if let Some(opt) = provider.config_options.iter_mut().find(|o| o.id == key) {
+                        opt.current_value = Some(val);
+                    }
+                }
+            }
+            // If still no currentValue (flag-driven provider), keep the honest
+            // "Not set" — the frontend will render the first choice as a subtle default,
+            // but we must not lie about liveness.
+            return Ok(SessionConfig {
+                session_id: session_id.to_string(),
+                agent: session.agent.clone(),
+                transport: provider.transport,
+                options: provider.config_options,
+                live: true,
+                interactive_terminal,
+            });
+        }
+    }
+
+    // Not a live ACP or Claude session: describe what the provider offers so a picker can
     // still be rendered, honestly labelled as not-live.
+    // Overlay any pending choices so a model set while stopped survives a refresh.
     let custom = {
         let config = state.config.read().await;
         config.settings().agents.providers.clone()
     };
     let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-    let provider = state.providers.get(&session.agent, &custom, &cwd).await;
-
+    let provider_opt = state.providers.get(&session.agent, &custom, &cwd).await;
+    let transport = provider_opt.as_ref().map(|p| p.transport).unwrap_or(Transport::Pty);
+    let mut options = provider_opt.map(|p| p.config_options).unwrap_or_default();
+    if let Ok(pending) = state.session_manager.pending_config(session_id).await {
+        for (key, val) in pending {
+            if let Some(opt) = options.iter_mut().find(|o| o.id == key) {
+                opt.current_value = Some(val);
+            }
+        }
+    }
     Ok(SessionConfig {
         session_id: session_id.to_string(),
         agent: session.agent,
-        transport: provider.as_ref().map_or(Transport::Pty, |p| p.transport),
-        options: provider.map(|p| p.config_options).unwrap_or_default(),
+        transport,
+        options,
         live: false,
         interactive_terminal,
     })

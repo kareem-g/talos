@@ -30,20 +30,20 @@ const SOURCE_NOTES: Record<string, string> = {
 
 function currentLabel(option: ConfigOption): string {
   const current = option.currentValue
+  const choices = option.choices ?? []
   if (!current) {
-    // Flag-driven providers (claude/codex) never report a live currentValue,
-    // so "Not set" looks broken when a model *is* running. Fall back to the
-    // provider's single model or the first choice as an implicit default,
-    // keeping the honest "Not set" only when there is truly nothing to show.
+    // Flag-driven providers (claude/codex) never report a live currentValue
+    // before first spawn, so "Not set" reads as broken. Prefer a single
+    // choice as an implicit default, otherwise the first choice with a subtle
+    // default hint — but keep the value honest so a pending change (which sets
+    // currentValue) always wins over this fallback.
     if (option.id === 'model' || option.category === 'model') {
-      if (option.choices.length === 1) return option.choices[0].name
-      // If the backend sent choices but no current, treat the first choice as
-      // the provider's default rather than showing a dead "Not set".
-      if (option.choices.length > 0) return option.choices[0].name
+      if (choices.length === 1) return choices[0].name
+      if (choices.length > 0) return `${choices[0].name} · default`
     }
     return 'Not set'
   }
-  return option.choices.find((choice) => choice.value === current)?.name ?? current
+  return choices.find((choice) => choice.value === current)?.name ?? current
 }
 
 /**
@@ -54,9 +54,10 @@ function currentLabel(option: ConfigOption): string {
  * split-and-rejoin, and the id is what gets sent back to the provider.
  */
 function groupChoices(option: ConfigOption) {
+  const choices = option.choices ?? []
   const groups = new Map<string, ConfigOption['choices']>()
   const UNGROUPED = '\u0000'
-  for (const choice of option.choices) {
+  for (const choice of choices) {
     const slash = choice.value.indexOf('/')
     const key = slash > 0 ? choice.value.slice(0, slash) : UNGROUPED
     const existing = groups.get(key)
@@ -77,11 +78,13 @@ export function ConfigControl({
   onChange,
   disabled,
   source,
+  busy,
 }: {
   option: ConfigOption
   onChange: (value: string) => void
   disabled?: boolean
   source?: string
+  busy?: boolean
 }) {
   const [open, setOpen] = useState(false)
 
@@ -90,8 +93,9 @@ export function ConfigControl({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        disabled={disabled}
+        disabled={disabled || busy}
         aria-label={`${option.name}: ${currentLabel(option)}`}
+        aria-busy={busy}
         className={cn(
           'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
           'text-[11.5px] transition-all duration-150',
@@ -102,7 +106,11 @@ export function ConfigControl({
         <span className="min-w-0 max-w-44 truncate font-medium text-ink">
           {currentLabel(option)}
         </span>
-        <ChevronDown size={11} className="shrink-0 text-ink-3" />
+        {busy ? (
+          <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" aria-hidden />
+        ) : (
+          <ChevronDown size={11} className="shrink-0 text-ink-3" />
+        )}
       </button>
 
       {open ? (
@@ -134,19 +142,20 @@ function ConfigLayer({
   const [filter, setFilter] = useState('')
   const [custom, setCustom] = useState('')
 
+  const choices = option.choices ?? []
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    if (!needle) return option.choices
-    return option.choices.filter(
+    if (!needle) return choices
+    return choices.filter(
       (choice) =>
         choice.value.toLowerCase().includes(needle) || choice.name.toLowerCase().includes(needle),
     )
-  }, [filter, option.choices])
+  }, [filter, choices])
 
   // Group only when there is enough to warrant it; short lists read better flat.
   const grouped = useMemo(
-    () => (option.choices.length > 8 ? groupChoices({ ...option, choices: filtered }) : null),
-    [option, filtered],
+    () => (choices.length > 8 ? groupChoices({ ...option, choices: filtered }) : null),
+    [choices, filtered, option],
   )
 
   const note = source ? SOURCE_NOTES[source] : undefined
@@ -166,13 +175,13 @@ function ConfigLayer({
         </div>
       ) : null}
 
-      {option.choices.length > 8 ? (
+      {choices.length > 8 ? (
         <div className="px-1 pb-1.5">
           <TextField
             type="search"
             value={filter}
             onChange={(changeEvent) => setFilter(changeEvent.target.value)}
-            placeholder={`Filter ${option.choices.length} options`}
+            placeholder={`Filter ${choices.length} options`}
             aria-label={`Filter ${option.name}`}
             leading={<Search />}
           />
@@ -209,7 +218,7 @@ function ConfigLayer({
 
       {filtered.length === 0 ? (
         <p className="px-2.5 py-8 text-center text-[12px] text-ink-3">
-          {option.choices.length === 0
+          {choices.length === 0
             ? 'This provider reported no options.'
             : 'No matches.'}
         </p>
@@ -257,12 +266,14 @@ export function ConfigBar({
   disabled,
   live,
   modelsSource,
+  busyId,
 }: {
   options: ConfigOption[]
   onChange: (configId: string, value: string) => void
   disabled?: boolean
   live?: boolean
   modelsSource?: string
+  busyId?: string | null
 }) {
   const ordered = useMemo(() => {
     const isModel = (option: ConfigOption) =>
@@ -279,6 +290,7 @@ export function ConfigBar({
           key={option.id}
           option={option}
           disabled={disabled}
+          busy={busyId === option.id}
           source={option.id === 'model' ? modelsSource : undefined}
           onChange={(value) => onChange(option.id, value)}
         />

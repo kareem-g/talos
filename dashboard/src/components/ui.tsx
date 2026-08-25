@@ -170,7 +170,7 @@ export function AlertIcon({ className, size = 14 }: IconProps) {
 type ButtonVariant = 'primary' | 'surface' | 'ghost' | 'danger'
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-canvas font-semibold enabled:hover:bg-accent-ink shadow-sm',
+  primary: 'bg-accent text-white font-semibold enabled:hover:bg-accent-2 border border-line-strong shadow-sm',
   surface: 'bg-surface border border-line/60 text-ink enabled:hover:bg-hover enabled:hover:border-line-strong',
   ghost: 'border border-line/40 text-ink-2 enabled:hover:bg-hover-2 enabled:hover:text-ink',
   danger: 'bg-red/[0.06] text-red enabled:hover:bg-red/[0.10] border border-red/20',

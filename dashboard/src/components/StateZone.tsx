@@ -17,13 +17,14 @@
  * One rule drives the copy: say what is happening, then what to do next.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Composer } from './Composer'
 import { ConfigBar } from './ConfigControls'
-import { Button, Dots } from './ui'
+import { Button } from './ui'
+import LoadingState from './LoadingState'
 import { socket } from '@/lib/socket'
 import { useStore } from '@/store'
-import { cn, formatDuration } from '@/lib/format'
+import { cn } from '@/lib/format'
 import { firstOpenApprovalId, sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { describeApproval } from '@/lib/approvals'
 import type { Conversation } from '@/types/conversation'
@@ -31,38 +32,18 @@ import type { ConnectionState } from '@/types/protocol'
 import type { Provider, SessionConfig } from '@/types/provider'
 import type { Session } from '@/types/session'
 
-/** Seconds since `since`, ticking once per second. Mounted only while live. */
-function useElapsed(since: string | undefined): string | undefined {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!since) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [since])
-  if (!since) return undefined
-  const start = new Date(since).getTime()
-  if (Number.isNaN(start)) return undefined
-  return formatDuration(Math.max(0, now - start))
-}
-
-/** The live strip while the agent works: what it is doing, and for how long.
- *  Stop/interrupt stay in the composer below, where the send button was. */
+/** The live strip while the agent works: pixel-grid loader + activity detail */
 function WorkingStrip({ conversation }: { conversation: Conversation }) {
   const activity = conversation.activity
-  const elapsed = useElapsed(activity?.since)
   const label = activity?.label ?? 'Working'
   return (
     <div className="flex items-center gap-3 border-t border-line/40 bg-surface/80 px-4 py-2.5">
-      <span className="size-[9px] shrink-0 rounded-full border-2 border-accent border-t-transparent breathe" aria-hidden />
-      <span className="shrink-0 text-[12px] font-medium text-ink shimmer">{label}</span>
+      <LoadingState label={label} variant="Drive" since={activity?.since} />
       {activity?.detail ? (
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{activity.detail}</span>
       ) : (
         <span className="flex-1" />
       )}
-      {elapsed ? (
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-3">{elapsed}</span>
-      ) : null}
     </div>
   )
 }
@@ -123,6 +104,10 @@ function ResumeCard({
   description,
   onResume,
   resuming,
+  config,
+  provider,
+  onSetConfig,
+  updatingId,
 }: {
   session: Session
   tone: 'orange' | 'dim'
@@ -130,6 +115,10 @@ function ResumeCard({
   description: string
   onResume: () => void
   resuming: boolean
+  config?: SessionConfig
+  provider?: Provider
+  onSetConfig?: (id: string, value: string) => void
+  updatingId?: string | null
 }) {
   const connected = useStore((s) => s.connection) === 'connected'
   return (
@@ -140,36 +129,50 @@ function ResumeCard({
       )}
       role="status"
     >
-      <div className="mx-auto flex w-full max-w-[46rem] items-center gap-3">
-        <span
-          className={cn(
-            'flex size-8 shrink-0 items-center justify-center rounded-full',
-            tone === 'orange' ? 'bg-orange-tint text-orange' : 'bg-field text-ink-3',
-          )}
-          aria-hidden
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5.5v13l11-6.5z" />
-          </svg>
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-medium text-ink">{title}</p>
-          {session.resume_command ? (
-            <code className="mt-1 block truncate font-mono text-[11px] text-ink-3" title={session.resume_command}>
-              {session.resume_command}
-            </code>
-          ) : (
-            <p className="mt-0.5 text-[11px] text-ink-3">{description}</p>
-          )}
+      <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3">
+        <div className="flex w-full items-center gap-3">
+          <span
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-full',
+              tone === 'orange' ? 'bg-orange-tint text-orange' : 'bg-field text-ink-3',
+            )}
+            aria-hidden
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5.5v13l11-6.5z" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-ink">{title}</p>
+            {session.resume_command ? (
+              <code className="mt-1 block truncate font-mono text-[11px] text-ink-3" title={session.resume_command}>
+                {session.resume_command}
+              </code>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-ink-3">{description}</p>
+            )}
+          </div>
+          <Button
+            variant="primary"
+            onClick={onResume}
+            disabled={resuming || !connected}
+            className="shrink-0 min-h-9"
+          >
+            {resuming ? 'Resuming…' : 'Resume'}
+          </Button>
         </div>
-        <Button
-          variant="primary"
-          onClick={onResume}
-          disabled={resuming || !connected}
-          className="shrink-0"
-        >
-          {resuming ? 'Resuming…' : 'Resume'}
-        </Button>
+        {config && onSetConfig ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line/40 bg-field/60 px-2.5 py-2">
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3">Model for next run</span>
+            <ConfigBar
+              options={config.options}
+              live={config.live}
+              modelsSource={provider?.modelsSource}
+              busyId={updatingId ?? null}
+              onChange={(id, v) => onSetConfig(id, v)}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -209,12 +212,17 @@ function StateStrip({ label, hint, pulse }: { label: string; hint?: string; puls
     <div className="border-t border-line/40 bg-surface/80 px-4 py-2.5" role="status">
       <div className="mx-auto flex w-full max-w-[46rem] items-center gap-2.5">
         {pulse ? (
-          <Dots />
+          <>
+            <LoadingState label={label} variant="Dots" />
+            {hint ? <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">{hint}</span> : <span className="flex-1" />}
+          </>
         ) : (
-          <span className="size-1.5 shrink-0 rounded-full bg-ink-3" aria-hidden />
+          <>
+            <span className="size-1.5 shrink-0 rounded-full bg-ink-3" aria-hidden />
+            <span className="text-[12px] font-medium text-ink-2">{label}</span>
+            {hint ? <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">{hint}</span> : <span className="flex-1" />}
+          </>
         )}
-        <span className="text-[12px] font-medium text-ink-2">{label}</span>
-        {hint ? <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">{hint}</span> : <span className="flex-1" />}
       </div>
     </div>
   )
@@ -256,12 +264,18 @@ export function StateZone({
   const stopSession = useStore((s) => s.stopSession)
   const resumeSession = useStore((s) => s.resumeSession)
   const [retrying, setRetrying] = useState(false)
+  const [updating, setUpdating] = useState<string | null>(null)
 
   const working = state === 'working' || state === 'starting'
 
   const resume = () => {
     setRetrying(true)
     void resumeSession(session.id).finally(() => setRetrying(false))
+  }
+
+  const handleSetConfig = (id: string, value: string) => {
+    setUpdating(id)
+    void Promise.resolve(onSetConfig(id, value)).finally(() => setUpdating(null))
   }
 
   const composer = (
@@ -282,7 +296,8 @@ export function StateZone({
             options={config.options}
             live={config.live}
             modelsSource={provider?.modelsSource}
-            onChange={(id, v) => onSetConfig(id, v)}
+            busyId={updating}
+            onChange={handleSetConfig}
           />
         ) : null
       }
@@ -308,6 +323,10 @@ export function StateZone({
           description={display.hint ?? 'Resume to continue this session'}
           onResume={resume}
           resuming={retrying}
+          config={config}
+          provider={provider}
+          onSetConfig={handleSetConfig}
+          updatingId={updating}
         />
       )
     case 'failed': {

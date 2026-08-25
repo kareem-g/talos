@@ -13,11 +13,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PairingScreen } from './components/Pairing'
 import { StationHome } from './components/home/StationHome'
+import { HomeSidebar } from './components/home/HomeSidebar'
 import { RemoteScreen } from './components/remote/RemoteScreen'
 import { SettingsScreen } from './components/settings/SettingsScreen'
 import { SessionView } from './components/SessionView'
 import { SessionWorkspace } from './components/desktop/SessionWorkspace'
-import { Dot, Dots, IconButton } from './components/ui'
+import { Dot, IconButton } from './components/ui'
+import LoadingState from './components/LoadingState'
 import { useRoute } from './lib/route'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
@@ -176,6 +178,20 @@ export default function App() {
   const sessionsLoading = useStore((state) => state.sessionsLoading)
   const [screen, setScreen] = useState<Screen>('home')
   const isDesktop = useIsDesktop()
+  const [homeSearch, setHomeSearch] = useState('')
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [homeNewTaskTick, setHomeNewTaskTick] = useState(0)
+
+  useEffect(() => {
+    function onPaletteKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setShowCommandPalette((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onPaletteKey)
+    return () => window.removeEventListener('keydown', onPaletteKey)
+  }, [])
 
   useEffect(() => {
     if (route.name === 'pair') return
@@ -274,7 +290,7 @@ export default function App() {
   if (route.name === 'session' && sessionsLoading) {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas">
-        <Dots label="Opening session…" />
+        <LoadingState label="Opening session" variant="Drive" />
       </div>
     )
     // A stale id falls through to the shell while the effect redirects.
@@ -289,10 +305,36 @@ export default function App() {
     ) : (
       <StationHome
         onOpenSession={(session) => openSessionFrom(session.id)}
+        searchQuery={homeSearch}
+        onSearchQueryChange={setHomeSearch}
+        newTaskTick={homeNewTaskTick}
       />
     )
 
   if (isDesktop) {
+    if (screen === 'home') {
+      return (
+        <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
+          <HomeSidebar
+            onNewTask={() => setHomeNewTaskTick((x) => x + 1)}
+            onSearch={() => setShowCommandPalette(true)}
+            onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
+            selectedId={selectedId}
+            searchQuery={homeSearch}
+          />
+          <main className="flex min-w-0 flex-1 flex-col bg-[#0f0f10]">{body}</main>
+          <AttentionPill onOpen={openSessionFrom} />
+          {showCommandPalette ? (
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
+              <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1a1a1c] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
+                <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
     return (
       <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
         <Rail screen={screen} onScreen={setScreen} connection={connection} />
@@ -314,7 +356,7 @@ export default function App() {
 
       {route.name === 'session' && !selected && sessionsLoading ? (
         <div className="flex flex-1 items-center justify-center">
-          <Dots label="Opening session…" />
+          <LoadingState label="Opening session" variant="Drive" />
         </div>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col">{body}</main>

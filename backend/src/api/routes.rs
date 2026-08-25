@@ -1770,6 +1770,8 @@ async fn finish_fresh_claude_after_switch(
         .update_status(session_id, SessionStatus::Idle)
         .await;
 
+    // Persist model for future refreshes (read_config when not live will overlay it)
+    let _ = state.session_manager.set_pending_config(session_id, "model", model).await;
     let mut config = crate::sessions::config::read_config(state, session_id).await?;
     for option in config.options.iter_mut() {
         if option.id == "model" {
@@ -1806,6 +1808,43 @@ pub(crate) async fn respawn_claude_with_model(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Session not found".to_string())?;
 
+    // Validate the model is actually a Claude model before killing the live session.
+    // The UI offers whatever the provider advertises, which can include openrouter
+    // models that are valid for other agents but not for `claude --model`.
+    {
+        let cfg = state.config.read().await;
+        let custom = cfg.settings().agents.providers.clone();
+        drop(cfg);
+        let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
+        if let Some(provider) = state.providers.get("claude", &custom, &cwd).await {
+            let known: std::collections::HashSet<String> = provider
+                .config_options
+                .iter()
+                .find(|o| o.id == "model")
+                .map(|o| o.choices.iter().map(|c| c.value.clone()).collect())
+                .unwrap_or_default();
+            // OpenRouter models are never valid for `claude --model`, even if they appear
+            // in the provider's advertised choices (e.g., from a custom config). Reject early
+            // so we don't kill the live session and lose the liveness window.
+            if model.starts_with("openrouter/") {
+                return Err(format!(
+                    "Model '{}' is not a Claude model. Use a Claude model (sonnet, opus, fable) for this session, or start a new session with an agent that supports openrouter (e.g., Codex, OpenCode with openrouter provider).",
+                    model
+                ));
+            }
+            // Also reject completely unknown models that aren't in the advertised list.
+            let is_known = known.contains(model) || known.iter().any(|v| v.ends_with(&format!("/{}", model)) || v == model);
+            if !is_known && model.contains('/') {
+                // For claude, a slash model that isn't known is likely a provider-prefixed
+                // model for another agent. Give a helpful hint.
+                return Err(format!(
+                    "Model '{}' is not known for Claude. Available: sonnet, opus, fable, or configure it as a custom provider.",
+                    model
+                ));
+            }
+        }
+    }
+
     let cfg = state.config.read().await;
     let binary = cfg.settings().agents.claude.path.clone();
     drop(cfg);
@@ -1814,6 +1853,7 @@ pub(crate) async fn respawn_claude_with_model(
     // keyed by the external id — not in this process.
     let _ = state.claude_stream.kill_session(session_id).await;
     let resume_target = session.external_id.clone();
+    let resume_target_for_restore = resume_target.clone();
 
     let (effective_model, extra_args) =
         claude_spawn_config(state, session_id, Some(model.to_string()), None).await;
@@ -1832,25 +1872,41 @@ pub(crate) async fn respawn_claude_with_model(
     {
         Ok(info) => {
             clear_claude_spawn_config(state, session_id).await;
+            // Persist the new model for future read_config (refresh) — keep it as pending
+            // so a later restart or a refresh when not has_active_session still shows it.
+            let _ = state.session_manager.set_pending_config(session_id, "model", model).await;
             state.session_manager.set_session_pid(session_id, info.pid).await;
 
             // Second gate: prove the restarted process actually stays up.
-            // Any early death gets ONE fresh retry (new conversation, same
-            // model) before failing honestly — transient gateway/proxy
-            // failures otherwise look like our bug.
+            // If it dies, preserve the conversation — don't fresh-spawn and lose history.
+            // The old external_id still points at the previous conversation in Claude's store.
             tracing::info!(session_id = %session_id, "model-switch liveness check");
             if let Some(tail) = state.claude_stream.stderr_if_dead(session_id, 3).await {
-                tracing::warn!(session_id = %session_id, %tail, "restarted Claude died early; retrying fresh");
+                tracing::warn!(session_id = %session_id, %tail, "restarted Claude died early; preserving conversation");
+                // Keep the old conversation id so a retry or plain resume can succeed.
+                if let Some(old) = resume_target_for_restore.filter(|s| !s.is_empty()) {
+                    let _ = state.session_manager.set_external_id(session_id, &old).await;
+                }
+                // Record the requested model so it can be retried, but don't lose the session.
+                let _ = state.session_manager.set_pending_config(session_id, "model", model).await;
+                let _ = state.session_manager.update_status(session_id, SessionStatus::Idle).await;
                 state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                     session_id: session_id.to_string(),
-                    code: "resume_target_missing".to_string(),
+                    code: "model_switch_failed".to_string(),
                     message: format!(
-                        "The previous conversation did not survive the switch{} — continuing fresh with {model}.",
+                        "Model '{}' failed to start{}. Conversation preserved — try a different model or press Resume to retry.",
+                        model,
                         if tail.is_empty() { String::new() } else { format!(" ({tail})") }
                     ),
                 });
-                let _ = state.session_manager.set_external_id(session_id, "").await;
-                return finish_fresh_claude_after_switch(state, session_id, session.project.as_deref(), model).await;
+                state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                    session_id: session_id.to_string(),
+                    state: "idle".to_string(),
+                });
+                if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
+                    state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+                }
+                return Err(format!("Model '{}' failed to start: {}", model, if tail.is_empty() { "process exited" } else { &tail }));
             }
 
             if !info.claude_session_id.is_empty() {
@@ -1982,6 +2038,11 @@ async fn finish_claude_stream_spawn(
         .map_err(|error| error.to_string())?;
 
     clear_claude_spawn_config(state, &session.id).await;
+    // Persist the effective model so a later refresh (read_config when not live)
+    // still shows the chosen model instead of default. Keep it as pending.
+    if let Some(m) = effective_model.as_deref() {
+        let _ = state.session_manager.set_pending_config(&session.id, "model", m).await;
+    }
 
     state.session_manager.set_session_pid(&session.id, info.pid).await;
 

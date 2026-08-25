@@ -1,111 +1,56 @@
 /**
- * StationHome — Mission Control (premium dark redesign).
+ * StationHome — Mission Control, rebuilt as a deep module.
  *
- * Answers, in order of urgency:
- *   1. What needs me?     → Attention rows with inline actions
- *   2. What is running?   → Active cards with live status
- *   3. Everything else    → The roster, newest first
+ * Subject: a solo dev's fleet of 3-15 concurrent agents.
+ * Job: triage — what needs you now, what's moving, what's next.
+ * Audience: the dev, not the agent.
  *
- * Grok × Apple design language: deep surfaces, cool blue accent,
- * generous whitespace, subtle borders, no bright green.
+ * Deep module: all ranking/headline/preview logic lives in
+ * `dashboard/src/lib/homeView.ts` (one public function). This file
+ * is the visual adapter: it maps HomeView → JSX and owns layout
+ * and interaction, not derivation.
+ *
+ * Visual thesis: the fleet's state is the hero. A single large
+ * "need you" number + a compact system strip tells the truth
+ * faster than a paragraph. The signature is the *triage timeline*:
+ * a vertical rule with state-colored dots and left-border tints
+ * that lets the eye scan for orange/red without reading.
+ *
+ * Tokens: deep navy canvas #080A0F, surface #11131A, field #171A23,
+ * ink #F1F1F3 / #9AA0AE / #6B7280, accent #3B82F6 (interactive),
+ * signal #F59E0B (attention), success #10B981, danger #EF4444.
+ * Type: IBM Plex Sans 600 for hero, 500 for names, JetBrains Mono
+ * for projects/ids/metrics. One motion: the live dot breathes.
  */
 
 import { useEffect, useMemo, useState } from 'react'
 import { NewSessionLayer } from '../SessionList'
-import { SyncIcon, SyncLayer } from '../SyncSessions'
-import { Button, Dot, Dots, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
-import { getConversation, useConversation, useStore } from '@/store'
+import { SyncLayer } from '../SyncSessions'
+import { Button, ChevronDown, Dot, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
+import LoadingState, { LoadingStateMini } from '../LoadingState'
+import { getConversation, useStore } from '@/store'
 import { basename, cn, relativeTime } from '@/lib/format'
-import { sessionUIState, uiStateDisplay, uiStateRank } from '@/lib/sessionState'
+import { uiStateDisplay } from '@/lib/sessionState'
 import { describeApproval } from '@/lib/approvals'
-import type { Conversation } from '@/types/conversation'
-import type { Provider } from '@/types/provider'
+import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
 import type { Session } from '@/types/session'
-
-type Filter = 'all' | 'active' | 'attention' | 'starred'
-
-/* ── Conversation-derived helpers ────────────────────────────────────────── */
-
-function previewFor(sessionId: string): string | undefined {
-  const conversation = getConversation(sessionId)
-  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
-    const message = conversation.messages[index]
-    for (const part of message.parts) {
-      if (part.kind === 'text' && part.text.trim()) return part.text.trim().slice(0, 88)
-      if (part.kind === 'reasoning' && part.text.trim()) return part.text.trim().slice(0, 72)
-    }
-  }
-  return undefined
-}
-
-/** The user's opening prompt — the session's task line. */
-function taskFor(sessionId: string): string | undefined {
-  const conversation = getConversation(sessionId)
-  for (const message of conversation.messages) {
-    if (message.role !== 'user') continue
-    for (const part of message.parts) {
-      if (part.kind === 'text' && part.text.trim()) {
-        const text = part.text.trim()
-        if (text.startsWith('/')) continue
-        return text.slice(0, 96)
-      }
-    }
-  }
-  return undefined
-}
-
-/** Newest error message, for failed-session headlines. */
-function lastErrorOf(conversation: Conversation): string | undefined {
-  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
-    for (let p = conversation.messages[index].parts.length - 1; p >= 0; p -= 1) {
-      const part = conversation.messages[index].parts[p]
-      if (part.kind === 'error') return part.message
-    }
-  }
-  return undefined
-}
-
-/** The newest unanswered approval part, or undefined. */
-function openApprovalOf(conversation: Conversation) {
-  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
-    for (let p = conversation.messages[index].parts.length - 1; p >= 0; p -= 1) {
-      const part = conversation.messages[index].parts[p]
-      if (part.kind === 'approval' && part.decision === undefined) return part
-    }
-  }
-  return undefined
-}
+import type { Provider } from '@/types/provider'
 
 const AGENT_HUES = ['#60a5fa', '#a78bfa', '#34d399', '#fb923c', '#facc15', '#f472b6']
-
 function hueFor(id: string): string {
-  let hash = 0
-  for (let index = 0; index < id.length; index += 1) {
-    hash = (hash * 31 + id.charCodeAt(index)) >>> 0
-  }
-  return AGENT_HUES[hash % AGENT_HUES.length]
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return AGENT_HUES[h % AGENT_HUES.length]
 }
 
-/**
- * Seconds tick for live surfaces.
- */
-function useNowTick(active: boolean): number {
+function useSharedNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
+    const t = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(t)
   }, [active])
   return now
-}
-
-function formatRuntime(ms: number): string {
-  if (ms < 0) ms = 0
-  const mins = Math.floor(ms / 60000)
-  if (mins < 1) return '<1m'
-  if (mins < 60) return `${mins}m`
-  const hrs = Math.floor(mins / 60)
-  return `${hrs}h ${mins % 60}m`
 }
 
 function Chevron() {
@@ -116,426 +61,105 @@ function Chevron() {
   )
 }
 
-/* ── Attention strip ─────────────────────────────────────────────────────── */
-
-const ATTENTION_TONES = {
-  approval: { dot: 'bg-orange', tint: 'border-l-orange bg-orange/[0.04]' },
-  failed: { dot: 'bg-red', tint: 'border-l-red bg-red/[0.04]' },
-  input: { dot: 'bg-accent', tint: 'border-l-accent bg-accent/[0.04]' },
-} as const
-
-function AttentionRow({ session, onOpen }: { session: Session; onOpen: () => void }) {
-  useConversation(session.id)
-  const connection = useStore((state) => state.connection)
-  const respondToApproval = useStore((state) => state.respondToApproval)
-  const resumeSession = useStore((state) => state.resumeSession)
-  const [retrying, setRetrying] = useState(false)
-  const providers = useStore((state) => state.providers)
-  const provider = providers.find((candidate) => candidate.id === session.agent)
-
-  const conversation = getConversation(session.id)
-  const uiState = sessionUIState(session, conversation, connection)
-  const tones = ATTENTION_TONES[uiState as keyof typeof ATTENTION_TONES] ?? ATTENTION_TONES.input
-  const connected = connection === 'connected'
-
-  const approval = uiState === 'approval' ? openApprovalOf(conversation) : undefined
-  const approvalView = approval ? describeApproval(approval.prompt, approval.options) : undefined
-  const allowOption = approvalView?.options.find((o) => o.kind === 'allow') ?? approvalView?.options[0]
-
-  const headline =
-    uiState === 'failed'
-      ? lastErrorOf(conversation) ?? 'The agent hit an error'
-      : uiState === 'input'
-        ? 'Waiting for your reply'
-        : approvalView?.context ?? approvalView?.question ?? 'Approval requested'
-
-  const retry = () => {
-    setRetrying(true)
-    void resumeSession(session.id).finally(() => setRetrying(false))
+// Re-use helpers that are still visual-only
+function openApprovalOf(sessionId: string) {
+  const conv = getConversation(sessionId)
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    for (let p = conv.messages[i].parts.length - 1; p >= 0; p--) {
+      const part = conv.messages[i].parts[p] as { kind: string; decision?: string; requestId?: string; prompt?: string; options?: unknown[] }
+      if (part.kind === 'approval' && part.decision === undefined) return part as { requestId: string; prompt: string; options: unknown[] }
+    }
   }
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(keyEvent) => keyEvent.key === 'Enter' && onOpen()}
-      className={cn(
-        'group flex w-full cursor-pointer items-center gap-3.5 border-l-2 px-4 py-3 text-left transition-all duration-150 hover:bg-hover',
-        tones.tint,
-      )}
-    >
-      <span className={cn('size-1.5 shrink-0 rounded-full', tones.dot)} aria-hidden />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[12.5px] font-semibold text-ink">{session.name}</span>
-          <span className="hidden shrink-0 truncate text-[10.5px] text-ink-3 sm:inline">
-            {provider?.name ?? session.agent}
-            {session.project ? ` · ${basename(session.project)}` : ''}
-          </span>
-        </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-mono text-[11px] leading-[1.4] text-ink-3">{headline}</span>
-        </span>
-      </span>
-      {uiState === 'failed' ? (
-        <button
-          type="button"
-          onClick={(clickEvent) => { clickEvent.stopPropagation(); retry() }}
-          disabled={retrying || !connected}
-          className={cn(
-            'inline-flex h-7 shrink-0 items-center rounded-full bg-surface border border-line px-3.5 text-[11.5px] font-medium text-ink',
-            'transition-all duration-150 active:scale-[0.97] disabled:opacity-40',
-            'hover:bg-hover-2 hover:border-line-strong',
-          )}
-        >
-          {retrying ? 'Retrying…' : 'Retry'}
-        </button>
-      ) : approval && allowOption ? (
-        <button
-          type="button"
-          onClick={(clickEvent) => {
-            clickEvent.stopPropagation()
-            respondToApproval(session.id, approval.requestId, allowOption.value)
-          }}
-          disabled={!connected}
-          className={cn(
-            'inline-flex h-7 shrink-0 items-center rounded-full bg-accent px-3.5 text-[11.5px] font-semibold text-canvas',
-            'transition-all duration-150 active:scale-[0.97] disabled:opacity-40',
-            'hover:bg-accent-ink',
-          )}
-        >
-          {allowOption.label}
-        </button>
-      ) : (
-        <span className="hidden shrink-0 items-center gap-0.5 text-[10.5px] font-medium uppercase tracking-[0.1em] text-ink-3 group-hover:flex">
-          Open <Chevron />
-        </span>
-      )}
-    </div>
-  )
+  return undefined
 }
-
-/* ── Active agent card ───────────────────────────────────────────────────── */
-
-function ActiveCard({ session, onOpen }: { session: Session; onOpen: () => void }) {
-  useConversation(session.id)
-  useNowTick(true)
-  const providers = useStore((state) => state.providers)
-  const provider = providers.find((candidate) => candidate.id === session.agent)
-  const hue = hueFor(session.agent)
-
-  const conversation = getConversation(session.id)
-  const uiState = sessionUIState(session, conversation, 'connected')
-  const display = uiStateDisplay(uiState)
-
-  const activity = conversation.activity
-  const startedMs = new Date(session.created_at).getTime()
-  const runtime = formatRuntime(Date.now() - startedMs)
-  const task = taskFor(session.id)
-  const attention = uiState === 'approval' || uiState === 'input'
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={cn(
-        'group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left',
-        'transition-all duration-150 hover:bg-hover-2',
-        attention
-          ? 'border-orange/20 bg-orange/[0.03]'
-          : 'border-line/60 bg-surface/80 hover:border-line-strong',
-      )}
-    >
-      <span className="flex w-full min-w-0 items-center gap-2.5">
-        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hue }} aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">{session.name}</span>
-        <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} className="h-5 px-1.5 text-[10px]" />
-      </span>
-      <span className="w-full truncate font-mono text-[10.5px] text-ink-3">
-        {session.project ? basename(session.project) : 'no project'}
-        {' · '}
-        {provider?.name ?? session.agent}
-      </span>
-      {task ? <span className="line-clamp-2 text-[11.5px] leading-[1.45] text-ink-2">{task}</span> : null}
-      <span className="flex w-full min-w-0 items-center gap-1.5 pt-1 border-t border-line/40">
-        {activity ? (
-          <>
-            <Dots />
-            <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-ink-3">
-              {activity.detail ?? activity.label}
-            </span>
-          </>
-        ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-ink-3">idle turn</span>
-        )}
-        <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-ink-3">{runtime}</span>
-      </span>
-    </button>
-  )
-}
-
-/* ── Roster row ──────────────────────────────────────────────────────────── */
-
-function RosterRow({ session, onOpen }: { session: Session; onOpen: () => void }) {
-  useConversation(session.id)
-  const providers = useStore((state) => state.providers)
-  const connection = useStore((state) => state.connection)
-  const starred = useStore((state) => state.isStarred(session.id))
-  const toggleStar = useStore((state) => state.toggleStar)
-  const provider = providers.find((candidate) => candidate.id === session.agent)
-  const hue = hueFor(session.agent)
-  const conversation = getConversation(session.id)
-  const live =
-    session.status === 'running' || session.status === 'starting' || session.status === 'resuming'
-  useNowTick(live)
-
-  const uiState = sessionUIState(session, conversation, connection)
-  const display = uiStateDisplay(uiState)
-  const preview = previewFor(session.id)
-  const attention = uiState === 'approval' || uiState === 'failed'
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(keyEvent) => keyEvent.key === 'Enter' && onOpen()}
-      className={cn(
-        'group grid cursor-pointer grid-cols-[8px_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 px-4 py-3',
-        'border-b border-line/40 transition-all duration-150 hover:bg-hover/60 md:grid-cols-[minmax(0,2.4fr)_120px_minmax(0,1fr)_70px_28px]',
-        attention && 'border-l-2 border-l-orange bg-orange/[0.02]',
-      )}
-    >
-      <span
-        className="size-2 shrink-0 rounded-full md:hidden"
-        style={{ backgroundColor: display.tone === 'green' ? '#34d399' : display.tone === 'orange' ? '#fb923c' : display.tone === 'red' ? '#f87171' : '#686878' }}
-        aria-hidden
-      />
-
-      {/* Name + status + preview */}
-      <span className="flex min-w-0 flex-col">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium text-ink">{session.name}</span>
-          <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} className="hidden h-5 px-1.5 text-[10px] md:inline-flex" />
-          <button
-            type="button"
-            aria-label={starred ? 'Unstar' : 'Star'}
-            onClick={(clickEvent) => {
-              clickEvent.stopPropagation()
-              toggleStar(session.id)
-            }}
-            className={cn(
-              'shrink-0 text-ink-3 transition-opacity hover:text-orange',
-              starred ? 'text-orange opacity-100' : 'opacity-30 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100',
-            )}
-          >
-            ★
-          </button>
-        </span>
-        {preview ? (
-          <span className="hidden truncate font-mono text-[11px] leading-none text-ink-3 md:block">{preview}</span>
-        ) : session.project ? (
-          <span className="hidden truncate font-mono text-[11px] leading-none text-ink-3 md:block">{basename(session.project)}</span>
-        ) : null}
-        <span className="truncate font-mono text-[11px] text-ink-3 md:hidden">
-          {preview ?? (session.project ? basename(session.project) : display.label)}
-        </span>
-      </span>
-
-      {/* Agent */}
-      <span className="hidden min-w-0 items-center gap-1.5 md:flex">
-        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hue }} aria-hidden />
-        <span className="truncate text-[11.5px] text-ink-2">{provider?.name ?? session.agent}</span>
-      </span>
-
-      {/* Project + branch */}
-      <span className="hidden truncate font-mono text-[11px] text-ink-3 md:block">
-        {session.project ? basename(session.project) : '—'}
-        {session.branch ? <span className="text-ink-3/60"> · {session.branch}</span> : null}
-      </span>
-
-      {/* Last activity */}
-      <span className="hidden shrink-0 text-right text-[11px] tabular-nums text-ink-3 md:block">
-        {relativeTime(session.updated_at)}
-      </span>
-
-      <span className="hidden justify-end md:flex">
-        <Chevron />
-      </span>
-    </div>
-  )
-}
-
-/* ── Token usage summary ─────────────────────────────────────────────────── */
-
-/** Compute total input + output tokens across all sessions. */
-function TotalUsage({ sessions }: { sessions: Session[] }) {
-  const totalIn = sessions.reduce((sum, s) => {
-    const conv = getConversation(s.id)
-    let t = 0
-    for (const msg of conv.messages) {
-      for (const p of msg.parts) {
-        if (p.kind === 'usage') t += (p.inputTokens ?? 0)
-        if (p.kind === 'turn_summary') t += (p.inputTokens ?? 0)
-      }
-    }
-    return sum + t
-  }, 0)
-  const totalOut = sessions.reduce((sum, s) => {
-    const conv = getConversation(s.id)
-    let t = 0
-    for (const msg of conv.messages) {
-      for (const p of msg.parts) {
-        if (p.kind === 'usage') t += (p.outputTokens ?? 0)
-        if (p.kind === 'turn_summary') t += (p.outputTokens ?? 0)
-      }
-    }
-    return sum + t
-  }, 0)
-  const totalCost = sessions.reduce((sum, s) => {
-    const conv = getConversation(s.id)
-    let t = 0
-    for (const msg of conv.messages) {
-      for (const p of msg.parts) {
-        if (p.kind === 'turn_summary' && p.costUsd !== undefined) t += p.costUsd
-        if (p.kind === 'usage' && p.costUsd !== undefined) t += p.costUsd
-      }
-    }
-    return sum + t
-  }, 0)
-
-  if (totalIn === 0 && totalOut === 0) return null
-  const fmt = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-    return String(n)
-  }
-
-  return (
-    <div className="flex items-center gap-3 text-[10.5px] tabular-nums text-ink-3">
-      <span>↑ {fmt(totalIn)}</span>
-      <span>↓ {fmt(totalOut)}</span>
-      {totalCost > 0 && (
-        <span className="text-accent/80">${totalCost < 0.01 ? totalCost.toFixed(4) : totalCost.toFixed(2)}</span>
-      )}
-    </div>
-  )
-}
-
-/* ── The screen ──────────────────────────────────────────────────────────── */
 
 export function StationHome({
   onOpenSession,
+  searchQuery,
+  onSearchQueryChange,
+  newTaskTick,
 }: {
-  onOpenSession: (session: Session) => void
+  onOpenSession: (s: Session) => void
+  searchQuery?: string
+  onSearchQueryChange?: (v: string) => void
+  newTaskTick?: number
 }) {
-  const sessions = useStore((state) => state.sessions)
-  const loading = useStore((state) => state.sessionsLoading)
-  const providers = useStore((state) => state.providers)
-  const starred = useStore((state) => state.starred)
-  const createSession = useStore((state) => state.createSession)
-  const connection = useStore((state) => state.connection)
+  const sessions = useStore((s) => s.sessions)
+  const loading = useStore((s) => s.sessionsLoading)
+  const providers = useStore((s) => s.providers)
+  const starred = useStore((s) => s.starred)
+  const connection = useStore((s) => s.connection)
+  const notices = useStore((s) => s.notices)
+  const revisions = useStore((s) => s.revisions)
+  const createSession = useStore((s) => s.createSession)
+  const openSession = useStore((s) => s.openSession)
+  const respondToApproval = useStore((s) => s.respondToApproval)
+  const resumeSession = useStore((s) => s.resumeSession)
+  const toggleStar = useStore((s) => s.toggleStar)
 
-  const [filter, setFilter] = useState<Filter>('all')
-  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<HomeFilter>('all')
+  const [internalSearch, setInternalSearch] = useState('')
+  const search = searchQuery ?? internalSearch
+  const setSearch = onSearchQueryChange ?? setInternalSearch
   const [creating, setCreating] = useState(false)
+  const [createProject, setCreateProject] = useState<string | undefined>(undefined)
   const [syncing, setSyncing] = useState(false)
+  const [launchOpen, setLaunchOpen] = useState(false)
   const [launchError, setLaunchError] = useState<string>()
+  const [busyMap, setBusyMap] = useState<Record<string, boolean>>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const starredSet = useMemo(() => new Set(starred), [starred])
-  const readyProviders = useMemo(
-    () => providers.filter((p) => p.state === 'ready'),
-    [providers],
-  )
+  const readyProviders = useMemo(() => providers.filter((p) => p.state === 'ready'), [providers])
+  const providerNameFor = useMemo(() => {
+    const m = new Map(providers.map((p) => [p.id, p.name] as const))
+    return (id: string) => m.get(id) ?? id
+  }, [providers])
 
-  const openSession = useStore((state) => state.openSession)
+  // Hydrate conversations that are in attention but empty
   useEffect(() => {
-    for (const session of sessions) {
-      if (session.status !== 'waiting_for_approval' && session.status !== 'waiting_for_input' && session.status !== 'error') continue
-      if (getConversation(session.id).messages.length > 0) continue
-      void openSession(session.id)
+    for (const s of sessions) {
+      if (s.status !== 'waiting_for_approval' && s.status !== 'waiting_for_input' && s.status !== 'error' && s.status !== 'needs_resume') continue
+      if (getConversation(s.id).messages.length > 0) continue
+      void openSession(s.id)
     }
   }, [sessions, openSession])
 
-  const withStates = useMemo(
+  // Subscribe to conversation revisions so headlines/previews stay live
+  // (deriveHomeView reads getConversation, which is mutated in place)
+  const revisionTick = useMemo(() => Object.values(revisions).join(','), [revisions])
+  // Deep module derives everything in one call
+  const nowTick = useSharedNow(true) // always tick for idleFor; cheap (1 interval)
+  const view = useMemo(
     () =>
-      sessions
-        .filter((s) => s.status !== 'archived')
-        .map((session) => ({
-          session,
-          uiState: sessionUIState(session, getConversation(session.id), connection),
-        })),
-    [sessions, connection],
+      deriveHomeView({
+        sessions,
+        connection,
+        search,
+        filter,
+        starredSet,
+        getConversation,
+        providerNameFor,
+        notices,
+        now: nowTick,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessions, connection, search, filter, starredSet, providerNameFor, notices, nowTick, revisionTick],
   )
 
-  const counts = useMemo(() => {
-    let running = 0
-    let attention = 0
-    let ended = 0
-    for (const { uiState: u } of withStates) {
-      if (u === 'working' || u === 'starting' || u === 'resuming') running += 1
-      if (u === 'approval' || u === 'input' || u === 'failed') attention += 1
-      if (u === 'ended' || u === 'paused') ended += 1
-    }
-    return { running, attention, ended, total: withStates.length }
-  }, [withStates])
+  // Separate tick for active cards (shared) — reuse nowTick to keep one interval
 
-  const attentionList = useMemo(
-    () =>
-      withStates
-        .filter(({ uiState: u }) => u === 'approval' || u === 'failed' || u === 'input')
-        .sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at)),
-    [withStates],
-  )
-
-  const activeList = useMemo(
-    () =>
-      withStates
-        .filter(({ uiState: u }) => u === 'working' || u === 'starting' || u === 'resuming')
-        .sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at)),
-    [withStates],
-  )
-
-  const filtered = useMemo(() => {
-    let list = [...withStates]
-    if (filter === 'active') {
-      list = list.filter(({ uiState: u }) => u === 'working' || u === 'starting' || u === 'resuming' || u === 'approval' || u === 'input')
-    } else if (filter === 'attention') {
-      list = list.filter(({ uiState: u }) => u === 'approval' || u === 'failed' || u === 'input')
-    } else if (filter === 'starred') list = list.filter(({ session }) => starredSet.has(session.id))
-
-    const needle = search.trim().toLowerCase()
-    if (needle) {
-      list = list.filter(
-        ({ session: s }) =>
-          s.name.toLowerCase().includes(needle) ||
-          s.agent.toLowerCase().includes(needle) ||
-          (s.project ?? '').toLowerCase().includes(needle) ||
-          (previewFor(s.id) ?? '').toLowerCase().includes(needle),
-      )
-    }
-
-    return list.sort(
-      (a, b) =>
-        uiStateRank(a.uiState) - uiStateRank(b.uiState) ||
-        b.session.updated_at.localeCompare(a.session.updated_at),
-    )
-  }, [withStates, filter, search, starredSet])
-
-  function quickLaunch(provider: Provider) {
+  function quickLaunch(p: Provider) {
     setLaunchError(undefined)
-    void createSession({ agent: provider.id })
+    void createSession({ agent: p.id })
       .then(onOpenSession)
-      .catch((cause) =>
-        setLaunchError(cause instanceof Error ? cause.message : `Could not start ${provider.name}`),
-      )
+      .catch((e) => setLaunchError(e instanceof Error ? e.message : `Could not start ${p.name}`))
   }
 
   useEffect(() => {
-    function onKey(keyEvent: KeyboardEvent) {
-      if ((keyEvent.metaKey || keyEvent.ctrlKey) && keyEvent.key.toLowerCase() === 'k') {
-        keyEvent.preventDefault()
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
         document.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
       }
     }
@@ -543,180 +167,437 @@ export function StationHome({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const filters: Array<{ id: Filter; label: string }> = [
+  useEffect(() => {
+    if (newTaskTick && newTaskTick > 0) setCreating(true)
+  }, [newTaskTick])
+
+  const filters: Array<{ id: HomeFilter; label: string }> = [
     { id: 'all', label: 'All' },
-    { id: 'active', label: counts.running > 0 ? `Active · ${counts.running}` : 'Active' },
-    { id: 'attention', label: counts.attention > 0 ? `Attention · ${counts.attention}` : 'Attention' },
+    { id: 'active', label: view.counts.running ? `Active · ${view.counts.running}` : 'Active' },
+    { id: 'attention', label: view.counts.attention ? `Attention · ${view.counts.attention}` : 'Attention' },
     { id: 'starred', label: 'Starred' },
   ]
 
-  const showAttention = attentionList.length > 0
-  const showActive = activeList.length > 0
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin">
-      {/* ── Hero header ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-20 shrink-0 border-b border-line/60 bg-canvas/95 backdrop-blur-xl">
-        <div className="flex items-center justify-between px-6 py-5 sm:px-8">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-ink">
-                AgentDeck
-              </h1>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-surface border border-line px-2.5 py-0.5 text-[10.5px] font-medium text-ink-2">
-                <Dot tone={connection === 'connected' ? 'green' : connection === 'connecting' || connection === 'reconnecting' ? 'orange' : 'red'} pulse={connection === 'reconnecting'} />
-                {connection === 'connected' ? 'Online' : 'Offline'}
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin bg-[#0a0a0c]">
+      {/* Distinctive top bar — control deck header, not a hero */}
+      <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#0a0a0c]/90 backdrop-blur-xl">
+        <div className="relative overflow-hidden">
+          {/* Subtle grid signature — faint, not decorative */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`, backgroundSize: '24px 24px' }} aria-hidden />
+          <div className="relative flex items-center gap-3 px-4 py-3.5 sm:px-6">
+            <div className="flex items-center gap-3">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-white text-[12px] font-bold tracking-[-0.02em] text-black">◐</span>
+              <div className="flex flex-col">
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400">Control Deck</span>
+                <span className="hidden text-[13px] font-semibold tracking-[-0.01em] text-white sm:block">
+                  {view.workspaces[0]?.name ?? 'Workspaces'} <span className="font-normal text-zinc-500">· {view.workspaces.length} projects · {view.counts.total} sessions</span>
+                </span>
+              </div>
+              <span className="ml-2 hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] sm:inline-flex">
+                <span className={cn('size-1.5 rounded-full', view.counts.attention > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')} />
+                <span className={view.counts.attention > 0 ? 'font-medium text-amber-400' : 'text-zinc-400'}>{view.counts.attention > 0 ? `${view.counts.attention} need you` : 'all clear'}</span>
+                <span className="text-white/20">·</span>
+                <span className="text-zinc-400">{view.counts.running} live</span>
               </span>
             </div>
-            <p className="text-[12.5px] text-ink-3">
-              {counts.running} running · {counts.attention} need you · {counts.total} total
-              <span className="mx-1.5 text-ink-3/40">·</span>
-              <TotalUsage sessions={sessions} />
-            </p>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="hidden items-center gap-1.5 text-[11px] text-zinc-500 sm:inline-flex">
+                <Dot tone={connection === 'connected' ? 'green' : 'red'} pulse={connection === 'reconnecting'} />
+                {connection === 'connected' ? 'Live' : 'Offline'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setLaunchOpen(true)}
+                className="hidden h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 text-[12px] font-medium text-white transition hover:bg-white/10 active:scale-[0.98] sm:inline-flex"
+              >
+                Quick launch
+                <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] leading-none text-black">{readyProviders.length}</span>
+              </button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setCreateProject(undefined)
+                  setCreating(true)
+                }}
+                className="h-8 min-h-0 gap-1.5 bg-white px-3.5 text-[12px] font-semibold text-black hover:bg-zinc-200 active:scale-[0.98]"
+              >
+                <Plus size={12} /> New
+              </Button>
+            </div>
           </div>
-          <Button variant="primary" onClick={() => setCreating(true)} className="shrink-0">
-            <Plus />
-            New session
-          </Button>
         </div>
-        {/* Launch rail */}
-        {readyProviders.length > 0 ? (
-          <div className="scroll-thin flex items-center gap-2 overflow-x-auto border-t border-line/40 px-6 py-2.5 sm:px-8" aria-label="Quick launch">
-            <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3">Launch</span>
-            {readyProviders.map((provider) => {
-              const hue = hueFor(provider.id)
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  onClick={() => quickLaunch(provider)}
-                  title={`Launch ${provider.name}`}
-                  className={cn(
-                    'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface/80 pl-1.5 pr-3',
-                    'text-[11.5px] font-medium text-ink-2 transition-all duration-150',
-                    'hover:border-line-strong hover:bg-hover hover:text-ink active:scale-[0.97]',
-                  )}
-                >
-                  <span className="size-2 rounded-full" style={{ backgroundColor: hue }} aria-hidden />
-                  {provider.name}
-                </button>
-              )
-            })}
+        {/* Subtle filter bar — not a hero, just context */}
+        <div className="flex items-center gap-2 border-t border-white/[0.06] bg-white/[0.02] px-4 py-2 sm:px-6">
+          <span className="hidden font-mono text-[11px] text-zinc-500 sm:inline">
+            {view.counts.total} sessions · {view.counts.paused > 0 ? `${view.counts.paused} paused · ` : ''}press <kbd className="rounded bg-white/10 px-1 py-0.5 font-mono text-[10px]">⌘K</kbd> to filter
+          </span>
+          <span className="font-mono text-[11px] text-zinc-500 sm:hidden">{view.workspaces.length} workspaces</span>
+          <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+            <span className="size-1.5 rounded-full bg-emerald-500/60" /> system live
+          </span>
+        </div>
+        {launchError ? (
+          <div role="alert" className="flex items-center gap-2 border-t border-red/20 bg-red/10 px-4 py-2 text-[12px] text-red sm:px-6 lg:px-8">
+            <span className="flex-1">{launchError}</span>
+            <button type="button" onClick={() => setLaunchError(undefined)} className="rounded p-1 hover:bg-red/10">
+              ✕
+            </button>
           </div>
         ) : null}
       </header>
 
-      {launchError ? (
-        <div role="alert" className="flex items-start gap-2 border-b border-red/20 bg-red/[0.04] px-6 py-2.5 text-[11.5px] sm:px-8">
-          <span className="min-w-0 flex-1">{launchError}</span>
-          <button type="button" onClick={() => setLaunchError(undefined)} aria-label="Dismiss" className="text-ink-3 hover:text-ink">
-            ✕
-          </button>
+      {/* Body: 12-col grid — left triage, right detail */}
+      <div className="mx-auto grid w-full max-w-[1280px] grid-cols-12 gap-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* Left: triage timeline */}
+        <div className="col-span-12 lg:col-span-5">
+          <div className="sticky top-[168px] space-y-6">
+            <section aria-label="Needs your attention">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-2">Triage — needs you</h2>
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-medium text-amber-600">{view.attention.length}</span>
+              </div>
+              {view.attention.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-line bg-surface/30 p-6 text-center">
+                  <p className="text-[13px] font-medium text-ink">All clear</p>
+                  <p className="mt-1 font-mono text-[11px] text-ink-3">No sessions need you right now.</p>
+                </div>
+              ) : (
+                <div className="relative rounded-xl border border-line bg-surface/50">
+                  {/* vertical rule */}
+                  <div className="pointer-events-none absolute bottom-4 left-[19px] top-4 w-px bg-line/60" aria-hidden />
+                  <ul className="divide-y divide-line/40">
+                    {view.attention.map(({ session, uiState, headline, providerName, idleFor }) => {
+                      const isPaused = uiState === 'paused'
+                      const isFailed = uiState === 'failed'
+                      const tone = isFailed ? 'bg-red' : isPaused ? 'bg-amber-500' : 'bg-orange'
+                      const isBusy = !!busyMap[session.id]
+                      const approval = uiState === 'approval' ? openApprovalOf(session.id) : undefined
+                      const viewApproval = approval ? describeApproval(approval.prompt, approval.options as unknown as string[]) : undefined
+                      const allow = (viewApproval as { options?: Array<{ kind: string; label: string; value: string }> } | undefined)?.options?.find((o) => o.kind === 'allow')
+                      return (
+                        <li key={session.id} className="relative flex gap-3 p-4">
+                          <span className={cn('relative mt-1 size-2 shrink-0 rounded-full ring-4 ring-canvas', tone)} aria-hidden />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="truncate text-[13px] font-semibold text-ink">{session.name}</span>
+                              <span className="hidden truncate font-mono text-[11px] text-ink-3 sm:inline">
+                                · {providerName} {session.project ? `· ${basename(session.project)}` : ''}
+                              </span>
+                              <StatusPill label={uiStateDisplay(uiState).label} tone={uiStateDisplay(uiState).tone} pulse={uiStateDisplay(uiState).pulse} className="h-5 px-1.5 text-[10px]" />
+                            </div>
+                            <p className="mt-1 line-clamp-2 font-mono text-[11.5px] leading-[1.45] text-ink-3" title={headline}>
+                              {headline}
+                            </p>
+                            {idleFor && (isPaused || isFailed) ? <p className="mt-1 font-mono text-[10px] text-ink-3/80">{idleFor} ago</p> : null}
+                          </div>
+                          <div className="ml-2 flex shrink-0 flex-col gap-1.5">
+                            {isFailed ? (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setBusyMap((m) => ({ ...m, [session.id]: true }))
+                                  void resumeSession(session.id).finally(() => setBusyMap((m) => ({ ...m, [session.id]: false })))
+                                }}
+                                className="inline-flex h-8 items-center justify-center rounded-full border border-line bg-canvas px-3 text-[11px] font-medium hover:bg-hover disabled:opacity-40"
+                              >
+                                {isBusy ? 'Retrying…' : 'Retry'}
+                              </button>
+                            ) : isPaused ? (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setBusyMap((m) => ({ ...m, [session.id]: true }))
+                                  void resumeSession(session.id).finally(() => setBusyMap((m) => ({ ...m, [session.id]: false })))
+                                }}
+                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-4 text-[11px] font-semibold text-white hover:bg-accent-ink disabled:opacity-40"
+                              >
+                                {isBusy ? 'Resuming…' : 'Resume'}
+                              </button>
+                            ) : approval && allow ? (
+                              <button
+                                type="button"
+                                onClick={() => respondToApproval(session.id, approval.requestId, allow.value)}
+                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-3 text-[11px] font-semibold text-white hover:bg-accent-ink"
+                              >
+                                {allow.label}
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => onOpenSession(session)}
+                              className="inline-flex h-7 items-center justify-center rounded-full bg-surface px-3 text-[11px] font-medium text-ink-2 ring-1 ring-line hover:bg-hover hover:text-ink"
+                            >
+                              Open <Chevron />
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
+            </section>
+
+            {/* Active now — compact, same timeline */}
+            <section aria-label="Active">
+              <h2 className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-2">Active — {view.active.length} running</h2>
+              {view.active.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-line bg-surface/30 p-4 text-center font-mono text-[11px] text-ink-3">No agents running.</p>
+              ) : (
+                <div className="grid gap-2">
+                  {view.active.map(({ session, task, runtime }) => {
+                    const conv = getConversation(session.id)
+                    const act = conv.activity
+                    const provider = providers.find((p) => p.id === session.agent)
+                    return (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => onOpenSession(session)}
+                        className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left transition hover:border-line-strong hover:bg-hover"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium text-ink">{session.name}</span>
+                          <span className="block truncate font-mono text-[11px] text-ink-3">
+                            {provider?.name ?? session.agent} · {session.project ? basename(session.project) : 'no project'}
+                          </span>
+                          {task ? <span className="mt-1 line-clamp-1 block font-mono text-[11px] text-ink-3">{task}</span> : null}
+                        </span>
+                        <span className="flex shrink-0 flex-col items-end gap-1">
+                          <LoadingStateMini label={act?.label ?? 'Working'} variant="Dots" />
+                          <span className="font-mono text-[10px] tabular-nums text-ink-3">{act?.detail ?? runtime}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
         </div>
-      ) : null}
 
-      {/* ── Attention ───────────────────────────────────────────────────── */}
-      {showAttention ? (
-        <section aria-label="Needs your attention" className="shrink-0 px-6 sm:px-8">
-          <div className="flex items-center justify-between gap-2 border-b border-line/40 pb-1 pt-5">
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-orange">
-              Needs you · {attentionList.length}
+        {/* Right: workspaces — grouped sessions */}
+        <div className="col-span-12 lg:col-span-7">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-2">
+              Workspaces · {view.workspaces.length} <span className="font-normal text-ink-3">· {view.filtered.length} sessions</span>
             </h2>
+            <div className="flex items-center gap-2">
+              <div role="tablist" className="flex items-center gap-1 rounded-full bg-inset p-1 ring-1 ring-line">
+                {filters.map((f) => (
+                  <button
+                    key={f.id}
+                    role="tab"
+                    aria-selected={filter === f.id}
+                    onClick={() => setFilter(f.id)}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-[11px] font-medium transition',
+                      filter === f.id ? 'bg-surface text-ink shadow-sm ring-1 ring-line' : 'text-ink-3 hover:text-ink',
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="flex flex-col">
-            {attentionList.map(({ session }) => (
-              <AttentionRow key={session.id} session={session} onOpen={() => onOpenSession(session)} />
-            ))}
-          </div>
-        </section>
-      ) : null}
 
-      {/* ── Active agents ──────────────────────────────────────────────── */}
-      {showActive ? (
-        <section aria-label="Active agents" className="shrink-0 px-6 pt-5 sm:px-8">
-          <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-accent/80">
-            Running now · {activeList.length}
-          </h2>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-            {activeList.map(({ session }) => (
-              <ActiveCard key={session.id} session={session} onOpen={() => onOpenSession(session)} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {/* ── Roster ─────────────────────────────────────────────────────── */}
-      <section aria-label="Sessions" className="min-h-0 shrink-0 pb-6">
-        <div className="flex items-center gap-2 px-6 pb-1 pt-5 sm:px-8">
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-            Sessions{filter === 'all' && !search ? '' : ` · ${filtered.length}`}
-          </h2>
-          <div role="tablist" aria-label="Filter sessions" className="scroll-thin flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {filters.map((entry) => (
-              <button
-                key={entry.id}
-                role="tab"
-                aria-selected={filter === entry.id}
-                onClick={() => setFilter(entry.id)}
-                className={cn(
-                  'h-6 shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] transition-all duration-150 sm:text-[11.5px]',
-                  filter === entry.id ? 'bg-surface border border-line-strong text-ink' : 'text-ink-3 hover:bg-hover-2 hover:text-ink-2',
-                )}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-          <div className="hidden w-56 shrink-0 sm:block">
+          <div className="mt-3">
             <TextField
               value={search}
-              onChange={(changeEvent) => setSearch(changeEvent.target.value)}
-              placeholder="Search sessions…"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search workspaces, sessions, agents…"
               aria-label="Search sessions"
-              leading={<Search size={12} />}
+              leading={<Search size={14} />}
             />
           </div>
-        </div>
-        <div className="sm:px-4">
-          {filtered.length > 0 ? (
-            <div className="sticky top-[57px] z-10 hidden grid-cols-[minmax(0,2.4fr)_120px_minmax(0,1fr)_70px_28px] gap-x-3 border-b border-line/40 bg-canvas/95 px-4 py-1.5 text-[9.5px] uppercase tracking-[0.14em] text-ink-3 backdrop-blur-sm md:grid">
-              <span>Session</span>
-              <span>Agent</span>
-              <span>Project</span>
-              <span className="text-right">Activity</span>
-              <span />
-            </div>
-          ) : null}
-          {loading && sessions.length === 0 ? (
-            <div className="py-16 text-center">
-              <Dots label="Loading sessions…" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              title={sessions.length === 0 ? 'No sessions' : 'Nothing here'}
-              description={
-                sessions.length === 0
-                  ? 'Launch an agent above, or import the sessions your CLIs already have.'
-                  : 'Try another filter.'
-              }
-              action={
-                sessions.length === 0 ? (
-                  <Button onClick={() => setSyncing(true)}>
-                    <SyncIcon size={12} />
-                    Import from CLIs
-                  </Button>
-                ) : undefined
-              }
-            />
-          ) : (
-            filtered.map(({ session }) => (
-              <RosterRow key={session.id} session={session} onOpen={() => onOpenSession(session)} />
-            ))
-          )}
-        </div>
-      </section>
 
-      <NewSessionLayer open={creating} onClose={() => setCreating(false)} onCreated={onOpenSession} />
+          <div className="mt-4 space-y-4">
+            {loading && sessions.length === 0 ? (
+              <div className="rounded-xl border border-line bg-surface/40 p-8 text-center">
+                <div className="flex justify-center">
+                  <LoadingState label="Loading workspaces" variant="Drive" />
+                </div>
+              </div>
+            ) : view.workspaces.length === 0 ? (
+              <EmptyState
+                title={sessions.length === 0 ? 'No workspaces yet' : 'No matches'}
+                description={sessions.length === 0 ? 'Create a workspace by launching an agent in a project folder.' : 'Try another filter or clear search.'}
+                action={
+                  sessions.length === 0 ? (
+                    <Button onClick={() => setSyncing(true)}>
+                      <Search size={12} /> Import from CLIs
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              view.workspaces.map((ws) => {
+                const isCollapsed = !!collapsed[ws.id]
+                return (
+                  <div key={ws.id} className="overflow-hidden rounded-xl border border-line bg-surface/40">
+                    {/* Workspace header — collapsible */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setCollapsed((prev) => ({ ...prev, [ws.id]: !prev[ws.id] }))}
+                      onKeyDown={(e) => e.key === 'Enter' && setCollapsed((prev) => ({ ...prev, [ws.id]: !prev[ws.id] }))}
+                      aria-expanded={!isCollapsed}
+                      className="flex w-full cursor-pointer items-center gap-3 bg-inset/60 px-4 py-3 text-left transition hover:bg-hover/20"
+                    >
+                      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface ring-1 ring-line">
+                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="text-ink-3" aria-hidden>
+                          <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                        </svg>
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-semibold text-ink">{ws.name}</span>
+                          <span className="hidden rounded-full bg-surface px-1.5 py-0.5 font-mono text-[10px] text-ink-3 ring-1 ring-line sm:inline">{ws.counts.total} sessions</span>
+                          {ws.counts.attention > 0 ? <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-600">{ws.counts.attention} need you</span> : null}
+                          {ws.counts.running > 0 ? <span className="hidden items-center gap-1 rounded-full bg-green/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-green sm:inline-flex"><span className="size-1 rounded-full bg-green animate-pulse" /> {ws.counts.running} running</span> : null}
+                        </div>
+                        <p className="truncate font-mono text-[11px] text-ink-3">{ws.project ?? 'No folder — inbox'}</p>
+                      </div>
+                      <span className="hidden shrink-0 items-center gap-2 sm:flex">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setCreateProject(ws.project ?? undefined)
+                            setCreating(true)
+                          }}
+                          className="rounded-full border border-line bg-canvas px-3 py-1 text-[11px] font-medium text-ink-2 transition hover:bg-hover hover:text-ink active:scale-[0.98]"
+                        >
+                          + New session
+                        </button>
+                        <span className={cn('rounded p-1 text-ink-3 transition-transform', isCollapsed && 'rotate-180')}>
+                          <ChevronDown size={14} />
+                        </span>
+                      </span>
+                      {/* Mobile chevron only */}
+                      <span className={cn('ml-auto shrink-0 rounded p-1 text-ink-3 transition-transform sm:hidden', isCollapsed && 'rotate-180')}>
+                        <ChevronDown size={14} />
+                      </span>
+                    </div>
+                    {/* Sessions inside workspace — collapsible */}
+                    {!isCollapsed ? (
+                      <ul className="divide-y divide-line/40 animate-fade">
+                        {ws.sessions.map(({ session, uiState }) => {
+                          const conv = getConversation(session.id)
+                          const provider = providers.find((p) => p.id === session.agent)
+                          const preview = (() => {
+                            for (let i = conv.messages.length - 1; i >= 0; i--) {
+                              for (const part of conv.messages[i].parts) {
+                                if (part.kind === 'text' && part.text.trim()) return part.text.trim().slice(0, 64)
+                              }
+                            }
+                            return undefined
+                          })()
+                          const isStarred = starredSet.has(session.id)
+                          return (
+                            <li key={session.id}>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => onOpenSession(session)}
+                                onKeyDown={(e) => e.key === 'Enter' && onOpenSession(session)}
+                                className="group flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-hover/40"
+                              >
+                                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hueFor(session.agent) }} aria-hidden />
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="truncate text-[13px] font-medium text-ink">{session.name}</span>
+                                    <StatusPill label={uiStateDisplay(uiState).label} tone={uiStateDisplay(uiState).tone} pulse={uiStateDisplay(uiState).pulse} className="h-5 px-1.5 text-[10px]" />
+                                    <button
+                                      type="button"
+                                      aria-label={isStarred ? 'Unstar' : 'Star'}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleStar(session.id)
+                                      }}
+                                      className={cn('rounded p-1 text-ink-3 hover:text-amber-500', isStarred ? 'text-amber-500 opacity-100' : 'opacity-30 group-hover:opacity-100')}
+                                    >
+                                      ★
+                                    </button>
+                                  </span>
+                                  <span className="block truncate font-mono text-[11px] text-ink-3">{preview ?? uiStateDisplay(uiState).label}</span>
+                                </span>
+                                <span className="hidden shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink-2 sm:flex">
+                                  <span className="size-1.5 rounded-full" style={{ backgroundColor: hueFor(session.agent) }} /> {provider?.name ?? session.agent}
+                                </span>
+                                <span className="hidden shrink-0 font-mono text-[11px] text-ink-3 sm:block">{relativeTime(session.updated_at)}</span>
+                                <Chevron />
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    ) : null}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Quick launch popup — replaces the old rail */}
+      {launchOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <button type="button" aria-label="Close" onClick={() => setLaunchOpen(false)} className="absolute inset-0 bg-canvas/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-[560px] overflow-hidden rounded-2xl border border-line bg-surface shadow-overlay">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <div>
+                <h3 className="text-[13px] font-semibold text-ink">Quick launch</h3>
+                <p className="font-mono text-[11px] text-ink-3">Pick an agent to start in this workspace</p>
+              </div>
+              <button type="button" onClick={() => setLaunchOpen(false)} className="rounded-full p-1.5 text-ink-3 hover:bg-hover hover:text-ink">
+                ✕
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-3">
+              {readyProviders.length === 0 ? (
+                <p className="p-4 font-mono text-[12px] text-ink-3">No agent is ready. Install a CLI first.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {readyProviders.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setLaunchOpen(false)
+                        quickLaunch(p)
+                      }}
+                      className="flex items-center gap-3 rounded-xl border border-line bg-canvas p-3 text-left transition hover:border-accent/30 hover:bg-hover active:scale-[0.99]"
+                    >
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent/10 ring-1 ring-accent/15">
+                        <span className="size-2.5 rounded-full" style={{ backgroundColor: hueFor(p.id) }} aria-hidden />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-semibold text-ink">{p.name}</span>
+                        <span className="block truncate font-mono text-[11px] text-ink-3">{p.id} · {p.version ?? 'ready'}</span>
+                      </span>
+                      <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white">Launch</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+                <span className="font-mono text-[11px] text-ink-3">{readyProviders.length} agents available</span>
+                <Button variant="ghost" onClick={() => { setLaunchOpen(false); setCreating(true) }}>
+                  Advanced… <Chevron />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <NewSessionLayer open={creating} onClose={() => { setCreating(false); setCreateProject(undefined) }} onCreated={onOpenSession} initialProject={createProject} />
       <SyncLayer open={syncing} onClose={() => setSyncing(false)} />
     </div>
   )

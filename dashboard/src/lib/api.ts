@@ -12,6 +12,7 @@
  */
 
 import type {
+  ConfigOption,
   ConfigUpdateResponse,
   Provider,
   ProvidersResponse,
@@ -117,12 +118,29 @@ export const providersApi = {
  * blank screen — the whole UI unmounts on `undefined.length`. Normalizing at the
  * one place data enters is cheaper than defending at every render site.
  */
+function normalizeOption(option: ConfigOption): ConfigOption {
+  return {
+    ...option,
+    choices: option.choices ?? [],
+    allowsCustomValue: option.allowsCustomValue ?? false,
+    mutability: option.mutability ?? 'live',
+    currentValue: option.currentValue ?? undefined,
+  }
+}
+
 function normalizeProvider(provider: Provider): Provider {
   return {
     ...provider,
     models: provider.models ?? [],
-    configOptions: provider.configOptions ?? [],
+    configOptions: (provider.configOptions ?? []).map(normalizeOption),
     capabilities: provider.capabilities ?? {},
+  }
+}
+
+function normalizeSessionConfig(config: SessionConfig): SessionConfig {
+  return {
+    ...config,
+    options: (config.options ?? []).map(normalizeOption),
   }
 }
 
@@ -276,7 +294,7 @@ export const configApi = {
   get: (sessionId: string) =>
     request<{ config: SessionConfig }>(
       `/api/sessions/${encodeURIComponent(sessionId)}/config`,
-    ).then((body) => body.config),
+    ).then((body) => normalizeSessionConfig(body.config)),
 
   /**
    * Change one dimension.
@@ -288,7 +306,7 @@ export const configApi = {
     request<ConfigUpdateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/config`, {
       method: 'PATCH',
       body: JSON.stringify({ configId, value }),
-    }),
+    }).then((body) => ({ ...body, config: normalizeSessionConfig(body.config) })),
 }
 
 export interface PairingOffer {

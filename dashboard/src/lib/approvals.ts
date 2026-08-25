@@ -17,6 +17,7 @@ export interface ApprovalOption {
   /** Value sent back to the agent verbatim. */
   value: string
   label: string
+  description?: string
   kind: 'allow' | 'deny' | 'other'
 }
 
@@ -25,6 +26,10 @@ export interface ApprovalView {
   question: string
   /** Mono context line — the command, path, or URL the prompt is about. */
   context?: string
+  /** Section header for questionnaire style (e.g., "File content") */
+  header?: string
+  /** Whether multiple options can be selected */
+  multiSelect?: boolean
   options: ApprovalOption[]
   /** True when the input was too opaque to summarize; show raw text. */
   raw: boolean
@@ -61,7 +66,7 @@ function questionFromRecord(record: Record<string, unknown>): string | undefined
   return undefined
 }
 
-/** Parse an AskUserQuestion-style envelope: questions[].{question,options[]}. */
+/** Parse an AskUserQuestion-style envelope: questions[].{question,header,multiSelect,options[]}. */
 function fromAskUserQuestion(parsed: unknown): ApprovalView | undefined {
   if (!parsed || typeof parsed !== 'object') return undefined
   const questions = (parsed as Record<string, unknown>)['questions']
@@ -72,20 +77,33 @@ function fromAskUserQuestion(parsed: unknown): ApprovalView | undefined {
   const question = questionFromRecord(record) ?? (typeof record['header'] === 'string' ? record['header'] : undefined)
   if (!question) return undefined
 
+  const header = typeof record['header'] === 'string' ? record['header'].trim() : undefined
+  const multiSelect = typeof record['multiSelect'] === 'boolean' ? (record['multiSelect'] as boolean) : undefined
+
   const options: ApprovalOption[] = []
   const rawOptions = record['options']
   if (Array.isArray(rawOptions)) {
     for (const entry of rawOptions) {
       if (entry && typeof entry === 'object') {
         const label = (entry as Record<string, unknown>)['label']
-        if (typeof label === 'string' && label.trim()) options.push({ value: label, label: label.trim(), kind: kindFor(label) })
+        const description = (entry as Record<string, unknown>)['description']
+        if (typeof label === 'string' && label.trim()) {
+          options.push({
+            value: label,
+            label: label.trim(),
+            description: typeof description === 'string' ? description.trim() : undefined,
+            kind: kindFor(label),
+          })
+        }
       } else if (typeof entry === 'string' && entry.trim()) {
         options.push({ value: entry, label: entry.trim(), kind: kindFor(entry) })
       }
     }
   }
   const context = contextFromRecord(record) ?? undefined
-  return { question, context, options, raw: false }
+  // If header exists and is different from question, keep it separate; otherwise use context
+  const finalHeader = header && header !== question ? header : undefined
+  return { question, context, header: finalHeader, multiSelect, options, raw: false }
 }
 
 /** Try JSON.parse; returns undefined on anything that is not an object/array. */
@@ -122,14 +140,26 @@ function fromTruncatedAskUserQuestion(prompt: string): ApprovalView | undefined 
   const questionMatch = prompt.match(/"question"\s*:\s*"([^"]+)"/)
   const question = questionMatch?.[1] ?? headerMatch?.[1]
   if (!question) return undefined
+  const header = headerMatch?.[1] && headerMatch[1] !== question ? headerMatch[1] : undefined
+  const multiSelect = /"multiSelect"\s*:\s*true/.test(prompt) ? true : /"multiSelect"\s*:\s*false/.test(prompt) ? false : undefined
   const options: ApprovalOption[] = []
-  const labelRegex = /"label"\s*:\s*"([^"]+)"/g
+  // Try to capture label + description pairs
+  const optionRegex = /"label"\s*:\s*"([^"]+)"(?:\s*,\s*"description"\s*:\s*"([^"]+)")?/g
   let m: RegExpExecArray | null
-  while ((m = labelRegex.exec(prompt)) !== null) {
+  while ((m = optionRegex.exec(prompt)) !== null) {
     const label = m[1]
-    if (label) options.push({ value: label, label, kind: kindFor(label) })
+    const description = m[2]
+    if (label) options.push({ value: label, label, description, kind: kindFor(label) })
   }
-  return { question, options, raw: false }
+  // Fallback to just labels if the above didn't capture
+  if (options.length === 0) {
+    const labelRegex = /"label"\s*:\s*"([^"]+)"/g
+    while ((m = labelRegex.exec(prompt)) !== null) {
+      const label = m[1]
+      if (label) options.push({ value: label, label, kind: kindFor(label) })
+    }
+  }
+  return { question, header, multiSelect, options, raw: false }
 }
 
 /**

@@ -32,11 +32,11 @@
     --line: #1e1e25;
     --line-strong: #2a2a33;
 
-    /* Primary accent — cool blue, not green. */
-    --accent: #5b8def;
-    --accent-ink: #7ba4f7;
-    --accent-tint: rgba(91, 141, 239, 0.12);
-    --accent-2: #4a7de0;
+    /* Primary accent — dark neutral (replaces blue). Deep charcoal with subtle lift. */
+    --accent: #23232a;
+    --accent-ink: #f0f0f2;
+    --accent-tint: rgba(255, 255, 255, 0.08);
+    --accent-2: #2a2a33;
 
     /* Status hues — muted and premium. */
     --green: #34d399;
@@ -104,7 +104,7 @@
     overscroll-behavior-y: none;
   }
 
-  /* Atmosphere: subtle grain texture for depth. */
+  /* Atmosphere: subtle grain — neutral, not blue. */
   body::before {
     content: '';
     position: fixed;
@@ -113,7 +113,7 @@
     pointer-events: none;
     background-image: radial-gradient(
       ellipse at 50% 0%,
-      rgba(91, 141, 239, 0.03) 0%,
+      rgba(255, 255, 255, 0.03) 0%,
       transparent 60%
     );
   }
@@ -132,12 +132,12 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--line-strong);
     outline-offset: 2px;
   }
 
   ::selection {
-    background: var(--accent-tint);
+    background: rgba(255, 255, 255, 0.08);
   }
 }
 
@@ -236,6 +236,15 @@
   }
 }
 
+@keyframes pixel-on {
+  0%, 100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 @keyframes breathe {
   0%,
   100% {
@@ -320,9 +329,9 @@
     color: var(--ink);
   }
 
-  /* Soft blue glow for active nav and live marks. */
+  /* Soft neutral glow for active nav and live marks. */
   .glow-accent {
-    box-shadow: 0 0 0 1px var(--accent-tint), 0 4px 20px -6px rgba(91, 141, 239, 0.4);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 20px -6px rgba(0, 0, 0, 0.5);
   }
 
   @media (prefers-reduced-motion: reduce) {
