@@ -131,6 +131,16 @@ export function StopIcon({ className, size = 13 }: IconProps) {
   )
 }
 
+/** Refresh / retry arrow — for re-running an assistant turn. */
+export function RefreshIcon({ className, size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  )
+}
+
 export function Sparkle({ className, size = 13 }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" className={className}>
@@ -588,10 +598,13 @@ export function Notice({
   message,
   tone = 'warn',
   onDismiss,
+  action,
 }: {
   message: string
   tone?: 'warn' | 'error'
   onDismiss: () => void
+  /** Optional inline action (e.g. "Restart now" after a next-run config). */
+  action?: { label: string; onClick: () => void; busy?: boolean }
 }) {
   return (
     <div
@@ -608,6 +621,16 @@ export function Notice({
         className={cn('mt-[2px] shrink-0', tone === 'error' ? 'text-red' : 'text-orange')}
       />
       <span className="min-w-0 flex-1">{message}</span>
+      {action ? (
+        <button
+          type="button"
+          onClick={action.onClick}
+          disabled={action.busy}
+          className="-m-1 shrink-0 rounded-md bg-ink px-2 py-0.5 text-[11px] font-medium text-canvas transition-opacity hover:opacity-85 disabled:opacity-50"
+        >
+          {action.busy ? 'Restarting…' : action.label}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onDismiss}

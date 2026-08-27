@@ -44,16 +44,44 @@ export interface Activity {
   timestamp: string
 }
 
+/**
+ * One answer choice the agent offers. All fields except `value` are optional;
+ * when absent the UI falls back to rendering `value` verbatim.
+ */
+export interface ApprovalOption {
+  /** Value sent back to the agent verbatim. */
+  value: string
+  label?: string
+  description?: string
+  /** `true` when this option also permits free-text input. */
+  allows_custom_text?: boolean
+}
+
 export interface ApprovalRequest {
   id: string
   prompt: string
+  /** Legacy flat option list. */
   options: string[]
+  /** Structured options, when the agent supplies them. */
+  option_data?: ApprovalOption[]
+  /** Selection mode the agent requested: "single" (default) or "multiple". */
+  selection_mode?: 'single' | 'multiple'
+  /** `true` when the agent invites free-form custom input for this prompt. */
+  allows_custom_text?: boolean
   /** PascalCase from the backend enum: "Low" | "Medium" | "High" | "Critical". */
   risk_level: string
   timestamp: string
 }
 
-/** Server → client frames. */
+/** Metadata carried with an approval response, beyond the verbatim `decision`. */
+export interface ApprovalMeta {
+  /** Free-form text the user supplied (custom input). */
+  customText?: string
+  /** `true` when the choice should persist for the rest of the session. */
+  always?: boolean
+  /** Explicit allow/deny for custom-text answers (the agent can't infer it). */
+  allow?: boolean
+}
 export type ServerFrame =
   | { type: 'Authenticated'; payload: { device_id: string; last_event_id: number } }
   | { type: 'DeviceRevoked'; payload: { device_id: string } }

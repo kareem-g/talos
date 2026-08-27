@@ -11,9 +11,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Globe2, LayoutGrid, Settings2, Sparkles, Workflow } from 'lucide-react'
 import { PairingScreen } from './components/Pairing'
 import { StationHome } from './components/home/StationHome'
 import { HomeSidebar } from './components/home/HomeSidebar'
+import { AutomationsScreen } from './components/automations/AutomationsScreen'
+import { SkillsScreen } from './components/skills/SkillsScreen'
 import { RemoteScreen } from './components/remote/RemoteScreen'
 import { SettingsScreen } from './components/settings/SettingsScreen'
 import { SessionView } from './components/SessionView'
@@ -42,49 +45,15 @@ function useIsDesktop(): boolean {
   return isDesktop
 }
 
-type Screen = 'home' | 'remote' | 'settings'
+type Screen = 'home' | 'automations' | 'skills' | 'remote' | 'settings'
 
-const SCREENS: Array<{ id: Screen; label: string }> = [
-  { id: 'home', label: 'Sessions' },
-  { id: 'remote', label: 'Remote' },
-  { id: 'settings', label: 'Settings' },
+const SCREENS: Array<{ id: Screen; label: string; icon: typeof LayoutGrid }> = [
+  { id: 'home', label: 'Sessions', icon: LayoutGrid },
+  { id: 'automations', label: 'Automations', icon: Workflow },
+  { id: 'skills', label: 'Skills', icon: Sparkles },
+  { id: 'remote', label: 'Remote', icon: Globe2 },
+  { id: 'settings', label: 'Settings', icon: Settings2 },
 ]
-
-/* ── Nav glyphs ──────────────────────────────────────────────────────────── */
-
-function HomeGlyph({ active }: { active?: boolean }) {
-  return (
-    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M3 10.5L12 3l9 7.5" />
-      <path d="M5 9.5V21h14V9.5" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
-    </svg>
-  )
-}
-
-function RemoteGlyph({ active }: { active?: boolean }) {
-  return (
-    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="7" y="2.5" width="10" height="19" rx="2.5" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
-      <path d="M11 18h2" />
-      <rect x="10" y="6" width="4" height="4" rx="1" />
-    </svg>
-  )
-}
-
-function SettingsGlyph({ active }: { active?: boolean }) {
-  return (
-    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="3" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.3 : 0} />
-      <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" />
-    </svg>
-  )
-}
-
-const GLYPHS: Record<Screen, (props: { active?: boolean }) => React.ReactNode> = {
-  home: HomeGlyph,
-  remote: RemoteGlyph,
-  settings: SettingsGlyph,
-}
 
 function BrandMark({ compact }: { compact?: boolean }) {
   return (
@@ -298,7 +267,11 @@ export default function App() {
 
   /* ── Screens shell ─────────────────────────────────────────────────────── */
   const body =
-    screen === 'remote' ? (
+    screen === 'automations' ? (
+      <AutomationsScreen />
+    ) : screen === 'skills' ? (
+      <SkillsScreen />
+    ) : screen === 'remote' ? (
       <RemoteScreen />
     ) : screen === 'settings' ? (
       <SettingsScreen />
@@ -319,6 +292,7 @@ export default function App() {
             onNewTask={() => setHomeNewTaskTick((x) => x + 1)}
             onSearch={() => setShowCommandPalette(true)}
             onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
+            onNavigate={setScreen}
             selectedId={selectedId}
             searchQuery={homeSearch}
           />
@@ -362,7 +336,27 @@ export default function App() {
         <main className="flex min-h-0 flex-1 flex-col">{body}</main>
       )}
 
+      {screen === 'home' ? (
+        <HomeSidebar
+          onNewTask={() => setHomeNewTaskTick((value) => value + 1)}
+          onSearch={() => setShowCommandPalette(true)}
+          onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
+          onNavigate={setScreen}
+          selectedId={selectedId}
+          searchQuery={homeSearch}
+        />
+      ) : null}
+
       <AttentionPill onOpen={openSessionFrom} />
+
+      {showCommandPalette ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[14vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1a1a1c] p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <input autoFocus type="search" placeholder="Search sessions, projects, agents..." value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
+            <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter. Press Esc to close.</p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Bottom tab bar */}
       <nav
@@ -371,7 +365,7 @@ export default function App() {
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {SCREENS.map((entry) => {
-          const Glyph = GLYPHS[entry.id]
+          const Glyph = entry.icon
           const active = screen === entry.id
           return (
             <button
@@ -384,7 +378,7 @@ export default function App() {
                 active ? 'text-accent-ink' : 'text-ink-3 hover:text-ink-2',
               )}
             >
-              <Glyph active={active} />
+              <Glyph size={22} strokeWidth={1.8} />
               <span className="text-[10px] font-medium">{entry.label}</span>
             </button>
           )
@@ -417,7 +411,7 @@ function Rail({
 
       <div className="flex flex-1 flex-col items-center gap-1">
         {SCREENS.map((entry) => {
-          const Glyph = GLYPHS[entry.id]
+          const Glyph = entry.icon
           const active = screen === entry.id
           return (
             <IconButton
@@ -427,7 +421,7 @@ function Rail({
               tone={active ? 'accent' : 'ghost'}
               className={cn(active && 'glow-accent')}
             >
-              <Glyph active={active} />
+              <Glyph size={22} strokeWidth={1.8} />
             </IconButton>
           )
         })}

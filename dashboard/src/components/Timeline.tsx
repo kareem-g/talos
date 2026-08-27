@@ -13,8 +13,11 @@
 import { memo, useEffect, useRef } from 'react'
 import { Part } from './chat'
 import { FileChips } from './chat'
+import { Chips } from './chat'
 import LoadingState from './LoadingState'
+import { CopyButton, IconButton, RefreshIcon } from './ui'
 import { cn } from '@/lib/format'
+import { useStore } from '@/store'
 import type {
   Activity,
   Conversation,
@@ -44,9 +47,15 @@ function partition(parts: MessagePart[]): {
 const Turn = memo(function Turn({
   message,
   onRespond,
+  onRetry,
+  project,
+  sessionId,
 }: {
   message: Message
-  onRespond: (requestId: string, decision: string) => void
+  onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
+  onRetry: () => void
+  project?: string
+  sessionId?: string
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
@@ -69,7 +78,7 @@ const Turn = memo(function Turn({
             )}
           >
             <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
-              {text}
+              <Chips text={text} />
             </p>
           </div>
         </div>
@@ -78,13 +87,27 @@ const Turn = memo(function Turn({
   }
 
   const { inline, files } = partition(message.parts)
+  const assistantText = message.parts
+    .map((part) => (part.kind === 'text' ? part.text : ''))
+    .join('')
 
   return (
-    <div className="flex flex-col gap-2">
-      {inline.map((part, index) => (
-        <Part key={index} part={part} onRespond={onRespond} />
-      ))}
-      {files.length > 0 ? <FileChips files={files} /> : null}
+    <div className="group flex flex-col gap-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          {inline.map((part, index) => (
+            <Part key={index} part={part} onRespond={onRespond} />
+          ))}
+          {files.length > 0 ? <FileChips files={files} project={project} sessionId={sessionId} /> : null}
+        </div>
+        {/* Assistant action bar — revealed on hover, like ChatGPT's controls. */}
+        <div className="flex shrink-0 items-center gap-0.5 pt-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <CopyButton value={assistantText} label="Copy" />
+          <IconButton label="Retry from last prompt" onClick={onRetry} className="size-7">
+            <RefreshIcon size={13} />
+          </IconButton>
+        </div>
+      </div>
     </div>
   )
 })
@@ -107,9 +130,14 @@ function ActivityLine({ activity }: { activity: Activity }) {
 export function Timeline({
   conversation,
   onRespond,
+  project,
+  sessionId,
 }: {
   conversation: Conversation
-  onRespond: (requestId: string, decision: string) => void
+  onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
+  /** Project root, for lazy-loading file diffs in the chat. */
+  project?: string
+  sessionId?: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** Whether the user is near the bottom; only then do we follow new content. */
@@ -120,6 +148,8 @@ export function Timeline({
     if (!element || !pinnedRef.current) return
     element.scrollTop = element.scrollHeight
   }, [conversation.messages, conversation.activity])
+
+  const resendLastUserPrompt = useStore((state) => state.resendLastUserPrompt)
 
   const empty = conversation.messages.length === 0
 
@@ -144,7 +174,14 @@ export function Timeline({
           </div>
         ) : null}
         {conversation.messages.map((message) => (
-          <Turn key={message.id} message={message} onRespond={onRespond} />
+          <Turn
+            key={message.id}
+            message={message}
+            onRespond={onRespond}
+            onRetry={() => resendLastUserPrompt(conversation.sessionId)}
+            project={project}
+            sessionId={sessionId}
+          />
         ))}
         {conversation.activity ? <ActivityLine activity={conversation.activity} /> : null}
       </div>

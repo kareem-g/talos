@@ -17,6 +17,17 @@ fn clamp_terminal_dimensions(cols: u16, rows: u16) -> (u16, u16) {
     )
 }
 
+/// Whether a raw approval decision string means "allow". Mirrors the broker's
+/// own rule so the "always allow" persistence path agrees with what the agent
+/// actually receives.
+fn is_allow_decision(decision: &str) -> bool {
+    let d = decision.to_lowercase();
+    d.starts_with("allow")
+        || d.eq_ignore_ascii_case("yes")
+        || d.eq_ignore_ascii_case("always allow")
+        || d.starts_with("always_allow")
+}
+
 #[cfg(test)]
 mod tests {
     use super::clamp_terminal_dimensions;
@@ -453,6 +464,29 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             let request_id = params.get("request_id").and_then(Value::as_str).unwrap_or("");
             let decision = params.get("decision").and_then(Value::as_str).unwrap_or("deny");
             let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
+            // Optional richer answer metadata forwarded from the approval card.
+            let always = params.get("always").and_then(Value::as_bool).unwrap_or(false);
+            let _custom_text = params.get("custom_text").and_then(Value::as_str).map(|s| s.to_string());
+            let allow = params.get("allow").and_then(Value::as_bool);
+
+            // "Always allow" (or an agent-provided option that encodes it) makes
+            // the choice sticky for the rest of the session by switching the
+            // permission broker to full-auto. We resolve first, then persist so
+            // the live MCP round-trip is already unblocked.
+            let is_allow = allow.unwrap_or_else(|| is_allow_decision(decision));
+            let persist_full = always
+                && is_allow
+                && !session_id.is_empty()
+                && state.permissions.resolve(request_id, decision.to_string()).await;
+            if persist_full {
+                let _ = crate::sessions::config::apply_config(
+                    state,
+                    session_id,
+                    "permission_mode",
+                    "full",
+                )
+                .await;
+            }
             // Claude stream permissions are decided through the permission
             // broker: the MCP server is blocked on an HTTP round-trip holding
             // this exact request id, and the answer unblocks the agent.

@@ -12,6 +12,8 @@
  * choices — anything it cannot parse falls through to the raw text.
  */
 
+import type { ApprovalOptionData } from '@/types/conversation'
+
 /** One answer choice on an approval card. */
 export interface ApprovalOption {
   /** Value sent back to the agent verbatim. */
@@ -19,6 +21,15 @@ export interface ApprovalOption {
   label: string
   description?: string
   kind: 'allow' | 'deny' | 'other'
+  /** `true` when this choice also permits free-text input. */
+  allowsCustomText?: boolean
+}
+
+/** Structured metadata the agent supplied alongside the prompt. */
+export interface ApprovalStructuredInput {
+  optionData?: ApprovalOptionData[]
+  multiSelect?: boolean
+  allowsCustomText?: boolean
 }
 
 export interface ApprovalView {
@@ -31,6 +42,8 @@ export interface ApprovalView {
   /** Whether multiple options can be selected */
   multiSelect?: boolean
   options: ApprovalOption[]
+  /** True when the agent invites free-form custom input for this prompt. */
+  allowsCustomText?: boolean
   /** True when the input was too opaque to summarize; show raw text. */
   raw: boolean
 }
@@ -168,8 +181,18 @@ function fromTruncatedAskUserQuestion(prompt: string): ApprovalView | undefined 
  * `fallbackOptions` are the choices the transport reported (often
  * `["allow","deny"]`); parsed envelopes may contribute richer labels, in which
  * case the fallback is only used when the envelope has none.
+ *
+ * `structured` carries metadata the agent supplied directly on the prompt
+ * event (`option_data`, `multi_select`, `allows_custom_text`). It takes
+ * precedence over the parsed envelope and the transport fallback, because it is
+ * the agent's own description of the choices — but it is optional, and when
+ * absent the existing parsing paths still run.
  */
-export function describeApproval(prompt: string, fallbackOptions: string[] = []): ApprovalView {
+export function describeApproval(
+  prompt: string,
+  fallbackOptions: string[] = [],
+  structured?: ApprovalStructuredInput,
+): ApprovalView {
   const parsed = tryParse(prompt)
 
   const fromEnvelope = fromAskUserQuestion(parsed)
@@ -177,7 +200,7 @@ export function describeApproval(prompt: string, fallbackOptions: string[] = [])
     if (fromEnvelope.options.length === 0 && fallbackOptions.length > 0) {
       fromEnvelope.options = fallbackOptions.map((value) => ({ value, label: value, kind: kindFor(value) }))
     }
-    return fromEnvelope
+    return mergeStructured(fromEnvelope, structured)
   }
 
   const truncated = fromTruncatedAskUserQuestion(prompt)
@@ -196,7 +219,7 @@ export function describeApproval(prompt: string, fallbackOptions: string[] = [])
         if (!haveLabel) truncated.options.push({ value, label: value, kind })
       }
     }
-    return truncated
+    return mergeStructured(truncated, structured)
   }
 
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -216,19 +239,55 @@ export function describeApproval(prompt: string, fallbackOptions: string[] = [])
           prettyQuestion = 'The agent needs permission to continue.'
         }
       }
-      return {
-        question: prettyQuestion,
-        context,
-        options: fallbackOptions.map((value) => ({ value, label: value, kind: kindFor(value) })),
-        raw: false,
-      }
+      return mergeStructured(
+        {
+          question: prettyQuestion,
+          context,
+          options: fallbackOptions.map((value) => ({ value, label: value, kind: kindFor(value) })),
+          raw: false,
+        },
+        structured,
+      )
     }
   }
 
+  return mergeStructured(
+    {
+      question: prompt,
+      options: fallbackOptions.map((value) => ({ value, label: value, kind: kindFor(value) })),
+      raw: true,
+    },
+    structured,
+  )
+}
+
+/**
+ * Merge agent-supplied structured metadata onto a parsed view. Structured
+ * `option_data` replaces the option list wholesale (it is the agent's own
+ * authoritative description); selection mode and custom-input flags are lifted
+ * to the view when present. Anything missing in `structured` leaves the parsed
+ * view untouched.
+ */
+function mergeStructured(view: ApprovalView, structured?: ApprovalStructuredInput): ApprovalView {
+  const optionData = structured?.optionData
+  const options =
+    optionData && optionData.length > 0
+      ? optionData.map((option) => ({
+          value: option.value,
+          label: option.label ?? option.value,
+          description: option.description,
+          kind: kindFor(option.value),
+          allowsCustomText: option.allowsCustomText,
+        }))
+      : view.options
+  // Coerce to booleans so callers always get true/false, never undefined.
+  const multiSelect = structured?.multiSelect === true
+  const allowsCustomText = structured?.allowsCustomText === true
   return {
-    question: prompt,
-    options: fallbackOptions.map((value) => ({ value, label: value, kind: kindFor(value) })),
-    raw: true,
+    ...view,
+    options,
+    multiSelect,
+    allowsCustomText,
   }
 }
 

@@ -31,6 +31,7 @@ import {
   Terminal,
 } from './ui'
 import { cn, formatDuration } from '@/lib/format'
+import { gitApi } from '@/lib/api'
 import { decisionLabel, describeApproval } from '@/lib/approvals'
 import { describeTool } from '@/lib/tools'
 import type {
@@ -89,7 +90,7 @@ function splitFences(text: string): Array<{ text: string; code: boolean; lang?: 
 
 /** Inline `code`, **bold**, and bullet lines. Deliberately minimal. */
 function inline(text: string): React.ReactNode {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|[@$#/][^\s]+)/g)
   return tokens.map((token, index) => {
     if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
       return (
@@ -108,9 +109,36 @@ function inline(text: string): React.ReactNode {
         </strong>
       )
     }
+    if (/^[@$#/][^\s]/.test(token)) {
+      const kind = token[0] === '@' ? 'at' : token[0] === '$' ? 'skill' : token[0] === '#' ? 'mention' : 'slash'
+      const raw = token.slice(1)
+      const label = kind === 'mention' ? raw.replace(/\s*\([^)]*\)$/, '') : kind === 'at' ? raw.replace(/\/$/, '') : raw
+      return (
+        <span
+          key={index}
+          className={cn(
+            'mx-[1px] inline-flex max-w-full items-baseline rounded px-1 py-[1px] align-baseline',
+            'text-[12px] font-medium',
+            kind === 'at' && 'bg-green/[0.16] text-green',
+            kind === 'skill' && 'bg-purple-400/[0.18] text-purple-300',
+            kind === 'mention' && 'bg-sky-400/[0.16] text-sky-300',
+            kind === 'slash' && 'bg-orange/[0.16] text-orange',
+          )}
+        >
+          <span className="shrink-0 opacity-60">{token[0]}</span>
+          <span className="truncate">{label}</span>
+        </span>
+      )
+    }
     return token
   })
 }
+
+/** Render inline text with @/$/#/ and / tokens as colored chips (shared by
+ *  the composer transcript and user bubbles). */
+export const Chips = memo(function Chips({ text }: { text: string }) {
+  return <>{inline(text)}</>
+})
 
 /** Code block: header with language and copy, mono body. */
 export function Code({ text, lang }: { text: string; lang?: string }) {
@@ -331,28 +359,141 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
 
 /* ── File changes ────────────────────────────────────────────────────────── */
 
-/** The collection's file-diff chips: a pill per file with add/delete counts. */
-export function FileChips({ files }: { files: FileChangePart[] }) {
+/** Minimal syntax-only diff renderer (no heavy dependency). */
+function DiffView({ diff }: { diff: string }) {
+  const lines = diff.split('\n')
   return (
-    <div className="flex max-w-full flex-wrap gap-1.5 border-t border-line pt-2.5">
+    <pre className="scroll-thin max-h-72 overflow-auto rounded-b-card border-t border-line/60 bg-inset px-3 py-2 font-mono text-[11px] leading-[1.55]">
+      <code className="block">
+        {lines.map((line, index) => {
+          const tone =
+            line.startsWith('+') && !line.startsWith('+++')
+              ? 'text-emerald-400'
+              : line.startsWith('-') && !line.startsWith('---')
+                ? 'text-rose-500'
+                : line.startsWith('@@')
+                  ? 'text-sky-400'
+                  : 'text-ink-2'
+          return (
+            <span key={index} className={cn('block whitespace-pre-wrap break-words', tone)}>
+              {line || ' '}
+            </span>
+          )
+        })}
+      </code>
+    </pre>
+  )
+}
+
+/** The collection's file-diff chips: a pill per file with add/delete counts. */
+export function FileChips({
+  files,
+  project,
+  sessionId,
+}: {
+  files: FileChangePart[]
+  /** Used to lazy-fetch a real diff from the daemon on expand. */
+  project?: string
+  sessionId?: string
+}) {
+  return (
+    <div className="flex max-w-full flex-col gap-1.5 border-t border-line pt-2.5">
       {files.map((file, index) => (
-        <span
+        <FileChip
           key={`${file.path}-${index}`}
-          className={cn(
-            'inline-flex h-7 max-w-full items-center gap-1.5 rounded-chip bg-surface px-2',
-            'font-mono text-[11.5px] shadow-btn transition-colors duration-100 hover:bg-hover',
-            file.ok ? 'text-ink' : 'text-red',
-          )}
+          file={file}
+          project={project}
+          sessionId={sessionId}
           style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${index * 70}ms both` }}
-        >
-          {file.ok ? (
-            <Check size={11} className="shrink-0 text-green" />
-          ) : (
-            <AlertIcon size={11} className="shrink-0 text-red" />
-          )}
-          <span className="min-w-0 truncate">{file.path}</span>
-        </span>
+        />
       ))}
+    </div>
+  )
+}
+
+function FileChip({
+  file,
+  project,
+  sessionId,
+  style,
+}: {
+  file: FileChangePart
+  project?: string
+  sessionId?: string
+  style?: React.CSSProperties
+}) {
+  const [open, setOpen] = useState(false)
+  const [diff, setDiff] = useState<string>()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string>()
+
+  async function toggle() {
+    const next = !open
+    setOpen(next)
+    if (!next || diff !== undefined || loading) return
+    if (!project) {
+      setError('No project')
+      return
+    }
+    setLoading(true)
+    setError(undefined)
+    try {
+      const body = await gitApi.diff(project, file.path, sessionId)
+      setDiff(body.diff)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load diff')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        'overflow-hidden rounded-chip bg-surface shadow-btn transition-colors duration-100',
+        open && 'bg-surface/80',
+      )}
+      style={style}
+    >
+      <button
+        type="button"
+        onClick={toggle}
+        className={cn(
+          'group/chip flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-left',
+          'transition-colors duration-100 hover:bg-hover',
+        )}
+      >
+        {file.ok ? (
+          <Check size={11} className="shrink-0 text-green" />
+        ) : (
+          <AlertIcon size={11} className="shrink-0 text-red" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink">{file.path}</span>
+        {project ? (
+          <span className="shrink-0 font-mono text-[10px] text-ink-3 opacity-0 transition-opacity group-hover/chip:opacity-100">
+            {open ? 'hide' : 'diff'}
+          </span>
+        ) : null}
+        {project ? (
+          <ChevronDown
+            size={11}
+            className={cn('shrink-0 text-ink-3 transition-transform duration-200', open && 'rotate-180')}
+          />
+        ) : null}
+      </button>
+      {open ? (
+        <div>
+          {loading ? (
+            <p className="px-3 py-2 font-mono text-[11px] text-ink-3">Loading diff…</p>
+          ) : error ? (
+            <p className="px-3 py-2 font-mono text-[11px] text-red">{error}</p>
+          ) : diff && diff.trim().length > 0 ? (
+            <DiffView diff={diff} />
+          ) : (
+            <p className="px-3 py-2 font-mono text-[11px] text-ink-3">No uncommitted diff for this file.</p>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -516,6 +657,11 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
  * Permission card — dark, sleep UI.
  * The agent is "sleeping" while waiting for your approval — dim, quiet, with a
  * moon/Zzz motif and a clear wake-up action. Resolved cards stay minimal.
+ *
+ * Behavior now supported (no layout change): multiple answer options, a
+ * free-text custom input when the agent offers one, and per-choice "always"
+ * persistence (always allow / always deny) so repeating prompts don't require
+ * re-answering.
  */
 function SleepIcon({ size = 16, className }: { size?: number; className?: string }) {
   return (
@@ -528,15 +674,21 @@ function SleepIcon({ size = 16, className }: { size?: number; className?: string
   )
 }
 
+type RespondMeta = { customText?: string; always?: boolean; allow?: boolean }
+
 export function Approval({
   part,
   onRespond,
 }: {
   part: ApprovalPart
-  onRespond: (requestId: string, decision: string) => void
+  onRespond: (requestId: string, decision: string, meta?: RespondMeta) => void
 }) {
   const resolved = part.decision !== undefined
-  const view = describeApproval(part.prompt, part.options)
+  const view = describeApproval(part.prompt, part.options, {
+    optionData: part.optionData,
+    multiSelect: part.multiSelect,
+    allowsCustomText: part.allowsCustomText,
+  })
   const risky = /high|critical/i.test(part.riskLevel ?? '')
   // Keep track of multi-select state locally
   const [selected, setSelected] = useState<string[]>([])
@@ -547,11 +699,24 @@ export function Approval({
     setSelected((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]))
   }
 
-  const handleSelect = (value: string) => {
+  /**
+   * Derive the response metadata from the option the user picked. An agent may
+   * encode persistence directly in the option value (e.g. `always_allow`,
+   * `always_deny`); we forward that so the backend can persist it. Allow/deny
+   * is inferred from the value unless the agent supplies an explicit flag.
+   */
+  const metaForValue = (value: string, explicitAllow?: boolean): RespondMeta => {
+    const lower = value.toLowerCase()
+    const always = lower === 'always_allow' || lower === 'always_deny' || lower === 'always allow' || lower === 'always deny'
+    const allow = explicitAllow ?? /^(allow|approve|yes|always_allow|always allow)\b/i.test(value)
+    return { always, allow }
+  }
+
+  const handleSelect = (value: string, explicitAllow?: boolean) => {
     if (isMulti) {
       toggleSelect(value)
     } else {
-      onRespond(part.requestId, value)
+      onRespond(part.requestId, value, metaForValue(value, explicitAllow))
     }
   }
 
@@ -559,7 +724,7 @@ export function Approval({
     if (selected.length === 0) return
     // For multi-select, send JSON array string so backend can parse it
     const decision = selected.length === 1 ? selected[0] : JSON.stringify(selected)
-    onRespond(part.requestId, decision)
+    onRespond(part.requestId, decision, { always: selected.some((v) => /always/i.test(v)) })
   }
 
   if (resolved) {
@@ -743,7 +908,7 @@ export function Part({
   onRespond,
 }: {
   part: MessagePart
-  onRespond: (requestId: string, decision: string) => void
+  onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
 }) {
   switch (part.kind) {
     case 'text':

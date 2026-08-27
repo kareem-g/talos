@@ -287,7 +287,117 @@ export const workspaceApi = {
         .filter(Boolean)
         .join('&')}`,
     ),
+  overview: (project: string) =>
+    request<WorkspaceOverview>(
+      `/api/workspace/overview?project=${encodeURIComponent(project)}`,
+    ),
+  file: (project: string, path: string) =>
+    request<{ path: string; contents: string; error?: string }>(
+      `/api/workspace/file?project=${encodeURIComponent(project)}&path=${encodeURIComponent(path)}`,
+    ),
 }
+
+/** Skills live as SKILL.md files on this machine (~/.hermes/skills). */
+export const skillsApi = {
+  list: () =>
+    request<{ skills: Array<{ name: string; description: string; source?: string }> }>('/api/skills'),
+}
+
+/* ── Git operations (branch panel / git tab) ─────────────────────────────── */
+
+export interface GitBranch {
+  name: string
+  head?: string
+  current?: boolean
+}
+
+export interface GitState {
+  branches: GitBranch[]
+  current?: string
+  changed_count: number
+  added: number
+  removed: number
+}
+
+export interface CommitResult {
+  ok: boolean
+  head?: string | null
+  output?: string
+  pushed?: boolean
+  push_error?: string | null
+  push_output?: string
+}
+
+export interface GitCommitEntry {
+  hash: string
+  short: string
+  author: string
+  email?: string
+  date: string
+  message: string
+  refs?: string[]
+}
+
+export const gitApi = {
+  /** Branches + diff totals for a project directory. */
+  branches: (project: string) =>
+    request<GitState>(`/api/git/branches?project=${encodeURIComponent(project)}`),
+
+  /** Recent commit history for the Git Graph modal. */
+  log: (project: string, limit = 200) =>
+    request<{ commits: GitCommitEntry[] }>(
+      `/api/git/log?project=${encodeURIComponent(project)}&limit=${limit}`,
+    ),
+
+  checkout: (project: string, branch: string) =>
+    request<{ ok: boolean; output?: string }>(`/api/git/checkout?project=${encodeURIComponent(project)}&branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify({ project }) }),
+
+  createBranch: (project: string, name: string) =>
+    request<{ ok: boolean; output?: string }>(`/api/git/branch?project=${encodeURIComponent(project)}`, {
+      method: 'POST',
+      body: JSON.stringify({ project, name }),
+    }),
+
+  /** Stage everything, commit, optionally push. Real git stderr comes back in `error`. */
+  commit: (project: string, message: string, push = false) =>
+    request<CommitResult>(`/api/git/commit?project=${encodeURIComponent(project)}`, {
+      method: 'POST',
+      body: JSON.stringify({ project, message, push }),
+    }),
+
+  /** Per-file diff for a file the agent edited. Resolves project from a session. */
+  diff: (project: string, path: string, session?: string) =>
+    request<{ path: string; diff: string }>(
+      `/api/git/diff?${[
+        `project=${encodeURIComponent(project)}`,
+        `path=${encodeURIComponent(path)}`,
+        session ? `session=${encodeURIComponent(session)}` : '',
+      ]
+        .filter(Boolean)
+        .join('&')}`,
+    ),
+}
+
+/* ── Standalone PTY terminals ────────────────────────────────────────────── */
+
+export interface StandaloneTerminal {
+  id: string
+  pid?: number
+  cwd?: string | null
+  created_at?: string
+}
+
+export const terminalsApi = {
+  list: () => request<{ terminals: StandaloneTerminal[] }>('/api/terminals'),
+  create: (cwd?: string) =>
+    request<StandaloneTerminal>('/api/terminals', {
+      method: 'POST',
+      body: JSON.stringify({ cwd }),
+    }),
+  close: (id: string) =>
+    request<{ closed: boolean }>(`/api/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
 
 export const configApi = {
   /** Current dimensions. `live: true` means these came from the running agent. */

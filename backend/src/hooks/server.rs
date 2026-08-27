@@ -58,6 +58,9 @@ pub async fn handle_permission_request(
             session_id: query.session_id.clone(),
             tool_name,
             input,
+            options: Vec::new(),
+            allows_custom_text: false,
+            selection_mode: "single".to_string(),
         },
     )
     .await;

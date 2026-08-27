@@ -14,6 +14,7 @@ import {
   applyMessage,
   sealConversation,
 } from './events'
+import { describeApproval } from './approvals'
 import { emptyConversation, type Conversation, type TextPart } from '@/types/conversation'
 import type { AgentEvent } from '@/types/protocol'
 
@@ -353,6 +354,36 @@ describe('approvals', () => {
 
     expect(conversation.messages[0].parts.filter((part) => part.kind === 'approval')).toHaveLength(1)
   })
+
+  it('carries structured options, selection mode and custom-input flag', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(
+      conversation,
+      event('permission_required', {
+        id: 'p2',
+        prompt: 'Pick environments',
+        options: ['prod', 'staging', 'both'],
+        option_data: [
+          { id: 'prod', label: 'Production', description: 'Live traffic', allows_custom_text: false },
+          { id: 'staging', label: 'Staging' },
+          { id: 'both', label: 'Both' },
+        ],
+        selection_mode: 'multi',
+        allows_custom_text: true,
+      }),
+    )
+
+    const approval = conversation.messages[0].parts.find((part) => part.kind === 'approval')
+    expect(approval).toMatchObject({
+      kind: 'approval',
+      requestId: 'p2',
+      options: ['prod', 'staging', 'both'],
+      multiSelect: true,
+      allowsCustomText: true,
+    })
+    // Structured metadata is preserved so labels/descriptions can be rendered.
+    expect(approval?.optionData?.[0]).toMatchObject({ value: 'prod', label: 'Production' })
+  })
 })
 
 describe('robustness', () => {
@@ -527,5 +558,38 @@ describe('GrokBot event types', () => {
     expect(tool.input).toContain('ls -la')
     expect(tool.output).toBe('ok')
     expect(turn.streaming).toBe(true) // turn continues after the tool
+  })
+})
+
+describe('describeApproval', () => {
+  it('merges structured option labels/descriptions over raw values', () => {
+    const view = describeApproval('Deploy where?', ['prod', 'staging'], {
+      optionData: [
+        { value: 'prod', label: 'Production', description: 'Live traffic', allowsCustomText: false },
+        { value: 'staging', label: 'Staging' },
+      ],
+      multiSelect: false,
+      allowsCustomText: false,
+    })
+    expect(view.question).toBe('Deploy where?')
+    expect(view.options.map((o) => o.label)).toEqual(['Production', 'Staging'])
+    expect(view.options[0].description).toBe('Live traffic')
+    expect(view.options[0].kind).toBe('other')
+  })
+
+  it('flags multi-select and custom-input from agent metadata', () => {
+    const view = describeApproval('Choose', ['a', 'b'], {
+      multiSelect: true,
+      allowsCustomText: true,
+    })
+    expect(view.multiSelect).toBe(true)
+    expect(view.allowsCustomText).toBe(true)
+  })
+
+  it('stays a no-op when no envelope and no option data', () => {
+    const view = describeApproval('Run rm -rf?', ['allow', 'deny'])
+    expect(view.options.map((o) => o.value)).toEqual(['allow', 'deny'])
+    expect(view.multiSelect).toBe(false)
+    expect(view.allowsCustomText).toBe(false)
   })
 })

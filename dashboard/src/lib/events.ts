@@ -17,6 +17,7 @@
 
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
 import type {
+  ApprovalOptionData,
   ApprovalPart,
   CommandPart,
   Conversation,
@@ -107,6 +108,40 @@ function stringList(payload: Record<string, unknown>, key: string): string[] {
   const value = payload[key]
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+/**
+ * Turn the agent's `options` field into structured metadata.
+ *
+ * Accepts both the rich shape (`{ value, label, description, allows_custom_text }`)
+ * an agent may send and a flat string array (the legacy permission prompt). The
+ * structured form wins when present; the flat form is normalized to it so the
+ * rest of the pipeline only deals with `ApprovalOptionData`.
+ */
+function parseApprovalOptions(payload: Record<string, unknown>): ApprovalOptionData[] {
+  const structured = payload['option_data']
+  if (Array.isArray(structured) && structured.length > 0) {
+    const parsed = structured
+      .map((item): ApprovalOptionData | null => {
+        if (typeof item === 'string') return { value: item }
+        if (item && typeof item === 'object') {
+          const record = item as Record<string, unknown>
+          const value = str(record, 'value') ?? str(record, 'id')
+          if (!value) return null
+          return {
+            value,
+            label: str(record, 'label') ?? str(record, 'title'),
+            description: str(record, 'description'),
+            allowsCustomText: record['allows_custom_text'] === true,
+          }
+        }
+        return null
+      })
+      .filter((item): item is ApprovalOptionData => item !== null)
+    if (parsed.length > 0) return parsed
+  }
+  // Fall back to the legacy flat string options.
+  return stringList(payload, 'options').map((value) => ({ value }))
 }
 
 /** Read a string field that may be named differently per provider. */
@@ -499,6 +534,14 @@ export function applyAgentEvent(
         options: stringList(payload, 'options'),
         riskLevel: str(payload, 'risk_level'),
       }
+      // Structured options: when the agent supplies richer metadata
+      // (labels, descriptions, custom-text flags) carry it through verbatim.
+      const optionData = parseApprovalOptions(payload)
+      if (optionData.length > 0) part.optionData = optionData
+      const selectionMode = str(payload, 'selection_mode')
+      part.multiSelect = selectionMode === 'multiple' || selectionMode === 'multi'
+      const allowsCustom = payload['allows_custom_text']
+      part.allowsCustomText = allowsCustom === true
       turn.parts.push(part)
       return true
     }

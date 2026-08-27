@@ -95,6 +95,22 @@ pub async fn start(
         .route("/api/workspace/overview", get(crate::api::routes::workspace_overview))
         .route("/api/workspace/file", get(crate::api::routes::workspace_file))
         .route("/api/workspace/dirs", get(crate::api::routes::workspace_dirs))
+        .route("/api/skills", get(crate::api::routes::list_skills))
+
+        // Git operations for the branch panel / git tab
+        .route("/api/git/branches", get(crate::api::routes::git_branches_handler))
+        .route("/api/git/diff", get(crate::api::routes::git_diff_handler))
+        .route("/api/git/checkout", post(crate::api::routes::git_checkout_handler))
+        .route("/api/git/branch", post(crate::api::routes::git_create_branch_handler))
+        .route("/api/git/log", get(crate::api::routes::git_log_handler))
+        .route("/api/git/commit", post(crate::api::routes::git_commit_handler))
+
+        // Standalone PTY terminals (right sidebar Terminals tab)
+        .route(
+            "/api/terminals",
+            get(crate::api::routes::terminal_list).post(crate::api::routes::terminal_create),
+        )
+        .route("/api/terminals/{id}", axum::routing::delete(crate::api::routes::terminal_close))
 
         // Notifications
         .route("/api/notifications/test", post(crate::api::routes::send_test_notification))

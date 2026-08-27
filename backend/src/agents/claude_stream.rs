@@ -31,6 +31,10 @@ enum Outbound {
     /// written, so `send_prompt` can await it.
     Prompt { text: String, done: tokio::sync::oneshot::Sender<()> },
     Shutdown,
+    /// A deliberate stop (model switch, user stop). The EOF path sees this and
+    /// stays quiet — no "exited" StateChange, no needs_resume marking. The
+    /// caller owns the follow-up state broadcast.
+    Replacing,
 }
 
 struct ClaudeHandle {
@@ -39,6 +43,10 @@ struct ClaudeHandle {
     session_id: Arc<Mutex<String>>,
     /// Bounded tail of stderr, readable for as long as the handle lives.
     stderr_tail: Arc<Mutex<String>>,
+    /// Set when the process is being deliberately replaced (model switch).
+    /// The EOF task checks this and stays silent instead of broadcasting an
+    /// `exited` state that would flip the session to needs_resume.
+    replacing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub struct ClaudeStreamInfo {
@@ -163,6 +171,7 @@ impl ClaudeStreamManager {
             child: child.clone(),
             session_id: claude_session_id.clone(),
             stderr_tail: stderr_tail.clone(),
+            replacing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
         self.sessions.write().await.insert(session_id.to_string(), Arc::clone(&handle));
 
@@ -207,7 +216,13 @@ impl ClaudeStreamManager {
                 )
                 .await;
             }
-            // EOF: the process exited.
+            // EOF: the process exited. A deliberate replacement (model switch)
+            // must stay silent — broadcasting "exited" here would race the new
+            // process's spawn and flip the session to needs_resume.
+            if handle.replacing.load(std::sync::atomic::Ordering::SeqCst) {
+                tracing::info!(session_id = %reader_session, "Claude stream replaced deliberately; suppressing exited broadcast");
+                return;
+            }
             let tail = eof_tail.lock().await.trim().to_string();
             tracing::info!(session_id = %reader_session, stderr = %tail, "Claude stream process exited");
             sessions.write().await.remove(&reader_session);
@@ -346,6 +361,29 @@ impl ClaudeStreamManager {
         Ok(())
     }
 
+    /// Stop the process because it is being deliberately replaced (a model
+    /// switch). Unlike `kill_session`, this flags the handle first so the EOF
+    /// task stays silent — otherwise its `exited` broadcast races the new
+    /// spawn and the daemon marks the session `needs_resume`.
+    pub async fn replace_session(&self, session_id: &str) -> crate::Result<()> {
+        let handle = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(session_id)
+        };
+        let Some(handle) = handle else {
+            return Err(crate::AgentDeckError::Session(format!(
+                "Session {session_id} is not running"
+            )));
+        };
+        handle.replacing.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = handle.tx.send(Outbound::Shutdown);
+        let mut child = handle.child.lock().await;
+        if let Some(mut child) = child.take() {
+            let _ = child.start_kill();
+        }
+        Ok(())
+    }
+
     /// Claude's own session id for a live session, when known.
     pub async fn claude_session_id(&self, session_id: &str) -> Option<String> {
         let sessions = self.sessions.read().await;
@@ -410,7 +448,7 @@ async fn writer_task(mut rx: mpsc::UnboundedReceiver<Outbound>, stdin: &mut Chil
                 }
                 let _ = done.send(());
             }
-            Outbound::Shutdown => break,
+            Outbound::Shutdown | Outbound::Replacing => break,
         }
     }
 }

@@ -19,7 +19,7 @@
  * than ours.
  */
 
-import type { ClientFrame, ConnectionState, IncomingFrame } from '@/types/protocol'
+import type { ApprovalMeta, ClientFrame, ConnectionState, IncomingFrame } from '@/types/protocol'
 import { isIncomingFrame } from '@/types/protocol'
 import { deviceToken } from './api'
 
@@ -216,13 +216,14 @@ class SocketClient {
     })
   }
 
-  respondToApproval(sessionId: string, requestId: string, decision: string): void {
+  respondToApproval(sessionId: string, requestId: string, decision: string, meta?: ApprovalMeta): void {
+    const params: Record<string, unknown> = { session_id: sessionId, request_id: requestId, decision }
+    if (meta?.customText !== undefined) params.custom_text = meta.customText
+    if (meta?.always === true) params.always = true
+    if (meta?.allow !== undefined) params.allow = meta.allow
     this.send({
       type: 'Command',
-      payload: {
-        action: 'approval_response',
-        params: { session_id: sessionId, request_id: requestId, decision },
-      },
+      payload: { action: 'approval_response', params },
     })
   }
 

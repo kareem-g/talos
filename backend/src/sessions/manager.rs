@@ -518,6 +518,12 @@ impl SessionManager {
     }
 
     pub async fn insert_terminal_output(&self, session_id: &str, sequence: u64, data: &str) -> Result<()> {
+        // Standalone PTY terminals (term-<uuid>) are not real sessions; their
+        // output lives only in the live broadcast. Skip persistence instead of
+        // failing the FK check on every keystroke.
+        if session_id.starts_with("term-") {
+            return Ok(());
+        }
         sqlx::query(
             "INSERT INTO terminal_output (session_id, sequence, data) VALUES (?1, ?2, ?3)",
         )

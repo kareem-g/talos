@@ -164,3 +164,177 @@ pub async fn read_file(project: &str, path: &str) -> Result<String, String> {
     let contents = tokio::fs::read_to_string(&canonical).await.map_err(|e| e.to_string())?;
     Ok(contents)
 }
+
+/* ── Git write operations (branch panel) ─────────────────────────────────── */
+
+/// Combined diffstat for the whole working tree: `+N -M` plus a short stat
+/// body. Untracked files count as additions of their full line count.
+pub async fn git_diff_stat_totals(project: &str) -> Result<(i64, i64), String> {
+    let output = tokio::process::Command::new("git")
+        .args(["-C", project, "diff", "HEAD", "--numstat"])
+        .output()
+        .await
+        .map_err(|error| format!("git diff failed: {error}"))?;
+    let mut added = 0_i64;
+    let mut removed = 0_i64;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split('\t');
+        let (Some(a), Some(r)) = (parts.next(), parts.nth(0)) else { continue };
+        // Untracked entries show as "-" in numstat; count their lines instead.
+        if a == "-" || r == "-" {
+            continue;
+        }
+        added += a.parse::<i64>().unwrap_or(0);
+        removed += r.parse::<i64>().unwrap_or(0);
+    }
+    // Include untracked files as additions.
+    if let Ok(files) = git_status(project).await {
+        for file in files {
+            if file.status.trim() != "??" {
+                continue;
+            }
+            if let Ok(contents) = read_file(project, &file.path).await {
+                added += contents.lines().count() as i64;
+            }
+        }
+    }
+    Ok((added, removed))
+}
+
+/// All local branches, current first.
+pub async fn git_branches(project: &str) -> Result<Vec<serde_json::Value>, String> {
+    let current = git_branch(project).await.unwrap_or_default();
+    let output = tokio::process::Command::new("git")
+        .args(["-C", project, "branch", "--format=%(refname:short)%09%(objectname)"])
+        .output()
+        .await
+        .map_err(|error| format!("git branch failed: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git branch failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let mut branches = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split('\t');
+        let name = parts.next().unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let head = parts.next().unwrap_or("").trim().to_string();
+        branches.push(json!({
+            "name": name,
+            "head": head,
+            "current": name == current,
+        }));
+    }
+    Ok(branches)
+}
+
+/// Run an arbitrary mutating git command and surface real stderr on failure.
+async fn git_run(project: &str, args: &[&str]) -> Result<String, String> {
+    let output = tokio::process::Command::new("git")
+        .args(["-C", project])
+        .args(args)
+        .output()
+        .await
+        .map_err(|error| format!("git {} failed: {error}", args.join(" ")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+/// Switch branches. Refuses to move off a dirty tree only if checkout itself
+/// would clobber files — otherwise git handles it and we pass its message back.
+pub async fn git_checkout(project: &str, branch: &str) -> Result<String, String> {
+    if branch.contains("..") || branch.starts_with('-') || branch.contains(char::is_whitespace) {
+        return Err("Invalid branch name".to_string());
+    }
+    git_run(project, &["checkout", branch]).await
+}
+
+/// Create a local branch from HEAD and switch to it.
+pub async fn git_create_branch(project: &str, branch: &str) -> Result<String, String> {
+    if branch.is_empty()
+        || branch.len() > 120
+        || !branch
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/' | '.'))
+    {
+        return Err("Invalid branch name".to_string());
+    }
+    git_run(project, &["checkout", "-b", branch]).await
+}
+
+/// Stage everything and commit. Empty message is rejected by git; pass that
+/// through so the UI shows the reason.
+pub async fn git_commit_all(project: &str, message: &str) -> Result<String, String> {
+    git_run(project, &["add", "-A"]).await?;
+    git_run(project, &["commit", "-m", message]).await
+}
+
+pub async fn git_push(project: &str) -> Result<String, String> {
+    let branch = git_branch(project)
+        .await
+        .ok_or_else(|| "Detached HEAD — cannot push".to_string())?;
+    git_run(project, &["push", "-u", "origin", &branch]).await
+}
+
+/// Recent commit history for the Git Graph view. One JSON object per line of
+/// `git log` output, newest first.
+pub async fn git_log(project: &str, limit: usize) -> Result<Vec<serde_json::Value>, String> {
+    let format = "%H%x09%h%x09%an%x09%ae%x09%aI%x09%s%x09%D";
+    let limit = limit.clamp(1, 500);
+    let output = tokio::process::Command::new("git")
+        .args([
+            "-C",
+            project,
+            "log",
+            &format!("--max-count={limit}"),
+            &format!("--pretty=format:{format}"),
+        ])
+        .output()
+        .await
+        .map_err(|error| format!("git log failed: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let mut commits = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split('\t');
+        let hash = parts.next().unwrap_or("").trim().to_string();
+        if hash.is_empty() {
+            continue;
+        }
+        let short = parts.next().unwrap_or("").trim().to_string();
+        let author = parts.next().unwrap_or("").trim().to_string();
+        let email = parts.next().unwrap_or("").trim().to_string();
+        let date = parts.next().unwrap_or("").trim().to_string();
+        let message = parts.next().unwrap_or("").trim().to_string();
+        // Ref decorations ("HEAD -> main, origin/main") become badge labels.
+        let refs: Vec<String> = parts
+            .next()
+            .unwrap_or("")
+            .split(',')
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        commits.push(json!({
+            "hash": hash,
+            "short": short,
+            "author": author,
+            "email": email,
+            "date": date,
+            "message": message,
+            "refs": refs,
+        }));
+    }
+    Ok(commits)
+}
+

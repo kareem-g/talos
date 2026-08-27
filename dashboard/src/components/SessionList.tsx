@@ -141,6 +141,7 @@ export function NewSessionLayer({
   onCreated,
   initialProvider,
   initialProject,
+  initialStep = 1,
 }: {
   open: boolean
   onClose: () => void
@@ -148,6 +149,8 @@ export function NewSessionLayer({
   /** Pre-select an agent — used by quick-launch buttons on the home screen. */
   initialProvider?: string
   initialProject?: string
+  /** Open directly on the agent/prompt step (skip the workspace step). */
+  initialStep?: 1 | 2
 }) {
   const providers = useStore((state) => state.providers)
   const providersLoading = useStore((state) => state.providersLoading)
@@ -179,7 +182,7 @@ export function NewSessionLayer({
   // Reset to step 1 on open, and apply initial project/provider
   useEffect(() => {
     if (!open) return
-    setStep(1)
+    setStep(initialStep)
     setError(undefined)
     if (initialProject) setProject(initialProject)
     else if (!project && recentWorkspaces[0]) setProject(recentWorkspaces[0])

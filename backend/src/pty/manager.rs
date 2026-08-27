@@ -336,6 +336,17 @@ impl PtyManager {
         sessions.contains_key(session_id)
     }
 
+    /// Live standalone terminals (`term-*`), for the right sidebar's
+    /// Terminals tab. Not agent sessions — raw shells.
+    pub async fn list_terminals(&self) -> Vec<PtySession> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .values()
+            .filter(|handle| handle.session.id.starts_with("term-"))
+            .map(|handle| handle.session.clone())
+            .collect()
+    }
+
     /// Begin one chat-generated assistant turn. Claude's terminal uses screen
     /// redraws, so this resets the delta baseline before the next response.
     pub fn begin_assistant_turn(&self, session_id: &str, submitted: &str) {

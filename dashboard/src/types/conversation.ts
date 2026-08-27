@@ -104,14 +104,37 @@ export interface TurnSummaryPart {
 }
 
 /** A permission request awaiting the user. */
+/**
+ * One answer choice from the agent. Carries the structured metadata the agent
+ * may provide (label/description/id) so the card can render more than a bare
+ * verbatim string — without the agent, `label` falls back to `value`.
+ */
+export interface ApprovalOptionData {
+  /** Value sent back to the agent verbatim. */
+  value: string
+  label?: string
+  description?: string
+  /** `true` when the agent offers a free-text alternative to this option. */
+  allowsCustomText?: boolean
+}
+
 export interface ApprovalPart {
   kind: 'approval'
   requestId: string
   prompt: string
+  /** Legacy flat option list. Prefer `options` (structured) when present. */
   options: string[]
+  /** Structured options, when the agent supplies them. */
+  optionData?: ApprovalOptionData[]
+  /** Selection mode the agent requested: single (default) or multiple. */
+  multiSelect?: boolean
+  /** `true` when the agent invites free-form custom input for this prompt. */
+  allowsCustomText?: boolean
   riskLevel?: string
   /** Set once resolved, so the card shows the outcome instead of vanishing. */
   decision?: string
+  /** Custom text the user supplied, retained for the resolved card. */
+  customText?: string
 }
 
 /** An error surfaced by the agent or the transport. */

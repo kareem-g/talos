@@ -99,6 +99,10 @@ struct AcpEventMapper {
     tool_starts: HashMap<String, u64>,
     /// messageId of an in-flight thought stream
     thought_open: Option<String>,
+    /// Whether the current turn produced any user-visible content (text,
+    /// thought, tool call). Bare `end_turn` turns with nothing are surfaced
+    /// as an explicit note instead of a silent empty completion.
+    turn_had_content: bool,
 }
 
 impl AcpEventMapper {
@@ -106,6 +110,7 @@ impl AcpEventMapper {
         self.turn = self.turn.saturating_add(1);
         self.tool_starts.clear();
         self.thought_open = None;
+        self.turn_had_content = false;
     }
 
     /// Wall time a tool ran, in milliseconds.
@@ -138,6 +143,7 @@ impl AcpEventMapper {
                 }
                 let text = extract_text_content(update.get("content"));
                 if !text.trim().is_empty() {
+                    self.turn_had_content = true;
                     let redraw = kind == "agent_message";
                     events.push(AgentEvent::new(
                         session_id,
@@ -159,6 +165,7 @@ impl AcpEventMapper {
             // chunk is forwarded as a `thinking_delta` alongside the
             // started/finished pair.
             "agent_thought_chunk" | "agent_thought" => {
+                self.turn_had_content = true;
                 let message_id = update.get("messageId").and_then(Value::as_str).unwrap_or("").to_string();
                 let text = extract_text_content(update.get("content"));
 
@@ -212,6 +219,7 @@ impl AcpEventMapper {
             }
             // Tool call create + patch (v1 sends both).
             "tool_call" | "tool_call_update" => {
+                self.turn_had_content = true;
                 let tool_id = update.get("toolCallId").and_then(Value::as_str).unwrap_or("").to_string();
                 let tool_kind = update.get("kind").and_then(Value::as_str).unwrap_or("other");
                 let status = update.get("status").and_then(Value::as_str).unwrap_or("pending");
@@ -677,8 +685,11 @@ impl AcpManager {
         let config_options = result
             .map(crate::providers::acp_probe::parse_config_options)
             .unwrap_or_default();
+        // Inject our backend-only permission mode dimension.
+        let mut all_options = config_options.clone();
+        all_options.push(crate::providers::types::permission_mode_config_option());
         if let Ok(mut stored) = handle.config_options.lock() {
-            *stored = config_options.clone();
+            *stored = all_options;
         }
 
         *handle.acp_session_id.lock().unwrap() = acp_session_id.clone();
@@ -783,6 +794,24 @@ impl AcpManager {
                                 &sid,
                                 "thinking_finished",
                                 json!({ "tool_name": "Thinking", "turn": mapper.turn, "source": "acp" }),
+                            ));
+                        }
+                        // A turn that produced nothing (no text, no tool, no
+                        // thought — e.g. an agent-side slash command that ran
+                        // silently) must not end as a bare completion: the UI
+                        // would show the user's message hanging unanswered.
+                        // Surface an explicit note so the turn is accounted for.
+                        if !mapper.turn_had_content && stop == "end_turn" {
+                            broadcast.broadcast_agent_event(AgentEvent::new(
+                                &sid,
+                                "assistant_text",
+                                json!({
+                                    "text": "(The agent handled this input internally and returned no reply text.)",
+                                    "delta": false,
+                                    "redraw": false,
+                                    "turn": mapper.turn,
+                                    "source": "acp",
+                                }),
                             ));
                         }
                     }

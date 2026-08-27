@@ -27,7 +27,7 @@ import {
 import { configApi, providersApi, sessionsApi } from '@/lib/api'
 import { socket } from '@/lib/socket'
 import { emptyConversation, type Conversation } from '@/types/conversation'
-import type { ConnectionState, IncomingFrame } from '@/types/protocol'
+import type { ApprovalMeta, ConnectionState, IncomingFrame } from '@/types/protocol'
 import type { Provider, SessionConfig, ConfigApplied } from '@/types/provider'
 import type { Session, SessionStatus, DiscoverResponse, SyncResponse } from '@/types/session'
 
@@ -84,12 +84,14 @@ interface StoreState {
     model?: string
   }) => Promise<Session>
   sendPrompt: (sessionId: string, text: string) => void
+  /** Resend the last user message to re-run the agent from that point. */
+  resendLastUserPrompt: (sessionId: string) => boolean
   stopSession: (sessionId: string) => Promise<void>
   /** Restart the agent so a stopped or imported session can continue. */
   resumeSession: (sessionId: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<void>
   setConfig: (sessionId: string, configId: string, value: string) => Promise<ConfigApplied>
-  respondToApproval: (sessionId: string, requestId: string, decision: string) => void
+  respondToApproval: (sessionId: string, requestId: string, decision: string, meta?: ApprovalMeta) => void
   dismissNotice: (sessionId: string) => void
   /** Toggle star for a session (local-only). */
   toggleStar: (sessionId: string) => void
@@ -316,7 +318,29 @@ export const useStore = create<StoreState>((set, get) => ({
     socket.sendInput(sessionId, trimmed)
   },
 
-  /** Stop the agent for real, then reflect what the backend reports. */
+  /**
+   * Re-run the agent from the last user prompt. Finds the most recent user
+   * message in the conversation and resends its text — equivalent to the user
+   * re-typing it. No-ops (returns false) when there is nothing to resend.
+   */
+  resendLastUserPrompt(sessionId) {
+    const conversation = getConversation(sessionId)
+    for (let i = conversation.messages.length - 1; i >= 0; i--) {
+      const message = conversation.messages[i]
+      if (message.role !== 'user') continue
+      const text = message.parts
+        .map((part) => (part.kind === 'text' ? part.text : ''))
+        .join('')
+        .trim()
+      if (!text) return false
+      addOptimisticUserMessage(conversation, text)
+      bump(set, sessionId)
+      socket.sendInput(sessionId, text)
+      return true
+    }
+    return false
+  },
+
   async stopSession(sessionId) {
     socket.stopSession(sessionId)
     try {
@@ -436,8 +460,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  respondToApproval(sessionId, requestId, decision) {
-    socket.respondToApproval(sessionId, requestId, decision)
+  respondToApproval(sessionId, requestId, decision, meta) {
+    socket.respondToApproval(sessionId, requestId, decision, meta)
   },
 
   dismissNotice(sessionId) {

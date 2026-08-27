@@ -25,6 +25,7 @@
 
 use super::types::{
     ConfigChoice, ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model,
+    permission_mode_config_option,
 };
 use serde_json::{json, Value};
 use std::process::Stdio;
@@ -169,6 +170,8 @@ async fn run_handshake(
             Ok(session) => {
                 probe.config_options = parse_config_options(&session);
                 probe.models = models_from_options(&probe.config_options);
+                // Inject our backend-only permission mode dimension.
+                probe.config_options.push(permission_mode_config_option());
             }
             Err(reason) => probe.session_error = reason,
         }

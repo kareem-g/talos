@@ -1,30 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Dot, IconButton, Notice, Segmented, StatusPill } from '../ui'
-import { getConversation, useConversation, useStore } from '@/store'
+import { IconButton, Notice, Segmented, StatusPill } from '../ui'
+import { useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
-import { sessionUIState, uiStateDisplay, uiStateRank } from '@/lib/sessionState'
+import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { Timeline } from '../Timeline'
 import { StateZone } from '../StateZone'
 import { TerminalView } from '../TerminalView'
-import { SessionPanels } from '../SessionPanels'
+import { RightRail, RIGHT_TABS, TAB_ICONS, type RightTab } from './session/RightRail'
+import { WorkspaceSwitcher } from './session/WorkspaceSwitcher'
+
+const RIGHT_TAB_KEY = 'agentdesk-right-tab'
 
 const LEFT_KEY = 'agentdeck-desktop-left-collapsed'
 const RIGHT_KEY = 'agentdeck-desktop-right-collapsed'
-const NOTES_PREFIX = 'agentdeck-notes-'
-const TERMINAL_TAB_PREFIX = 'agentdeck-terminal-tab-'
-
-/** Right-panel tab: existing context column, or a live terminal. */
-type RightTab = 'context' | 'terminal'
-
-function loadTerminalTab(sessionId: string): RightTab {
-  try {
-    return localStorage.getItem(TERMINAL_TAB_PREFIX + sessionId) === 'terminal' ? 'terminal' : 'context'
-  } catch {
-    return 'context'
-  }
-}
 
 const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
 
@@ -72,7 +62,6 @@ export function SessionWorkspace({
   const notice = useStore((s) => s.notices[session.id])
   const connection = useStore((s) => s.connection)
   const providers = useStore((s) => s.providers)
-  const sessions = useStore((s) => s.sessions)
   const openSession = useStore((s) => s.openSession)
   const sendPrompt = useStore((s) => s.sendPrompt)
   const setConfig = useStore((s) => s.setConfig)
@@ -81,23 +70,12 @@ export function SessionWorkspace({
   const toggleStar = useStore((s) => s.toggleStar)
   const starred = useStore((s) => s.isStarred(session.id))
   const [tab, setTab] = useState<'chat' | 'terminal'>('chat')
-  const [rightTab, setRightTab] = useState<RightTab>(() => loadTerminalTab(session.id))
-  // Remember the last right-panel tab per session.
-  useEffect(() => {
-    try {
-      localStorage.setItem(TERMINAL_TAB_PREFIX + session.id, rightTab)
-    } catch {
-      /* storage may be unavailable */
-    }
-  }, [rightTab, session.id])
-
   // Keyboard shortcut: Cmd/Ctrl+` toggles the right panel's terminal/context tab.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === '`') {
         e.preventDefault()
         setRightCollapsed(false)
-        setRightTab((current) => (current === 'terminal' ? 'context' : 'terminal'))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -139,13 +117,18 @@ export function SessionWorkspace({
   const titleInputRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [notes, setNotes] = useState(() => {
+  const [restartingForConfig, setRestartingForConfig] = useState(false)
+
+  /** Apply a pending (next-run) config immediately: restart the agent. */
+  async function restartForConfig() {
+    setRestartingForConfig(true)
     try {
-      return localStorage.getItem(NOTES_PREFIX + session.id) ?? ''
-    } catch {
-      return ''
+      await useStore.getState().resumeSession(session.id)
+      dismissNotice(session.id)
+    } finally {
+      setRestartingForConfig(false)
     }
-  })
+  }
 
   useEffect(() => {
     try {
@@ -161,13 +144,6 @@ export function SessionWorkspace({
       /* storage may be unavailable */
     }
   }, [rightCollapsed])
-  useEffect(() => {
-    try {
-      localStorage.setItem(NOTES_PREFIX + session.id, notes)
-    } catch {
-      /* storage may be unavailable */
-    }
-  }, [notes, session.id])
 
   useEffect(() => {
     void openSession(session.id)
@@ -248,18 +224,6 @@ export function SessionWorkspace({
    * shows each workspace's own session list, not the whole app. Inbox sessions
    * (project == null) only see other inbox sessions.
    */
-  const switcherSessions = useMemo(() => {
-    const currentProject = session.project ?? null
-    return sessions
-      .filter((s) => s.status !== 'archived' && (s.project ?? null) === currentProject)
-      .map((s) => ({ session: s, uiState: sessionUIState(s, getConversation(s.id), connection) }))
-      .sort(
-        (a, b) =>
-          uiStateRank(a.uiState) - uiStateRank(b.uiState) ||
-          b.session.updated_at.localeCompare(a.session.updated_at),
-      )
-  }, [sessions, connection, session.project])
-
   return (
     <div className="flex h-dvh min-w-0 flex-1 flex-col bg-canvas text-ink">
       {/* ── Header: one compact row ─────────────────────────────────────── */}
@@ -375,22 +339,28 @@ export function SessionWorkspace({
         </div>
       </header>
 
-      {notice ? <Notice message={notice} onDismiss={() => dismissNotice(session.id)} /> : null}
+      {notice ? (
+        <Notice
+          message={notice}
+          onDismiss={() => dismissNotice(session.id)}
+          action={
+            /applies the next|next time this session|next run/i.test(notice)
+              ? { label: 'Restart now', onClick: () => void restartForConfig(), busy: restartingForConfig }
+              : undefined
+          }
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
-        {/* ── Left rail — session switcher ──────────────────────────────── */}
+        {/* ── Left rail — workspaces-style switcher ──────────────────────── */}
         <aside
           className={cn(
-            'flex shrink-0 flex-col border-r border-line/60 bg-canvas transition-[width] duration-200 motion-reduce:transition-none',
-            leftCollapsed ? 'w-0 overflow-hidden border-r-0' : 'w-[248px]',
+            'flex shrink-0 flex-col border-r border-white/[0.07] bg-[#0a0a0c] text-zinc-100 transition-[width] duration-200 motion-reduce:transition-none',
+            leftCollapsed ? 'w-0 overflow-hidden border-r-0' : 'w-[264px]',
           )}
           aria-hidden={leftCollapsed}
         >
-          <SwitcherRail
-            current={session.id}
-            entries={switcherSessions}
-            onSelect={(id) => onOpenSession?.(id)}
-          />
+          <WorkspaceSwitcher session={session} onSelect={(id) => onOpenSession?.(id)} />
         </aside>
 
         {/* ── Center ─────────────────────────────────────────────────────── */}
@@ -430,7 +400,7 @@ export function SessionWorkspace({
             {tab === 'chat' ? (
               <>
                 <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-                  <Timeline conversation={conversation} onRespond={(id, d) => useStore.getState().respondToApproval(session.id, id, d)} />
+                  <Timeline conversation={conversation} onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)} />
                 </div>
                 {/* One state-aware surface: composer, resume, retry, or pointer. */}
                 <StateZone
@@ -457,143 +427,107 @@ export function SessionWorkspace({
           </div>
         </main>
 
-        {/* ── Right panel — Context / Terminal ───────────────────────────── */}
-        <aside className={cn('flex shrink-0 flex-col border-l border-line/60 bg-inset transition-[width] duration-200 motion-reduce:transition-none', rightCollapsed ? 'w-0 overflow-hidden border-l-0' : 'w-[320px]')}>
-          {!rightCollapsed ? (
-            <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1.5" role="tablist" aria-label="Right panel">
-              {(['context', 'terminal'] as const).map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  role="tab"
-                  aria-selected={rightTab === name}
-                  onClick={() => setRightTab(name)}
-                  className={cn(
-                    'rounded-[6px] px-2.5 py-1 text-[11.5px] font-medium capitalize transition-colors',
-                    rightTab === name ? 'bg-hover text-ink' : 'text-ink-3 hover:text-ink',
-                  )}
-                >
-                  {name === 'terminal' ? 'Terminal' : 'Context'}
-                </button>
-              ))}
-              <span className="ml-auto font-mono text-[10px] text-ink-3">⌃`</span>
-            </div>
-          ) : null}
-
-          {rightTab === 'terminal' && !rightCollapsed ? (
-            /* Terminal tab — lazy-mounted only while active; unmount disposes xterm. */
-            <WorkspaceTerminal session={session} connection={connection} />
-          ) : (
-            <div className="scroll-thin flex-1 overflow-y-auto px-0 py-3">
-              {!rightCollapsed ? (
-                <div className="px-4 pb-4">
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Notes (local only)…"
-                    rows={2}
-                    className="w-full resize-none rounded-[8px] border border-line bg-field px-2.5 py-2 text-[11.5px] leading-[1.5] text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
-                  />
-                </div>
-              ) : null}
-              <SessionPanels
-                sessionId={session.id}
-                facts={{
-                  createdAt: session.created_at,
-                  updatedAt: session.updated_at,
-                  project: session.project,
-                  branch: session.branch,
-                  agentName: provider?.name ?? session.agent,
-                  statusLabel: stateDisplay.label,
-                  modelValue: config?.options.find((o) => o.id === 'model' || o.category === 'model')?.currentValue ?? undefined,
-                  worktreePath: session.worktree_path ?? null,
-                }}
-              />
-            </div>
+        {/* ── Right rail — icon tabs + main panel (desktop) ──────────────── */}
+        <aside
+          className={cn(
+            'hidden shrink-0 overflow-hidden border-l border-white/[0.07] bg-[#0a0a0c] text-zinc-100 transition-[width] duration-200 motion-reduce:transition-none md:block',
+            rightCollapsed ? 'w-0 border-l-0' : '',
           )}
+          aria-hidden={rightCollapsed}
+          style={{ width: rightCollapsed ? 0 : undefined }}
+        >
+          {!rightCollapsed ? (
+            <RightRail session={session} onOpenSession={(id) => onOpenSession?.(id)} />
+          ) : null}
         </aside>
       </div>
+
+      {/* ── Mobile: right sidebar collapses into a bottom sheet ─────────── */}
+      <MobileCommandSheet session={session} onOpenSession={onOpenSession} />
     </div>
   )
 }
 
-/* ── Left rail: session switcher ─────────────────────────────────────────── */
-
-/**
- * Fast session switching without leaving the workspace. Ranked like the
- * dashboard (needs-you → live → rest), searchable, with per-state dots so an
- * approval elsewhere is visible while you read this transcript.
- */
-function SwitcherRail({
-  current,
-  entries,
-  onSelect,
+/** Small-screen variant: a drag-up bottom sheet with a horizontal icon tab bar. */
+function MobileCommandSheet({
+  session,
+  onOpenSession,
 }: {
-  current: string
-  entries: Array<{ session: Session; uiState: ReturnType<typeof sessionUIState> }>
-  onSelect: (id: string) => void
+  session: Session
+  onOpenSession?: (id: string) => void
 }) {
-  const [query, setQuery] = useState('')
-  const needle = query.trim().toLowerCase()
-  const filtered = needle
-    ? entries.filter(
-        ({ session }) =>
-          session.name.toLowerCase().includes(needle) ||
-          session.agent.toLowerCase().includes(needle) ||
-          (session.project ?? '').toLowerCase().includes(needle),
-      )
-    : entries
+  const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<RightTab>(() => {
+    try {
+      const saved = localStorage.getItem(RIGHT_TAB_KEY) as RightTab | null
+      return saved && RIGHT_TABS.some((t) => t.id === saved) ? saved : 'sessions'
+    } catch {
+      return 'sessions'
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RIGHT_TAB_KEY, tab)
+    } catch {
+      /* storage may be unavailable */
+    }
+  }, [tab])
 
   return (
-    <>
-      <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-3">
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-ink-3">Sessions</span>
-        <span className="font-mono text-[10px] text-ink-3">{entries.length}</span>
-      </div>
-      <div className="px-3 pb-2">
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter…"
-          aria-label="Filter sessions"
-          className="h-7 w-full rounded-control border border-line bg-field px-2.5 text-[11.5px] outline-none placeholder:text-ink-3 focus:border-line-strong"
-        />
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {filtered.map(({ session, uiState }) => {
-          const display = uiStateDisplay(uiState)
-          const attention = uiState === 'approval' || uiState === 'failed' || uiState === 'input'
-          return (
+    <div className="md:hidden">
+      {/* Handle bar pinned above the composer area */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="fixed inset-x-0 bottom-0 z-[60] flex h-6 items-center justify-center border-t border-white/[0.07] bg-[#0a0a0c]/95 backdrop-blur"
+        aria-label={open ? 'Close command sheet' : 'Open command sheet'}
+      >
+        <span className="h-1 w-10 rounded-full bg-zinc-600" aria-hidden />
+      </button>
+
+      {open ? (
+        <div
+          className="animate-up fixed inset-x-0 bottom-0 z-[61] flex h-[70dvh] flex-col rounded-t-xl border-t border-white/10 bg-[#0d0d10] text-zinc-100 shadow-overlay"
+          role="dialog"
+          aria-label="Agent command center"
+        >
+          {/* Horizontal icon tab bar */}
+          <div className="flex shrink-0 items-center justify-around gap-1 border-b border-white/[0.07] px-2 py-2">
+            {RIGHT_TABS.map((entry) => {
+              const Icon = TAB_ICONS[entry.id]
+              const active = tab === entry.id
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => setTab(entry.id)}
+                  aria-label={entry.label}
+                  className={cn(
+                    'flex size-11 items-center justify-center rounded-xl transition',
+                    active ? 'bg-white/10 text-white' : 'text-zinc-500',
+                  )}
+                >
+                  <Icon size={19} strokeWidth={1.7} />
+                </button>
+              )
+            })}
             <button
-              key={session.id}
               type="button"
-              onClick={() => onSelect(session.id)}
-              aria-current={session.id === current}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors',
-                session.id === current ? 'bg-accent-tint' : 'hover:bg-hover-2',
-              )}
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              className="ml-auto rounded-lg p-2 text-zinc-500"
             >
-              <Dot tone={display.tone} pulse={display.pulse} />
-              <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-[12px]', session.id === current ? 'font-semibold text-accent-ink' : 'font-medium text-ink')}>
-                  {session.name}
-                </span>
-                <span className="block truncate text-[10.5px] text-ink-3">
-                  {display.label}
-                  {session.project ? ` · ${session.project.split('/').pop()}` : ''}
-                </span>
-              </span>
-              {attention ? <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-orange" aria-hidden /> : null}
+              ✕
             </button>
-          )
-        })}
-        {filtered.length === 0 ? (
-          <p className="px-2 py-4 text-[11px] leading-relaxed text-ink-3">No sessions match.</p>
-        ) : null}
-      </div>
-    </>
+          </div>
+          <div className="min-h-0 flex-1">
+            <RightRail session={session} onOpenSession={(id) => onOpenSession?.(id)} initialTab={tab} onTabChange={setTab} />
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -633,80 +567,6 @@ function connectionLabelShort(state: string): string {
     default:
       return 'Connected'
   }
-}
-
-/**
- * Terminal tab for the right panel.
- *
- * Wraps `TerminalView` with a desktop toolbar: session badge, re-fit, and font
- * size controls. Mounts only while the tab is active; unmounting disposes
- * xterm via TerminalView's own cleanup.
- */
-function WorkspaceTerminal({
-  session,
-  connection,
-}: {
-  session: Session
-  connection: string
-}) {
-  const conversation = useConversation(session.id)
-  const config = useStore((s) => s.configs[session.id])
-  const [fontSize, setFontSize] = useState(12)
-  const [fitNonce, setFitNonce] = useState(0)
-  const interactive = config?.interactiveTerminal === true
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-surface px-2 py-1.5">
-        <span className="truncate rounded-chip bg-field px-2 py-0.5 text-[10.5px] font-medium text-ink-2">{session.name}</span>
-        <span className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setFitNonce((n) => n + 1)}
-            title="Re-fit terminal"
-            aria-label="Re-fit terminal"
-            className="rounded-control bg-field px-1.5 py-1 font-mono text-[10.5px] text-ink-2 shadow-hairline hover:bg-hover hover:text-ink"
-          >
-            ⤢
-          </button>
-          <button
-            type="button"
-            onClick={() => setFontSize((f) => Math.max(9, f - 1))}
-            title="Smaller font"
-            aria-label="Smaller terminal font"
-            className="rounded-control bg-field px-1.5 py-1 font-mono text-[10.5px] text-ink-2 shadow-hairline hover:bg-hover hover:text-ink"
-          >
-            A−
-          </button>
-          <button
-            type="button"
-            onClick={() => setFontSize((f) => Math.min(20, f + 1))}
-            title="Larger font"
-            aria-label="Larger terminal font"
-            className="rounded-control bg-field px-1.5 py-1 font-mono text-[10.5px] text-ink-2 shadow-hairline hover:bg-hover hover:text-ink"
-          >
-            A+
-          </button>
-          <span
-            className={cn('ml-1 size-2 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-red')}
-            title={connection === 'connected' ? 'Connected' : 'Disconnected — output may buffer locally'}
-            aria-hidden
-          />
-        </span>
-      </div>
-      <div key={`${fontSize}-${fitNonce}`} className="relative flex min-h-0 flex-1 flex-col">
-        <TerminalView
-          output={conversation.terminal}
-          interactive={interactive}
-          transport={config?.transport}
-          connectionState={connection as never}
-          fontSize={fontSize}
-          onInput={(d) => socket.sendTerminalInput(session.id, d)}
-          onResize={(c, r) => socket.resizeTerminal(session.id, c, r)}
-        />
-      </div>
-    </div>
-  )
 }
 
 function BackIcon() {

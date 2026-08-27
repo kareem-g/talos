@@ -18,8 +18,11 @@
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{oneshot, Mutex};
+
+use crate::questions::QuestionOption;
 
 /// How long a permission card stays open before auto-deny. Generous on
 /// purpose: the whole point of remote control is answering from your phone
@@ -58,6 +61,14 @@ pub struct PermissionQuery {
     pub session_id: String,
     pub tool_name: String,
     pub input: Value,
+    /// Optional structured answer options the agent provided (id/label/etc.).
+    /// When empty, the card falls back to a plain allow/deny choice.
+    pub options: Vec<QuestionOption>,
+    /// When true the user may supply arbitrary free text instead of (or in
+    /// addition to) picking a listed option.
+    pub allows_custom_text: bool,
+    /// "single" | "multi" — whether one or several options may be chosen.
+    pub selection_mode: String,
 }
 
 pub struct PermissionOutcome {
@@ -69,8 +80,21 @@ pub struct PermissionOutcome {
     pub waited_ms: u64,
 }
 
+/// Linux reports an executable that has been replaced in place as
+/// `"/path/to/binary (deleted)"` through `/proc/self/exe`. A running daemon is
+/// commonly rebuilt during development, so strip that kernel suffix before
+/// handing the path to Claude's child-process launcher.
+pub fn usable_executable_path(path: PathBuf) -> PathBuf {
+    let raw = path.to_string_lossy();
+    raw.strip_suffix(" (deleted)")
+        .map(PathBuf::from)
+        .unwrap_or(path)
+}
+
 /// Ask the human. Broadcasts the approval card and blocks until they answer
-/// (or the timeout auto-denies).
+/// (or the timeout auto-denies). Respects the session's `permission_mode`
+/// setting: `auto_edit` auto-allows file edits, `plan` auto-denies writes,
+/// `full` auto-allows everything, `ask` prompts every time.
 pub async fn request_user_decision(
     state: &crate::config::AppState,
     query: PermissionQuery,
@@ -79,6 +103,76 @@ pub async fn request_user_decision(
 
     let started = std::time::Instant::now();
     let request_id = uuid::Uuid::new_v4().to_string();
+
+    // Check if the session has a permission_mode override.
+    let permission_mode = match state.session_manager.pending_config(&query.session_id).await {
+        Ok(pending) => pending
+            .iter()
+            .find(|(k, _)| k == "permission_mode")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "ask".to_string()),
+        Err(_) => "ask".to_string(),
+    };
+
+    // Auto-allow or auto-deny based on permission_mode.
+    let is_file_edit = matches!(&query.input, Value::String(_) | Value::Object(_))
+        && matches!(
+            query.tool_name.as_str(),
+            "write" | "edit" | "str_replace" | "create_file" | "delete_file"
+        );
+    let is_high_risk = matches!(
+        query.tool_name.as_str(),
+        "bash" | "run_command" | "exec"
+    );
+
+    match permission_mode.as_str() {
+        "full" => {
+            // Auto-allow everything.
+            state.permissions.resolve(&request_id, "allow".to_string()).await;
+            return PermissionOutcome {
+                allowed: true,
+                input: query.input,
+                reason: "Auto-approved (full access)".to_string(),
+                waited_ms: 0,
+            };
+        }
+        "auto_edit" => {
+            if is_file_edit {
+                // Auto-allow file edits.
+                state.permissions.resolve(&request_id, "allow".to_string()).await;
+                return PermissionOutcome {
+                    allowed: true,
+                    input: query.input,
+                    reason: "Auto-approved (auto-edit mode)".to_string(),
+                    waited_ms: 0,
+                };
+            }
+            // Fall through to prompt for non-file edits.
+        }
+        "plan" => {
+            if is_file_edit || is_high_risk {
+                // Auto-deny destructive operations in plan mode.
+                state.permissions.resolve(&request_id, "deny".to_string()).await;
+                return PermissionOutcome {
+                    allowed: false,
+                    input: query.input,
+                    reason: "Denied (plan mode: read-only)".to_string(),
+                    waited_ms: 0,
+                };
+            }
+            // Allow reads/queries.
+            state.permissions.resolve(&request_id, "allow".to_string()).await;
+            return PermissionOutcome {
+                allowed: true,
+                input: query.input,
+                reason: "Approved (plan mode: read operation)".to_string(),
+                waited_ms: 0,
+            };
+        }
+        _ => {
+            // "ask" mode: fall through to normal prompting.
+        }
+    }
 
     // Compact, readable rendering of what the tool would do.
     let input_preview = match &query.input {
@@ -90,16 +184,30 @@ pub async fn request_user_decision(
 
     let rx = state.permissions.register(request_id.clone()).await;
 
+    // Structured options: prefer what the agent supplied, else the default
+    // allow/deny pair. The card renders whatever is here verbatim, so richer
+    // option data (labels, descriptions, custom-text) flows straight through.
+    let option_values: Vec<String> = if query.options.is_empty() {
+        vec!["allow".to_string(), "deny".to_string()]
+    } else {
+        query.options.iter().map(|o| o.id.clone()).collect()
+    };
+    let selection_mode = if query.selection_mode.is_empty() { "single" } else { &query.selection_mode };
+
     state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
         &query.session_id,
         "permission_required",
         json!({
             "id": request_id,
             "prompt": prompt,
-            "options": ["allow", "deny"],
+            "options": option_values,
+            "option_data": query.options,
+            "selection_mode": selection_mode,
+            "allows_custom_text": query.allows_custom_text,
             "risk_level": risk,
             "tool_name": query.tool_name,
             "source": "claude-stream",
+            "permission_mode": permission_mode,
         }),
     ));
     state.broadcast.broadcast(WsMessage::ApprovalRequest {
@@ -107,7 +215,7 @@ pub async fn request_user_decision(
         request: crate::websocket::ApprovalRequest {
             id: request_id.clone(),
             prompt: prompt.clone(),
-            options: vec!["allow".to_string(), "deny".to_string()],
+            options: option_values.clone(),
             risk_level: crate::websocket::RiskLevel::Medium,
             timestamp: chrono::Utc::now(),
         },
@@ -287,4 +395,22 @@ fn mcp_error(message: String) -> Value {
     json!({
         "content": [{ "type": "text", "text": json!({ "behavior": "deny", "message": message }).to_string() }],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::usable_executable_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn removes_linux_deleted_executable_suffix() {
+        let path = usable_executable_path(PathBuf::from("/tmp/agentdeck-backend (deleted)"));
+        assert_eq!(path, PathBuf::from("/tmp/agentdeck-backend"));
+    }
+
+    #[test]
+    fn leaves_normal_executable_paths_unchanged() {
+        let path = PathBuf::from("/tmp/agentdeck-backend");
+        assert_eq!(usable_executable_path(path.clone()), path);
+    }
 }

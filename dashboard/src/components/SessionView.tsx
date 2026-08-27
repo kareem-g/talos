@@ -208,7 +208,9 @@ export function SessionView({
         <>
           <Timeline
             conversation={conversation}
-            onRespond={(requestId, decision) => respondToApproval(session.id, requestId, decision)}
+            onRespond={(requestId, decision, meta) => respondToApproval(session.id, requestId, decision, meta)}
+            project={session.project ?? undefined}
+            sessionId={session.id}
           />
           <StateZone
             session={session}

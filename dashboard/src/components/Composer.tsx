@@ -16,7 +16,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, StopIcon } from './ui'
-import { workspaceApi, type DirListing } from '@/lib/api'
+import { skillsApi, workspaceApi, type DirListing } from '@/lib/api'
 import { cn } from '@/lib/format'
 
 const MAX_HEIGHT_PX = 168
@@ -33,7 +33,7 @@ const BUILTIN_COMMANDS: Record<string, string[]> = {
   codex: ['init', 'compact', 'review'],
 }
 
-type MenuKind = 'slash' | 'at'
+type MenuKind = 'slash' | 'at' | 'skill' | 'mention'
 
 interface MenuItem {
   /** Text inserted when chosen (without the leading trigger char). */
@@ -42,19 +42,69 @@ interface MenuItem {
   hint?: string
 }
 
+const TOKEN_RE = /([@$#/])(\S+)/g
+
+type Segment =
+  | { kind: 'text'; text: string }
+  | { kind: 'at' | 'skill' | 'mention' | 'slash'; trigger: string; token: string; label: string }
+
+/** Split the draft into plain-text and token (chip) segments for rendering. */
+function parseSegments(
+  text: string,
+  mentionNames: Array<{ id: string; name: string }>,
+): Segment[] {
+  const segments: Segment[] = []
+  let last = 0
+  for (const match of text.matchAll(TOKEN_RE)) {
+    const index = match.index ?? 0
+    if (index > last) segments.push({ kind: 'text', text: text.slice(last, index) })
+    const trigger = match[1]
+    const token = match[2]
+
+    // A slash is only a command chip at a word boundary (line/space start),
+    // never mid-word like "and/or".
+    if (trigger === '/' && index > 0 && !/\s/.test(text[index - 1])) {
+      segments.push({ kind: 'text', text: match[0] })
+      last = index + match[0].length
+      continue
+    }
+
+    const kind = trigger === '@' ? 'at' : trigger === '$' ? 'skill' : trigger === '#' ? 'mention' : 'slash'
+    let label = token
+    if (kind === 'mention') {
+      // Stored as "Name (id)" — show the friendly name.
+      const idMatch = /\(([^)]+)\)$/.exec(token)
+      const id = idMatch?.[1]
+      const found = id ? mentionNames.find((m) => m.id === id) : undefined
+      label = found?.name ?? token.replace(/\s*\([^)]*\)$/, '')
+    } else if (kind === 'at') {
+      label = token.replace(/\/$/, '')
+    } else if (kind === 'slash') {
+      label = token
+    }
+    segments.push({ kind, trigger, token, label })
+    last = index + match[0].length
+  }
+  if (last < text.length) segments.push({ kind: 'text', text: text.slice(last) })
+  return segments
+}
+
+const TRIGGERS: Record<MenuKind, string> = { slash: '/', at: '@', skill: '$', mention: '#' }
+
 /** The token (trigger + partial query) ending at the caret, if any. */
 function activeToken(text: string, caret: number): { kind: MenuKind; query: string; start: number } | null {
   // Only look at the current line up to the caret.
   const upto = text.slice(0, caret)
   const lineStart = upto.lastIndexOf('\n') + 1
   const line = upto.slice(lineStart)
-  const match = /(^|\s)([/@])([^\s/]*)$/.exec(line)
+  const match = /(^|\s)([/@$#])([^\s/]*)$/.exec(line)
   if (!match) return null
-  const kind: MenuKind = match[2] === '/' ? 'slash' : 'at'
+  const kind = (match[2] === '/' ? 'slash' : match[2] === '@' ? 'at' : match[2] === '$' ? 'skill' : 'mention') as MenuKind
   if (kind === 'slash') {
-    // A slash only opens the menu as the message's first word — otherwise it
-    // is ordinary punctuation mid-sentence.
-    if (line.trimStart().length > match[0].trimStart().length) return null
+    // A slash opens the command menu at a word boundary (line/space start),
+    // not mid-word like "and/or". Unlike before, it need not be the first word.
+    const slashStart = lineStart + match.index + match[1].length
+    if (slashStart > 0 && !/\s/.test(text[slashStart - 1])) return null
   }
   const start = lineStart + match.index + match[1].length
   return { kind, query: match[3], start }
@@ -97,6 +147,7 @@ export function Composer({
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
 
   // Slash menu items: agent-announced first, then curated built-ins.
   const slashItems = useMemo<MenuItem[]>(() => {
@@ -116,8 +167,36 @@ export function Composer({
   // @context browsing state.
   const [atListing, setAtListing] = useState<DirListing>()
   const [atLoading, setAtLoading] = useState(false)
+  /** Current @ navigation path ('' = project root). Drilling into a folder updates this. */
+  const [atPath, setAtPath] = useState('')
+  // $ skills (agent-announced or daemon-listed) and # past conversations.
+  const [skills, setSkills] = useState<Array<{ name: string; description: string }>>([])
+  const [mentions, setMentions] = useState<Array<{ id: string; name: string }>>([])
   const [menu, setMenu] = useState<{ kind: MenuKind; query: string; start: number } | null>(null)
   const [menuIndex, setMenuIndex] = useState(0)
+
+  function loadSkills() {
+    if (skills.length > 0) return
+    skillsApi
+      .list()
+      .then((body) => setSkills(body.skills ?? []))
+      .catch(() => setSkills([]))
+  }
+
+  function loadMentions() {
+    if (mentions.length > 0) return
+    import('@/lib/api')
+      .then(({ sessionsApi }) => sessionsApi.list())
+      .then((all) =>
+        setMentions(
+          all
+            .filter((s) => s.status !== 'archived')
+            .slice(0, 30)
+            .map((s) => ({ id: s.id, name: s.name })),
+        ),
+      )
+      .catch(() => setMentions([]))
+  }
 
   const menuItems = useMemo<MenuItem[]>(() => {
     if (!menu) return []
@@ -125,21 +204,52 @@ export function Composer({
     if (menu.kind === 'slash') {
       return slashItems.filter((item) => item.label.toLowerCase().includes(query)).slice(0, 8)
     }
+    if (menu.kind === 'skill') {
+      return skills
+        .filter((skill) => skill.name.toLowerCase().includes(query))
+        .slice(0, 8)
+        .map((skill) => ({
+          insert: skill.name,
+          label: skill.name,
+          hint: skill.description ? skill.description.slice(0, 60) : 'skill',
+        }))
+    }
+    if (menu.kind === 'mention') {
+      return mentions
+        .filter((session) => session.name.toLowerCase().includes(query))
+        .slice(0, 8)
+        .map((session) => ({
+          insert: `${session.name} (${session.id})`,
+          label: session.name,
+          hint: 'conversation',
+        }))
+    }
     const entries = atListing?.entries ?? []
     const filtered = entries.filter((entry) => entry.name.toLowerCase().includes(query))
     // A typed path that matches nothing is still insertable verbatim.
     if (filtered.length === 0 && menu.query.length > 0 && !query.includes('/')) return []
-    return filtered.slice(0, 10).map((entry) => ({
-      insert: entry.dir ? `${entry.name}/` : entry.name,
-      label: entry.name,
-      hint: entry.dir ? 'folder' : undefined,
-    }))
-  }, [menu, slashItems, atListing])
+    // When navigated into a subdir, offer a ".." row to go back up.
+    const parent: MenuItem[] =
+      menu.kind === 'at' && atPath
+        ? [{ insert: '..', label: '..', hint: 'up' }]
+        : []
+    return [
+      ...parent,
+      ...filtered.slice(0, 10).map((entry) => ({
+        insert: entry.dir ? `${entry.name}/` : entry.name,
+        label: entry.name,
+        hint: entry.dir ? 'folder' : undefined,
+      })),
+    ]
+  }, [menu, slashItems, atListing, skills, mentions, atPath])
 
   function loadAt(path?: string) {
+    const resolved = path ?? atPath ?? ''
+    setAtPath(resolved)
+    setMenuIndex(0)
     setAtLoading(true)
     workspaceApi
-      .dirs(path || projectPath, true)
+      .dirs(resolved || projectPath, true)
       .then(setAtListing)
       .catch(() => setAtListing(undefined))
       .finally(() => setAtLoading(false))
@@ -158,7 +268,13 @@ export function Composer({
     const caret = textareaRef.current?.selectionStart ?? next.length
     const token = activeToken(next, caret)
     if (token && !disabled) {
-      if (token.kind === 'at' && (!atListing || menu?.kind !== 'at')) loadAt()
+      if (token.kind === 'at') {
+        // A freshly-started @ token resets navigation to the project root.
+        if (menu?.kind !== 'at') setAtPath('')
+        if (!atListing || menu?.kind !== 'at') loadAt()
+      }
+      if (token.kind === 'skill') loadSkills()
+      if (token.kind === 'mention') loadMentions()
       setMenu(token)
       setMenuIndex(0)
     } else {
@@ -172,7 +288,27 @@ export function Composer({
     const caret = textareaRef.current?.selectionStart ?? value.length
     const before = value.slice(0, menu.start)
     const after = value.slice(caret)
-    const trigger = menu.kind === 'slash' ? '/' : '@'
+    const trigger = TRIGGERS[menu.kind]
+
+    // @ folder: drill into it instead of inserting — list its subdirs.
+    if (menu.kind === 'at' && item.insert.endsWith('/')) {
+      // Resolve the absolute path from the entry so the backend lists the right dir.
+      const name = item.insert.replace(/\/$/, '')
+      const entry = atListing?.entries.find((e) => e.dir && e.name === name)
+      const childPath = entry?.path ?? (atPath ? `${atPath.replace(/\/$/, '')}/${name}` : name)
+      loadAt(childPath)
+      setMenu({ kind: 'at', query: '', start: menu.start })
+      return
+    }
+
+    // @ "..": navigate up one directory level (absolute).
+    if (menu.kind === 'at' && item.insert === '..') {
+      const parentPath = atPath ? atPath.replace(/\/$/, '').split('/').slice(0, -1).join('/') : ''
+      loadAt(parentPath || undefined)
+      setMenu({ kind: 'at', query: '', start: menu.start })
+      return
+    }
+
     const inserted = `${trigger}${item.insert} `
     const nextValue = `${before}${inserted}${after}`
     setValue(nextValue)
@@ -181,14 +317,6 @@ export function Composer({
       textareaRef.current?.focus()
       const pos = (before + inserted).length
       textareaRef.current?.setSelectionRange(pos, pos)
-      // Opening a folder keeps the @ menu alive for the next segment.
-      if (menu.kind === 'at' && item.insert.endsWith('/')) {
-        const dir = (projectPath ? projectPath.replace(/\/$/, '') + '/' : '') + before.slice(before.lastIndexOf('@') + 1) + item.insert
-        void dir
-        // Re-list from the resolved path on the next change event instead of
-        // guessing here; the menu simply stays open with what we have.
-        setMenu({ kind: 'at', query: '', start: menu.start })
-      }
     })
   }
 
@@ -198,16 +326,6 @@ export function Composer({
     setValue('')
     setMenu(null)
     onSend(text)
-  }
-
-  function insertCommand(command: string) {
-    if (disabled) return
-    setValue((current) => {
-      const prefix = `/${command.replace(/^\//, '')} `
-      if (current.trim() === prefix.trim()) return current
-      return current ? `${current.trimEnd()} ${prefix}` : prefix
-    })
-    textareaRef.current?.focus()
   }
 
   const canSend = value.trim().length > 0 && !disabled
@@ -227,7 +345,7 @@ export function Composer({
           >
             <div className="px-2.5 py-1.5 border-b border-line/40">
               <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-ink-3">
-                {menu.kind === 'slash' ? 'Commands' : 'Files'}
+                {menu.kind === 'slash' ? 'Commands' : menu.kind === 'at' ? 'Files' : menu.kind === 'skill' ? 'Skills' : 'Conversations'}
               </span>
             </div>
             {menu.kind === 'at' && atLoading ? (
@@ -240,20 +358,31 @@ export function Composer({
                 type="button"
                 role="option"
                 aria-selected={index === menuIndex}
+                ref={(node) => {
+                  if (index === menuIndex && node) node.scrollIntoView({ block: 'nearest' })
+                }}
                 onMouseDown={(event) => {
                   event.preventDefault()
                   applyItem(item)
                 }}
                 className={cn(
                   'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-75',
-                  index === menuIndex ? 'bg-accent/[0.08]' : 'hover:bg-hover-2',
+                  index === menuIndex
+                    ? 'bg-white/[0.14] text-white ring-1 ring-inset ring-white/20'
+                    : 'hover:bg-white/[0.06]',
                 )}
               >
                 <span className={cn(
                   'flex size-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-semibold',
-                  menu.kind === 'slash' ? 'bg-accent/[0.12] text-accent-ink' : 'bg-green/[0.10] text-green',
+                  menu.kind === 'slash'
+                    ? 'bg-accent/[0.12] text-accent-ink'
+                    : menu.kind === 'skill'
+                      ? 'bg-purple-400/[0.12] text-purple-300'
+                      : menu.kind === 'mention'
+                        ? 'bg-sky-400/[0.12] text-sky-300'
+                        : 'bg-green/[0.10] text-green',
                 )}>
-                  {menu.kind === 'slash' ? '/' : '@'}
+                  {TRIGGERS[menu.kind]}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{item.label}</span>
                 {item.hint ? (
@@ -265,29 +394,6 @@ export function Composer({
           </div>
         ) : null}
 
-        {/* Quick command chips (tap targets, no typing required). */}
-        {commands && commands.length > 0 && !working ? (
-          <div
-            className="scroll-thin mb-2 flex items-center gap-1.5 overflow-x-auto pb-0.5"
-            aria-label="Agent commands"
-          >
-            {commands.map((command) => (
-              <button
-                key={command}
-                type="button"
-                onClick={() => insertCommand(command)}
-                className={cn(
-                  'inline-flex h-7 shrink-0 items-center rounded-lg border border-line/50 bg-surface/80 px-2.5',
-                  'font-mono text-[11px] text-ink-2 transition-all duration-150',
-                  'hover:border-line-strong hover:bg-hover hover:text-ink',
-                )}
-              >
-                <span className="text-accent-ink">/</span>
-                {command.replace(/^\//, '')}
-              </button>
-            ))}
-          </div>
-        ) : null}
 
         <div
           className={cn(
@@ -312,31 +418,82 @@ export function Composer({
             }
           }}
         >
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={value}
-            disabled={disabled}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onChange={(changeEvent) => handleChange(changeEvent.target.value)}
-            onBlurCapture={() => setTimeout(() => setMenu(null), 120)}
-            onKeyDown={(keyEvent) => {
-              if (keyEvent.key !== 'Enter') return
-              if (keyEvent.shiftKey || isTouchPrimary()) return
-              if (menu && menuItems.length > 0) return // handled by wrapper
-              keyEvent.preventDefault()
-              send()
-            }}
-            placeholder={placeholder ?? 'Message the agent…'}
-            aria-label="Message"
-            className={cn(
-              'scroll-thin block w-full resize-none bg-transparent px-3.5 pt-3',
-              'text-[13px] leading-[1.6] text-ink outline-none',
-              'placeholder:text-ink-3 disabled:opacity-50',
-            )}
-            style={{ maxHeight: MAX_HEIGHT_PX }}
-          />
+          <div className="relative">
+            {/* Backdrop: renders the draft with inline chips behind the textarea. */}
+            <div
+              aria-hidden
+              className={cn(
+                'pointer-events-none absolute inset-0 overflow-hidden px-3.5 pt-3',
+                'whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink',
+              )}
+              ref={backdropRef}
+            >
+              {parseSegments(value, mentions).map((segment, index) =>
+                segment.kind === 'text' ? (
+                  <span key={index}>{segment.text}</span>
+                ) : (
+                  <span
+                    key={index}
+                    className={cn(
+                      'inline-flex max-w-full items-baseline rounded px-0.5 py-[1px]',
+                      'text-[12px] font-medium',
+                      segment.kind === 'at' && 'bg-green/[0.16] text-green',
+                      segment.kind === 'skill' && 'bg-purple-400/[0.18] text-purple-300',
+                      segment.kind === 'mention' && 'bg-sky-400/[0.16] text-sky-300',
+                      segment.kind === 'slash' && 'bg-orange/[0.16] text-orange',
+                    )}
+                  >
+                    <span className="shrink-0 opacity-60">{segment.trigger}</span>
+                    <span className="truncate">{segment.label}</span>
+                  </span>
+                ),
+              )}
+              {/* Trailing space keeps the last line's height in sync. */}
+              {' '}
+            </div>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={value}
+              disabled={disabled}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onChange={(changeEvent) => handleChange(changeEvent.target.value)}
+              onScroll={(scrollEvent) => {
+                if (backdropRef.current) backdropRef.current.scrollTop = (scrollEvent.target as HTMLTextAreaElement).scrollTop
+              }}
+              onBlurCapture={() => setTimeout(() => setMenu(null), 120)}
+              onKeyDown={(keyEvent) => {
+                if (keyEvent.key === 'Backspace') {
+                  // Delete a whole chip (token) as a single unit when the caret
+                  // sits immediately after it.
+                  const caret = textareaRef.current?.selectionStart ?? value.length
+                  if (caret === textareaRef.current?.selectionEnd && caret > 0) {
+                    const before = value.slice(0, caret)
+                    const m = /([@$#])(\S*)$/.exec(before)
+                    if (m && m.index < caret) {
+                      keyEvent.preventDefault()
+                      setValue(before.slice(0, m.index) + value.slice(caret))
+                      return
+                    }
+                  }
+                }
+                if (keyEvent.key !== 'Enter') return
+                if (keyEvent.shiftKey || isTouchPrimary()) return
+                if (menu && menuItems.length > 0) return // handled by wrapper
+                keyEvent.preventDefault()
+                send()
+              }}
+              placeholder={placeholder ?? 'Message the agent…'}
+              aria-label="Message"
+              className={cn(
+                'scroll-thin relative block w-full resize-none bg-transparent px-3.5 pt-3',
+                'text-[13px] leading-[1.6] text-transparent caret-white outline-none',
+                'placeholder:text-ink-3 disabled:opacity-50',
+              )}
+              style={{ maxHeight: MAX_HEIGHT_PX }}
+            />
+          </div>
 
           <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1.5">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">

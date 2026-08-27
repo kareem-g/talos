@@ -455,3 +455,44 @@ mod tests {
         assert_eq!(immediate["applied"], "immediate");
     }
 }
+
+/// The permission mode dimension for AgentDeck.
+///
+/// Controls how the permission broker handles tool requests:
+///   ask     → prompt the human for every permission
+///   auto_edit → auto-allow file edits, prompt on high-risk
+///   plan    → read-only: auto-deny writes/bash, allow reads
+///   full    → auto-allow everything
+pub(crate) fn permission_mode_config_option() -> ConfigOption {
+    ConfigOption {
+        id: "permission_mode".to_string(),
+        name: "Permission Mode".to_string(),
+        category: Some("permissions".to_string()),
+        option_type: ConfigOptionType::Select,
+        current_value: None,
+        choices: vec![
+            ConfigChoice {
+                value: "ask".to_string(),
+                name: "Ask".to_string(),
+                description: Some("Prompt for every permission".to_string()),
+            },
+            ConfigChoice {
+                value: "auto_edit".to_string(),
+                name: "Auto-edit".to_string(),
+                description: Some("Auto-allow file edits, prompt on high-risk".to_string()),
+            },
+            ConfigChoice {
+                value: "plan".to_string(),
+                name: "Plan".to_string(),
+                description: Some("Read-only: no writes or bash".to_string()),
+            },
+            ConfigChoice {
+                value: "full".to_string(),
+                name: "Full".to_string(),
+                description: Some("Auto-allow everything".to_string()),
+            },
+        ],
+        mutability: ConfigMutability::Live,
+        allows_custom_value: false,
+    }
+}

@@ -19,7 +19,7 @@
 
 import { useMemo, useState } from 'react'
 import { Composer } from './Composer'
-import { ConfigBar } from './ConfigControls'
+import { ComposerControls } from '@/components/desktop/session/TasksAndExecution'
 import { Button } from './ui'
 import LoadingState from './LoadingState'
 import { socket } from '@/lib/socket'
@@ -67,7 +67,11 @@ function ApprovalPointer({ conversation }: { conversation: Conversation }) {
     return undefined
   }, [conversation, requestId])
 
-  const view = part ? describeApproval(part.prompt, part.options) : undefined
+  const view = part ? describeApproval(part.prompt, part.options, {
+    optionData: part.optionData,
+    multiSelect: part.multiSelect,
+    allowsCustomText: part.allowsCustomText,
+  }) : undefined
   const summary = view?.context ?? view?.question
 
   return (
@@ -104,10 +108,6 @@ function ResumeCard({
   description,
   onResume,
   resuming,
-  config,
-  provider,
-  onSetConfig,
-  updatingId,
 }: {
   session: Session
   tone: 'orange' | 'dim'
@@ -115,10 +115,6 @@ function ResumeCard({
   description: string
   onResume: () => void
   resuming: boolean
-  config?: SessionConfig
-  provider?: Provider
-  onSetConfig?: (id: string, value: string) => void
-  updatingId?: string | null
 }) {
   const connected = useStore((s) => s.connection) === 'connected'
   return (
@@ -161,18 +157,6 @@ function ResumeCard({
             {resuming ? 'Resuming…' : 'Resume'}
           </Button>
         </div>
-        {config && onSetConfig ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line/40 bg-field/60 px-2.5 py-2">
-            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3">Model for next run</span>
-            <ConfigBar
-              options={config.options}
-              live={config.live}
-              modelsSource={provider?.modelsSource}
-              busyId={updatingId ?? null}
-              onChange={(id, v) => onSetConfig(id, v)}
-            />
-          </div>
-        ) : null}
       </div>
     </div>
   )
@@ -291,15 +275,13 @@ export function StateZone({
       agentId={session.agent}
       projectPath={session.project ?? undefined}
       controls={
-        config ? (
-          <ConfigBar
-            options={config.options}
-            live={config.live}
-            modelsSource={provider?.modelsSource}
-            busyId={updating}
-            onChange={handleSetConfig}
-          />
-        ) : null
+        <ComposerControls
+          config={config}
+          agent={session.agent}
+          modelsSource={provider?.modelsSource}
+          busyId={updating}
+          onChange={handleSetConfig}
+        />
       }
     />
   )
@@ -323,10 +305,6 @@ export function StateZone({
           description={display.hint ?? 'Resume to continue this session'}
           onResume={resume}
           resuming={retrying}
-          config={config}
-          provider={provider}
-          onSetConfig={handleSetConfig}
-          updatingId={updating}
         />
       )
     case 'failed': {

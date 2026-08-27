@@ -164,6 +164,23 @@ pub async fn apply_config(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Session not found".to_string())?;
 
+    // Permission mode is backend-only: it doesn't get sent to the agent,
+    // but controls how the permission broker handles tool requests.
+    // Handle it before routing to ACP so it applies to any session type.
+    if config_id == "permission_mode" {
+        let _ = state
+            .session_manager
+            .set_pending_config(session_id, "permission_mode", value)
+            .await;
+        let mut config = crate::sessions::config::read_config(state, session_id).await?;
+        if let Some(option) = config.options.iter_mut().find(|o| o.id == "permission_mode") {
+            option.current_value = Some(value.to_string());
+        }
+        let applied = ConfigApplied::Immediate;
+        broadcast_config(state, session_id, &applied, &config);
+        return Ok((applied, config));
+    }
+
     // Live ACP session: the agent can change this now.
     if state.acp_manager.has_active_session(session_id).await {
         return apply_acp_config(state, session_id, &session.agent, config_id, value).await;

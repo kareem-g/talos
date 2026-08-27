@@ -1471,6 +1471,13 @@ async fn spawn_session(
                 drop(cfg);
                 return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
             }
+            // Catalog PTY-tier providers (CommandCode, Aider, …) have no config
+            // section of their own — launch the catalog binary directly.
+            if let Some(entry) = crate::providers::catalog::entry_for(agent) {
+                let command = vec![entry.binary.to_string()];
+                drop(cfg);
+                return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
+            }
             let Some(executable) = body.get("executable").and_then(|value| value.as_str()) else {
                 drop(cfg);
                 let _ = state
@@ -1651,7 +1658,12 @@ async fn finish_acp_spawn(
 /// `/api/hooks/permission` with the session's hook token. Reuses the hook
 /// token when one exists so there is exactly one secret per session.
 async fn claude_permission_args(state: &AppState, session_id: &str) -> Vec<String> {
-    let Some(exe) = std::env::current_exe().ok().map(|p| p.to_string_lossy().to_string()) else {
+    let Some(exe) = std::env::current_exe()
+        .ok()
+        .map(crate::permissions::usable_executable_path)
+        .filter(|path| path.is_file())
+        .map(|path| path.to_string_lossy().to_string()) else {
+        tracing::warn!(session_id = %session_id, "Could not resolve a usable AgentDeck executable for Claude permissions");
         return Vec::new();
     };
     let port = state.config.read().await.settings().server.port;
@@ -1808,9 +1820,14 @@ pub(crate) async fn respawn_claude_with_model(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Session not found".to_string())?;
 
-    // Validate the model is actually a Claude model before killing the live session.
-    // The UI offers whatever the provider advertises, which can include openrouter
-    // models that are valid for other agents but not for `claude --model`.
+    // Validate the model before killing the live session. Claude accepts any
+    // model id its own configuration advertises (native discovery reads
+    // ~/.claude/settings.json, which is how custom routed gateways like
+    // `openrouter/org/name` become legitimate claude models via the
+    // ANTHROPIC_DEFAULT_*_MODEL remap). So: accept anything on that advertised
+    // list — including slash ids. Only a *bare* unknown alias is refused,
+    // because `claude --model <alias>` would fail at spawn and we'd have
+    // killed the live session for nothing.
     {
         let cfg = state.config.read().await;
         let custom = cfg.settings().agents.providers.clone();
@@ -1823,25 +1840,19 @@ pub(crate) async fn respawn_claude_with_model(
                 .find(|o| o.id == "model")
                 .map(|o| o.choices.iter().map(|c| c.value.clone()).collect())
                 .unwrap_or_default();
-            // OpenRouter models are never valid for `claude --model`, even if they appear
-            // in the provider's advertised choices (e.g., from a custom config). Reject early
-            // so we don't kill the live session and lose the liveness window.
-            if model.starts_with("openrouter/") {
+            let known_alias = |candidate: &str| {
+                known.contains(candidate)
+                    || known.iter().any(|v| v.ends_with(&format!("/{candidate}")) || v == candidate)
+            };
+            let bare = model.rsplit('/').next().unwrap_or(&model);
+            if !known.is_empty() && !known_alias(&model) && !known_alias(bare) {
                 return Err(format!(
-                    "Model '{}' is not a Claude model. Use a Claude model (sonnet, opus, fable) for this session, or start a new session with an agent that supports openrouter (e.g., Codex, OpenCode with openrouter provider).",
+                    "Model '{}' is not configured for Claude. Add it to ~/.claude/settings.json (model or ANTHROPIC_DEFAULT_*_MODEL) to use it with this session.",
                     model
                 ));
             }
-            // Also reject completely unknown models that aren't in the advertised list.
-            let is_known = known.contains(model) || known.iter().any(|v| v.ends_with(&format!("/{}", model)) || v == model);
-            if !is_known && model.contains('/') {
-                // For claude, a slash model that isn't known is likely a provider-prefixed
-                // model for another agent. Give a helpful hint.
-                return Err(format!(
-                    "Model '{}' is not known for Claude. Available: sonnet, opus, fable, or configure it as a custom provider.",
-                    model
-                ));
-            }
+            // An empty advertised list means we couldn't discover anything —
+            // don't block; the spawn's liveness check is the real referee.
         }
     }
 
@@ -1850,8 +1861,11 @@ pub(crate) async fn respawn_claude_with_model(
     drop(cfg);
 
     // Stop the current process. Its conversation lives in Claude's own store,
-    // keyed by the external id — not in this process.
-    let _ = state.claude_stream.kill_session(session_id).await;
+    // keyed by the external id — not in this process. `replace_session` (not
+    // `kill_session`) flags the handle so its EOF task stays silent: an
+    // "exited" broadcast here would race the new spawn and flip the session to
+    // needs_resume, forcing a manual resume after every model switch.
+    let _ = state.claude_stream.replace_session(session_id).await;
     let resume_target = session.external_id.clone();
     let resume_target_for_restore = resume_target.clone();
 
@@ -2955,6 +2969,349 @@ pub async fn list_worktrees(
         Ok(worktrees) => Json(json!({ "worktrees": worktrees })).into_response(),
         Err(error) => Json(json!({ "error": error })).into_response(),
     }
+}
+
+// ===== GIT OPERATIONS (branch panel / git tab) =====
+
+/// Resolve `project` from the query, or fall back to a session's project.
+async fn git_project_of(
+    state: &Arc<AppState>,
+    params: &std::collections::HashMap<String, String>,
+    body_project: Option<&str>,
+) -> Result<String, Response> {
+    if let Some(p) = body_project.filter(|p| !p.is_empty()) {
+        return Ok(p.to_string());
+    }
+    if let Some(p) = params.get("project").filter(|p| !p.is_empty()) {
+        return Ok(p.clone());
+    }
+    if let Some(session_id) = params.get("session") {
+        if let Ok(Some(session)) = state.session_manager.get_session(session_id).await {
+            if let Some(project) = session.project {
+                return Ok(project);
+            }
+        }
+    }
+    Err(Json(json!({ "error": "project or session required" })).into_response())
+}
+
+/// Per-file git diff for the branch panel / chat file chips.
+///
+/// Resolves `project` the same way the other git handlers do (explicit arg, or a
+/// `session` query that carries a project). `path` is the file reported by the
+/// agent's `file_edited` events, so the chat can expand a real diff on demand
+/// rather than only the path + ok/fail pill it streams today.
+pub async fn git_diff_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let project = match git_project_of(&state, &params, None).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    let Some(path) = params.get("path").filter(|p| !p.is_empty()).cloned() else {
+        return Json(json!({ "error": "path required" })).into_response();
+    };
+    match crate::workspace::git_diff(&project, &path, false).await {
+        Ok(diff) => Json(json!({ "path": path, "diff": diff })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+pub struct GitBranchBody {
+    pub project: Option<String>,
+}
+
+/// All local branches + current branch + diff totals for the branch panel.
+pub async fn git_branches_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let project = match git_project_of(&state, &params, None).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    let branches = match crate::workspace::git_branches(&project).await {
+        Ok(b) => b,
+        Err(error) => return Json(json!({ "error": error })).into_response(),
+    };
+    let changed = crate::workspace::git_status(&project).await.unwrap_or_default();
+    let (added, removed) =
+        crate::workspace::git_diff_stat_totals(&project).await.unwrap_or((0, 0));
+    Json(json!({
+        "branches": branches,
+        "current": branches.iter().find(|b| b.get("current") == Some(&json!(true))).and_then(|b| b.get("name").cloned()),
+        "changed_count": changed.len(),
+        "added": added,
+        "removed": removed,
+    }))
+    .into_response()
+}
+
+/// Checkout an existing local branch.
+pub async fn git_checkout_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    body: Option<axum::Json<GitBranchBody>>,
+) -> Response {
+    let body_project = body.and_then(|b| b.0.project);
+    let project = match git_project_of(&state, &params, body_project.as_deref()).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    let Some(branch) = params.get("branch").filter(|b| !b.is_empty()).cloned() else {
+        return Json(json!({ "error": "branch required" })).into_response();
+    };
+    match crate::workspace::git_checkout(&project, &branch).await {
+        Ok(stdout) => Json(json!({ "ok": true, "output": stdout.trim() })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct GitCreateBranchBody {
+    pub project: Option<String>,
+    pub name: String,
+}
+
+/// Create and switch to a new local branch from HEAD.
+pub async fn git_create_branch_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::Json(body): axum::Json<GitCreateBranchBody>,
+) -> Response {
+    let project = match git_project_of(&state, &params, body.project.as_deref()).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    match crate::workspace::git_create_branch(&project, body.name.trim()).await {
+        Ok(stdout) => Json(json!({ "ok": true, "output": stdout.trim() })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
+}
+
+/// Recent commit history for the Git Graph modal.
+pub async fn git_log_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let project = match git_project_of(&state, &params, None).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(200);
+    match crate::workspace::git_log(&project, limit).await {
+        Ok(commits) => Json(json!({ "commits": commits })).into_response(),
+        Err(error) => Json(json!({ "error": error })).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct GitCommitBody {
+    pub project: Option<String>,
+    pub message: String,
+    #[serde(default)]
+    pub push: bool,
+}
+
+/// Stage all changes, commit with the given message, optionally push.
+pub async fn git_commit_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::Json(body): axum::Json<GitCommitBody>,
+) -> Response {
+    let project = match git_project_of(&state, &params, body.project.as_deref()).await {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
+    if body.message.trim().is_empty() {
+        return Json(json!({ "error": "commit message is empty" })).into_response();
+    }
+    let commit_output = match crate::workspace::git_commit_all(&project, body.message.trim()).await {
+        Ok(o) => o,
+        Err(error) => return Json(json!({ "error": error })).into_response(),
+    };
+    let mut push_output = String::new();
+    let mut push_error: Option<String> = None;
+    if body.push {
+        match crate::workspace::git_push(&project).await {
+            Ok(o) => push_output = o.trim().to_string(),
+            Err(error) => push_error = Some(error),
+        }
+    }
+    let head = tokio::process::Command::new("git")
+        .args(["-C", &project, "rev-parse", "--short", "HEAD"])
+        .output()
+        .await
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    Json(json!({
+        "ok": true,
+        "head": head,
+        "output": commit_output.trim(),
+        "pushed": body.push && push_error.is_none(),
+        "push_error": push_error,
+        "push_output": push_output,
+    }))
+    .into_response()
+}
+
+
+// ===== STANDALONE PTY TERMINALS =====
+
+#[derive(serde::Deserialize)]
+pub struct TerminalCreateBody {
+    /// Working directory for the shell. Empty means $HOME.
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// Shell override; defaults to $SHELL or /bin/bash.
+    #[serde(default)]
+    pub shell: Option<String>,
+}
+
+/// Spawn a standalone interactive PTY shell. The id is `term-<uuid>` so the
+/// rest of the pipeline can distinguish it from agent sessions.
+pub async fn terminal_create(
+    State(state): State<Arc<AppState>>,
+    axum::Json(body): axum::Json<TerminalCreateBody>,
+) -> Response {
+    let id = format!("term-{}", uuid::Uuid::new_v4());
+    let cwd = body.cwd.filter(|c| !c.trim().is_empty()).map(|c| c.to_string());
+    if let Some(cwd) = &cwd {
+        if !std::path::Path::new(cwd).is_dir() {
+            return Json(json!({ "error": format!("directory does not exist: {cwd}") })).into_response();
+        }
+    }
+    let shell = body
+        .shell
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        });
+    match state
+        .pty_manager
+        .spawn_session(&id, "terminal", cwd.as_deref(), vec![shell])
+        .await
+    {
+        Ok(session) => Json(json!({
+            "id": session.id,
+            "pid": session.pid,
+            "cwd": cwd,
+        }))
+        .into_response(),
+        Err(error) => Json(json!({ "error": error.to_string() })).into_response(),
+    }
+}
+
+/// List live standalone terminals.
+pub async fn terminal_list(State(state): State<Arc<AppState>>) -> Response {
+    let terminals: Vec<serde_json::Value> = state
+        .pty_manager
+        .list_terminals()
+        .await
+        .into_iter()
+        .map(|session| {
+            json!({
+                "id": session.id,
+                "pid": session.pid,
+                "cwd": session.project,
+                "created_at": session.created_at,
+            })
+        })
+        .collect();
+    Json(json!({ "terminals": terminals })).into_response()
+}
+
+/// Close a standalone terminal and kill its process.
+pub async fn terminal_close(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    if !id.starts_with("term-") {
+        return Json(json!({ "error": "not a standalone terminal" })).into_response();
+    }
+    match state.pty_manager.kill_session(&id).await {
+        Ok(()) => Json(json!({ "closed": true })).into_response(),
+        Err(error) => Json(json!({ "error": error.to_string() })).into_response(),
+    }
+}
+
+// ===== SKILLS =====
+
+/// Extract a human-readable description from a SKILL.md: prefer the
+/// `description:` field inside the YAML frontmatter, else the first prose
+/// line of the body.
+fn skill_description(body: &str) -> String {
+    let mut lines = body.lines();
+    if lines.next().map(|line| line.trim() == "---").unwrap_or(false) {
+        for line in lines.by_ref() {
+            let trimmed = line.trim();
+            if trimmed == "---" {
+                break;
+            }
+            if let Some(rest) = trimmed.strip_prefix("description:") {
+                let value = rest.trim().trim_matches('"').trim_matches('\'');
+                if !value.is_empty() {
+                    return value.chars().take(200).collect();
+                }
+            }
+        }
+    }
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" {
+            continue;
+        }
+        return trimmed.chars().take(200).collect();
+    }
+    String::new()
+}
+
+/// List installed skills from `~/.hermes/skills` (and `~/.claude/skills` when
+/// present). Read-only; mirrors what the CLIs themselves load.
+pub async fn list_skills() -> Response {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut skills: Vec<serde_json::Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for base in ["hermes", "claude"] {
+        let dir = std::path::Path::new(&home).join(format!(".{base}/skills"));
+        let Ok(mut reader) = tokio::fs::read_dir(&dir).await else {
+            continue;
+        };
+        while let Ok(Some(entry)) = reader.next_entry().await {
+            if !entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !seen.insert(name.clone()) {
+                continue;
+            }
+            let skill_md = entry.path().join("SKILL.md");
+            let description = match tokio::fs::read_to_string(&skill_md).await {
+                Ok(body) => skill_description(&body),
+                Err(_) => continue,
+            };
+            skills.push(json!({
+                "name": name,
+                "description": description,
+                "source": base.to_string(),
+                "path": skill_md.to_string_lossy(),
+            }));
+        }
+    }
+
+    skills.sort_by(|a, b| {
+        a.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+    });
+    Json(json!({ "skills": skills })).into_response()
 }
 
 // ===== NOTIFICATIONS =====

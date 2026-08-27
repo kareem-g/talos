@@ -25,9 +25,10 @@ use super::catalog::{self, CATALOG};
 use super::discovery;
 use super::native;
 use super::types::{
-    ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model, ProviderCapabilities,
-    ProviderDescriptor, ProviderState, Transport,
+    ConfigChoice, ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model,
+    ProviderCapabilities, ProviderDescriptor, ProviderState, Transport,
 };
+use super::types::permission_mode_config_option;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -351,7 +352,11 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
         }
     }
 
-    let config_options = vec![model_config_option(&models, candidate.transport, &candidate.id)];
+    let permission_option = permission_mode_config_option();
+    let config_options = vec![
+        model_config_option(&models, candidate.transport, &candidate.id),
+        permission_option,
+    ];
 
     ProviderDescriptor {
         id: candidate.id.clone(),
