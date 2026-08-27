@@ -280,6 +280,7 @@ export function StateZone({
           agent={session.agent}
           modelsSource={provider?.modelsSource}
           busyId={updating}
+          mode={conversation.mode}
           onChange={handleSetConfig}
         />
       }

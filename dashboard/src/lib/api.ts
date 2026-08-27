@@ -154,6 +154,18 @@ export interface SessionHistory {
   messages: AgentMessage[]
   events: AgentEvent[]
   terminal_output: Array<{ sequence: number; data: string; timestamp: string }>
+  /** Pending AskUserQuestion cards to hydrate on replay (live ones arrive via WS). */
+  questions?: Array<{
+    question_id: string
+    session_id: string
+    title: string
+    question: string
+    options: Array<{ id: string; label: string; description?: string; allows_custom_text?: boolean }>
+    selection_mode: string
+    status: string
+  }>
+  /** Pending permission approvals to hydrate on replay. */
+  approvals?: Array<{ id: string; prompt: string; options: string[]; risk_level?: string }>
 }
 
 export const sessionsApi = {

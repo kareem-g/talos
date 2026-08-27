@@ -135,6 +135,10 @@ export interface ApprovalPart {
   decision?: string
   /** Custom text the user supplied, retained for the resolved card. */
   customText?: string
+  /** Header line for questionnaire-style cards (e.g. the question title). */
+  header?: string
+  /** True when this card is an AskUserQuestion (answered via QuestionAnswer). */
+  isQuestion?: boolean
 }
 
 /** An error surfaced by the agent or the transport. */

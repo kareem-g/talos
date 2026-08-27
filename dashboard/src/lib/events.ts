@@ -562,6 +562,52 @@ export function applyAgentEvent(
       return false
     }
 
+    /**
+     * The agent asked the user a structured question (Claude Code's
+     * AskUserQuestion tool). The backend has already persisted it and emits the
+     * full Question payload here. Render it as an approval card carrying the
+     * structured options — the approval component already knows how to render
+     * and answer these.
+     */
+    case 'question_started': {
+      const turn = currentTurn(conversation, event)
+      const questionId = str(payload, 'question_id')
+      if (!questionId) return false
+      // A re-delivered start must not create a second card.
+      if (turn.parts.some((part) => part.kind === 'approval' && part.requestId === questionId)) {
+        return false
+      }
+      const rawOptions = payload['options']
+      const optionData: ApprovalOptionData[] = Array.isArray(rawOptions)
+        ? rawOptions
+            .filter((o) => o && typeof o === 'object')
+            .map((o) => {
+              const record = o as Record<string, unknown>
+              return {
+                value: str(record, 'id') ?? str(record, 'label') ?? '',
+                label: str(record, 'label') ?? str(record, 'id') ?? '',
+                description: str(record, 'description'),
+                allowsCustomText: record['allows_custom_text'] === true,
+              }
+            })
+            .filter((o) => o.value !== '')
+        : []
+      const selectionMode = str(payload, 'selection_mode')
+      const part: ApprovalPart = {
+        kind: 'approval',
+        requestId: questionId,
+        prompt: str(payload, 'question') ?? str(payload, 'title') ?? 'The agent is asking a question.',
+        options: optionData.map((o) => o.label).filter((l): l is string => Boolean(l)),
+        optionData,
+        multiSelect: selectionMode === 'multiple' || selectionMode === 'multi',
+        allowsCustomText: optionData.some((o) => o.allowsCustomText),
+        header: str(payload, 'title'),
+        isQuestion: true,
+      }
+      turn.parts.push(part)
+      return true
+    }
+
     case 'agent_error': {
       const turn = currentTurn(conversation, event)
       turn.parts.push({

@@ -118,6 +118,7 @@ export type ClientFrame =
   | { type: 'TerminalInput'; payload: { session_id: string; data: string } }
   | { type: 'TerminalResize'; payload: { session_id: string; cols: number; rows: number } }
   | { type: 'Command'; payload: { action: string; params: Record<string, unknown> } }
+  | { type: 'QuestionAnswer'; payload: { question_id: string; selected_options: string[]; custom_text?: string } }
   | { type: 'Ping' }
 
 /**

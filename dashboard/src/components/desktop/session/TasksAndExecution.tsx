@@ -240,12 +240,15 @@ export function ComposerControls({
   agent,
   modelsSource,
   busyId,
+  mode,
   onChange,
 }: {
   config?: { options: ConfigOptionLike[]; live?: boolean } | undefined
   agent?: string
   modelsSource?: string
   busyId?: string | null
+  /** Live session mode from the agent (e.g. plan ↔ act), when reported. */
+  mode?: { id: string; modes: Array<{ id: string; name?: string }> }
   onChange: (id: string, value: string) => void
 }) {
   void agent // no per-agent filtering: every advertised choice stays offered
@@ -269,6 +272,9 @@ export function ComposerControls({
         currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
         onChange={onChange}
       />
+      {mode && mode.modes.length > 0 ? (
+        <SessionModeChip mode={mode} onChange={(value) => onChange('mode', value)} />
+      ) : null}
       {ordered.map((option) => (
         <InlineOptionChip key={option.id} option={option} busy={busyId === option.id} onChange={(value) => onChange(option.id, value)} />
       ))}
@@ -395,6 +401,86 @@ export function PermissionChip({
         </DropdownList>
       ) : null}
     </div>
+  )
+}
+
+/* ── Session mode chip (plan / act) ─────────────────────────────────────── */
+
+/**
+ * The agent's working mode — e.g. "plan" (think and propose) vs "act"
+ * (execute changes). Populated by `mode_changed` events; the agent declares
+ * its available modes at runtime, so this chip only appears when there is a
+ * choice to make. Selecting a mode sends a `mode` config update.
+ */
+function SessionModeChip({
+  mode,
+  onChange,
+}: {
+  mode: { id: string; modes: Array<{ id: string; name?: string }> }
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const current = mode.modes.find((m) => m.id === mode.id)
+  const label = current?.name ?? current?.id ?? mode.id
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        title={`Session mode: ${label}`}
+        className={cn(
+          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
+          'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
+          open && 'bg-hover border-line-strong',
+        )}
+      >
+        <ModeIcon size={12} className="shrink-0 text-blue-400" />
+        <span className="max-w-[100px] truncate font-medium">{label}</span>
+        <ChevronDown size={11} className={cn('shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open ? (
+        <DropdownList anchorRef={ref} onClose={() => setOpen(false)} width={220}>
+          <div role="listbox" className="p-1">
+            {mode.modes.map((option) => {
+              const active = option.id === mode.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => {
+                    onChange(option.id)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2.5 px-2.5 py-2 text-left transition-colors',
+                    active ? 'bg-hover' : 'hover:bg-hover-2',
+                  )}
+                >
+                  <Check size={11} strokeWidth={2.6} className={cn('shrink-0', active ? 'text-emerald-400' : 'text-transparent')} />
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{option.name ?? option.id}</span>
+                </button>
+              )
+            })}
+          </div>
+        </DropdownList>
+      ) : null}
+    </div>
+  )
+}
+
+function ModeIcon({ size, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size ?? 14} height={size ?? 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
   )
 }
 

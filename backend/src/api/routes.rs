@@ -168,6 +168,24 @@ pub async fn get_session_transcripts(
             let events = state.session_manager.get_agent_events(&id).await.unwrap_or_default();
             let terminal_output = state.session_manager.get_terminal_output(&id).await.unwrap_or_default();
             let agent_states = state.session_manager.get_agent_states(&id).await.unwrap_or_default();
+            // Pending questions/approvals are not in the event log (question_started
+            // is broadcast-only), so attach them here to survive a replay.
+            let questions = state.session_manager.get_pending_questions(&id).await.unwrap_or_default();
+            let approvals: Vec<serde_json::Value> = state
+                .session_manager
+                .get_pending_approvals(&id)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|approval| {
+                    json!({
+                        "id": approval.id,
+                        "prompt": approval.prompt,
+                        "options": approval.options,
+                        "risk_level": approval.risk_level,
+                    })
+                })
+                .collect();
             tracing::debug!("[AgentDeck][Persistence] Loaded {} legacy transcripts, {} messages, {} events for session={}", transcripts.len(), messages.len(), events.len(), id);
             Json(json!({
                 "session_id": id,
@@ -176,6 +194,8 @@ pub async fn get_session_transcripts(
                 "events": events,
                 "terminal_output": terminal_output,
                 "agent_states": agent_states,
+                "questions": questions,
+                "approvals": approvals,
                 "total": transcripts.len(),
             }))
         }

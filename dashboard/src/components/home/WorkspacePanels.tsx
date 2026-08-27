@@ -1,22 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  AlertCircle,
-
-  ChevronDown,
-  ExternalLink,
-  FolderGit2,
-  GitBranch,
-  Globe2,
-  LoaderCircle,
-  Play,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Search,
-  TerminalSquare,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { ChevronDown, ExternalLink, FolderGit2, GitBranch, Globe2, LoaderCircle, Play, Plus, RefreshCw, RotateCcw, Search, TerminalSquare, Trash2, X } from 'lucide-react'
 import { Button, Chip, Dots, EmptyState, IconButton, StatusPill, TextField } from '../ui'
 import { getConversation, useStore } from '@/store'
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
@@ -24,6 +7,14 @@ import { relativeTime, cn } from '@/lib/format'
 import { sessionWorkspaceApi, workspaceApi, type WorkspaceOverview } from '@/lib/api'
 import type { Provider } from '@/types/provider'
 import type { Session } from '@/types/session'
+import {
+  DiffLayer,
+  GitError,
+  GitSection,
+  GitSummary,
+  PanelHeader,
+  PanelScroll,
+} from '../shared/GitComponents'
 
 export type WorkspaceTab = 'sessions' | 'agents' | 'terminals' | 'browser' | 'tasks' | 'git'
 
@@ -56,35 +47,6 @@ export function WorkspacePanel({ tab, actions }: { tab: WorkspaceTab; actions: P
     case 'sessions':
       return null
   }
-}
-
-function PanelHeader({
-  eyebrow,
-  title,
-  detail,
-  action,
-}: {
-  eyebrow: string
-  title: string
-  detail?: string
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="border-b border-white/[0.07] px-3 pb-3 pt-3">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{eyebrow}</p>
-          <h2 className="mt-1 text-[14px] font-semibold tracking-[-0.01em] text-white">{title}</h2>
-          {detail ? <p className="mt-1 text-[11px] leading-[1.5] text-zinc-500">{detail}</p> : null}
-        </div>
-        {action}
-      </div>
-    </div>
-  )
-}
-
-function PanelScroll({ children }: { children: React.ReactNode }) {
-  return <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">{children}</div>
 }
 
 function ProviderBadge({ provider }: { provider: Provider }) {
@@ -406,7 +368,7 @@ function GitPanel() {
         {projects.length === 0 ? <p className="px-2 py-2 text-[10px] text-zinc-500">No session has a project folder yet.</p> : <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2"><GitBranch size={13} className="text-zinc-500" /><select aria-label="Git project" value={project} onChange={(event) => setProject(event.target.value)} className="min-w-0 flex-1 bg-transparent font-mono text-[10px] text-zinc-300 outline-none">{projects.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select><ChevronDown size={12} className="text-zinc-500" /></label>}
       </div>
       <PanelScroll>
-        {error ? <div className="mb-2 flex gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-2 text-[10px] text-red-300"><AlertCircle size={13} className="shrink-0" />{error}</div> : null}
+        {error ? <GitError message={error} /> : null}
         {loading && !overview ? <div className="p-4 text-center"><Dots label="Reading git state…" /></div> : !project ? <EmptyState title="Choose a project" description="Git tools become available when a session has a project folder." /> : <div className="space-y-3">
           <GitSummary overview={overview} files={files} />
           <GitSection title={`Changes${files.length ? ` · ${files.length}` : ''}`}>
@@ -420,14 +382,3 @@ function GitPanel() {
   )
 }
 
-function GitSummary({ overview, files }: { overview?: WorkspaceOverview; files: Array<{ path: string; status?: string }> }) {
-  const added = files.filter((file) => file.status?.includes('A') || file.status?.includes('?')).length
-  const modified = files.filter((file) => file.status?.includes('M')).length
-  return <div className="grid grid-cols-3 gap-1.5"><div className="rounded-lg bg-white/[0.04] p-2"><p className="font-mono text-[9px] uppercase text-zinc-600">Branch</p><p className="mt-1 truncate font-mono text-[10px] text-zinc-300">{(overview as (WorkspaceOverview & { branch?: string }) | undefined)?.branch ?? 'detached'}</p></div><div className="rounded-lg bg-white/[0.04] p-2"><p className="font-mono text-[9px] uppercase text-zinc-600">Added</p><p className="mt-1 font-mono text-[12px] text-emerald-400">+{added}</p></div><div className="rounded-lg bg-white/[0.04] p-2"><p className="font-mono text-[9px] uppercase text-zinc-600">Modified</p><p className="mt-1 font-mono text-[12px] text-orange-400">{modified}</p></div></div>
-}
-
-function GitSection({ title, children }: { title: string; children: React.ReactNode }) { return <section><h3 className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">{title}</h3>{children}</section> }
-
-function DiffLayer({ path, diff, onClose }: { path: string; diff: string; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-2 backdrop-blur-sm sm:items-center sm:p-8" role="dialog" aria-modal="true"><div className="flex max-h-[88dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#19191b] shadow-2xl"><div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5"><span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-200">{path}</span><button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-white">Close</button></div><pre className="scroll-thin min-h-0 flex-1 overflow-auto p-3 font-mono text-[10px] leading-[1.6] text-zinc-300">{diff.split('\n').map((line, index) => <span key={index} className={cn('block', line.startsWith('+') && 'bg-emerald-500/[0.08] text-emerald-300', line.startsWith('-') && 'bg-red-500/[0.08] text-red-300', line.startsWith('@@') && 'text-sky-300')}>{line || ' '}</span>)}</pre></div></div>
-}

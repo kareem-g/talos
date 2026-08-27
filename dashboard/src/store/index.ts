@@ -237,6 +237,37 @@ export const useStore = create<StoreState>((set, get) => ({
       }
       for (const chunk of history.terminal_output) appendTerminal(conversation, chunk.data)
 
+      // Hydrate pending questions/approvals that were still open when the
+      // session was last active. Live ones arrive via question_started frames
+      // (handled in events.ts); these are the ones that would otherwise be lost
+      // on replay because question_started is not persisted to the event log.
+      if (history.questions?.length) {
+        const { messages } = conversation
+        const turn = messages[messages.length - 1]
+        if (turn) {
+          for (const q of history.questions) {
+            if (turn.parts.some((p) => p.kind === 'approval' && p.requestId === q.question_id)) continue
+            const optionData = q.options.map((o) => ({
+              value: o.id,
+              label: o.label,
+              description: o.description,
+              allowsCustomText: o.allows_custom_text,
+            }))
+            turn.parts.push({
+              kind: 'approval',
+              requestId: q.question_id,
+              prompt: q.question || q.title || 'The agent is asking a question.',
+              options: optionData.map((o) => o.label),
+              optionData,
+              multiSelect: q.selection_mode === 'multiple',
+              allowsCustomText: optionData.some((o) => o.allowsCustomText),
+              header: q.title,
+              isQuestion: true,
+            })
+          }
+        }
+      }
+
       // A turn left streaming by history (the agent stopped while we were away)
       // would spin forever. The session status is the authority on whether work
       // is still happening.
@@ -461,7 +492,25 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   respondToApproval(sessionId, requestId, decision, meta) {
-    socket.respondToApproval(sessionId, requestId, decision, meta)
+    // Question cards (AskUserQuestion) are answered via QuestionAnswer, not the
+    // permission broker. Detect the card by its requestId and route accordingly.
+    const conversation = getConversation(sessionId)
+    const isQuestion = conversation.messages.some((message) =>
+      message.parts.some((part) => part.kind === 'approval' && part.requestId === requestId && part.isQuestion),
+    )
+    if (isQuestion) {
+      // Multi-select submits a JSON array; single select submits a bare string.
+      let selectedOptions = [decision]
+      try {
+        const parsed = JSON.parse(decision)
+        if (Array.isArray(parsed)) selectedOptions = parsed.map((v) => String(v))
+      } catch {
+        /* decision is a bare string — keep the single-element list */
+      }
+      socket.answerQuestion(requestId, selectedOptions, meta?.customText)
+    } else {
+      socket.respondToApproval(sessionId, requestId, decision, meta)
+    }
   },
 
   dismissNotice(sessionId) {

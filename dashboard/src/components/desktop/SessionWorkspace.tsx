@@ -1,20 +1,33 @@
+/**
+ * SessionWorkspace — the OpenCode-style 4-zone agentic IDE layout.
+ *
+ *   TopBar (40px)  — identity, project, status, timer, connection.
+ *   LeftSidebar    — project selector, branch+stats, session navigator (~280px).
+ *   Center         — Chat|Terminal tabs, the conversation, the composer.
+ *   RightGitPanel  — always-visible git tools (~380px).
+ *
+ * The whole thing is a single grid. The center column is fluid; the sidebars
+ * are fixed. Every data source here is real and daemon-backed — git state,
+ * session state, conversation events, terminal bytes. Nothing is mocked.
+ *
+ * State that drives the surface (tab, editing title, runtime tick, outline,
+ * scroll-to-section, keyboard shortcuts) is preserved from the prior version;
+ * only the layout scaffold changed.
+ */
+
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { IconButton, Notice, Segmented, StatusPill } from '../ui'
+import { Segmented } from '../ui'
 import { useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
-import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
+import { sessionUIState } from '@/lib/sessionState'
 import { Timeline } from '../Timeline'
 import { StateZone } from '../StateZone'
 import { TerminalView } from '../TerminalView'
-import { RightRail, RIGHT_TABS, TAB_ICONS, type RightTab } from './session/RightRail'
-import { WorkspaceSwitcher } from './session/WorkspaceSwitcher'
-
-const RIGHT_TAB_KEY = 'agentdesk-right-tab'
-
-const LEFT_KEY = 'agentdeck-desktop-left-collapsed'
-const RIGHT_KEY = 'agentdeck-desktop-right-collapsed'
+import { TopBar } from './TopBar'
+import { LeftSidebar } from './LeftSidebar'
+import { RightGitPanel } from './RightGitPanel'
 
 const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
 
@@ -70,56 +83,15 @@ export function SessionWorkspace({
   const toggleStar = useStore((s) => s.toggleStar)
   const starred = useStore((s) => s.isStarred(session.id))
   const [tab, setTab] = useState<'chat' | 'terminal'>('chat')
-  // Keyboard shortcut: Cmd/Ctrl+` toggles the right panel's terminal/context tab.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === '`') {
-        e.preventDefault()
-        setRightCollapsed(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
-  // Keyboard shortcut: Cmd/Ctrl+D toggles star
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault()
-        toggleStar(session.id)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [session.id, toggleStar])
-
-  const [leftCollapsed, setLeftCollapsed] = useState(() => {
-    try {
-      // The switcher is valuable on wide screens; keep it open by default.
-      return localStorage.getItem(LEFT_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const [rightCollapsed, setRightCollapsed] = useState(() => {
-    try {
-      const v = localStorage.getItem(RIGHT_KEY)
-      if (v !== null) return v === '1'
-      // default collapsed on 1024–1280 per spec
-      return window.matchMedia('(max-width: 1280px)').matches
-    } catch {
-      return false
-    }
-  })
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(session.name)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const [restartingForConfig, setRestartingForConfig] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
 
-  /** Apply a pending (next-run) config immediately: restart the agent. */
   async function restartForConfig() {
     setRestartingForConfig(true)
     try {
@@ -129,21 +101,6 @@ export function SessionWorkspace({
       setRestartingForConfig(false)
     }
   }
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LEFT_KEY, leftCollapsed ? '1' : '0')
-    } catch {
-      /* storage may be unavailable */
-    }
-  }, [leftCollapsed])
-  useEffect(() => {
-    try {
-      localStorage.setItem(RIGHT_KEY, rightCollapsed ? '1' : '0')
-    } catch {
-      /* storage may be unavailable */
-    }
-  }, [rightCollapsed])
 
   useEffect(() => {
     void openSession(session.id)
@@ -167,12 +124,8 @@ export function SessionWorkspace({
 
   const provider = useMemo(() => providers.find((p) => p.id === session.agent), [providers, session.agent])
   const uiState = sessionUIState(session, conversation, connection)
-  const stateDisplay = uiStateDisplay(uiState)
 
-  // Live detail for the status pill: what the agent is doing right now.
-  const activityDetail = conversation.activity?.detail
-
-  // Header runtime ticks only while something is actually happening.
+  // Live runtime tick.
   const live = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
   const now = useNowTick(live)
   const runtime = useMemo(() => {
@@ -181,10 +134,7 @@ export function SessionWorkspace({
     return formatRuntime(Math.max(0, end - start))
   }, [session.created_at, session.updated_at, live, now])
 
-  // Outline: one entry per message, recomputed each render. Deliberately NOT
-  // useMemo'd on `conversation.messages` — that array is mutated in place by
-  // the reducer, so its reference never changes and a memo here captured the
-  // empty array forever ("No sections yet." with a full transcript).
+  // Outline: one entry per message.
   const outline = conversation.messages.map((m, idx) => {
     const preview =
       m.parts
@@ -206,139 +156,49 @@ export function SessionWorkspace({
     target.scrollTo({ top: ratio * Math.max(0, max), behavior: 'smooth' })
   }
 
-  // Keyboard: Esc closes panels (right first then left)
+  // Keyboard: Cmd/Ctrl+` focuses the terminal tab.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (!rightCollapsed) setRightCollapsed(true)
-        else if (!leftCollapsed) setLeftCollapsed(true)
+      if ((e.metaKey || e.ctrlKey) && e.key === '`') {
+        e.preventDefault()
+        setTab((t) => (t === 'chat' ? 'terminal' : 'chat'))
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [leftCollapsed, rightCollapsed])
+  }, [])
 
-  /**
-   * Workspace-scoped switcher: only sessions from the same project (workspace)
-   * as the current session. This keeps the sidebar focused — the image reference
-   * shows each workspace's own session list, not the whole app. Inbox sessions
-   * (project == null) only see other inbox sessions.
-   */
+  // Keyboard: Cmd/Ctrl+D toggles star.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        toggleStar(session.id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [session.id, toggleStar])
+
+  function handleNewSession() {
+    const state = useStore.getState()
+    const prov = state.providers.find((p) => p.state === 'ready') ?? state.providers[0]
+    if (!prov) return
+    void state.createSession({ agent: prov.id }).then((s) => onOpenSession?.(s.id))
+  }
+
+  function focusComposer() {
+    setTab('chat')
+    // The composer textarea is rendered by StateZone → Composer. Query it after the tab flips.
+    requestAnimationFrame(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')
+      ta?.focus()
+    })
+  }
+
   return (
     <div className="flex h-dvh min-w-0 flex-1 flex-col bg-canvas text-ink">
-      {/* ── Header: one compact row ─────────────────────────────────────── */}
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 bg-canvas px-2">
-        <IconButton label="Back to Mission Control" onClick={onBack} className="-ml-1 size-8">
-          <BackIcon />
-        </IconButton>
-        <span className="h-5 w-px bg-line" aria-hidden />
-        {/* Agent identity dot + provider name */}
-        <span className="hidden min-w-0 items-center gap-1.5 sm:flex">
-          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hueFor(session.agent) }} aria-hidden />
-          <span className="shrink-0 text-[12px] font-medium text-ink-2">{provider?.name ?? session.agent}</span>
-          <span className="text-[11px] text-ink-3">·</span>
-        </span>
-        <div className="min-w-0 flex-1">
-          {editingTitle ? (
-            <input
-              ref={titleInputRef}
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={() => setEditingTitle(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setEditingTitle(false)
-                if (e.key === 'Escape') {
-                  setTitleDraft(session.name)
-                  setEditingTitle(false)
-                }
-              }}
-              className="w-full max-w-[320px] rounded-control border border-line bg-field px-2 py-0.5 text-[12px] font-medium outline-none focus:border-line-strong"
-            />
-          ) : (
-            <div className="flex min-w-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingTitle(true)}
-                title="Rename session"
-                className="truncate text-left text-[12.5px] font-medium tracking-[-0.01em] hover:underline"
-              >
-                {session.name}
-              </button>
-              {session.project ? (
-                <span className="hidden truncate font-mono text-[10.5px] text-ink-3 md:inline">
-                  {session.project.split('/').pop() ?? session.project}
-                  {session.branch ? ` : ${session.branch}` : ''}
-                </span>
-              ) : null}
-            </div>
-          )}
-        </div>
-        <StatusPill
-          label={stateDisplay.label}
-          tone={stateDisplay.tone}
-          pulse={stateDisplay.pulse}
-          detail={activityDetail}
-        />
-        <span className="hidden shrink-0 font-mono text-[10px] tabular-nums text-ink-3 lg:inline">{runtime}</span>
-        {/* Connection: a named dot, tooltip carries the state */}
-        <span
-          role="status"
-          title={connection === 'connected' ? 'Connected' : connectionLabelShort(connection)}
-          className={cn('size-2 shrink-0 rounded-full', connection === 'connected' ? 'bg-green' : connection === 'reconnecting' || connection === 'connecting' ? 'bg-orange breathe' : 'bg-red')}
-          aria-hidden
-        />
-        <div className="flex items-center gap-0.5">
-          <IconButton label={leftCollapsed ? 'Show session list' : 'Hide session list'} onClick={() => setLeftCollapsed((v) => !v)} className="size-8">
-            <PanelLeftIcon collapsed={leftCollapsed} />
-          </IconButton>
-          <IconButton label={rightCollapsed ? 'Show context panel' : 'Hide context panel'} onClick={() => setRightCollapsed((v) => !v)} className="size-8">
-            <PanelRightIcon collapsed={rightCollapsed} />
-          </IconButton>
-          <IconButton
-            label={starred ? 'Unstar session' : 'Star session'}
-            onClick={() => toggleStar(session.id)}
-            className={cn('size-8', starred ? 'text-orange' : '')}
-          >
-            {starred ? <StarFilled /> : <StarOutline />}
-          </IconButton>
-          {/* Overflow menu keeps destructive/rare actions reachable but quiet. */}
-          <div ref={menuRef} className="relative">
-            <IconButton label="More actions" onClick={() => setMenuOpen((v) => !v)} className={cn('size-8', menuOpen ? 'bg-hover-2 text-ink' : '')}>
-              <DotsIcon />
-            </IconButton>
-            {menuOpen ? (
-              <div
-                role="menu"
-                className="animate-up absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-card border border-line bg-surface shadow-overlay"
-              >
-                <MenuButton label="Copy link" onClick={() => {
-                  setMenuOpen(false)
-                  void navigator.clipboard?.writeText(window.location.href)
-                }} />
-                <MenuButton label="Export JSON" onClick={() => {
-                  setMenuOpen(false)
-                  const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `${session.name}.json`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                }} />
-                <div className="border-t border-line" aria-hidden />
-                <MenuButton label="Delete session" destructive onClick={async () => {
-                  setMenuOpen(false)
-                  if (confirm(`Delete "${session.name}"?`)) {
-                    await deleteSession(session.id)
-                    onBack()
-                  }
-                }} />
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </header>
-
+      {/* ── Notice banner ─────────────────────────────────────────────────── */}
       {notice ? (
         <Notice
           message={notice}
@@ -351,20 +211,124 @@ export function SessionWorkspace({
         />
       ) : null}
 
-      <div className="flex min-h-0 flex-1">
-        {/* ── Left rail — workspaces-style switcher ──────────────────────── */}
-        <aside
-          className={cn(
-            'flex shrink-0 flex-col border-r border-white/[0.07] bg-[#0a0a0c] text-zinc-100 transition-[width] duration-200 motion-reduce:transition-none',
-            leftCollapsed ? 'w-0 overflow-hidden border-r-0' : 'w-[264px]',
-          )}
-          aria-hidden={leftCollapsed}
-        >
-          <WorkspaceSwitcher session={session} onSelect={(id) => onOpenSession?.(id)} />
-        </aside>
+      {/* ── Top bar (40px) ────────────────────────────────────────────────── */}
+      <TopBar
+        session={session}
+        uiState={uiState}
+        connection={connection}
+        runtime={runtime}
+        onNewSession={handleNewSession}
+        onBack={onBack}
+      />
 
-        {/* ── Center ─────────────────────────────────────────────────────── */}
-        <main className="flex min-w-0 flex-1 flex-col bg-canvas">
+      {/* ── 4-zone body ───────────────────────────────────────────────────── */}
+      <div className="flex min-h-0 flex-1">
+        {/* Left sidebar (~280px) */}
+        <LeftSidebar
+          session={session}
+          onSelect={(id) => onOpenSession?.(id)}
+          searchRef={searchRef}
+        />
+
+        {/* Center — fluid */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+          {/* Session title row + tabs */}
+          <div className="flex shrink-0 items-center gap-2 border-b border-line/40 bg-inset px-3 py-1.5">
+            {/* Agent identity dot + provider name */}
+            <span className="hidden items-center gap-1.5 sm:flex">
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hueFor(session.agent) }} aria-hidden />
+              <span className="shrink-0 text-[12px] font-medium text-ink-2">{provider?.name ?? session.agent}</span>
+            </span>
+
+            {/* Editable session title */}
+            <div className="min-w-0 flex-1">
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={() => setEditingTitle(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setEditingTitle(false)
+                    if (e.key === 'Escape') {
+                      setTitleDraft(session.name)
+                      setEditingTitle(false)
+                    }
+                  }}
+                  className="w-full max-w-[320px] rounded-control border border-line bg-field px-2 py-0.5 text-[12px] font-medium outline-none focus:border-line-strong"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditingTitle(true)}
+                  title="Rename session"
+                  className="truncate text-left text-[12.5px] font-medium tracking-[-0.01em] hover:underline"
+                >
+                  {session.name}
+                </button>
+              )}
+            </div>
+
+            {/* Star + overflow menu */}
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => toggleStar(session.id)}
+                title={starred ? 'Unstar session' : 'Star session'}
+                className={cn('flex size-7 items-center justify-center rounded-full transition-colors', starred ? 'text-orange' : 'text-ink-3 hover:bg-hover-2 hover:text-ink')}
+              >
+                {starred ? <StarFilled /> : <StarOutline />}
+              </button>
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  title="More actions"
+                  className={cn('flex size-7 items-center justify-center rounded-full transition-colors', menuOpen ? 'bg-hover-2 text-ink' : 'text-ink-3 hover:bg-hover-2 hover:text-ink')}
+                >
+                  <DotsIcon />
+                </button>
+                {menuOpen ? (
+                  <div role="menu" className="animate-up absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-card border border-line bg-surface shadow-overlay">
+                    <MenuButton
+                      label="Copy link"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        void navigator.clipboard?.writeText(window.location.href)
+                      }}
+                    />
+                    <MenuButton
+                      label="Export JSON"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `${session.name}.json`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                    />
+                    <div className="border-t border-line" aria-hidden />
+                    <MenuButton
+                      label="Delete session"
+                      destructive
+                      onClick={async () => {
+                        setMenuOpen(false)
+                        if (confirm(`Delete "${session.name}"?`)) {
+                          await deleteSession(session.id)
+                          onBack()
+                        }
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {/* Tab switcher + jump-to */}
           <div className="flex shrink-0 items-center gap-2 border-b border-line/40 bg-inset px-3 py-1.5">
             <Segmented
               value={tab}
@@ -396,13 +360,17 @@ export function SessionWorkspace({
               </select>
             ) : null}
           </div>
+
+          {/* Chat / terminal surface */}
           <div ref={centerRef} className="flex min-h-0 flex-1 flex-col bg-canvas">
             {tab === 'chat' ? (
               <>
-                <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-                  <Timeline conversation={conversation} onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)} />
-                </div>
-                {/* One state-aware surface: composer, resume, retry, or pointer. */}
+                <Timeline
+                  conversation={conversation}
+                  onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)}
+                  project={session.project ?? undefined}
+                  sessionId={session.id}
+                />
                 <StateZone
                   session={session}
                   conversation={conversation}
@@ -427,106 +395,21 @@ export function SessionWorkspace({
           </div>
         </main>
 
-        {/* ── Right rail — icon tabs + main panel (desktop) ──────────────── */}
-        <aside
-          className={cn(
-            'hidden shrink-0 overflow-hidden border-l border-white/[0.07] bg-[#0a0a0c] text-zinc-100 transition-[width] duration-200 motion-reduce:transition-none md:block',
-            rightCollapsed ? 'w-0 border-l-0' : '',
-          )}
-          aria-hidden={rightCollapsed}
-          style={{ width: rightCollapsed ? 0 : undefined }}
-        >
-          {!rightCollapsed ? (
-            <RightRail session={session} onOpenSession={(id) => onOpenSession?.(id)} />
-          ) : null}
-        </aside>
+        {/* Right git panel (~380px, always visible) */}
+        <RightGitPanel
+          session={session}
+          notify={(message, tone) => {
+            // Surface git errors as session notices so they reach the user even
+            // if the panel is scrolled. Ok messages are transient (the panel
+            // re-renders on success), so we don't spam the notice banner.
+            if (tone === 'error') {
+              useStore.setState((state) => ({ notices: { ...state.notices, [session.id]: message } }))
+            }
+          }}
+          onFocusComposer={focusComposer}
+          onFocusSearch={() => searchRef.current?.focus()}
+        />
       </div>
-
-      {/* ── Mobile: right sidebar collapses into a bottom sheet ─────────── */}
-      <MobileCommandSheet session={session} onOpenSession={onOpenSession} />
-    </div>
-  )
-}
-
-/** Small-screen variant: a drag-up bottom sheet with a horizontal icon tab bar. */
-function MobileCommandSheet({
-  session,
-  onOpenSession,
-}: {
-  session: Session
-  onOpenSession?: (id: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<RightTab>(() => {
-    try {
-      const saved = localStorage.getItem(RIGHT_TAB_KEY) as RightTab | null
-      return saved && RIGHT_TABS.some((t) => t.id === saved) ? saved : 'sessions'
-    } catch {
-      return 'sessions'
-    }
-  })
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(RIGHT_TAB_KEY, tab)
-    } catch {
-      /* storage may be unavailable */
-    }
-  }, [tab])
-
-  return (
-    <div className="md:hidden">
-      {/* Handle bar pinned above the composer area */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="fixed inset-x-0 bottom-0 z-[60] flex h-6 items-center justify-center border-t border-white/[0.07] bg-[#0a0a0c]/95 backdrop-blur"
-        aria-label={open ? 'Close command sheet' : 'Open command sheet'}
-      >
-        <span className="h-1 w-10 rounded-full bg-zinc-600" aria-hidden />
-      </button>
-
-      {open ? (
-        <div
-          className="animate-up fixed inset-x-0 bottom-0 z-[61] flex h-[70dvh] flex-col rounded-t-xl border-t border-white/10 bg-[#0d0d10] text-zinc-100 shadow-overlay"
-          role="dialog"
-          aria-label="Agent command center"
-        >
-          {/* Horizontal icon tab bar */}
-          <div className="flex shrink-0 items-center justify-around gap-1 border-b border-white/[0.07] px-2 py-2">
-            {RIGHT_TABS.map((entry) => {
-              const Icon = TAB_ICONS[entry.id]
-              const active = tab === entry.id
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setTab(entry.id)}
-                  aria-label={entry.label}
-                  className={cn(
-                    'flex size-11 items-center justify-center rounded-xl transition',
-                    active ? 'bg-white/10 text-white' : 'text-zinc-500',
-                  )}
-                >
-                  <Icon size={19} strokeWidth={1.7} />
-                </button>
-              )
-            })}
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="Close"
-              className="ml-auto rounded-lg p-2 text-zinc-500"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <RightRail session={session} onOpenSession={(id) => onOpenSession?.(id)} initialTab={tab} onTabChange={setTab} />
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -546,52 +429,6 @@ function MenuButton({ label, onClick, destructive }: { label: string; onClick: (
     >
       {label}
     </button>
-  )
-}
-
-function connectionLabelShort(state: string): string {
-  switch (state) {
-    case 'idle':
-    case 'offline':
-      return 'Offline'
-    case 'connecting':
-      return 'Connecting…'
-    case 'reconnecting':
-      return 'Reconnecting…'
-    case 'disconnected':
-      return 'Disconnected'
-    case 'unauthorized':
-      return 'Not paired'
-    case 'error':
-      return 'Connection error'
-    default:
-      return 'Connected'
-  }
-}
-
-function BackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M15 18l-6-6 6-6" />
-    </svg>
-  )
-}
-
-function PanelLeftIcon({ collapsed }: { collapsed: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d={collapsed ? 'M9 3v18' : 'M9 3v18M9 8l-2 2 2 2'} />
-    </svg>
-  )
-}
-
-function PanelRightIcon({ collapsed }: { collapsed: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d={collapsed ? 'M15 3v18' : 'M15 3v18M15 8l2 2-2 2'} />
-    </svg>
   )
 }
 
@@ -617,6 +454,54 @@ function DotsIcon() {
       <circle cx="5" cy="12" r="1.8" />
       <circle cx="12" cy="12" r="1.8" />
       <circle cx="19" cy="12" r="1.8" />
+    </svg>
+  )
+}
+
+/** Dismissible inline notice. */
+function Notice({
+  message,
+  onDismiss,
+  action,
+}: {
+  message: string
+  onDismiss: () => void
+  action?: { label: string; onClick: () => void; busy?: boolean }
+}) {
+  return (
+    <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-orange/20 bg-orange/[0.04] px-3.5 py-2 text-[11.5px] leading-[1.6] text-ink">
+      <AlertIcon size={13} className="mt-[2px] shrink-0 text-orange" />
+      <span className="min-w-0 flex-1">{message}</span>
+      {action ? (
+        <button
+          type="button"
+          onClick={action.onClick}
+          disabled={action.busy}
+          className="-m-1 shrink-0 rounded-md bg-ink px-2 py-0.5 text-[11px] font-medium text-canvas transition-opacity hover:opacity-85 disabled:opacity-50"
+        >
+          {action.busy ? 'Restarting…' : action.label}
+        </button>
+      ) : null}
+      <button type="button" onClick={onDismiss} aria-label="Dismiss" className="-m-1 shrink-0 p-1 text-ink-3 transition-colors hover:text-ink">
+        <Close size={12} />
+      </button>
+    </div>
+  )
+}
+
+function AlertIcon({ size, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size ?? 14} height={size ?? 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 9v4M12 17h.01" />
+      <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+    </svg>
+  )
+}
+
+function Close({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6L6 18M6 6l12 12" />
     </svg>
   )
 }

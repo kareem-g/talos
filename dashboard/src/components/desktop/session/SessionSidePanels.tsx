@@ -8,6 +8,7 @@
  * Every piece of data comes from the local daemon; nothing here is mocked.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { File, Folder } from 'lucide-react'
 import { workspaceApi } from '@/lib/api'
 import type { DirListing, WorkspaceOverview } from '@/lib/api'
 import { useStore } from '@/store'
@@ -186,7 +187,8 @@ export function FilesPanel({ session }: { session: Session }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await workspaceApi.dirs(path || undefined)
+      // files=1: list regular files too, not just directories.
+      const result = await workspaceApi.dirs(path || undefined, true)
       setListing(result)
       if (result.exists) setCwd(result.path)
     } catch (cause) {
@@ -291,9 +293,11 @@ export function FilesPanel({ session }: { session: Session }) {
             onClick={() => (entry.dir ? void load(entry.path) : void openFile(entry))}
             className="flex w-full items-center gap-2 rounded-control px-1.5 py-1 text-left hover:bg-hover-2"
           >
-            <span className="w-4 shrink-0 text-center text-[11px]" aria-hidden>
-              {entry.dir ? <span className="text-accent">▸</span> : <span className="text-ink-3">·</span>}
-            </span>
+            {entry.dir ? (
+              <Folder size={13} className="shrink-0 text-accent/80" aria-hidden />
+            ) : (
+              <File size={13} className="shrink-0 text-ink-3" aria-hidden />
+            )}
             <span className={cn('min-w-0 flex-1 truncate font-mono text-[11.5px]', entry.dir ? 'text-ink' : 'text-ink-2')}>
               {entry.name}
             </span>

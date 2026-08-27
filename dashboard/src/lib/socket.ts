@@ -227,6 +227,14 @@ class SocketClient {
     })
   }
 
+  /** Answer an AskUserQuestion tool call that is waiting on the user. */
+  answerQuestion(questionId: string, selectedOptions: string[], customText?: string): void {
+    this.send({
+      type: 'QuestionAnswer',
+      payload: { question_id: questionId, selected_options: selectedOptions, custom_text: customText },
+    })
+  }
+
   private handleFrame(frame: IncomingFrame): void {
     if (frame.type === 'Authenticated') {
       const serverLast = frame.payload.last_event_id
