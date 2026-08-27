@@ -15,6 +15,7 @@
  * string and adding one must not require a frontend change.
  */
 
+import { describeApproval } from '@/lib/approvals'
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
 import type {
   ApprovalOptionData,
@@ -343,6 +344,12 @@ export function applyAgentEvent(
     case 'tool_started':
     case 'tool_activity': {
       const turn = currentTurn(conversation, event)
+      // AskUserQuestion is rendered by its approval/question card, which carries
+      // the actual question and options. The raw JSON tool card would duplicate
+      // that — and the raw `{"questions":[...]}` envelope reads as noise — so
+      // skip the generic tool card for it entirely.
+      const toolName = strAny(payload, 'tool_name', 'name', 'title')
+      if (toolName && /AskUserQuestion/i.test(toolName)) return false
       // Grok names these id/name; canonical events use tool_id/tool_name.
       const toolId = strAny(payload, 'tool_id', 'toolCallId', 'call_id', 'id') ?? `tool-${event.event_id}`
       // A re-delivered start must not create a second card.
@@ -527,21 +534,52 @@ export function applyAgentEvent(
       ) {
         return false
       }
+      // The backend may send structured answer options two ways:
+      //   1. `option_data` — complete, structured (id/label/description). This is
+      //      the authoritative source; the AskUserQuestion hook populates it.
+      //   2. The prompt may carry an AskUserQuestion JSON envelope (e.g.
+      //      `AskUserQuestion {"questions":[...]}`). Parse it only as a fallback
+      //      when `option_data` is absent — the prompt is truncated to ~220
+      //      chars by the permission path, so it rarely holds every option.
+      const promptText = str(payload, 'prompt') ?? 'The agent is requesting permission.'
+      const payloadOptions = parseApprovalOptions(payload)
+      const fromAskUserQuestion = /AskUserQuestion/i.test(promptText)
+      const approvalView = describeApproval(promptText, stringList(payload, 'options'))
+      const promptParsed = fromAskUserQuestion && approvalView.raw === false && approvalView.options.length > 0
+      const hasStructuredOptions = payloadOptions.length > 0
+      // Prefer payload option_data; fall back to prompt parsing only when needed.
+      const optionData = hasStructuredOptions
+        ? payloadOptions
+        : promptParsed
+          ? approvalView.options.map((o) => ({ value: o.value, label: o.label, description: o.description, allowsCustomText: o.allowsCustomText }))
+          : []
+      const isAskUserQuestion = hasStructuredOptions || promptParsed
       const part: ApprovalPart = {
         kind: 'approval',
         requestId,
-        prompt: str(payload, 'prompt') ?? 'The agent is requesting permission.',
-        options: stringList(payload, 'options'),
+        prompt: isAskUserQuestion
+          ? (hasStructuredOptions ? promptText : (approvalView.question || promptText))
+          : promptText,
+        options: isAskUserQuestion
+          ? optionData.map((o) => o.label).filter((l): l is string => Boolean(l))
+          : stringList(payload, 'options'),
         riskLevel: str(payload, 'risk_level'),
+        header: isAskUserQuestion ? (approvalView.header ?? str(payload, 'prompt')) : undefined,
       }
-      // Structured options: when the agent supplies richer metadata
-      // (labels, descriptions, custom-text flags) carry it through verbatim.
-      const optionData = parseApprovalOptions(payload)
       if (optionData.length > 0) part.optionData = optionData
       const selectionMode = str(payload, 'selection_mode')
-      part.multiSelect = selectionMode === 'multiple' || selectionMode === 'multi'
-      const allowsCustom = payload['allows_custom_text']
-      part.allowsCustomText = allowsCustom === true
+      part.multiSelect =
+        hasStructuredOptions
+          ? (selectionMode === 'multiple' || selectionMode === 'multi')
+          : (approvalView.multiSelect === true || selectionMode === 'multiple' || selectionMode === 'multi')
+      part.allowsCustomText = payload['allows_custom_text'] === true || approvalView.allowsCustomText === true
+      // Do NOT mark as a question here. The MCP permission path uses a UUID
+      // requestId and does not persist to the questions table, so answerQuestion
+      // would fail to find it. Clicking an option routes through
+      // respondToApproval, which records the selected option as the approval
+      // response and unblocks the agent — the correct behavior for this path.
+      // (Only the question_started event sets isQuestion = true.)
+      part.isQuestion = false
       turn.parts.push(part)
       return true
     }
@@ -555,6 +593,33 @@ export function applyAgentEvent(
         for (const part of conversation.messages[index].parts) {
           if (part.kind === 'approval' && part.requestId === requestId) {
             part.decision = str(payload, 'decision') ?? 'resolved'
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    /**
+     * The user answered an AskUserQuestion (via the question_started path).
+     * Resolve the matching approval card so it shows the outcome instead of the
+     * buttons. The card's requestId is the question_id.
+     */
+    case 'question_answered': {
+      const questionId = str(payload, 'question_id')
+      if (!questionId) return false
+      const selected = payload['selected_options']
+      let decision = 'Responded'
+      if (Array.isArray(selected) && selected.length > 0) {
+        decision = selected.map((v) => String(v)).join(', ')
+      } else if (typeof selected === 'string' && selected.trim()) {
+        decision = selected.trim()
+      }
+      for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+        for (const part of conversation.messages[index].parts) {
+          if (part.kind === 'approval' && part.requestId === questionId) {
+            part.decision = decision
+            part.customText = str(payload, 'custom_text') ?? undefined
             return true
           }
         }

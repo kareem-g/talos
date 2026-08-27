@@ -78,6 +78,11 @@ pub struct PermissionOutcome {
     pub reason: String,
     /// Wall time the card was open, for telemetry.
     pub waited_ms: u64,
+    /// For an answered AskUserQuestion, the verbatim answer text (an option
+    /// label, or a JSON array for multi-select). `None` for ordinary permission
+    /// decisions. Informational only: the value Claude actually consumes is
+    /// carried by `input`, which is the `updatedInput` envelope for the tool.
+    pub answer_text: Option<String>,
 }
 
 /// Linux reports an executable that has been replaced in place as
@@ -125,8 +130,14 @@ pub async fn request_user_decision(
         "bash" | "run_command" | "exec"
     );
 
+    // AskUserQuestion is answered through this same broker (the Claude session's
+    // `--permission-prompt-tool`): the decision string the user picks IS the
+    // answer. Auto-modes below must not short-circuit questions, since there is
+    // no default answer to synthesize.
+    let is_question = query.tool_name.eq_ignore_ascii_case("AskUserQuestion");
+
     match permission_mode.as_str() {
-        "full" => {
+        "full" if !is_question => {
             // Auto-allow everything.
             state.permissions.resolve(&request_id, "allow".to_string()).await;
             return PermissionOutcome {
@@ -134,9 +145,10 @@ pub async fn request_user_decision(
                 input: query.input,
                 reason: "Auto-approved (full access)".to_string(),
                 waited_ms: 0,
+                answer_text: None,
             };
         }
-        "auto_edit" => {
+        "auto_edit" if !is_question => {
             if is_file_edit {
                 // Auto-allow file edits.
                 state.permissions.resolve(&request_id, "allow".to_string()).await;
@@ -145,11 +157,12 @@ pub async fn request_user_decision(
                     input: query.input,
                     reason: "Auto-approved (auto-edit mode)".to_string(),
                     waited_ms: 0,
+                    answer_text: None,
                 };
             }
             // Fall through to prompt for non-file edits.
         }
-        "plan" => {
+        "plan" if !is_question => {
             if is_file_edit || is_high_risk {
                 // Auto-deny destructive operations in plan mode.
                 state.permissions.resolve(&request_id, "deny".to_string()).await;
@@ -158,6 +171,7 @@ pub async fn request_user_decision(
                     input: query.input,
                     reason: "Denied (plan mode: read-only)".to_string(),
                     waited_ms: 0,
+                    answer_text: None,
                 };
             }
             // Allow reads/queries.
@@ -167,10 +181,11 @@ pub async fn request_user_decision(
                 input: query.input,
                 reason: "Approved (plan mode: read operation)".to_string(),
                 waited_ms: 0,
+                answer_text: None,
             };
         }
         _ => {
-            // "ask" mode: fall through to normal prompting.
+            // "ask" mode (or a question in any mode): fall through to prompting.
         }
     }
 
@@ -179,7 +194,15 @@ pub async fn request_user_decision(
         Value::String(text) => text.clone(),
         other => other.to_string(),
     };
-    let prompt = format!("{} {}", query.tool_name, truncate(&input_preview, 220));
+    // AskUserQuestion packs the full questions envelope in its input — preserve
+    // it in full so the frontend can extract every option (the regex fallback
+    // parser needs the complete JSON; truncating loses all but the first).
+    let prompt_limit = if query.tool_name.eq_ignore_ascii_case("AskUserQuestion") {
+        4000
+    } else {
+        220
+    };
+    let prompt = format!("{} {}", query.tool_name, truncate(&input_preview, prompt_limit));
     let risk = risk_for(&query.tool_name);
 
     let rx = state.permissions.register(request_id.clone()).await;
@@ -210,16 +233,14 @@ pub async fn request_user_decision(
             "permission_mode": permission_mode,
         }),
     ));
-    state.broadcast.broadcast(WsMessage::ApprovalRequest {
-        session_id: query.session_id.clone(),
-        request: crate::websocket::ApprovalRequest {
-            id: request_id.clone(),
-            prompt: prompt.clone(),
-            options: option_values.clone(),
-            risk_level: crate::websocket::RiskLevel::Medium,
-            timestamp: chrono::Utc::now(),
-        },
-    });
+    // NOTE: Do NOT also emit `WsMessage::ApprovalRequest` here. The broadcast
+    // loop in `daemon/mod.rs` turns that message into a *second*
+    // `permission_required` agent event with the same id but only the bare
+    // `prompt`/`options` (no `option_data`/`selection_mode`), which the
+    // frontend renders as a duplicate card and which `INSERT OR REPLACE` then
+    // clobbers. The agent event above is the canonical, data-complete
+    // broadcast; the trailing `StateChange` already marks the session
+    // `waiting_for_approval`.
     state.broadcast.broadcast(WsMessage::StateChange {
         session_id: query.session_id.clone(),
         state: "waiting_for_approval".to_string(),
@@ -230,6 +251,61 @@ pub async fn request_user_decision(
         .ok()
         .and_then(|result| result.ok())
         .unwrap_or_else(|| "deny".to_string());
+
+    // AskUserQuestion: the decision string IS the user's answer (an option label,
+    // or a JSON array for multi-select). Claude's `--permission-prompt-tool`
+    // contract requires the tool result to be `{behavior:"allow", updatedInput}`,
+    // and the answer rides in `updatedInput.answers` — a map of question text →
+    // answer string (multi-select answers are comma-separated). Claude then
+    // re-invokes AskUserQuestion with that pre-answered input and the tool
+    // returns the answers verbatim, so the model reads "the user answered: …".
+    if is_question {
+        let answer = decision;
+        let answer_string = if query.selection_mode == "multi" {
+            // The card sends multi-select choices as a JSON array string.
+            serde_json::from_str::<Vec<String>>(&answer)
+                .ok()
+                .filter(|values| !values.is_empty())
+                .map(|values| values.join(", "))
+                .unwrap_or_else(|| answer.clone())
+        } else {
+            answer.clone()
+        };
+        let question_text = query
+            .input
+            .get("questions")
+            .and_then(Value::as_array)
+            .and_then(|questions| questions.first())
+            .and_then(|question| question.get("question"))
+            .and_then(Value::as_str)
+            .unwrap_or("Question");
+        let mut updated_input = query.input.clone();
+        if let Some(object) = updated_input.as_object_mut() {
+            object.insert("answers".to_string(), json!({ question_text: answer_string }));
+            object.insert("annotations".to_string(), json!({}));
+        }
+        state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+            &query.session_id,
+            "permission_resolved",
+            json!({
+                "request_id": request_id,
+                "decision": answer,
+                "answer": answer,
+                "source": "claude-stream",
+            }),
+        ));
+        state.broadcast.broadcast(WsMessage::StateChange {
+            session_id: query.session_id.clone(),
+            state: "running".to_string(),
+        });
+        return PermissionOutcome {
+            allowed: true,
+            input: updated_input,
+            reason: "Answered".to_string(),
+            waited_ms: started.elapsed().as_millis() as u64,
+            answer_text: Some(answer),
+        };
+    }
 
     let allowed = decision.starts_with("allow")
         || decision.eq_ignore_ascii_case("yes")
@@ -260,6 +336,7 @@ pub async fn request_user_decision(
             "Denied by user".to_string()
         },
         waited_ms: started.elapsed().as_millis() as u64,
+        answer_text: None,
     }
 }
 
@@ -361,6 +438,11 @@ pub async fn run_mcp_server() -> std::io::Result<()> {
                         // is the JSON decision — no structuredContent, no
                         // isError, nothing else.
                         Ok(outcome) => Ok(json!({
+                            // Claude validates permission results STRICTLY:
+                            // the single text block must carry the JSON
+                            // `{behavior, updatedInput}` decision verbatim —
+                            // both ordinary approvals and AskUserQuestion
+                            // answers (which ride in `updatedInput.answers`).
                             "content": [{ "type": "text", "text": outcome.to_string() }],
                         })),
                         Err(error) => Ok(mcp_error(format!("Bad decision payload: {error}"))),

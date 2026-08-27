@@ -343,6 +343,17 @@ export function RightGitPanel({
 
   useEffect(() => {
     void refresh()
+    // Keep the panel live: git state changes outside the app (agent edits,
+    // CLI commits), so poll occasionally and re-fetch when the tab regains focus.
+    const interval = setInterval(() => void refresh(), 15_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [refresh])
 
   async function checkout(branch: GitBranch) {

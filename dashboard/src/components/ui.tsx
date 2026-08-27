@@ -378,21 +378,30 @@ export function Layer({
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // `onClose` is often an inline closure from the caller (e.g.
+  // `onClose={() => setOpen(false)}`), so its identity changes on every
+  // render. Read it through a ref so this effect can depend only on `open` —
+  // otherwise typing in a child <input> re-runs the effect and yanks focus
+  // back to the panel, making the config fields impossible to fill.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   // Escape closes the topmost layer. Each layer listens; the deepest one is
   // last to mount, so stopping propagation there keeps parents open.
+  // Focus the panel once on open; never re-focus on downstream re-renders.
   useEffect(() => {
     if (!open) return
     function onKeyDown(keyEvent: KeyboardEvent) {
       if (keyEvent.key === 'Escape') {
         keyEvent.stopPropagation()
-        onClose()
+        onCloseRef.current()
       }
     }
     const node = panelRef.current
     node?.focus({ preventScroll: true })
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [open, onClose])
+  }, [open])
 
   // Prevent background scroll while any layer is open.
   useEffect(() => {

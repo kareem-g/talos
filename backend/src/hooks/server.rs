@@ -52,15 +52,33 @@ pub async fn handle_permission_request(
         .to_string();
     let input = body.get("input").cloned().unwrap_or(json!({}));
 
+    // AskUserQuestion is gated through the same broker as permissions: Claude's
+    // `--permission-prompt-tool` calls this callback and blocks until we answer.
+    // The agent's real question options live in `input.questions`, which we
+    // extract below so the card shows them; the user's pick is returned as the
+    // question's answer (see `request_user_decision`). Do NOT short-circuit with
+    // `allow` here — that bypasses the card entirely and Claude reports "the
+    // user did not answer", which is exactly the broken behavior we are fixing.
+
+    // When the agent asks a structured question (AskUserQuestion), the real
+    // answer choices live inside `input.questions[0].options` — extract them so
+    // the card shows the actual choices instead of a generic allow/deny.
+    let (options, selection_mode, allows_custom_text) =
+        if tool_name.eq_ignore_ascii_case("AskUserQuestion") {
+            extract_question_options(&input)
+        } else {
+            (Vec::new(), "single".to_string(), false)
+        };
+
     let outcome = crate::permissions::request_user_decision(
         &state,
         crate::permissions::PermissionQuery {
             session_id: query.session_id.clone(),
             tool_name,
             input,
-            options: Vec::new(),
-            allows_custom_text: false,
-            selection_mode: "single".to_string(),
+            options,
+            allows_custom_text,
+            selection_mode,
         },
     )
     .await;
@@ -492,3 +510,53 @@ fn is_file_tool(tool_name: &str) -> bool {
 }
 
 use crate::websocket::WsMessage;
+
+/// Extract structured answer options from an AskUserQuestion tool input.
+///
+/// The envelope is `input.questions[0].{question,header,multiSelect,options[]}`.
+/// Returns the parsed `QuestionOption`s, the selection mode ("single"|"multi"),
+/// and whether any option invites free-text input.
+fn extract_question_options(input: &Value) -> (Vec<QuestionOption>, String, bool) {
+    let question = input
+        .get("questions")
+        .and_then(Value::as_array)
+        .and_then(|q| q.first())
+        .and_then(|q| q.as_object());
+    let Some(question) = question else {
+        return (Vec::new(), "single".to_string(), false)
+    };
+    let multi_select = question.get("multiSelect").and_then(Value::as_bool).unwrap_or(false);
+    let raw_options = question.get("options").and_then(Value::as_array);
+    let Some(raw_options) = raw_options else {
+        return (Vec::new(), if multi_select { "multi".to_string() } else { "single".to_string() }, false)
+    };
+    let mut allows_custom = false;
+    let options: Vec<QuestionOption> = raw_options
+        .iter()
+        .filter_map(|raw| {
+            let obj = raw.as_object()?;
+            let label = obj.get("label").and_then(Value::as_str)?.to_string();
+            let id = obj
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| label.clone());
+            let description = obj.get("description").and_then(Value::as_str).map(str::to_string);
+            let custom = obj.get("allows_custom_text").and_then(Value::as_bool).unwrap_or(false);
+            if custom {
+                allows_custom = true;
+            }
+            Some(QuestionOption {
+                id,
+                label,
+                description,
+                allows_custom_text: custom,
+            })
+        })
+        .collect();
+    (
+        options,
+        if multi_select { "multi".to_string() } else { "single".to_string() },
+        allows_custom,
+    )
+}
