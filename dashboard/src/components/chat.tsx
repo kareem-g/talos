@@ -568,7 +568,7 @@ function formatTokens(count: number | undefined): string | null {
 export function UsageMeter({ part }: { part: UsagePart }) {
   const input = formatTokens(part.inputTokens)
   const output = formatTokens(part.outputTokens)
-  if (input === null && output === null && part.costUsd === undefined) return null
+  if (input === null && output === null) return null
 
   return (
     <div className="animate-up mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -590,14 +590,6 @@ export function UsageMeter({ part }: { part: UsagePart }) {
           {output}
         </span>
       ) : null}
-      {part.costUsd !== undefined ? (
-        <span
-          title="Estimated cost"
-          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-accent-tint px-1.5 text-[11px] tabular-nums text-accent-ink shadow-hairline"
-        >
-          ${part.costUsd < 0.01 && part.costUsd > 0 ? part.costUsd.toFixed(4) : part.costUsd.toFixed(2)}
-        </span>
-      ) : null}
     </div>
   )
 }
@@ -616,7 +608,7 @@ const STOP_REASONS: Record<string, string> = {
   refusal: 'Refused',
 }
 
-/** End-of-turn card: why the turn stopped and what it cost. */
+/** End-of-turn card: why the turn stopped, how long it ran, and token counts. */
 export function TurnSummary({ part }: { part: TurnSummaryPart }) {
   const reason = part.stopReason ? STOP_REASONS[part.stopReason] ?? part.stopReason : undefined
   const input = formatTokens(part.inputTokens)
@@ -627,9 +619,6 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
     stats.push(`${input ?? '0'} in · ${output ?? '0'} out`)
   }
   if (part.durationMs !== undefined) stats.push(formatDuration(part.durationMs))
-  if (part.costUsd !== undefined) {
-    stats.push(`$${part.costUsd < 0.01 && part.costUsd > 0 ? part.costUsd.toFixed(4) : part.costUsd.toFixed(2)}`)
-  }
 
   const failed = /error|refus|max_tokens|max_turns/i.test(part.stopReason ?? '')
 

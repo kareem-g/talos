@@ -280,8 +280,9 @@ export function StateZone({
     <Composer
       wide
       onSend={onSend}
-      onStop={() => void stopSession(session.id)}
-      onInterrupt={() => socket.interruptSession(session.id)}
+      // Stop ends the running response only — the session stays resumable, so
+      // the next message or a steer just works (auto-resume on send).
+      onStop={() => socket.interruptSession(session.id)}
       working={working}
       disabled={connection !== 'connected'}
       placeholder={

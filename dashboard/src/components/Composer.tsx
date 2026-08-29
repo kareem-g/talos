@@ -115,7 +115,6 @@ function activeToken(text: string, caret: number): { kind: MenuKind; query: stri
 export function Composer({
   onSend,
   onStop,
-  onInterrupt,
   working,
   disabled,
   placeholder,
@@ -135,7 +134,6 @@ export function Composer({
 }: {
   onSend: (text: string, attachments: AttachmentRef[]) => void
   onStop?: () => void
-  onInterrupt?: () => void
   /** True while the agent is running: Enter queues instead of sending. */
   working?: boolean
   disabled?: boolean
@@ -759,25 +757,11 @@ export function Composer({
                     <ArrowUp />
                   </button>
                 ) : null}
-                {onInterrupt ? (
-                  <button
-                    type="button"
-                    onClick={onInterrupt}
-                    aria-label="Interrupt"
-                    title="Interrupt (Ctrl+C)"
-                    className={cn(
-                      'flex size-8 items-center justify-center rounded-full',
-                      'bg-hover text-ink-2 transition-[background-color,transform] duration-150',
-                      'hover:bg-line-strong hover:text-ink active:scale-95',
-                    )}
-                  >
-                    <span className="font-mono text-[10px] font-bold">^C</span>
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={onStop}
-                  aria-label="Stop the agent"
+                  aria-label="Stop the response"
+                  title="Stop the running response — the session stays open for a new message"
                   className={cn(
                     'flex size-8 items-center justify-center rounded-full',
                     'bg-red-tint text-red transition-[background-color,transform] duration-150',

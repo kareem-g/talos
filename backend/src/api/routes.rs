@@ -3145,6 +3145,55 @@ pub async fn upload_attachment(
     }
 }
 
+/// Serve an uploaded attachment back to the dashboard (e.g. a pasted image the
+/// composer and chat preview). Files live under `ATTACHMENT_DIR/<session>/`.
+pub async fn get_attachment(
+    axum::extract::Path((session_id, file_name)): axum::extract::Path<(String, String)>,
+) -> Response {
+    // Sanitize: only safe file-name characters, no path traversal.
+    if file_name.is_empty()
+        || !file_name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return (axum::http::StatusCode::BAD_REQUEST, "invalid file name").into_response();
+    }
+    let path = PathBuf::from(ATTACHMENT_DIR).join(&session_id).join(&file_name);
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            let mime = attachment_content_type(&file_name);
+            (
+                [(axum::http::header::CONTENT_TYPE, mime)],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(_) => (axum::http::StatusCode::NOT_FOUND, "attachment not found").into_response(),
+    }
+}
+
+/// Best-effort content type from the extension (no mime crate in the tree).
+fn attachment_content_type(file_name: &str) -> &'static str {
+    let lower = file_name.to_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml"
+    } else if lower.ends_with(".pdf") {
+        "application/pdf"
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+        "text/plain"
+    } else {
+        "application/octet-stream"
+    }
+}
+
 // ===== WORKSPACE (worktrees + changed files + diffs) =====
 
 /// List subdirectories of a path for the new-session project picker.

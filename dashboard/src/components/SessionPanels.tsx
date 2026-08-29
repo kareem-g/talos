@@ -79,23 +79,21 @@ export function SessionPanels({
 
   // Aggregate token usage across all turns.
   const usage = useMemo(() => {
-    let input = 0, output = 0, cost = 0, turns = 0
+    let input = 0, output = 0, turns = 0
     for (const msg of conversation.messages) {
       for (const p of msg.parts) {
         if (p.kind === 'usage') {
           input += p.inputTokens ?? 0
           output += p.outputTokens ?? 0
-          if (p.costUsd !== undefined) cost += p.costUsd
         }
         if (p.kind === 'turn_summary') {
           input += p.inputTokens ?? 0
           output += p.outputTokens ?? 0
-          if (p.costUsd !== undefined) cost += p.costUsd
           turns += 1
         }
       }
     }
-    return { input, output, cost, turns }
+    return { input, output, turns }
   }, [conversation])
   const fmtTokens = (n: number) => {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`

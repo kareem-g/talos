@@ -455,12 +455,18 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
                         state: "running".to_string(),
                     });
                 } else if state.claude_stream.has_active_session(session_id).await {
-                    // Claude stream has no graceful interrupt; treat as stop placeholder
+                    // Claude stream has no graceful interrupt; the process must
+                    // go. Mark it resumable (not exited) so the user can send a
+                    // follow-up and the session comes back cleanly.
                     let _ = state.claude_stream.kill_session(session_id).await;
                     let _ = state.session_manager.update_status(
                         session_id,
-                        crate::sessions::SessionStatus::Exited,
+                        crate::sessions::SessionStatus::NeedsResume,
                     ).await;
+                    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                        session_id: session_id.to_string(),
+                        state: "needs_resume".to_string(),
+                    });
                 }
             }
         }

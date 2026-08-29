@@ -735,7 +735,7 @@ export function SideSessionView({
       <Composer
         wide
         onSend={(text) => sendPrompt(sideId, text)}
-        onStop={() => void useStore.getState().stopSession(sideId)}
+        onStop={() => void useStore.getState().interruptSession(sideId)}
         working={sideSess?.status === 'running'}
         disabled={connection !== 'connected'}
         placeholder="Message the side session…"

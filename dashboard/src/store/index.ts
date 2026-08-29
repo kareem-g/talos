@@ -137,6 +137,12 @@ interface StoreState {
   /** Resend the last user message to re-run the agent from that point. */
   resendLastUserPrompt: (sessionId: string) => boolean
   stopSession: (sessionId: string) => Promise<void>
+  /**
+   * Stop only the running response. The session stays alive (resumable), so
+   * the next message or a steer lands in the same conversation instead of
+   * killing the whole session.
+   */
+  interruptSession: (sessionId: string) => void
   /** Restart the agent so a stopped or imported session can continue. */
   resumeSession: (sessionId: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<void>
@@ -393,6 +399,11 @@ export const useStore = create<StoreState>((set, get) => ({
   /**
    * Send a prompt. The message appears immediately; the server echo reconciles
    * it rather than duplicating it.
+   *
+   * A prompt sent to a stopped-but-resumable session (the user hit Stop on the
+   * running response, or the session was imported) resumes it first — stopping
+   * the current turn must not leave the session dead, and the next message or
+   * steer should just work.
    */
   sendPrompt(sessionId, text) {
     const trimmed = text.trim()
@@ -400,6 +411,16 @@ export const useStore = create<StoreState>((set, get) => ({
     const conversation = getConversation(sessionId)
     addOptimisticUserMessage(conversation, trimmed)
     bump(set, sessionId)
+    const session = get().sessions.find((s) => s.id === sessionId)
+    const resumable = Boolean(
+      session && (session.status === 'needs_resume' || session.status === 'paused' || session.status === 'exited'),
+    )
+    if (resumable) {
+      void get()
+        .resumeSession(sessionId)
+        .then(() => socket.sendInput(sessionId, trimmed))
+      return
+    }
     socket.sendInput(sessionId, trimmed)
   },
 
@@ -495,6 +516,11 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch (error) {
       setNotice(set, sessionId, error instanceof Error ? error.message : 'Could not stop the agent')
     }
+  },
+
+  /** Stop the running response only — the session stays resumable. */
+  interruptSession(sessionId) {
+    socket.interruptSession(sessionId)
   },
 
   /**
