@@ -69,6 +69,8 @@ pub struct PermissionQuery {
     pub allows_custom_text: bool,
     /// "single" | "multi" — whether one or several options may be chosen.
     pub selection_mode: String,
+    /// True when this is a plan-mode approval (ExitPlanMode / plan proposal).
+    pub is_plan: bool,
 }
 
 pub struct PermissionOutcome {
@@ -231,6 +233,7 @@ pub async fn request_user_decision(
             "tool_name": query.tool_name,
             "source": "claude-stream",
             "permission_mode": permission_mode,
+            "is_plan": query.is_plan,
         }),
     ));
     // NOTE: Do NOT also emit `WsMessage::ApprovalRequest` here. The broadcast
@@ -308,6 +311,7 @@ pub async fn request_user_decision(
     }
 
     let allowed = decision.starts_with("allow")
+        || decision.starts_with("approve")
         || decision.eq_ignore_ascii_case("yes")
         || decision.eq_ignore_ascii_case("always");
 
@@ -332,6 +336,10 @@ pub async fn request_user_decision(
             "Approved by user".to_string()
         } else if started.elapsed() >= DECISION_TIMEOUT {
             "Auto-denied: no response within 5 minutes".to_string()
+        } else if query.is_plan && decision.trim().len() > 2 {
+            // A plan "suggest changes" reply carries the user's feedback — pass
+            // it back to the agent so it can revise the plan.
+            decision.trim().to_string()
         } else {
             "Denied by user".to_string()
         },

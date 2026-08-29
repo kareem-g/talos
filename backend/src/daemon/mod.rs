@@ -74,6 +74,7 @@ impl Daemon {
             broadcast,
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
             browser_manager: Arc::new(crate::browser::manager::BrowserManager::new()),
+            trajectories: Arc::new(crate::trajectory::TrajectoryRecorder::new()),
         });
 
         // Reconcile sessions left mid-flight by a previous run.

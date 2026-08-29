@@ -61,6 +61,15 @@ export function FloatingHud({
   const done = stats.done
   const total = stats.todos.length
 
+  // The active step: the one in progress, else the first pending one. Shown in
+  // the collapsed pill so the user always sees what the agent is working on.
+  const activeTodo = useMemo(() => {
+    const active =
+      stats.todos.find((t) => t.status === 'in_progress' || t.status === 'blocked' || t.status === 'failed') ??
+      stats.todos.find((t) => t.status === 'pending')
+    return active
+  }, [stats.todos])
+
   /** Every plan the agent produced, oldest first. */
   const plans = useMemo(() => {
     const out: Array<{ id: string; title: string; steps: number }> = []
@@ -86,11 +95,18 @@ export function FloatingHud({
           type="button"
           onClick={() => setCollapsed(false)}
           title="Expand HUD"
-          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-line/60 bg-hover px-2.5 py-1 text-[10.5px] text-ink-2 shadow-overlay transition-colors hover:text-ink"
+          className="pointer-events-auto flex max-w-[320px] items-center gap-1.5 rounded-full border border-line/60 bg-hover px-2.5 py-1 text-[10.5px] text-ink-2 shadow-overlay transition-colors hover:text-ink"
         >
-          <MapIcon size={12} className="text-ink-3" />
-          {done}/{total} · {derived.length} agent{derived.length === 1 ? '' : 's'}
-          <X size={10} className="text-ink-3" />
+          <MapIcon size={12} className="shrink-0 text-ink-3" />
+          <span className="shrink-0 font-mono tabular-nums text-green">{done}/{total}</span>
+          {activeTodo ? (
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink">
+              {stripMarkdown(activeTodo.title)}
+            </span>
+          ) : (
+            <span className="shrink-0">{derived.length} agent{derived.length === 1 ? '' : 's'}</span>
+          )}
+          <X size={10} className="shrink-0 text-ink-3" />
         </button>
       </div>
     )
@@ -162,7 +178,7 @@ export function FloatingHud({
                     <HudRow
                       key={plan.id}
                       icon={<ListTodo size={13} className="text-ink-3" />}
-                      label={plan.title}
+                      label={stripMarkdown(plan.title)}
                       onClick={() => onSelectTab('plan')}
                     />
                   ))}
@@ -195,7 +211,7 @@ export function FloatingHud({
                             <Circle size={13} className="shrink-0 text-ink-3" />
                           )
                         }
-                        label={todo.title}
+                        label={stripMarkdown(todo.title)}
                         onClick={() => onSelectTab('plan')}
                         muted={complete}
                       />
@@ -516,6 +532,18 @@ function CommitSubmenu({
   )
 }
 
+/** Strip common Markdown markers so labels read cleanly in the HUD. */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .trim()
+}
+
 function HudRow({
   icon,
   label,
@@ -530,21 +558,58 @@ function HudRow({
   /** Dim the label (e.g. completed todos). */
   muted?: boolean
 }) {
+  const textRef = useRef<HTMLSpanElement>(null)
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
+  const [truncated, setTruncated] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  // Detect truncation after mount / label change.
+  useEffect(() => {
+    const span = textRef.current
+    if (span) setTruncated(span.scrollHeight > span.clientHeight)
+  }, [label])
+
+  // Anchor the tooltip to the row's left edge (the HUD hugs the screen's right
+  // edge, so right-anchored tips would clip off-screen).
+  function showTip() {
+    const el = buttonRef.current
+    if (!el || !truncated) return
+    const rect = el.getBoundingClientRect()
+    // Position the tooltip's right edge 8px left of the row, vertically centered.
+    setTip({ x: rect.left - 8, y: rect.top + rect.height / 2 })
+  }
+
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
-      title={label}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-1.5 py-[3px] text-left transition-colors',
+        'flex relative w-full items-center gap-2 rounded-md px-1.5 py-[3px] text-left transition-colors',
         onClick ? 'hover:bg-hover-2' : 'cursor-default',
       )}
+      onMouseEnter={showTip}
+      onMouseLeave={() => setTip(null)}
+      onFocus={showTip}
+      onBlur={() => setTip(null)}
     >
       <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
-      <span className={cn('line-clamp-2 min-w-0 flex-1 text-[11.5px] leading-snug', muted ? 'text-ink-3' : 'text-ink')}>
+      <span
+        ref={textRef}
+        className={cn('line-clamp-2 min-w-0 flex-1 text-[11.5px] leading-snug', muted ? 'text-ink-3' : 'text-ink')}
+      >
         {label}
       </span>
       {right}
+      {tip ? (
+        <span
+          role="tooltip"
+          className="pointer-events-none fixed z-50 max-w-[280px] rounded-lg border border-line/60 bg-surface px-2.5 py-1.5 text-[11.5px] leading-snug text-ink shadow-overlay"
+          style={{ right: window.innerWidth - tip.x, top: tip.y, transform: 'translateY(-50%)' }}
+        >
+          {label}
+        </span>
+      ) : null}
     </button>
   )
 }

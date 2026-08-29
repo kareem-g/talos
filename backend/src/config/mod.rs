@@ -116,4 +116,5 @@ pub struct AppState {
     pub broadcast: BroadcastHub,
     pub transcript_tails: Option<Arc<TranscriptTails>>,
     pub browser_manager: Arc<crate::browser::manager::BrowserManager>,
+    pub trajectories: Arc<crate::trajectory::TrajectoryRecorder>,
 }

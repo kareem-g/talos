@@ -59,6 +59,12 @@ pub async fn start(
         // Agents
         .route("/api/agents", get(crate::api::routes::list_agents))
 
+        // Trajectories: record/replay/export a session's event stream
+        .route("/api/trajectories/record", post(crate::api::trajectory::record))
+        .route("/api/trajectories/stop", post(crate::api::trajectory::stop))
+        .route("/api/trajectories/replay", post(crate::api::trajectory::replay))
+        .route("/api/sessions/{id}/trajectory", get(crate::api::trajectory::export_session))
+
         // Providers: discovery, capabilities, and real model lists. The
         // frontend renders these verbatim and hardcodes no CLI or model.
         // Static `/api/providers/api*` routes must be registered BEFORE the
@@ -113,7 +119,22 @@ pub async fn start(
         .route("/api/workspace/file", get(crate::api::routes::workspace_file))
         .route("/api/workspace/dirs", get(crate::api::routes::workspace_dirs))
         .route("/api/skills", get(crate::api::routes::list_skills))
-        .route("/api/skills/{name}", get(crate::api::routes::get_skill))
+        // Skills management. Static paths must precede the dynamic `{name}`
+        // so `available`/`installed`/`install` aren't captured as a name.
+        .route("/api/skills/available", get(crate::api::skills::list_available))
+        .route("/api/skills/installed", get(crate::api::skills::list_installed))
+        .route("/api/skills/install", post(crate::api::skills::install))
+        .route("/api/skills/{id}/toggle", put(crate::api::skills::toggle))
+        .route(
+            "/api/skills/{id}/content",
+            get(crate::api::skills::get_content),
+        )
+        .route(
+            "/api/skills/{name}",
+            get(crate::api::routes::get_skill)
+                .delete(crate::api::skills::uninstall)
+                .put(crate::api::skills::update_content),
+        )
 
         // Git operations for the branch panel / git tab
         .route("/api/git/branches", get(crate::api::routes::git_branches_handler))

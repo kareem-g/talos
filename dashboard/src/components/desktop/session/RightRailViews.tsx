@@ -29,7 +29,6 @@ import { useStore, getConversation, useConversation } from '@/store'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
 import { GitWorkspaceView } from './GitWorkspaceView'
-import { PlanStepList } from './ProgressCard'
 import { Timeline } from '@/components/Timeline'
 import { Composer } from '@/components/Composer'
 import {
@@ -60,42 +59,87 @@ function ViewHeader({ eyebrow, right }: { eyebrow: string; right?: React.ReactNo
 /* ── 1. Plan ───────────────────────────────────────────────────────────────── */
 
 export function PlanView({ session, onNewTask }: { session: Session; onNewTask?: () => void }) {
-  const { todos, toggle } = useTodos(session)
-  const sendPrompt = useStore((s) => s.sendPrompt)
-  const done = todos.filter((t) => t.status === 'completed').length
-  const total = todos.length
-  const active = todos.filter((t) => t.status !== 'completed').length
+  const conversation = useConversation(session.id)
+  const plan = latestPlanInfo(conversation.messages)
+  const planText = plan?.text?.trim() ?? ''
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ViewHeader
         eyebrow="Plan"
         right={
-          <span className="flex items-center gap-1">
-            {onNewTask ? (
-              <RailButton onClick={onNewTask} label="New task">
-                <Plus size={12} /> New task
-              </RailButton>
-            ) : null}
-            <span className="font-mono text-[10px] tabular-nums text-ink-3">{done}/{total}</span>
-          </span>
+          onNewTask ? (
+            <RailButton onClick={onNewTask} label="New task">
+              <Plus size={12} /> New task
+            </RailButton>
+          ) : null
         }
       />
-      {/* Progress bar */}
-      <div className="border-b border-line/40 px-3 py-2">
-        <div className="h-1 min-w-0 overflow-hidden rounded-full bg-field">
-          <div
-            className="h-full rounded-full bg-accent-2 transition-all duration-500"
-            style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }}
-          />
-        </div>
-        <div className="mt-1 flex items-center justify-between font-mono text-[9.5px] text-ink-3">
-          <span>{active} remaining</span>
-          <span>{done} done</span>
-        </div>
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1.5">
-        <PlanStepList todos={todos} onToggle={toggle} onRetry={(title) => void sendPrompt(session.id, `Retry step: ${title}`)} />
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        {/* Full plan body the agent wrote. The todo checklist lives in the HUD
+            Progress section; this surface is for reading the plan in full. */}
+        {planText ? (
+          <div className="px-3.5 py-3">
+            {planText
+              .split('\n')
+              .map((l) => l.trim())
+              .filter(Boolean)
+              .map((line, index) => {
+                const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line)
+                if (headingMatch) {
+                  const level = headingMatch[1].length
+                  const text = headingMatch[2]
+                  const size = level === 1 ? 'text-[15px]' : level === 2 ? 'text-[13.5px]' : 'text-[12.5px]'
+                  return (
+                    <h3
+                      key={index}
+                      className={cn(
+                        'font-semibold text-ink first:mt-0',
+                        'mt-3.5',
+                        size,
+                        level === 1 && 'pb-1.5',
+                      )}
+                    >
+                      {text}
+                    </h3>
+                  )
+                }
+                const bullet = /^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)
+                const clean = line.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')
+                return (
+                  <p
+                    key={index}
+                    className={cn(
+                      'whitespace-pre-wrap break-words leading-[1.65]',
+                      bullet ? 'ml-3 flex gap-1.5 text-[12px] text-ink-2' : 'mt-1.5 text-[12.5px] text-ink-2',
+                    )}
+                  >
+                    {bullet ? <span className="shrink-0 text-ink-3">•</span> : null}
+                    <span className="min-w-0 flex-1">{clean}</span>
+                  </p>
+                )
+              })}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-1.5 px-3.5 py-14 text-center">
+            <p className="text-[12.5px] font-medium text-ink-2">No plan yet</p>
+            <p className="max-w-[36ch] text-[11.5px] leading-[1.6] text-ink-3">
+              The agent will write its plan here when it has one. Until then, the HUD Progress section shows the live todo checklist.
+            </p>
+          </div>
+        )}
+
+        {/* Related files (when the agent produced the plan alongside edits). */}
+        {plan?.relatedFiles && plan.relatedFiles.length > 0 ? (
+          <div className="mt-2 border-t border-line/40 px-3.5 py-2.5">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">Related files</p>
+            <ul className="mt-1 flex flex-col">
+              {plan.relatedFiles.map((path) => (
+                <li key={path} className="truncate font-mono text-[11px] text-ink-2">{path}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </div>
   )

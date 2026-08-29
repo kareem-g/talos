@@ -23,6 +23,7 @@ fn clamp_terminal_dimensions(cols: u16, rows: u16) -> (u16, u16) {
 fn is_allow_decision(decision: &str) -> bool {
     let d = decision.to_lowercase();
     d.starts_with("allow")
+        || d.starts_with("approve")
         || d.eq_ignore_ascii_case("yes")
         || d.eq_ignore_ascii_case("always allow")
         || d.starts_with("always_allow")
@@ -308,50 +309,62 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         }
     };
 
-    // Pi runs on-demand: every prompt is its own headless turn. Route before
-    // the live-agent guard — there is intentionally no resident process.
-    if session.agent == "pi" {
+    // Route structured-stream backends (pi, api, acp, claude) through the
+    // unified harness. On-demand backends (pi, api) always resolve — every
+    // prompt is its own turn with no resident process. Resident backends
+    // (acp, claude) resolve only while their process is actually live.
+    if let Some(turn) = crate::agents::harness::resolve_turn(state, &session).await {
+        if !turn.is_live(state, session_id).await {
+            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                session_id: session_id.to_string(),
+                code: "session_not_running".to_string(),
+                message: format!(
+                    "The {} agent is not running. Resume this session to continue.",
+                    session.agent
+                ),
+            });
+            return;
+        }
         let state = Arc::clone(state);
-        let session = session.clone();
-        let prompt = clean_data.clone();
+        let session_id_for_log = session.id.clone();
+        // Enrich the prompt (environment, skills, similar trajectories) before
+        // the turn. The assembler never fails the turn: on any error it falls
+        // back to an uninjected context so a prompt is never dropped.
+        let ctx = match crate::context_assembler::assemble(&state, &session, &clean_data).await {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                tracing::warn!(session_id = %session.id, %error, "context assembly failed");
+                crate::agents::harness::TurnContext {
+                    session: session.clone(),
+                    prompt: clean_data.clone(),
+                    injected_context: None,
+                }
+            }
+        };
         tokio::spawn(async move {
-            if let Err(error) =
-                crate::api::routes::spawn_pi_turn(&state, &session, &prompt).await
-            {
-                state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
-                    session_id: session.id.clone(),
-                    code: "pi_turn_failed".to_string(),
-                    message: error,
-                });
+            if let Err(error) = turn.start_turn(&state, ctx).await {
+                if turn.name() == "pi" {
+                    state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                        session_id: session_id_for_log.clone(),
+                        code: "pi_turn_failed".to_string(),
+                        message: error.to_string(),
+                    });
+                } else {
+                    // spawn_api_turn and the resident send_prompt paths already
+                    // broadcast their own errors; this is a fallback log.
+                    tracing::warn!(session_id = %session_id_for_log, %error, "turn failed");
+                }
             }
         });
         return;
     }
 
-    // Custom API providers (openai_compatible, anthropic_compatible) — direct HTTP, no process.
-    if state.api_manager.is_api_provider(&*state, &session.agent).await {
-        let state = Arc::clone(state);
-        let session = session.clone();
-        let prompt = clean_data.clone();
-        tokio::spawn(async move {
-            if let Err(error) = crate::agents::api::spawn_api_turn(&state, &session, &prompt).await {
-                // spawn_api_turn already broadcasts its own error; this is a fallback.
-                tracing::warn!(session_id=%session.id, %error, "API turn failed");
-            }
-        });
-        return;
-    }
-
-    // A prompt needs a live agent to receive it. Without this check the session
-    // was marked `running` and the user's message was recorded, but nothing was
-    // listening — the prompt silently vanished and the UI stopped offering the
-    // Resume action that would actually have helped.
-    // API providers are always "live" (on-demand HTTP) so include them.
-    let has_agent = state.acp_manager.has_active_session(session_id).await
-        || state.pty_manager.has_active_session(session_id).await
-        || state.claude_stream.has_active_session(session_id).await
-        || state.api_manager.has_active_session(&*state, session_id).await;
-    if !has_agent {
+    // A prompt needs a live agent to receive it. Without this check the
+    // session was marked `running` and the user's message was recorded, but
+    // nothing was listening — the prompt silently vanished and the UI stopped
+    // offering the Resume action that would actually have helped. This is the
+    // PTY path (codex/opencode/custom), which the harness doesn't cover.
+    if !state.pty_manager.has_active_session(session_id).await {
         state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
             session_id: session_id.to_string(),
             code: "session_not_running".to_string(),
@@ -360,57 +373,6 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
                 session.agent
             ),
         });
-        return;
-    }
-
-    state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-        message: crate::agent_events::AgentMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session_id.to_string(),
-            role: "user".to_string(),
-            content: clean_data.clone(),
-            timestamp: chrono::Utc::now(),
-        },
-    });
-
-    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
-        session_id: session_id.to_string(),
-        state: "running".to_string(),
-    });
-
-    // ACP agents (opencode, copilot, gemini, …) receive follow-ups as a
-    // `session/prompt` on the same live subprocess — true multi-turn chat,
-    // not keystrokes typed into a TUI.
-    if state.acp_manager.has_active_session(session_id).await {
-        let agent_prompt = format!(
-            "{}{}",
-            crate::api::routes::browser_skill_prompt_injection_for(&clean_data).await,
-            clean_data
-        );
-        if let Err(error) = state.acp_manager.send_prompt(session_id, &agent_prompt).await {
-            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
-                session_id: session_id.to_string(),
-                code: "acp_error".to_string(),
-                message: format!("Failed to send prompt to agent: {}", error),
-            });
-        }
-        return;
-    }
-
-    // Claude (structured stream-json transport) receives follow-ups over stdin.
-    if state.claude_stream.has_active_session(session_id).await {
-        let agent_prompt = format!(
-            "{}{}",
-            crate::api::routes::browser_skill_prompt_injection_for(&clean_data).await,
-            clean_data
-        );
-        if let Err(error) = state.claude_stream.send_prompt(session_id, &agent_prompt).await {
-            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
-                session_id: session_id.to_string(),
-                code: "claude_error".to_string(),
-                message: format!("Failed to send prompt to Claude: {}", error),
-            });
-        }
         return;
     }
 
@@ -446,43 +408,36 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
     match action {
         "interrupt" => {
             if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
-                if state.acp_manager.has_active_session(session_id).await {
-                    let _ = state.acp_manager.interrupt_session(session_id).await;
-                } else if state.pty_manager.has_active_session(session_id).await {
+                // Structured-stream backends interrupt through the harness
+                // (ACP sends `session/cancel`; Claude is stopped and marked
+                // resumable). PTY sessions fall through to the Ctrl-C branch.
+                let mut handled = false;
+                if let Ok(Some(session)) = state.session_manager.get_session(session_id).await
+                    && let Some(turn) = crate::agents::harness::resolve_turn(state, &session).await
+                {
+                    handled = turn.interrupt(state, session_id).await.is_ok();
+                }
+                if !handled && state.pty_manager.has_active_session(session_id).await {
                     let _ = state.pty_manager.send_input(session_id, "\x03").await;
                     state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
                         session_id: session_id.to_string(),
                         state: "running".to_string(),
-                    });
-                } else if state.claude_stream.has_active_session(session_id).await {
-                    // Claude stream has no graceful interrupt; the process must
-                    // go. Mark it resumable (not exited) so the user can send a
-                    // follow-up and the session comes back cleanly.
-                    let _ = state.claude_stream.kill_session(session_id).await;
-                    let _ = state.session_manager.update_status(
-                        session_id,
-                        crate::sessions::SessionStatus::NeedsResume,
-                    ).await;
-                    state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
-                        session_id: session_id.to_string(),
-                        state: "needs_resume".to_string(),
                     });
                 }
             }
         }
         "stop" | "kill" => {
             if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
-                // ACP sessions are stopped by cancelling + killing the
-                // subprocess; PTY sessions by signalling the process.
+                // Structured-stream sessions are stopped through the harness;
+                // PTY sessions by signalling the process.
                 let mut killed = false;
-                if state.acp_manager.has_active_session(session_id).await {
-                    killed = state.acp_manager.kill_session(session_id).await.is_ok();
+                if let Ok(Some(session)) = state.session_manager.get_session(session_id).await
+                    && let Some(turn) = crate::agents::harness::resolve_turn(state, &session).await
+                {
+                    killed = turn.stop(state, session_id).await.is_ok();
                 }
-                if state.pty_manager.has_active_session(session_id).await {
-                    killed = state.pty_manager.kill_session(session_id).await.is_ok() || killed;
-                }
-                if state.claude_stream.has_active_session(session_id).await {
-                    killed = state.claude_stream.kill_session(session_id).await.is_ok() || killed;
+                if !killed && state.pty_manager.has_active_session(session_id).await {
+                    killed = state.pty_manager.kill_session(session_id).await.is_ok();
                 }
                 if !killed {
                     // Fallback: try PTY kill anyway for imported sessions
@@ -500,7 +455,7 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             let session_id = params.get("session_id").and_then(Value::as_str).unwrap_or("");
             // Optional richer answer metadata forwarded from the approval card.
             let always = params.get("always").and_then(Value::as_bool).unwrap_or(false);
-            let _custom_text = params.get("custom_text").and_then(Value::as_str).map(|s| s.to_string());
+            let custom_text = params.get("custom_text").and_then(Value::as_str).map(|s| s.to_string());
             let allow = params.get("allow").and_then(Value::as_bool);
 
             // "Always allow" (or an agent-provided option that encodes it) makes
@@ -523,15 +478,26 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             }
             // Claude stream permissions are decided through the permission
             // broker: the MCP server is blocked on an HTTP round-trip holding
-            // this exact request id, and the answer unblocks the agent.
-            if state.permissions.resolve(request_id, decision.to_string()).await {
-                let _ = state.session_manager.resolve_approval(request_id, decision).await;
+            // this exact request id, and the answer unblocks the agent. A
+            // "suggest changes" reply carries the user's typed feedback in
+            // `custom_text` — hand that back as the decision so the agent sees
+            // the revisions to make.
+            let resolved_decision = if !is_allow
+                && decision.eq_ignore_ascii_case("suggest changes")
+                && custom_text.as_deref().map(|t| !t.trim().is_empty()).unwrap_or(false)
+            {
+                custom_text.unwrap_or(decision.to_string())
+            } else {
+                decision.to_string()
+            };
+            if state.permissions.resolve(request_id, resolved_decision.clone()).await {
+                let _ = state.session_manager.resolve_approval(request_id, &resolved_decision).await;
                 if !session_id.is_empty() {
                     let session_id = session_id.to_string();
                     state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
                         &session_id,
                         "permission_resolved",
-                        serde_json::json!({ "request_id": request_id, "decision": decision }),
+                        serde_json::json!({ "request_id": request_id, "decision": resolved_decision }),
                     ));
                     state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
                         session_id,
@@ -542,25 +508,37 @@ async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {
             }
             // ACP approvals are structured protocol requests: respond with the
             // chosen optionId instead of typing a keystroke into a TUI.
-            if !session_id.is_empty() && state.acp_manager.has_active_session(session_id).await {
-                match state.acp_manager.respond_approval(session_id, request_id, decision).await {
-                    Ok(session_id) => {
-                        let _ = state.session_manager.resolve_approval(request_id, decision).await;
-                        state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                            &session_id,
-                            "permission_resolved",
-                            serde_json::json!({ "request_id": request_id, "decision": decision }),
-                        ));
+            if !session_id.is_empty() {
+                let acp_turn = if let Ok(Some(session)) =
+                    state.session_manager.get_session(session_id).await
+                {
+                    crate::agents::harness::resolve_turn(state, &session)
+                        .await
+                        .filter(|turn| turn.name() == "acp")
+                } else {
+                    None
+                };
+                if let Some(turn) = acp_turn {
+                    let response = turn.respond_approval(state, session_id, request_id, decision).await;
+                    match response {
+                        Ok(()) => {
+                            let _ = state.session_manager.resolve_approval(request_id, decision).await;
+                            state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                                session_id,
+                                "permission_resolved",
+                                serde_json::json!({ "request_id": request_id, "decision": decision }),
+                            ));
+                        }
+                        Err(error) => {
+                            state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
+                                session_id: session_id.to_string(),
+                                code: "approval_error".to_string(),
+                                message: error.to_string(),
+                            });
+                        }
                     }
-                    Err(error) => {
-                        state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
-                            session_id: session_id.to_string(),
-                            code: "approval_error".to_string(),
-                            message: error.to_string(),
-                        });
-                    }
+                    return;
                 }
-                return;
             }
             let mut response = state.pty_manager.respond_to_approval(request_id, decision).await;
             if response.is_err() {

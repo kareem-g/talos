@@ -494,6 +494,10 @@ export function SessionWorkspace({
                     onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)}
                     project={session.project ?? undefined}
                     sessionId={session.id}
+                    onViewPlan={() => {
+                      if (!rightOpen) toggleRight()
+                      rightRailRef.current?.openTab('plan')
+                    }}
                   />
                   {/* Floating contexture HUD (Progress / Goal / Git / Agents) —
                       section actions open the matching right-panel tab. */}

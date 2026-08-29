@@ -11,6 +11,37 @@ pub struct Settings {
     pub mcp: McpConfig,
     pub notifications: NotificationsConfig,
     pub theme: ThemeConfig,
+    /// Falls back to defaults for configs written before this field existed.
+    #[serde(default)]
+    pub context_assembly: ContextAssemblyConfig,
+}
+
+/// Controls how prompts are enriched before they reach the agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextAssemblyConfig {
+    /// Include a git/OS/environment markdown section in the injected context.
+    pub environment_enabled: bool,
+    /// Load project skills from `.agentdeck/skills/` into the injected context.
+    pub skills_enabled: bool,
+    /// Inject past successful trajectories as few-shot examples.
+    pub trajectory_injection_enabled: bool,
+    /// How many similar trajectories to inject (upper bound).
+    pub max_trajectories: usize,
+    /// Minimum Jaccard similarity (0..1) for a trajectory to be considered
+    /// similar enough to inject.
+    pub similarity_threshold: f64,
+}
+
+impl Default for ContextAssemblyConfig {
+    fn default() -> Self {
+        Self {
+            environment_enabled: true,
+            skills_enabled: true,
+            trajectory_injection_enabled: true,
+            max_trajectories: 3,
+            similarity_threshold: 0.3,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,9 +117,21 @@ impl AgentBinary {
         let name = self.path.to_lowercase();
         if name.contains("claude") {
             vec![
-                AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
-                AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
-                AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+                AgentModel {
+                    id: "sonnet".to_string(),
+                    name: "Sonnet".to_string(),
+                    tag: Some("Balanced".to_string()),
+                },
+                AgentModel {
+                    id: "opus".to_string(),
+                    name: "Opus".to_string(),
+                    tag: Some("Flagship".to_string()),
+                },
+                AgentModel {
+                    id: "haiku".to_string(),
+                    name: "Haiku".to_string(),
+                    tag: Some("Fast".to_string()),
+                },
             ]
         } else {
             vec![]
@@ -98,7 +141,13 @@ impl AgentBinary {
     pub fn built_in_reasoning(&self) -> Vec<String> {
         let name = self.path.to_lowercase();
         if name.contains("claude") {
-            vec!["low".to_string(), "medium".to_string(), "high".to_string(), "xhigh".to_string(), "max".to_string()]
+            vec![
+                "low".to_string(),
+                "medium".to_string(),
+                "high".to_string(),
+                "xhigh".to_string(),
+                "max".to_string(),
+            ]
         } else {
             vec![]
         }
@@ -233,9 +282,21 @@ pub fn backfill_defaults(settings: &mut Settings) {
     let claude = &mut settings.agents.claude;
     if claude.models.is_empty() {
         claude.models = vec![
-            AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
-            AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
-            AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+            AgentModel {
+                id: "sonnet".to_string(),
+                name: "Sonnet".to_string(),
+                tag: Some("Balanced".to_string()),
+            },
+            AgentModel {
+                id: "opus".to_string(),
+                name: "Opus".to_string(),
+                tag: Some("Flagship".to_string()),
+            },
+            AgentModel {
+                id: "haiku".to_string(),
+                name: "Haiku".to_string(),
+                tag: Some("Fast".to_string()),
+            },
         ];
     }
     if claude.reasoning_levels.is_empty() {
@@ -285,9 +346,21 @@ impl Default for Settings {
                     args: vec![],
                     env: std::collections::HashMap::new(),
                     models: vec![
-                        AgentModel { id: "sonnet".to_string(), name: "Sonnet".to_string(), tag: Some("Balanced".to_string()) },
-                        AgentModel { id: "opus".to_string(), name: "Opus".to_string(), tag: Some("Flagship".to_string()) },
-                        AgentModel { id: "haiku".to_string(), name: "Haiku".to_string(), tag: Some("Fast".to_string()) },
+                        AgentModel {
+                            id: "sonnet".to_string(),
+                            name: "Sonnet".to_string(),
+                            tag: Some("Balanced".to_string()),
+                        },
+                        AgentModel {
+                            id: "opus".to_string(),
+                            name: "Opus".to_string(),
+                            tag: Some("Flagship".to_string()),
+                        },
+                        AgentModel {
+                            id: "haiku".to_string(),
+                            name: "Haiku".to_string(),
+                            tag: Some("Fast".to_string()),
+                        },
                     ],
                     reasoning_levels: vec![
                         "low".to_string(),
@@ -361,6 +434,7 @@ impl Default for Settings {
                 default: "tokyo-night".to_string(),
                 custom: None,
             },
+            context_assembly: ContextAssemblyConfig::default(),
         }
     }
 }

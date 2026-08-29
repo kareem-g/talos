@@ -63,13 +63,53 @@ pub async fn handle_permission_request(
     // When the agent asks a structured question (AskUserQuestion), the real
     // answer choices live inside `input.questions[0].options` — extract them so
     // the card shows the actual choices instead of a generic allow/deny.
+    let is_plan = is_plan_approval(&tool_name, &input);
     let (options, selection_mode, allows_custom_text) =
         if tool_name.eq_ignore_ascii_case("AskUserQuestion") {
             extract_question_options(&input)
+        } else if is_plan {
+            // Plan-mode exit (ExitPlanMode / plan proposal) waits for the user's
+            // go-ahead. Surface the proposed steps as a `plan` event so the HUD's
+            // Progress section shows them while blocked on approval, and offer the
+            // plan-specific choices: approve / decline / suggest changes.
+            emit_plan_proposal(&state, &query.session_id, &tool_name, &input).await;
+            let mut plan_options = vec![
+                QuestionOption {
+                    id: "approve".to_string(),
+                    label: "Approve".to_string(),
+                    description: Some("Accept the plan and let the agent execute it".to_string()),
+                    allows_custom_text: false,
+                },
+                QuestionOption {
+                    id: "decline".to_string(),
+                    label: "Decline".to_string(),
+                    description: Some("Reject the plan and stop the agent".to_string()),
+                    allows_custom_text: false,
+                },
+                QuestionOption {
+                    id: "suggest changes".to_string(),
+                    label: "Suggest changes".to_string(),
+                    description: Some("Send feedback for the agent to revise".to_string()),
+                    allows_custom_text: true,
+                },
+            ];
+            // If the agent supplied its own options (e.g. a rich AskUserQuestion
+            // inside ExitPlanMode), prefer them.
+            if let (opts, mode, custom) = extract_question_options(&input) {
+                if !opts.is_empty() {
+                    plan_options = opts;
+                    (plan_options, mode, custom)
+                } else {
+                    (plan_options, "single".to_string(), true)
+                }
+            } else {
+                (plan_options, "single".to_string(), true)
+            }
         } else {
             (Vec::new(), "single".to_string(), false)
         };
 
+    let is_plan = is_plan_approval(&tool_name, &input);
     let outcome = crate::permissions::request_user_decision(
         &state,
         crate::permissions::PermissionQuery {
@@ -79,6 +119,7 @@ pub async fn handle_permission_request(
             options,
             allows_custom_text,
             selection_mode,
+            is_plan,
         },
     )
     .await;
@@ -510,6 +551,50 @@ fn is_file_tool(tool_name: &str) -> bool {
 }
 
 use crate::websocket::WsMessage;
+
+/// Whether a permission request is a plan-mode approval (Claude Code
+/// `ExitPlanMode` / plan proposals that ask the user to approve before
+/// executing). The plan text usually rides in `input.plan`.
+fn is_plan_approval(tool_name: &str, input: &Value) -> bool {
+    if tool_name.eq_ignore_ascii_case("ExitPlanMode") || tool_name.eq_ignore_ascii_case("exit_plan_mode") {
+        return true;
+    }
+    // Some agents surface the plan proposal as a generic permission whose input
+    // carries a `plan` text field.
+    let has_plan_text = input
+        .get("plan")
+        .and_then(Value::as_str)
+        .map(|plan| !plan.trim().is_empty())
+        .unwrap_or(false);
+    has_plan_text && (tool_name.to_lowercase().contains("plan") || input.get("suggest_changes").is_some())
+}
+
+/// Parse a plan proposal out of a permission input and broadcast it as a
+/// `plan` AgentEvent so the HUD's Progress section shows the proposed steps
+/// while the session waits for approval.
+async fn emit_plan_proposal(state: &AppState, session_id: &str, tool_name: &str, input: &Value) {
+    let plan_text = input
+        .get("plan")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if plan_text.is_empty() {
+        return;
+    }
+    let title = if tool_name.eq_ignore_ascii_case("ExitPlanMode") {
+        "Proposed plan"
+    } else {
+        "Plan"
+    };
+    if let Some(payload) = crate::agents::plan::plan_from_markdown(&plan_text, title) {
+        state.broadcast.broadcast_agent_event(AgentEvent::new(
+            session_id,
+            "plan",
+            payload,
+        ));
+    }
+}
 
 /// Extract structured answer options from an AskUserQuestion tool input.
 ///

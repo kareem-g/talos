@@ -201,6 +201,8 @@ export interface PlanInfo {
   /** Files the agent changed in the same message after producing the plan. */
   relatedFiles: string[]
   stepCount: number
+  /** The full plan body (markdown) the agent wrote, when it reported one. */
+  text?: string
 }
 
 /** Metadata about the newest plan part, for the Plan view's header. */
@@ -209,7 +211,7 @@ export function latestPlanInfo(messages: Message[]): PlanInfo | undefined {
     const message = messages[i]
     const planIndex = message.parts.findIndex((part) => part.kind === 'plan')
     if (planIndex === -1) continue
-    const plan = message.parts[planIndex] as { title?: string; steps: string[] }
+    const plan = message.parts[planIndex] as { title?: string; steps: string[]; text?: string }
     const relatedFiles = message.parts
       .slice(planIndex + 1)
       .filter((part): part is FileChangePart => part.kind === 'file')
@@ -219,6 +221,7 @@ export function latestPlanInfo(messages: Message[]): PlanInfo | undefined {
       createdAt: message.createdAt,
       relatedFiles,
       stepCount: plan.steps.length,
+      text: plan.text,
     }
   }
   return undefined

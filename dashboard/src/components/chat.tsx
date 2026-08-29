@@ -16,12 +16,11 @@
  * entrances.
  */
 
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import {
   AlertIcon,
   Check,
   ChevronDown,
-  Circle,
   CopyButton,
   Dots,
   FileIcon,
@@ -506,46 +505,79 @@ function FileChip({
  * dot pending. Statuses come from `entries`; agents without them render the
  * classic numbered list.
  */
-export function Plan({ part }: { part: PlanPart }) {
-  const entries: Array<{ content: string; status?: string }> =
-    part.entries ?? part.steps.map((content) => ({ content }))
-  const hasStatus = entries.some((entry) => entry.status !== undefined)
+/**
+ * Plan preview card — the timeline's rendering of a `plan` part. Shows the
+ * plan's title and body (markdown, clamped) with a "View full plan" action that
+ * opens the right-rail Plan tab. The step list itself lives in the HUD Progress
+ * section and the right rail — the timeline card is a *preview*, not a todo
+ * list, so the plan reads as the agent wrote it.
+ */
+export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => void }) {
+  const body = (part.text ?? '').trim()
+  // Title: the payload title, else the first heading/line of the body.
+  const firstLine = body.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const title = part.title?.trim() || firstLine.replace(/^#{1,6}\s*/, '') || 'Plan'
+  // Body excludes the title line so it isn't shown twice.
+  const bodyWithoutTitle = part.title
+    ? body
+    : body.split('\n').slice(body.split('\n').findIndex((l) => l.trim()) + 1).join('\n').trim()
 
   return (
-    <div className="animate-up overflow-hidden rounded-xl border border-line/40 bg-surface/80 shadow-card">
-      <div className="px-4 py-3">
-        <p className="pb-2 text-[12.5px] font-semibold text-ink">{part.title ?? 'Plan'}</p>
-        <ol className="flex flex-col gap-1.5">
-          {entries.map((entry, index) => {
-            const status = entry.status ?? (hasStatus ? 'pending' : undefined)
-            const done = status === 'completed'
-            const active = status === 'in_progress'
-            return (
-              <li
-                key={index}
-                className={cn(
-                  'flex gap-2.5 text-[12px] leading-[1.6]',
-                  done ? 'text-ink-3' : active ? 'text-ink' : 'text-ink-2',
-                )}
-              >
-                {status !== undefined ? (
-                  <span className="mt-[3px] flex size-[13px] shrink-0 items-center justify-center">
-                    {done ? (
-                      <Check size={11} className="text-green" />
-                    ) : active ? (
-                      <span className="size-[7px] rounded-full border border-accent border-t-transparent breathe" />
-                    ) : (
-                      <Circle size={11} className="text-line-strong" />
+    <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#0a0a0c] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
+      {/* Header — document icon + "Plan" + copy */}
+      <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+        <FileIcon size={13} className="shrink-0 text-zinc-500" />
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Plan</span>
+        {body ? (
+          <span className="ml-auto">
+            <CopyButton value={body} label="Copy plan" />
+          </span>
+        ) : null}
+      </div>
+
+      {/* Title + body preview */}
+      <div className="px-4 pb-3 pt-3.5">
+        <h3 className="text-[15px] font-semibold leading-[1.4] text-white">{title}</h3>
+        {bodyWithoutTitle ? (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {bodyWithoutTitle
+              .split('\n')
+              .map((l) => l.trim())
+              .filter(Boolean)
+              .slice(0, 6)
+              .map((line, index) => {
+                const heading = /^#{1,6}\s+/.test(line)
+                const bullet = /^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)
+                const clean = line.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')
+                return (
+                  <p
+                    key={index}
+                    className={cn(
+                      'whitespace-pre-wrap break-words leading-[1.6]',
+                      heading ? 'text-[13px] font-semibold text-zinc-100' : 'text-[12.5px] text-zinc-400',
                     )}
-                  </span>
-                ) : (
-                  <span className="shrink-0 tabular-nums text-ink-3">{index + 1}.</span>
-                )}
-                <span className="min-w-0">{entry.content}</span>
-              </li>
-            )
-          })}
-        </ol>
+                  >
+                    {bullet ? <span className="mr-1.5 text-zinc-600">•</span> : null}
+                    {inline(clean)}
+                  </p>
+                )
+              })}
+            {bodyWithoutTitle.split('\n').filter((l) => l.trim()).length > 6 ? (
+              <p className="font-mono text-[10.5px] text-zinc-600">…</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {onViewPlan ? (
+          <button
+            type="button"
+            onClick={onViewPlan}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 transition hover:bg-white/[0.06] active:scale-[0.99]"
+          >
+            View full plan
+            <span aria-hidden className="text-zinc-500">→</span>
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -665,12 +697,214 @@ function SleepIcon({ size = 16, className }: { size?: number; className?: string
 
 type RespondMeta = { customText?: string; always?: boolean; allow?: boolean }
 
+/**
+ * Plan-approval card — shown when the agent proposes a full plan and waits for
+ * the user's go-ahead (ExitPlanMode / plan-mode approval). Matches the
+ * reference design: a plan preview (title + body + "View full plan"), numbered
+ * options with bold labels + descriptions, a free-text row for suggestions, and
+ * a Dismiss / Submit footer.
+ */
+function PlanApproval({
+  part,
+  view,
+  onRespond,
+  onViewPlan,
+}: {
+  part: ApprovalPart
+  view: ReturnType<typeof describeApproval>
+  onRespond: (requestId: string, decision: string, meta?: RespondMeta) => void
+  onViewPlan?: () => void
+}) {
+  const [selected, setSelected] = useState<number | null>(null)
+  const [feedback, setFeedback] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  // The plan body rides in the prompt as `ExitPlanMode {"plan": "…"}`. Pull the
+  // markdown out so the card can preview it; fall back to the parsed question.
+  const planText = useMemo(() => {
+    const match = part.prompt.match(/\{[\s\S]*\}/)
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]) as Record<string, unknown>
+        const plan = parsed['plan']
+        if (typeof plan === 'string' && plan.trim()) return plan.trim()
+      } catch {
+        /* not JSON — fall through */
+      }
+    }
+    return view.question
+  }, [part.prompt, view.question])
+
+  // First non-empty line (minus a leading heading marker) is the title.
+  const lines = planText.split('\n').map((l) => l.trim()).filter(Boolean)
+  const title = (lines[0] ?? 'Proposed plan').replace(/^#{1,6}\s*/, '')
+  const body = lines.slice(1).join('\n')
+
+  const options = view.options.length > 0
+    ? view.options
+    : [
+        { value: 'approve', label: 'Approve', description: 'Accept the plan and let the agent execute it', kind: 'allow' as const },
+        { value: 'decline', label: 'Decline', description: 'Reject the plan and stop the agent', kind: 'deny' as const },
+        { value: 'suggest changes', label: 'Suggest changes', description: 'Send feedback for the agent to revise', kind: 'other' as const },
+      ]
+
+  const isSuggest = selected !== null && options[selected]?.value === 'suggest changes'
+  const canSubmit = selected !== null && (!isSuggest || feedback.trim().length > 0)
+
+  const handleSubmit = () => {
+    if (selected === null || submitting) return
+    const option = options[selected]
+    setSubmitting(true)
+    if (option.value === 'suggest changes') {
+      onRespond(part.requestId, 'suggest changes', { allow: false, customText: feedback.trim() })
+    } else {
+      const allow = /^(allow|approve|yes)\b/i.test(option.value)
+      onRespond(part.requestId, option.value, { allow })
+    }
+  }
+
+  const handleDismiss = () => {
+    setSubmitting(true)
+    onRespond(part.requestId, 'decline', { allow: false })
+  }
+
+  return (
+    <div
+      data-approval-id={part.requestId}
+      className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#0a0a0c] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
+      role="alert"
+      aria-label="Plan approval required"
+    >
+      {/* Plan header — document icon + "Plan" + copy */}
+      <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+        <FileIcon size={13} className="shrink-0 text-zinc-500" />
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Plan</span>
+        <span className="ml-auto">
+          <CopyButton value={planText} label="Copy plan" />
+        </span>
+      </div>
+
+      {/* Plan preview — title + clamped body + "View full plan" → right rail */}
+      <div className="px-4 pb-3 pt-3.5">
+        <h3 className="text-[15px] font-semibold leading-[1.4] text-white">{title}</h3>
+        {body ? (
+          <div className="mt-2 line-clamp-4 whitespace-pre-wrap break-words text-[12.5px] leading-[1.65] text-zinc-400">
+            {body}
+          </div>
+        ) : null}
+        {body && onViewPlan ? (
+          <button
+            type="button"
+            onClick={onViewPlan}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 transition hover:bg-white/[0.06] active:scale-[0.99]"
+          >
+            View full plan
+            <span aria-hidden className="text-zinc-500">→</span>
+          </button>
+        ) : null}
+      </div>
+
+      {/* Numbered options */}
+      <div className="border-t border-white/[0.06] bg-white/[0.02] px-4 py-3">
+        <div className="flex flex-col gap-2">
+          {options.map((option, index) => {
+            const active = selected === index
+            return (
+              <button
+                key={`${option.value}-${index}`}
+                type="button"
+                disabled={submitting}
+                onClick={() => setSelected(index)}
+                className={cn(
+                  'group flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all duration-150 active:scale-[0.99]',
+                  active
+                    ? 'border-white bg-white'
+                    : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]',
+                )}
+              >
+                <span
+                  className={cn(
+                    'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold',
+                    active ? 'border-black bg-black text-white' : 'border-white/15 bg-white/5 text-zinc-400',
+                  )}
+                >
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block text-[13px] font-semibold', active ? 'text-black' : 'text-zinc-100')}>
+                    {option.label}
+                  </span>
+                  {option.description ? (
+                    <span className={cn('mt-0.5 block text-[11.5px] leading-[1.5]', active ? 'text-black/60' : 'text-zinc-500')}>
+                      {option.description}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            )
+          })}
+
+          {/* Free-text row — always visible, focused when "Suggest changes" is picked */}
+          <div
+            className={cn(
+              'flex items-center gap-3 rounded-xl border px-4 py-2.5 transition-colors',
+              isSuggest ? 'border-emerald-500/40 bg-emerald-500/[0.06]' : 'border-white/10 bg-white/[0.03]',
+            )}
+          >
+            <span
+              className={cn(
+                'flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold',
+                isSuggest ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400' : 'border-white/15 bg-white/5 text-zinc-400',
+              )}
+            >
+              {options.length + 1}
+            </span>
+            <input
+              value={feedback}
+              onChange={(e) => { setFeedback(e.target.value); if (e.target.value.trim()) setSelected(options.findIndex((o) => o.value === 'suggest changes')) }}
+              onFocus={() => setSelected(options.findIndex((o) => o.value === 'suggest changes'))}
+              placeholder="Enter your answer…"
+              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-zinc-200 outline-none placeholder:text-zinc-600"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Footer — hint + Dismiss + Submit */}
+      <div className="flex items-center gap-3 border-t border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10.5px] leading-[1.4] text-zinc-600">
+          <AlertIcon size={12} className="shrink-0" />
+          Use Tab / arrow keys to choose, then Enter or Space to select
+        </span>
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={handleDismiss}
+          className="shrink-0 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-[12px] font-medium text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+        >
+          Dismiss
+        </button>
+        <button
+          type="button"
+          disabled={!canSubmit || submitting}
+          onClick={handleSubmit}
+          className="shrink-0 rounded-lg bg-white px-4 py-1.5 text-[12px] font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Submit
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function Approval({
   part,
   onRespond,
+  onViewPlan,
 }: {
   part: ApprovalPart
   onRespond: (requestId: string, decision: string, meta?: RespondMeta) => void
+  onViewPlan?: () => void
 }) {
   const resolved = part.decision !== undefined
   const view = describeApproval(part.prompt, part.options, {
@@ -714,6 +948,12 @@ export function Approval({
     // For multi-select, send JSON array string so backend can parse it
     const decision = selected.length === 1 ? selected[0] : JSON.stringify(selected)
     onRespond(part.requestId, decision, { always: selected.some((v) => /always/i.test(v)) })
+  }
+
+  // A plan-mode approval (ExitPlanMode / plan proposal) gets a dedicated card
+  // with approve / decline / suggest-changes actions and the plan's steps.
+  if (part.isPlan && !resolved) {
+    return <PlanApproval part={part} view={view} onRespond={onRespond} onViewPlan={onViewPlan} />
   }
 
   if (resolved) {
@@ -922,10 +1162,13 @@ export function Part({
   part,
   onRespond,
   sessionId,
+  onViewPlan,
 }: {
   part: MessagePart
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
   sessionId?: string
+  /** Opens the right-rail Plan tab (timeline plan preview's "View full plan"). */
+  onViewPlan?: () => void
 }) {
   switch (part.kind) {
     case 'text':
@@ -938,9 +1181,9 @@ export function Part({
     case 'command':
       return <Step part={part} />
     case 'plan':
-      return <Plan part={part} />
+      return <Plan part={part} onViewPlan={onViewPlan} />
     case 'approval':
-      return <Approval part={part} onRespond={onRespond} />
+      return <Approval part={part} onRespond={onRespond} onViewPlan={onViewPlan} />
     case 'usage':
       return <UsageMeter part={part} />
     case 'turn_summary':

@@ -213,6 +213,18 @@ impl SessionManager {
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
+    /// Sessions that finished at least one turn and kept history — the
+    /// candidates for similar-trajectory injection. A completed turn leaves
+    /// the session `idle`; Claude sessions with history are `needs_resume`.
+    pub async fn list_completed_sessions(&self) -> Result<Vec<Session>> {
+        let rows = sqlx::query_as::<_, SessionRow>(
+            "SELECT * FROM sessions WHERE status IN ('idle', 'needs_resume') ORDER BY updated_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
     pub async fn get_session(&self, id: &str) -> Result<Option<Session>> {
         let active = self.active_sessions.read().await;
         if let Some(session) = active.get(id) {

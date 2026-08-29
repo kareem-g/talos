@@ -67,12 +67,14 @@ const Turn = memo(function Turn({
   onRetry,
   project,
   sessionId,
+  onViewPlan,
 }: {
   message: Message
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
   onRetry: () => void
   project?: string
   sessionId?: string
+  onViewPlan?: () => void
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
@@ -113,7 +115,7 @@ const Turn = memo(function Turn({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           {inline.map((part, index) => (
-            <Part key={index} part={part} onRespond={onRespond} sessionId={sessionId} />
+            <Part key={index} part={part} onRespond={onRespond} sessionId={sessionId} onViewPlan={onViewPlan} />
           ))}
           {files.length > 0 ? <FileChips files={files} project={project} sessionId={sessionId} /> : null}
         </div>
@@ -244,12 +246,15 @@ export function Timeline({
   onRespond,
   project,
   sessionId,
+  onViewPlan,
 }: {
   conversation: Conversation
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
   /** Project root, for lazy-loading file diffs in the chat. */
   project?: string
   sessionId?: string
+  /** Opens the right-rail Plan tab (timeline plan preview's "View full plan"). */
+  onViewPlan?: () => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** Whether the user is near the bottom; only then do we follow new content. */
@@ -329,6 +334,7 @@ export function Timeline({
                 onRetry={() => resendLastUserPrompt(conversation.sessionId)}
                 project={project}
                 sessionId={sessionId}
+                onViewPlan={onViewPlan}
               />
             </div>
           ))}

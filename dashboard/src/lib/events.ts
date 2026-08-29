@@ -27,6 +27,7 @@ import type {
   Conversation,
   Message,
   MessagePart,
+  PlanPart,
   ReasoningPart,
   TextPart,
   ToolPart,
@@ -147,6 +148,21 @@ function parseApprovalOptions(payload: Record<string, unknown>): ApprovalOptionD
   }
   // Fall back to the legacy flat string options.
   return stringList(payload, 'options').map((value) => ({ value }))
+}
+
+/**
+ * A plan-approval option set looks like approve / decline / suggest-changes.
+ * Used to tag plan cards when the `is_plan` flag is absent (replayed history).
+ */
+function isPlanApprovalOptions(
+  optionData: ApprovalOptionData[],
+  flatOptions: string[],
+): boolean {
+  const values = optionData.length > 0
+    ? optionData.map((o) => o.value.toLowerCase())
+    : flatOptions.map((o) => o.toLowerCase())
+  const has = (...needles: string[]) => values.some((v) => needles.some((n) => v === n || v.includes(n)))
+  return has('approve', 'accept') && (has('decline', 'reject', 'deny') || has('suggest changes', 'suggest'))
 }
 
 /** Read a string field that may be named differently per provider. */
@@ -491,12 +507,23 @@ export function applyAgentEvent(
         entries = stringList(payload, 'steps').map((content) => ({ content }))
       }
       if (entries.length === 0) return true
-      turn.parts.push({
+      // A new plan supersedes the previous one in the same turn (ACP
+      // `plan_update`, Claude `TodoWrite`, and checklist scans all emit
+      // repeatedly) — keep one plan part per turn so the HUD's Plans list
+      // doesn't stack duplicates.
+      const existingPlan = turn.parts.findIndex((part) => part.kind === 'plan')
+      const previous = existingPlan === -1 ? undefined : (turn.parts[existingPlan] as PlanPart)
+      const planPart: PlanPart = {
         kind: 'plan',
-        title: str(payload, 'title'),
+        title: str(payload, 'title') ?? previous?.title,
         steps: entries.map((entry) => entry.content),
         entries,
-      })
+        // The full plan body (markdown) the agent wrote — carried across
+        // superseding updates so a later status-only event doesn't blank it.
+        text: str(payload, 'text') ?? previous?.text,
+      }
+      if (existingPlan === -1) turn.parts.push(planPart)
+      else turn.parts[existingPlan] = planPart
       return true
     }
 
@@ -693,6 +720,10 @@ export function applyAgentEvent(
           ? (selectionMode === 'multiple' || selectionMode === 'multi')
           : (approvalView.multiSelect === true || selectionMode === 'multiple' || selectionMode === 'multi')
       part.allowsCustomText = payload['allows_custom_text'] === true || approvalView.allowsCustomText === true
+      // Plan-mode approvals (ExitPlanMode) carry a structured option set and the
+      // `is_plan` flag from the backend — the card renders the plan's steps and
+      // the approve / decline / suggest-changes actions.
+      part.isPlan = payload['is_plan'] === true || isPlanApprovalOptions(optionData, stringList(payload, 'options'))
       // Do NOT mark as a question here. The MCP permission path uses a UUID
       // requestId and does not persist to the questions table, so answerQuestion
       // would fail to find it. Clicking an option routes through

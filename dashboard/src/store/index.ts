@@ -408,8 +408,9 @@ export const useStore = create<StoreState>((set, get) => ({
   sendPrompt(sessionId, text, attachments = []) {
     const trimmed = text.trim()
     if (!trimmed) return
+    const wireText = withAttachmentBlock(trimmed, attachments)
     const conversation = getConversation(sessionId)
-    addOptimisticUserMessage(conversation, trimmed, attachments)
+    addOptimisticUserMessage(conversation, wireText, attachments)
     bump(set, sessionId)
     const session = get().sessions.find((s) => s.id === sessionId)
     const resumable = Boolean(
@@ -418,10 +419,10 @@ export const useStore = create<StoreState>((set, get) => ({
     if (resumable) {
       void get()
         .resumeSession(sessionId)
-        .then(() => socket.sendInput(sessionId, withAttachmentBlock(trimmed, attachments)))
+        .then(() => socket.sendInput(sessionId, wireText))
       return
     }
-    socket.sendInput(sessionId, withAttachmentBlock(trimmed, attachments))
+    socket.sendInput(sessionId, wireText)
   },
 
   /** Queue a follow-up typed while the agent is working. */

@@ -82,6 +82,11 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Record, replay, and export session trajectories
+    Trajectory {
+        #[command(subcommand)]
+        action: TrajectoryAction,
+    },
     /// Show status
     Status,
 }
@@ -141,6 +146,39 @@ enum ConfigAction {
     Edit,
     Reset,
     Show,
+}
+
+#[derive(Subcommand)]
+enum TrajectoryAction {
+    /// Start recording a session's events to a JSONL file
+    Record {
+        /// Session to record
+        session_id: String,
+        /// Output file path (default: app data dir)
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Stop recording a session
+    Stop {
+        /// Session to stop recording
+        session_id: String,
+    },
+    /// Replay a trajectory file through the daemon
+    Replay {
+        /// Trajectory file to replay
+        path: std::path::PathBuf,
+        /// Re-target events to this session instead of the recorded one
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Export a session's persisted events as JSONL
+    Export {
+        /// Session to export
+        session_id: String,
+        /// Output file path (default: <session-id>.jsonl)
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -346,6 +384,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     println!("{}", content);
                 } else {
                     println!("No configuration file found");
+                }
+            }
+        },
+        Commands::Trajectory { action } => match action {
+            TrajectoryAction::Record { session_id, out } => {
+                let client = reqwest::Client::new();
+                let mut body = serde_json::json!({ "session_id": session_id });
+                if let Some(path) = out {
+                    body["path"] = serde_json::json!(path.to_string_lossy());
+                }
+                let resp = client
+                    .post("http://localhost:9120/api/trajectories/record")
+                    .json(&body)
+                    .send()
+                    .await?;
+                let data: serde_json::Value = resp.json().await?;
+                println!("{}", serde_json::to_string_pretty(&data)?);
+            }
+            TrajectoryAction::Stop { session_id } => {
+                let client = reqwest::Client::new();
+                let resp = client
+                    .post("http://localhost:9120/api/trajectories/stop")
+                    .json(&serde_json::json!({ "session_id": session_id }))
+                    .send()
+                    .await?;
+                let data: serde_json::Value = resp.json().await?;
+                println!("{}", serde_json::to_string_pretty(&data)?);
+            }
+            TrajectoryAction::Replay { path, session } => {
+                let client = reqwest::Client::new();
+                let mut body = serde_json::json!({ "path": path.to_string_lossy() });
+                if let Some(session) = session {
+                    body["session_id"] = serde_json::json!(session);
+                }
+                let resp = client
+                    .post("http://localhost:9120/api/trajectories/replay")
+                    .json(&body)
+                    .send()
+                    .await?;
+                let data: serde_json::Value = resp.json().await?;
+                println!("{}", serde_json::to_string_pretty(&data)?);
+            }
+            TrajectoryAction::Export { session_id, out } => {
+                let client = reqwest::Client::new();
+                let resp = client
+                    .get(format!(
+                        "http://localhost:9120/api/sessions/{session_id}/trajectory"
+                    ))
+                    .send()
+                    .await?;
+                if !resp.status().is_success() {
+                    let data: serde_json::Value = resp.json().await?;
+                    println!("{}", serde_json::to_string_pretty(&data)?);
+                } else {
+                    let text = resp.text().await?;
+                    let path = out
+                        .unwrap_or_else(|| std::path::PathBuf::from(format!("{session_id}.jsonl")));
+                    std::fs::write(&path, text)?;
+                    println!("Exported to {}", path.display());
                 }
             }
         },

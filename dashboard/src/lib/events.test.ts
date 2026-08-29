@@ -535,6 +535,27 @@ describe('GrokBot event types', () => {
     expect(plan.entries?.[1].status).toBe('in_progress')
   })
 
+  it('replaces the plan part in the same turn instead of stacking duplicates', () => {
+    const conversation = emptyConversation('s1')
+    // A TodoWrite / plan_update stream emits several updates per turn.
+    applyAgentEvent(conversation, event('plan', {
+      steps: ['Old'],
+      entries: [{ content: 'Old', status: 'pending' }],
+    }))
+    applyAgentEvent(conversation, event('plan', {
+      steps: ['New', 'Newer'],
+      entries: [
+        { content: 'New', status: 'in_progress' },
+        { content: 'Newer', status: 'pending' },
+      ],
+    }))
+
+    const plans = conversation.messages[0].parts.filter((part) => part.kind === 'plan')
+    expect(plans).toHaveLength(1)
+    const plan = plans[0] as { steps?: string[] }
+    expect(plan.steps).toEqual(['New', 'Newer'])
+  })
+
   it('marks a grok tool failed by status string', () => {
     const conversation = emptyConversation('s1')
     applyAgentEvent(conversation, event('tool_call', { id: 'x1', name: 'bash', status: 'in_progress' }))

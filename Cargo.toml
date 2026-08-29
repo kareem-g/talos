@@ -26,7 +26,7 @@ base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
 rustls = "0.23"
 rustls-pemfile = "2.2"
 xdg = "2.5"

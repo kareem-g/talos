@@ -75,6 +75,12 @@ export interface PlanPart {
    * and possibly shorter — a missing entry renders as pending.
    */
   entries?: Array<{ content: string; status?: string }>
+  /**
+   * The full plan body as the agent wrote it (markdown). Rendered by the
+   * timeline's plan preview card and the right-rail Plan tab; `steps` is the
+   * extracted todo list. Absent for agents that only report structured steps.
+   */
+  text?: string
 }
 
 /**
@@ -139,6 +145,8 @@ export interface ApprovalPart {
   header?: string
   /** True when this card is an AskUserQuestion (answered via QuestionAnswer). */
   isQuestion?: boolean
+  /** True when this is a plan-mode approval (ExitPlanMode / plan proposal). */
+  isPlan?: boolean
 }
 
 /** An error surfaced by the agent or the transport. */

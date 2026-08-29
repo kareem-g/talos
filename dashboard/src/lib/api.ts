@@ -341,14 +341,78 @@ export const workspaceApi = {
     ),
 }
 
-/** Skills live as SKILL.md files on this machine (~/.hermes/skills) or bundled
- *  in the repo (docs/skills/, source: "agentdeck"). */
+/** Skills management: the backend owns `.agentdeck/skills/` per project.
+ *  `list`/`get` read the on-disk catalog (bundled + ~/.claude + ~/.hermes);
+ *  the management calls read and write the project's installed skills. */
+export interface RegistrySkill {
+  id: string
+  name: string
+  description: string
+  author?: string
+  version?: string
+  category?: string
+}
+export interface InstalledSkill {
+  id: string
+  name: string
+  enabled: boolean
+  path: string
+}
+export type InstallSource =
+  | { kind: 'registry'; skill_id: string }
+  | { kind: 'url'; url: string; name?: string }
+  | { kind: 'skillssh'; url: string; name?: string }
+  | { kind: 'content'; name: string; content: string }
+
 export const skillsApi = {
   list: () =>
     request<{ skills: Array<{ name: string; description: string; source?: string }> }>('/api/skills'),
   get: (name: string) =>
     request<{ name: string; source: string; content: string }>(
       `/api/skills/${encodeURIComponent(name)}`,
+    ),
+  available: () =>
+    request<{ skills: RegistrySkill[] }>('/api/skills/available'),
+  installed: (project: string) =>
+    request<{ skills: InstalledSkill[] }>(
+      `/api/skills/installed?project=${encodeURIComponent(project)}`,
+    ),
+  install: (source: InstallSource, project: string) =>
+    request<{ path: string; installed: boolean }>('/api/skills/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        // Map the discriminated union onto the backend's InstallRequest.
+        skill_id: source.kind === 'registry' ? source.skill_id : undefined,
+        url: source.kind === 'url' ? source.url : undefined,
+        skillssh: source.kind === 'skillssh' ? source.url : undefined,
+        content: source.kind === 'content' ? source.content : undefined,
+        name:
+          source.kind === 'url' || source.kind === 'skillssh'
+            ? source.name
+            : source.kind === 'content'
+              ? source.name
+              : undefined,
+        project,
+      }),
+    }),
+  toggle: (id: string, enabled: boolean, project: string) =>
+    request<{ skill_id: string; enabled: boolean }>(
+      `/api/skills/${encodeURIComponent(id)}/toggle`,
+      { method: 'PUT', body: JSON.stringify({ enabled, project }) },
+    ),
+  uninstall: (id: string, project: string) =>
+    request<{ skill_id: string; uninstalled: boolean }>(
+      `/api/skills/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`,
+      { method: 'DELETE' },
+    ),
+  update: (id: string, content: string, project: string) =>
+    request<{ skill_id: string; updated: boolean }>(
+      `/api/skills/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify({ content, project }) },
+    ),
+  content: (id: string, project: string) =>
+    request<{ skill_id: string; path: string; content: string }>(
+      `/api/skills/${encodeURIComponent(id)}/content?project=${encodeURIComponent(project)}`,
     ),
 }
 

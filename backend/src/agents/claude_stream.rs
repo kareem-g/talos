@@ -183,9 +183,13 @@ impl ClaudeStreamManager {
         let turn = Arc::new(AtomicU64::new(0));
         // Streaming tool inputs arrive as JSON fragments keyed by block index;
         // accumulated here so each tool card gets its full input exactly once
-        // at block close instead of one junk card per fragment.
-        let tool_inputs: Arc<Mutex<HashMap<i64, (String, String)>>> =
+        // at block close instead of one junk card per fragment. The name is
+        // stored too so a TodoWrite tool can be promoted to a `plan` event.
+        let tool_inputs: Arc<Mutex<HashMap<i64, (String, String, String)>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // Assistant text for the current turn, so markdown checklists written
+        // in prose (models that skip TodoWrite) can still become a plan.
+        let turn_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
         let reader_session_id = claude_session_id.clone();
         let eof_tail = stderr_tail.clone();
         tokio::spawn(async move {
@@ -213,6 +217,7 @@ impl ClaudeStreamManager {
                     &thought_open,
                     &turn,
                     &tool_inputs,
+                    &turn_text,
                 )
                 .await;
             }
@@ -462,7 +467,8 @@ async fn handle_claude_line(
     claude_session_id: &Arc<Mutex<String>>,
     thought_open: &Arc<Mutex<bool>>,
     turn: &Arc<AtomicU64>,
-    tool_inputs: &Arc<Mutex<HashMap<i64, (String, String)>>>,
+    tool_inputs: &Arc<Mutex<HashMap<i64, (String, String, String)>>>,
+    turn_text: &Arc<Mutex<String>>,
 ) {
     let type_field = value.get("type").and_then(Value::as_str);
     let source = "claude-stream";
@@ -487,6 +493,8 @@ async fn handle_claude_line(
             match event.get("type").and_then(Value::as_str) {
                 Some("message_start") => {
                     turn.fetch_add(1, Ordering::SeqCst);
+                    // Reset the per-turn text buffer for checklist scanning.
+                    *turn_text.lock().await = String::new();
                 }
                 Some("content_block_start") => {
                     let block = event.get("content_block");
@@ -513,7 +521,7 @@ async fn handle_claude_line(
                             tool_inputs
                                 .lock()
                                 .await
-                                .insert(index, (id.to_string(), String::new()));
+                                .insert(index, (id.to_string(), name.to_string(), String::new()));
                             broadcast.broadcast_agent_event(AgentEvent::new(
                                 session_id,
                                 "tool_started",
@@ -545,6 +553,10 @@ async fn handle_claude_line(
                                     "assistant_text",
                                     json!({ "text": text, "delta": true, "turn": current_turn, "source": source }),
                                 ));
+                                // Accumulate for markdown-checklist scanning at
+                                // turn close — models that skip TodoWrite still
+                                // write `- [ ]` plans in prose.
+                                turn_text.lock().await.push_str(text);
                             }
                         }
                         Some("input_json_delta") => {
@@ -559,7 +571,7 @@ async fn handle_claude_line(
                             if !partial.is_empty() {
                                 let mut inputs = tool_inputs.lock().await;
                                 if let Some(entry) = inputs.get_mut(&index) {
-                                    entry.1.push_str(partial);
+                                    entry.2.push_str(partial);
                                 }
                             }
                         }
@@ -569,7 +581,7 @@ async fn handle_claude_line(
                 Some("content_block_stop") => {
                     let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
                     // A finished tool_use block publishes its complete input.
-                    if let Some((tool_id, accumulated)) = tool_inputs.lock().await.remove(&index) {
+                    if let Some((tool_id, tool_name, accumulated)) = tool_inputs.lock().await.remove(&index) {
                         broadcast.broadcast_agent_event(AgentEvent::new(
                             session_id,
                             "tool_input",
@@ -580,6 +592,18 @@ async fn handle_claude_line(
                                 "source": source,
                             }),
                         ));
+                        // Claude Code's TodoWrite tool carries the todo list —
+                        // promote it to the unified `plan` event so the HUD
+                        // Progress section renders todos for CLI sessions too.
+                        if tool_name.eq_ignore_ascii_case("TodoWrite") {
+                            if let Some(payload) = crate::agents::plan::todo_payload(&accumulated, "Plan") {
+                                broadcast.broadcast_agent_event(AgentEvent::new(
+                                    session_id,
+                                    "plan",
+                                    payload,
+                                ));
+                            }
+                        }
                     }
                     // index 0 is usually the thinking block.
                     if index == 0 {
@@ -636,6 +660,19 @@ async fn handle_claude_line(
                     "source": source,
                 }),
             ));
+            // Scan the accumulated assistant text for markdown checklists.
+            // Models that write `- [ ]` plans in prose (without TodoWrite)
+            // still get a `plan` event so the HUD's Progress section works.
+            {
+                let text = turn_text.lock().await;
+                if let Some(payload) = crate::agents::plan::checklists_from_text(&text) {
+                    broadcast.broadcast_agent_event(AgentEvent::new(
+                        session_id,
+                        "plan",
+                        payload,
+                    ));
+                }
+            }
             broadcast.broadcast_agent_event(AgentEvent::new(
                 session_id,
                 "agent_completed",
