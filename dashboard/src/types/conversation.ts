@@ -224,6 +224,32 @@ export type MessagePart =
   | ConfigChangedPart
   | BrowserStepPart
 
+/**
+ * A file the user attached to a message. The daemon stores it under the
+ * session's scratch dir and returns this reference; the outgoing prompt lists
+ * the paths so the agent can read them.
+ */
+export interface AttachmentRef {
+  ref: string
+  name: string
+  fileName: string
+  contentType?: string
+  size: number
+  path: string
+}
+
+/**
+ * A follow-up message typed while the agent is working. It waits in the
+ * composer's queue (editable, steerable, deletable) until the agent goes idle
+ * — or until the user hits Steer to inject it immediately.
+ */
+export interface QueuedMessage {
+  id: string
+  text: string
+  attachments: AttachmentRef[]
+  createdAt: string
+}
+
 export type MessageRole = 'user' | 'assistant'
 
 /**

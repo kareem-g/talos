@@ -14,10 +14,12 @@
  * - The field grows to a cap, then scrolls internally.
  */
 
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, StopIcon } from './ui'
+import { CornerUpLeft, GripVertical, Paperclip, Pencil, Trash2, X } from 'lucide-react'
 import { skillsApi, workspaceApi, type DirListing } from '@/lib/api'
 import { cn } from '@/lib/format'
+import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
 
 const MAX_HEIGHT_PX = 168
 
@@ -122,11 +124,19 @@ export function Composer({
   agentId,
   projectPath,
   wide,
+  queue,
+  onQueue,
+  onSteer,
+  onEditQueued,
+  onRemoveQueued,
+  onReorderQueued,
+  onUploadFiles,
+  draftSeed,
 }: {
-  onSend: (text: string) => void
+  onSend: (text: string, attachments: AttachmentRef[]) => void
   onStop?: () => void
   onInterrupt?: () => void
-  /** True while the agent is running: send becomes stop. */
+  /** True while the agent is running: Enter queues instead of sending. */
   working?: boolean
   disabled?: boolean
   placeholder?: string
@@ -143,11 +153,45 @@ export function Composer({
   projectPath?: string
   /** Desktop workspace: drop the centered reading column, use full width. */
   wide?: boolean
+  /** Follow-up messages waiting above the field (while the agent works). */
+  queue?: QueuedMessage[]
+  /** Queue the current draft instead of sending (Enter while working). */
+  onQueue?: (text: string, attachments: AttachmentRef[]) => void
+  /** Send a queued message immediately. */
+  onSteer?: (id: string) => void
+  /** Pull a queued message back into the composer. */
+  onEditQueued?: (id: string) => void
+  /** Delete a queued message. */
+  onRemoveQueued?: (id: string) => void
+  /** Reorder the queue by dragging a row. */
+  onReorderQueued?: (from: number, to: number) => void
+  /** Upload picked files; resolves to their references. */
+  onUploadFiles?: (files: File[]) => Promise<AttachmentRef[]>
+  /** Load a message back into the field (set when the user edits a queued one). */
+  draftSeed?: { text: string; attachments: AttachmentRef[]; nonce: number } | null
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
+  const [attachments, setAttachments] = useState<AttachmentRef[]>([])
+  const [uploading, setUploading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragFrom = useRef<number | null>(null)
+
+  // Edit-a-queued-message: the parent bumps `nonce` and hands us the draft.
+  useEffect(() => {
+    if (!draftSeed) return
+    setValue(draftSeed.text)
+    setAttachments(draftSeed.attachments)
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      const end = draftSeed.text.length
+      textareaRef.current?.setSelectionRange(end, end)
+    })
+    // Only react to a new seed, not every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSeed?.nonce])
 
   // Slash menu items: agent-announced first, then curated built-ins, then
   // AgentDeck's own commands (/side, /btw).
@@ -328,15 +372,46 @@ export function Composer({
     })
   }
 
-  function send() {
+  /** Submit the draft: queue it while the agent works, otherwise send. */
+  function submit() {
     const text = value.trim()
-    if (!text || disabled) return
+    if ((!text && attachments.length === 0) || disabled) return
+    const files = attachments
     setValue('')
+    setAttachments([])
     setMenu(null)
-    onSend(text)
+    if (working && onQueue) {
+      onQueue(text, files)
+    } else {
+      onSend(text, files)
+    }
   }
 
-  const canSend = value.trim().length > 0 && !disabled
+  function send() {
+    submit()
+  }
+
+  /** Upload picked files and add their references to the draft. */
+  async function handleFiles(files: File[]) {
+    if (!onUploadFiles || files.length === 0) return
+    setUploading(true)
+    try {
+      const refs = await onUploadFiles(files)
+      if (refs.length > 0) setAttachments((current) => [...current, ...refs])
+    } catch (error) {
+      // Surface via the parent's notice channel if it wired one; here, keep
+      // the picked files out of the draft rather than sending a broken ref.
+      console.error('attachment upload failed', error)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function removeAttachment(ref: string) {
+    setAttachments((current) => current.filter((a) => a.ref !== ref))
+  }
+
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !disabled
 
   return (
     <div
@@ -344,6 +419,87 @@ export function Composer({
       style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
     >
       <div className={cn('relative mx-auto w-full', !wide && 'max-w-[46rem]')}>
+        {/* Queued follow-ups — editable rows above the field while the agent works. */}
+        {queue && queue.length > 0 ? (
+          <div className="mb-1.5 flex flex-col gap-1">
+            {queue.map((item, index) => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={() => {
+                  dragFrom.current = index
+                }}
+                onDragOver={(event) => {
+                  if (dragFrom.current !== null) event.preventDefault()
+                }}
+                onDrop={() => {
+                  if (dragFrom.current !== null && dragFrom.current !== index) {
+                    onReorderQueued?.(dragFrom.current, index)
+                  }
+                  dragFrom.current = null
+                }}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-xl border border-line/50 bg-surface/80 px-2 py-1.5',
+                  'shadow-raised backdrop-blur-sm transition-colors',
+                )}
+              >
+                <span
+                  aria-hidden
+                  title="Drag to reorder"
+                  className="shrink-0 cursor-grab text-ink-3 active:cursor-grabbing"
+                >
+                  <GripVertical size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">
+                  {item.text || (item.attachments.length > 0 ? `${item.attachments.length} attachment(s)` : '')}
+                  {item.attachments.length > 0 && item.text ? (
+                    <span className="ml-1.5 font-mono text-[10px] text-ink-3">
+                      +{item.attachments.length}
+                    </span>
+                  ) : null}
+                </span>
+                {onSteer ? (
+                  <button
+                    type="button"
+                    onClick={() => onSteer(item.id)}
+                    aria-label="Steer the agent with this message now"
+                    title="Send now, without waiting for the turn to end"
+                    className={cn(
+                      'flex shrink-0 items-center gap-1 rounded-lg border border-line/50 bg-inset px-2 py-1',
+                      'text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink',
+                    )}
+                  >
+                    <CornerUpLeft size={12} />
+                    Steer
+                  </button>
+                ) : null}
+                {onEditQueued ? (
+                  <button
+                    type="button"
+                    onClick={() => onEditQueued(item.id)}
+                    aria-label="Edit this queued message"
+                    title="Edit"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                ) : null}
+                {onRemoveQueued ? (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveQueued(item.id)}
+                    aria-label="Delete this queued message"
+                    title="Delete"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-red-tint hover:text-red"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {/* Completion menu — IDE-style floating popup with sections. */}
         {menu && menuItems.length > 0 ? (
           <div
@@ -426,6 +582,29 @@ export function Composer({
             }
           }}
         >
+          {/* Attachment chips — shown above the draft once files are picked. */}
+          {attachments.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+              {attachments.map((a) => (
+                <span
+                  key={a.ref}
+                  className="inline-flex max-w-[220px] items-center gap-1 rounded-lg border border-line/50 bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
+                  title={a.path}
+                >
+                  <Paperclip size={10} className="shrink-0 text-ink-3" />
+                  <span className="min-w-0 truncate">{a.fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(a.ref)}
+                    aria-label={`Remove ${a.fileName}`}
+                    className="shrink-0 text-ink-3 transition-colors hover:text-red"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="relative">
             {/* Backdrop: renders the draft with inline chips behind the textarea. */}
             <div
@@ -492,7 +671,10 @@ export function Composer({
                 keyEvent.preventDefault()
                 send()
               }}
-              placeholder={placeholder ?? 'Message the agent…'}
+              placeholder={
+                placeholder ??
+                (working ? 'Keep typing to queue follow-up changes' : 'Message the agent…')
+              }
               aria-label="Message"
               className={cn(
                 'scroll-thin relative block w-full resize-none bg-transparent px-3.5 pt-3',
@@ -505,6 +687,47 @@ export function Composer({
 
           <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1.5">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+              {onUploadFiles ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    aria-label="Attach files"
+                    title="Attach files"
+                    className={cn(
+                      'flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3',
+                      'transition-colors hover:bg-hover-2 hover:text-ink disabled:opacity-50',
+                    )}
+                  >
+                    {uploading ? (
+                      <span className="size-3.5 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" aria-hidden />
+                    ) : (
+                      <Paperclip size={14} />
+                    )}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files ?? [])
+                      event.target.value = ''
+                      void handleFiles(files)
+                    }}
+                  />
+                  {attachments.length > 0 ? (
+                    <span
+                      className="flex shrink-0 items-center gap-1 rounded-lg bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-2"
+                      title={`${attachments.length} attachment(s)`}
+                    >
+                      <Paperclip size={10} className="text-ink-3" />
+                      {attachments.length}
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
               <span
                 aria-hidden
                 title="Type / for commands, @ for files"
@@ -517,6 +740,25 @@ export function Composer({
 
             {working ? (
               <span className="flex shrink-0 items-center gap-1.5">
+                {/* While the agent works, the send button queues the draft
+                    (Enter does the same); it sits beside Stop, as in the
+                    reference design — so queueing never depends on the
+                    keyboard alone. */}
+                {onQueue && canSend ? (
+                  <button
+                    type="button"
+                    onClick={send}
+                    aria-label="Queue follow-up"
+                    title="Queue this follow-up for the next turn"
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-full',
+                      'bg-accent text-white transition-[background-color,transform] duration-150',
+                      'hover:brightness-110 active:scale-95',
+                    )}
+                  >
+                    <ArrowUp />
+                  </button>
+                ) : null}
                 {onInterrupt ? (
                   <button
                     type="button"

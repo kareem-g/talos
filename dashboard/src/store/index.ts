@@ -27,7 +27,7 @@ import {
 import { configApi, providersApi, sessionsApi } from '@/lib/api'
 import { readableAgentError } from '@/lib/errors'
 import { socket } from '@/lib/socket'
-import { emptyConversation, type Conversation } from '@/types/conversation'
+import { emptyConversation, type AttachmentRef, type Conversation, type QueuedMessage } from '@/types/conversation'
 import type { ApprovalMeta, ConnectionState, IncomingFrame } from '@/types/protocol'
 import type { Provider, SessionConfig, ConfigApplied } from '@/types/provider'
 import type { Session, SessionStatus, DiscoverResponse, SyncResponse } from '@/types/session'
@@ -50,6 +50,22 @@ export function getConversation(sessionId: string): Conversation {
     conversations.set(sessionId, conversation)
   }
   return conversation
+}
+
+/**
+ * Append the attached-file paths to a prompt so the agent can read them.
+ *
+ * The daemon stores uploads under the session's scratch dir and returns the
+ * paths; there is no native attachment channel to the CLIs, so the paths ride
+ * in the prompt text — the agent Reads them like any other file.
+ */
+export function withAttachmentBlock(text: string, attachments: AttachmentRef[]): string {
+  if (attachments.length === 0) return text
+  const lines = attachments.map(
+    (a) => `- ${a.path} (${a.fileName}${a.contentType ? `, ${a.contentType}` : ''})`,
+  )
+  const block = `<attached_files>\n${lines.join('\n')}\n</attached_files>`
+  return text.trim() ? `${text.trim()}\n\n${block}` : block
 }
 
 interface StoreState {
@@ -84,6 +100,13 @@ interface StoreState {
   /** Starred session ids (local-only, persisted to localStorage). */
   starred: string[]
 
+  /**
+   * Follow-up messages typed while the agent is working, per session. They
+   * render as editable rows above the composer and auto-send one-per-turn as
+   * the agent goes idle — or immediately via Steer.
+   */
+  queues: Record<string, QueuedMessage[]>
+
   loadProviders: (refresh?: boolean) => Promise<void>
   loadSessions: () => Promise<void>
   /** Sessions in each CLI's own history that this app does not have yet. */
@@ -99,6 +122,18 @@ interface StoreState {
     model?: string
   }) => Promise<Session>
   sendPrompt: (sessionId: string, text: string) => void
+  /** Queue a follow-up message (typed while the agent is working). */
+  queueMessage: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
+  /** Drop a queued message without sending it. */
+  removeQueued: (sessionId: string, id: string) => void
+  /** Send a queued message immediately, without waiting for the turn to end. */
+  steerQueued: (sessionId: string, id: string) => void
+  /** Pull a queued message back into the composer for editing. Returns it. */
+  editQueued: (sessionId: string, id: string) => QueuedMessage | undefined
+  /** Reorder the queue by dragging a row. */
+  reorderQueued: (sessionId: string, from: number, to: number) => void
+  /** Send the head of the queue — called when the agent goes idle. */
+  flushQueue: (sessionId: string) => void
   /** Resend the last user message to re-run the agent from that point. */
   resendLastUserPrompt: (sessionId: string) => boolean
   stopSession: (sessionId: string) => Promise<void>
@@ -127,6 +162,7 @@ export const useStore = create<StoreState>((set, get) => ({
   revisions: {},
   notices: {},
   browserCursors: {},
+  queues: {},
   starred: (() => {
     try {
       const raw = localStorage.getItem('agentdeck-starred')
@@ -365,6 +401,68 @@ export const useStore = create<StoreState>((set, get) => ({
     addOptimisticUserMessage(conversation, trimmed)
     bump(set, sessionId)
     socket.sendInput(sessionId, trimmed)
+  },
+
+  /** Queue a follow-up typed while the agent is working. */
+  queueMessage(sessionId, text, attachments = []) {
+    const trimmed = text.trim()
+    if (!trimmed && attachments.length === 0) return
+    const message: QueuedMessage = {
+      id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: trimmed,
+      attachments,
+      createdAt: new Date().toISOString(),
+    }
+    set((state) => ({
+      queues: { ...state.queues, [sessionId]: [...(state.queues[sessionId] ?? []), message] },
+    }))
+  },
+
+  removeQueued(sessionId, id) {
+    set((state) => ({
+      queues: {
+        ...state.queues,
+        [sessionId]: (state.queues[sessionId] ?? []).filter((m) => m.id !== id),
+      },
+    }))
+  },
+
+  /** Inject a queued message now, without waiting for the turn to end. */
+  steerQueued(sessionId, id) {
+    const message = (get().queues[sessionId] ?? []).find((m) => m.id === id)
+    if (!message) return
+    get().removeQueued(sessionId, id)
+    get().sendPrompt(sessionId, withAttachmentBlock(message.text, message.attachments))
+  },
+
+  /** Pull a queued message back into the composer for editing. */
+  editQueued(sessionId, id) {
+    const message = (get().queues[sessionId] ?? []).find((m) => m.id === id)
+    if (!message) return undefined
+    get().removeQueued(sessionId, id)
+    return message
+  },
+
+  reorderQueued(sessionId, from, to) {
+    set((state) => {
+      const queue = [...(state.queues[sessionId] ?? [])]
+      if (from < 0 || from >= queue.length || to < 0 || to >= queue.length) return {}
+      const [moved] = queue.splice(from, 1)
+      queue.splice(to, 0, moved)
+      return { queues: { ...state.queues, [sessionId]: queue } }
+    })
+  },
+
+  /**
+   * Send the head of the queue. Called when the agent goes idle, so a queue
+   * drains one message per turn rather than flooding the agent.
+   */
+  flushQueue(sessionId) {
+    const queue = get().queues[sessionId] ?? []
+    if (queue.length === 0) return
+    const [head, ...rest] = queue
+    set((state) => ({ queues: { ...state.queues, [sessionId]: rest } }))
+    get().sendPrompt(sessionId, withAttachmentBlock(head.text, head.attachments))
   },
 
   /**
@@ -699,6 +797,8 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
             sealConversation(conversation)
             bump(set, frame.payload.session.id)
           }
+          // The turn ended: apply the next queued follow-up, if any.
+          get().flushQueue(frame.payload.session.id)
         }
       }
       return
@@ -734,6 +834,9 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
           sealConversation(conversation)
           bump(set, frame.payload.session_id)
         }
+        // Idle (not merely terminal): the agent is waiting — apply the next
+        // queued follow-up.
+        if (status === 'idle') get().flushQueue(frame.payload.session_id)
       }
       return
     }

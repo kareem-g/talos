@@ -29,7 +29,7 @@ import {
   StatusPill,
   Terminal as TerminalIcon,
 } from './ui'
-import { useConversation, useStore } from '@/store'
+import { useConversation, useStore, withAttachmentBlock } from '@/store'
 import { socket } from '@/lib/socket'
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { agentStateDisplay } from '@/types/remote'
@@ -218,7 +218,7 @@ export function SessionView({
             connection={connection}
             config={config}
             provider={provider}
-            onSend={(t) => sendPrompt(session.id, t)}
+            onSend={(t, attachments) => sendPrompt(session.id, withAttachmentBlock(t, attachments))}
             onSetConfig={(id, v) => void setConfig(session.id, id, v)}
           />
         </>

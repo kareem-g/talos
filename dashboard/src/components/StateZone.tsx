@@ -23,11 +23,12 @@ import { ComposerControls } from '@/components/desktop/session/TasksAndExecution
 import { Button } from './ui'
 import LoadingState from './LoadingState'
 import { socket } from '@/lib/socket'
+import { attachmentsApi } from '@/lib/api'
 import { useStore } from '@/store'
 import { cn } from '@/lib/format'
 import { firstOpenApprovalId, sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { describeApproval } from '@/lib/approvals'
-import type { Conversation } from '@/types/conversation'
+import type { AttachmentRef, Conversation } from '@/types/conversation'
 import type { ConnectionState } from '@/types/protocol'
 import type { Provider, SessionConfig } from '@/types/provider'
 import type { Session } from '@/types/session'
@@ -239,7 +240,7 @@ export function StateZone({
   connection: ConnectionState
   config?: SessionConfig
   provider?: Provider
-  onSend: (text: string) => void
+  onSend: (text: string, attachments: AttachmentRef[]) => void
   onSetConfig: (id: string, value: string) => void
 }) {
   const state = sessionUIState(session, conversation, connection)
@@ -247,8 +248,16 @@ export function StateZone({
   const notice = useStore((s) => s.notices[session.id])
   const stopSession = useStore((s) => s.stopSession)
   const resumeSession = useStore((s) => s.resumeSession)
+  const queue = useStore((s) => s.queues[session.id])
+  const queueMessage = useStore((s) => s.queueMessage)
+  const steerQueued = useStore((s) => s.steerQueued)
+  const editQueued = useStore((s) => s.editQueued)
+  const removeQueued = useStore((s) => s.removeQueued)
+  const reorderQueued = useStore((s) => s.reorderQueued)
   const [retrying, setRetrying] = useState(false)
   const [updating, setUpdating] = useState<string | null>(null)
+  // Set when the user edits a queued message: hands the draft back to the composer.
+  const [draftSeed, setDraftSeed] = useState<{ text: string; attachments: AttachmentRef[]; nonce: number } | null>(null)
 
   const working = state === 'working' || state === 'starting'
 
@@ -262,6 +271,11 @@ export function StateZone({
     void Promise.resolve(onSetConfig(id, value)).finally(() => setUpdating(null))
   }
 
+  const handleEditQueued = (id: string) => {
+    const message = editQueued(session.id, id)
+    if (message) setDraftSeed({ text: message.text, attachments: message.attachments, nonce: Date.now() })
+  }
+
   const composer = (
     <Composer
       wide
@@ -270,10 +284,24 @@ export function StateZone({
       onInterrupt={() => socket.interruptSession(session.id)}
       working={working}
       disabled={connection !== 'connected'}
-      placeholder={connection !== 'connected' ? 'Waiting for connection…' : 'Message the agent…'}
+      placeholder={
+        connection !== 'connected'
+          ? 'Waiting for connection…'
+          : working
+            ? 'Keep typing to queue follow-up changes'
+            : 'Message the agent…'
+      }
       commands={conversation.commands.length > 0 ? conversation.commands : undefined}
       agentId={session.agent}
       projectPath={session.project ?? undefined}
+      queue={queue}
+      onQueue={(text, attachments) => queueMessage(session.id, text, attachments)}
+      onSteer={(id) => steerQueued(session.id, id)}
+      onEditQueued={handleEditQueued}
+      onRemoveQueued={(id) => removeQueued(session.id, id)}
+      onReorderQueued={(from, to) => reorderQueued(session.id, from, to)}
+      onUploadFiles={(files) => attachmentsApi.upload(session.id, files)}
+      draftSeed={draftSeed}
       controls={
         <ComposerControls
           config={config}

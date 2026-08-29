@@ -20,6 +20,7 @@ import type {
 } from '@/types/provider'
 import type { CreateSessionRequest, DiscoverResponse, Session, SyncResponse } from '@/types/session'
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
+import type { AttachmentRef } from '@/types/conversation'
 
 export class ApiError extends Error {
   constructor(
@@ -457,6 +458,59 @@ export const browserApi = {
 
   screenshotUrl: (sessionId: string, tabId: string) =>
     `/api/browser/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(tabId)}`,
+}
+
+/* ── Attachments ─────────────────────────────────────────────────────────── */
+
+/**
+ * Upload files to a session's scratch dir.
+ *
+ * Multipart, so this cannot go through `request` (which pins
+ * `Content-Type: application/json` whenever a body is present — the browser
+ * must set the multipart boundary itself). It reuses the same auth header and
+ * error-envelope handling as every other call here.
+ */
+export const attachmentsApi = {
+  upload: async (sessionId: string, files: File[]): Promise<AttachmentRef[]> => {
+    if (files.length === 0) return []
+    const form = new FormData()
+    for (const file of files) form.append(file.name, file)
+
+    const headers = new Headers()
+    const token = deviceToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+
+    let response: Response
+    try {
+      response = await fetch(
+        `/api/attachments/upload?session=${encodeURIComponent(sessionId)}`,
+        { method: 'POST', body: form, headers },
+      )
+    } catch (cause) {
+      throw new ApiError(
+        cause instanceof Error ? cause.message : 'Upload failed',
+        0,
+        'network_error',
+      )
+    }
+
+    const body = await response.text()
+    let parsed: { attachments?: AttachmentRef[]; error?: string } | null = null
+    if (body.length > 0) {
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        throw new ApiError('Malformed upload response', response.status, 'malformed_response')
+      }
+    }
+    if (parsed && typeof parsed.error === 'string') {
+      throw new ApiError(parsed.error, response.status)
+    }
+    if (!response.ok) {
+      throw new ApiError(`Upload failed (${response.status})`, response.status)
+    }
+    return parsed?.attachments ?? []
+  },
 }
 
 /* ── Standalone PTY terminals ────────────────────────────────────────────── */

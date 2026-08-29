@@ -19,10 +19,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Segmented } from '../ui'
-import { useConversation, useStore } from '@/store'
+import { useConversation, useStore, withAttachmentBlock } from '@/store'
 import { socket } from '@/lib/socket'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
+import type { AttachmentRef } from '@/types/conversation'
 import { sessionUIState } from '@/lib/sessionState'
 import { Timeline } from '../Timeline'
 import { StateZone } from '../StateZone'
@@ -190,8 +191,9 @@ export function SessionWorkspace({
     return blocks.length ? `${blocks.join('\n\n')}\n\n${text}` : text
   }
 
-  // Intercept custom slash commands; otherwise send (attaching # mention context).
-  const handleSend = (text: string) => {
+  // Intercept custom slash commands; otherwise send (attaching # mention context
+  // and any uploaded files, whose paths ride in the prompt for the agent to read).
+  const handleSend = (text: string, attachments: AttachmentRef[] = []) => {
     const trimmed = text.trim()
     const sideMatch = /^\/side\s+([\s\S]+)$/.exec(trimmed)
     const btwMatch = /^\/btw\s+([\s\S]+)$/.exec(trimmed)
@@ -203,7 +205,9 @@ export function SessionWorkspace({
       void sendSideNote(btwMatch[1].trim())
       return
     }
-    void expandMentionContext(text).then((augmented) => sendPrompt(session.id, augmented))
+    void expandMentionContext(text).then((augmented) =>
+      sendPrompt(session.id, withAttachmentBlock(augmented, attachments)),
+    )
   }
 
   const [editingTitle, setEditingTitle] = useState(false)
