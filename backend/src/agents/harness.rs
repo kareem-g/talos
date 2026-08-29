@@ -12,8 +12,11 @@
 //! what happens once a session exists.
 
 use crate::Result;
+use crate::agent_events::AgentEvent;
 use crate::config::AppState;
 use crate::sessions::Session;
+use crate::websocket::WsMessage;
+use crate::websocket::broadcast::BroadcastHub;
 use async_trait::async_trait;
 
 /// Everything a turn needs from its caller: the session and the raw user
@@ -297,6 +300,25 @@ async fn broadcast_user_message(state: &AppState, session_id: &str, content: &st
         });
 }
 
+/// Complete a turn successfully — the shared end of the turn lifecycle.
+///
+/// Every backend ends a successful turn the same way: an `agent_completed`
+/// event followed by an `idle` state change. The daemon's StateChange listener
+/// persists the session as idle, so resident-process backends (acp, claude)
+/// that finish turns asynchronously in their stream readers must call this
+/// from there instead of doing their own completion bookkeeping.
+pub fn complete_turn(broadcast: &BroadcastHub, session_id: &str, payload: serde_json::Value) {
+    broadcast.broadcast_agent_event(AgentEvent::new(
+        session_id,
+        "agent_completed",
+        payload,
+    ));
+    broadcast.broadcast(WsMessage::StateChange {
+        session_id: session_id.to_string(),
+        state: "idle".to_string(),
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +334,33 @@ mod tests {
         assert_eq!(classify("claude", false, false, true), TurnKind::Claude);
         assert_eq!(classify("codex", false, false, false), TurnKind::Pty);
         assert_eq!(classify("unknown", false, false, false), TurnKind::Pty);
+    }
+
+    #[test]
+    fn complete_turn_broadcasts_completion_then_idle() {
+        let hub = BroadcastHub::new();
+        let mut rx = hub.subscribe();
+
+        complete_turn(&hub, "s1", serde_json::json!({ "source": "test" }));
+
+        let first = rx.try_recv().unwrap().message;
+        match first {
+            WsMessage::AgentEvent { event } => {
+                assert_eq!(event.session_id, "s1");
+                assert_eq!(event.kind, "agent_completed");
+                assert_eq!(event.payload["source"], "test");
+            }
+            other => panic!("expected agent_completed first, got {other:?}"),
+        }
+        let second = rx.try_recv().unwrap().message;
+        match second {
+            WsMessage::StateChange { session_id, state } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(state, "idle");
+            }
+            other => panic!("expected idle state change, got {other:?}"),
+        }
+        // The contract is exactly two messages — nothing else.
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
     }
 }

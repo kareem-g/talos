@@ -673,19 +673,28 @@ async fn handle_claude_line(
                     ));
                 }
             }
-            broadcast.broadcast_agent_event(AgentEvent::new(
-                session_id,
-                "agent_completed",
-                json!({
-                    "stop_reason": value.get("stop_reason").cloned().unwrap_or(Value::Null),
-                    "input_tokens": usage_num("input_tokens"),
-                    "output_tokens": usage_num("output_tokens"),
-                    "cost_usd": num("total_cost_usd"),
-                    "duration_ms": num("duration_ms").map(|ms| ms as u64),
-                    "turn": current_turn,
-                    "source": source,
-                }),
-            ));
+            if is_error {
+                // A failed turn ends in a terminal error state, not idle —
+                // without this the session stayed "running" forever.
+                broadcast.broadcast(WsMessage::StateChange {
+                    session_id: session_id.to_string(),
+                    state: "error".to_string(),
+                });
+            } else {
+                crate::agents::harness::complete_turn(
+                    &broadcast,
+                    session_id,
+                    json!({
+                        "stop_reason": value.get("stop_reason").cloned().unwrap_or(Value::Null),
+                        "input_tokens": usage_num("input_tokens"),
+                        "output_tokens": usage_num("output_tokens"),
+                        "cost_usd": num("total_cost_usd"),
+                        "duration_ms": num("duration_ms").map(|ms| ms as u64),
+                        "turn": current_turn,
+                        "source": source,
+                    }),
+                );
+            }
         }
         // Tool results arrive as `user` messages containing tool_result
         // blocks. Without this, tool cards stayed "running" forever — the

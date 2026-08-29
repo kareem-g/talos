@@ -906,15 +906,11 @@ impl AcpManager {
                             ));
                         }
                     }
-                    broadcast.broadcast_agent_event(AgentEvent::new(
+                    crate::agents::harness::complete_turn(
+                        &broadcast,
                         &sid,
-                        "agent_completed",
                         json!({ "source": "acp", "stopReason": stop }),
-                    ));
-                    broadcast.broadcast(WsMessage::StateChange {
-                        session_id: sid.clone(),
-                        state: "idle".to_string(),
-                    });
+                    );
                 }
                 Err(error) => {
                     tracing::warn!("[AgentDeck][ACP][{}] session/prompt failed: {}", sid, error);
