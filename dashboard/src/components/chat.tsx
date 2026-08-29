@@ -890,6 +890,8 @@ export function ErrorCard({ message }: { message: string }) {
 /** Rendered inline in user messages for pasted/attached images. */
 export function Image({ url }: { url: string }) {
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
+  if (error || !url) return null
   return (
     <img
       src={url}
@@ -900,6 +902,7 @@ export function Image({ url }: { url: string }) {
         'transition-opacity duration-200',
       )}
       onLoad={() => setLoaded(true)}
+      onError={() => setError(true)}
       loading="lazy"
     />
   )
@@ -928,7 +931,7 @@ export function Part({
     case 'text':
       return <Prose text={part.text} streaming={part.streaming} />
     case 'image':
-      return <Image url={sessionId ? `/api/attachments/${sessionId}/${part.fileName}` : ''} />
+      return <Image url={sessionId ? `/api/attachments/${sessionId}/${encodeURIComponent(part.fileName)}` : ''} />
     case 'reasoning':
       return <Reasoning part={part} />
     case 'tool':
