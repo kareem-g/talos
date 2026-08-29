@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -32,6 +33,12 @@ pub struct BrowserMcp {
     engine: Mutex<Option<Arc<BrowserEngine>>>,
     /// tab id → (info, cdp client)
     tabs: Mutex<HashMap<String, (TabInfo, CdpClient)>>,
+    /// The tab that `browser_tab_get` / `browser_tab_new` last selected; the
+    /// "active tab" locator/action calls target when no `tab` is given.
+    active_tab_id: Mutex<Option<String>>,
+    /// Cached flat DOM snapshot per tab (locator ground truth). Stale after a
+    /// short TTL, so repeated `get_by_*` calls don't re-walk the whole DOM.
+    snapshot_cache: Mutex<HashMap<String, (Instant, Value)>>,
     cursor: Mutex<CursorState>,
     /// Stable ids so a `browser_step` completion can update its running part.
     next_step: AtomicU64,
@@ -43,11 +50,19 @@ pub struct BrowserMcp {
     daemon: reqwest::Client,
 }
 
+/// How long a cached locator snapshot stays fresh before the next search
+/// re-walks the DOM. Mirrors control-browser's "reuse the snapshot until the
+/// page changes" rule — short enough to stay correct, long enough to make
+/// locator searches cheap.
+const SNAPSHOT_TTL: Duration = Duration::from_millis(1500);
+
 impl BrowserMcp {
     fn new() -> Self {
         Self {
             engine: Mutex::new(None),
             tabs: Mutex::new(HashMap::new()),
+            active_tab_id: Mutex::new(None),
+            snapshot_cache: Mutex::new(HashMap::new()),
             cursor: Mutex::new(CursorState::default()),
             next_step: AtomicU64::new(0),
             http_port: std::env::var("AGENTDECK_BROWSER_HTTP_PORT")
@@ -146,13 +161,69 @@ impl BrowserMcp {
 
     async fn active_tab(&self) -> Result<(TabInfo, CdpClient)> {
         let tabs = self.tabs.lock().await;
-        if tabs.is_empty() {
+        let active = self.active_tab_id.lock().await;
+        let selected = active
+            .as_ref()
+            .and_then(|id| tabs.get(id))
+            .or_else(|| tabs.iter().next().map(|(_, v)| v));
+        let Some((info, client)) = selected else {
             return Err(crate::AgentDeckError::Unknown(
                 "No browser tab. Use browser_tab_new to open one.".into(),
             ));
+        };
+        Ok((info.clone(), client.clone()))
+    }
+
+    /// Invalidate the cached locator snapshot for a tab (navigation, tab close).
+    async fn invalidate_snapshot(&self, tab_id: &str) {
+        self.snapshot_cache.lock().await.remove(tab_id);
+    }
+
+    /// Return a fresh-enough DOM snapshot for locator searches. The snapshot
+    /// walker is the expensive part of `get_by_*`; caching it for a short TTL
+    /// keeps repeated searches fast without going stale.
+    async fn snapshot_for_locators(&self, client: &CdpClient, tab_id: &str) -> Result<Value> {
+        {
+            let cache = self.snapshot_cache.lock().await;
+            if let Some((at, snap)) = cache.get(tab_id) {
+                if at.elapsed() < SNAPSHOT_TTL && snap.get("nodes").is_some() {
+                    return Ok(snap.clone());
+                }
+            }
         }
-        let first = tabs.iter().next().unwrap();
-        Ok((first.1 .0.clone(), first.1 .1.clone()))
+        let snap = snapshot::dom_snapshot(client).await?;
+        self.snapshot_cache
+            .lock()
+            .await
+            .insert(tab_id.to_string(), (Instant::now(), snap.clone()));
+        Ok(snap)
+    }
+
+    /// Wait for the page to reach a load state (`interactive` =
+    /// domcontentloaded, `complete` = load) by polling `document.readyState`.
+    /// Bounded by `timeout`; returns Ok even if the page never settles so a
+    /// slow page doesn't fail the navigation that started it.
+    async fn wait_for_load_state(&self, client: &CdpClient, state: &str, timeout: Duration) -> Result<Value> {
+        let target = match state {
+            "domcontentloaded" | "interactive" => "interactive",
+            "complete" | "load" => "complete",
+            other => {
+                return Err(crate::AgentDeckError::Unknown(format!(
+                    "Unknown load state: {other} (use \"load\" or \"domcontentloaded\")"
+                )));
+            }
+        };
+        let start = Instant::now();
+        loop {
+            let ready = client.evaluate("document.readyState").await.unwrap_or_default();
+            if ready.as_str() == Some(target) || ready.as_str() == Some("complete") {
+                return Ok(ready);
+            }
+            if start.elapsed() > timeout {
+                return Ok(ready);
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
     }
 }
 
@@ -203,11 +274,14 @@ impl BrowserMcp {
         let _ = client.call("Runtime.enable", json!({})).await;
         if url != "about:blank" {
             let _ = client.call("Page.navigate", json!({ "url": url })).await;
-            // Auto-capture so the dashboard mirror shows the loaded site even
-            // if the agent never calls browser_screenshot.
-            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            // Wait for the real load instead of a fixed sleep, so fast pages
+            // don't pay a flat latency tax and slow pages don't get captured
+            // half-loaded. Capture right after so the dashboard mirror shows
+            // the loaded site even if the agent never calls browser_screenshot.
+            let _ = self.wait_for_load_state(&client, "load", Duration::from_secs(30)).await;
             let _ = self.capture_screenshot(&tab.id, &client).await;
         }
+        *self.active_tab_id.lock().await = Some(tab.id.clone());
         self.tabs.lock().await.insert(tab.id.clone(), (tab.clone(), client));
         let step = self.emit_step_start("goto", &url).await;
         self.emit_step_end(&step, "ok", "Opened tab").await;
@@ -221,7 +295,21 @@ impl BrowserMcp {
             let _ = engine.close_tab(&id).await;
         }
         self.tabs.lock().await.remove(&id);
+        self.invalidate_snapshot(&id).await;
+        let mut active = self.active_tab_id.lock().await;
+        if active.as_deref() == Some(&id) {
+            *active = None;
+        }
         Ok(json!({ "ok": true }))
+    }
+
+    /// Return a tab's info and make it the active tab (what no-`tab` actions
+    /// target). Parity with control-browser's `browser.tabs.get(id)`.
+    async fn tool_tab_get(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let (info, _client) = self.ensure_tab(&tab_id).await?;
+        *self.active_tab_id.lock().await = Some(info.id.clone());
+        Ok(json!({ "ok": true, "id": info.id, "title": info.title, "url": info.url }))
     }
 
     async fn tool_goto(&self, args: Value) -> Result<Value> {
@@ -234,27 +322,34 @@ impl BrowserMcp {
         };
         let step = self.emit_step_start("goto", &url).await;
         let result = client.call("Page.navigate", json!({ "url": url })).await?;
-        // Let the page settle, then capture so the dashboard mirror shows the
-        // loaded site immediately — it must not wait for an explicit
-        // browser_screenshot (which is what left it as a broken image icon).
-        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        // Wait for the real load, then capture so the dashboard mirror shows
+        // the loaded site immediately — no fixed sleep, no broken image icon.
+        let _ = self.wait_for_load_state(&client, "load", Duration::from_secs(30)).await;
+        self.invalidate_snapshot(&info.id).await;
         let _ = self.capture_screenshot(&info.id, &client).await;
+        *self.active_tab_id.lock().await = Some(info.id.clone());
         self.emit_step_end(&step, "ok", &format!("Navigated to {url}")).await;
         Ok(json!({ "ok": true, "result": result }))
     }
 
     async fn tool_dom_snapshot(&self, args: Value) -> Result<Value> {
         let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
-        let (_info, client) = if tab_id.is_empty() {
+        let (info, client) = if tab_id.is_empty() {
             self.active_tab().await?
         } else {
             self.ensure_tab(&tab_id).await?
         };
         let snap = snapshot::snapshot_for_tool(&client).await?;
+        // Seed the locator cache so the next get_by_* doesn't re-walk the DOM.
+        self.snapshot_cache
+            .lock()
+            .await
+            .insert(info.id, (Instant::now(), snap.get("snapshot").cloned().unwrap_or_default()));
         Ok(json!({ "ok": true, "snapshot": snap }))
     }
 
-    /// Shared locator search: returns matching nodes from a fresh snapshot.
+    /// Shared locator search: returns matching nodes from a fresh-enough
+    /// snapshot (cached for a short TTL — see `snapshot_for_locators`).
     async fn find_nodes(
         &self,
         tab_id: &str,
@@ -262,12 +357,12 @@ impl BrowserMcp {
         name: Option<&str>,
         testid: Option<&str>,
     ) -> Result<Vec<Value>> {
-        let (_info, client) = if tab_id.is_empty() {
+        let (info, client) = if tab_id.is_empty() {
             self.active_tab().await?
         } else {
             self.ensure_tab(tab_id).await?
         };
-        let snap = snapshot::dom_snapshot(&client).await?;
+        let snap = self.snapshot_for_locators(&client, &info.id).await?;
         let nodes = snapshot::nodes_array(&snap);
         let name_lc = name.map(str::to_lowercase);
         let testid_lc = testid.map(str::to_lowercase);
@@ -550,6 +645,36 @@ impl BrowserMcp {
         Ok(json!({ "ok": true, "pass": pass, "expected": expected, "actual": actual }))
     }
 
+    /// Read-only JS evaluation — parity with control-browser's
+    /// `tab.playwright.evaluate`. Returns the evaluated value.
+    async fn tool_evaluate(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let expression = args.get("expression").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("evaluate", &expression).await;
+        let value = client.evaluate(&expression).await?;
+        self.emit_step_end(&step, "ok", &format!("Evaluated {expression}")).await;
+        Ok(json!({ "ok": true, "result": value }))
+    }
+
+    /// Wait for a page load state (`load` / `domcontentloaded`) — parity with
+    /// `waitForLoadState`.
+    async fn tool_wait_for_load_state(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let state = args.get("state").and_then(Value::as_str).unwrap_or("load").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let ready = self.wait_for_load_state(&client, &state, Duration::from_secs(30)).await?;
+        Ok(json!({ "ok": true, "state": ready }))
+    }
+
     // ── Cursor (computer-use) ──────────────────────────────────────────────
 
     async fn tool_cursor_move(&self, args: Value) -> Result<Value> {
@@ -557,6 +682,85 @@ impl BrowserMcp {
         let y = args.get("y").and_then(Value::as_i64).unwrap_or(0) as i32;
         self.set_cursor(x, y, false, "left").await;
         Ok(json!({ "ok": true, "x": x, "y": y }))
+    }
+
+    /// Move the cursor by a relative offset from its current position.
+    async fn tool_cursor_move_by(&self, args: Value) -> Result<Value> {
+        let dx = args.get("dx").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let dy = args.get("dy").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let cursor = self.cursor.lock().await;
+        let (nx, ny) = (cursor.x + dx, cursor.y + dy);
+        drop(cursor);
+        self.set_cursor(nx, ny, false, "left").await;
+        Ok(json!({ "ok": true, "x": nx, "y": ny }))
+    }
+
+    /// Double-click with the visible cursor at the given position (or the
+    /// current cursor position when omitted).
+    async fn tool_cursor_double_click(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let x = args.get("x").and_then(Value::as_i64).map(|v| v as i32);
+        let y = args.get("y").and_then(Value::as_i64).map(|v| v as i32);
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let (x, y) = if let (Some(x), Some(y)) = (x, y) {
+            (x, y)
+        } else {
+            let cursor = self.cursor.lock().await;
+            (cursor.x, cursor.y)
+        };
+        self.set_cursor(x, y, true, "left").await;
+        self.dispatch_click(&client, x, y, "left", true).await?;
+        let _ = self.emit("browser_cursor_clicked", json!({ "x": x, "y": y, "button": "left" })).await;
+        Ok(json!({ "ok": true, "x": x, "y": y }))
+    }
+
+    /// Drag with the visible cursor from one point to another (press, glide,
+    /// release) — parity with control-browser's `cua.drag`.
+    async fn tool_cursor_drag(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let from = args.get("from").cloned().unwrap_or_default();
+        let to = args.get("to").cloned().unwrap_or_default();
+        let (fx, fy) = (from.get("x").and_then(Value::as_i64).unwrap_or(0) as i32, from.get("y").and_then(Value::as_i64).unwrap_or(0) as i32);
+        let (tx, ty) = (to.get("x").and_then(Value::as_i64).unwrap_or(0) as i32, to.get("y").and_then(Value::as_i64).unwrap_or(0) as i32);
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        self.set_cursor(fx, fy, true, "left").await;
+        client
+            .call(
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mousePressed", "x": fx, "y": fy, "button": "left", "clickCount": 1 }),
+            )
+            .await?;
+        // Glide in steps so the user sees the pointer travel the path.
+        const STEPS: i32 = 12;
+        for i in 1..=STEPS {
+            let x = fx + (tx - fx) * i / STEPS;
+            let y = fy + (ty - fy) * i / STEPS;
+            client
+                .call(
+                    "Input.dispatchMouseEvent",
+                    json!({ "type": "mouseMoved", "x": x, "y": y, "button": "left", "buttons": 1 }),
+                )
+                .await?;
+            self.set_cursor(x, y, true, "left").await;
+            tokio::time::sleep(Duration::from_millis(12)).await;
+        }
+        client
+            .call(
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mouseReleased", "x": tx, "y": ty, "button": "left", "clickCount": 1 }),
+            )
+            .await?;
+        self.set_cursor(tx, ty, false, "left").await;
+        let _ = self.emit("browser_cursor_clicked", json!({ "x": tx, "y": ty, "button": "left" })).await;
+        Ok(json!({ "ok": true, "from": { "x": fx, "y": fy }, "to": { "x": tx, "y": ty } }))
     }
 
     async fn tool_cursor_move_to(&self, args: Value) -> Result<Value> {
@@ -750,6 +954,15 @@ fn browser_tools() -> Vec<(&'static str, &'static str, Value)> {
         }),
     ),
     (
+        "browser_tab_get",
+        "Get a tab's info and make it the active tab (the one no-`tab` actions target).",
+        json!({
+            "type": "object",
+            "properties": { "tab": { "type": "string", "description": "Tab id" } },
+            "required": ["tab"],
+        }),
+    ),
+    (
         "browser_goto",
         "Navigate the tab to a URL.",
         json!({
@@ -888,11 +1101,31 @@ fn browser_tools() -> Vec<(&'static str, &'static str, Value)> {
         }),
     ),
     (
+        "browser_wait_for_load_state",
+        "Wait for the page to reach a load state: \"load\" (readyState complete) or \"domcontentloaded\".",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "state": { "type": "string", "enum": ["load", "domcontentloaded"], "description": "Default \"load\"" },
+            },
+        }),
+    ),
+    (
         "browser_assert",
         "Run a read-only JS expression and compare to expected (pass/fail for test logs).",
         json!({
             "type": "object",
             "properties": { "tab": { "type": "string" }, "expression": { "type": "string" }, "expected": {} },
+            "required": ["expression"],
+        }),
+    ),
+    (
+        "browser_evaluate",
+        "Run a read-only JS expression and return its value.",
+        json!({
+            "type": "object",
+            "properties": { "tab": { "type": "string" }, "expression": { "type": "string" } },
             "required": ["expression"],
         }),
     ),
@@ -903,6 +1136,15 @@ fn browser_tools() -> Vec<(&'static str, &'static str, Value)> {
             "type": "object",
             "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } },
             "required": ["x", "y"],
+        }),
+    ),
+    (
+        "browser_cursor_move_by",
+        "Move the visible AI cursor by a relative offset from its current position.",
+        json!({
+            "type": "object",
+            "properties": { "dx": { "type": "integer" }, "dy": { "type": "integer" } },
+            "required": ["dx", "dy"],
         }),
     ),
     (
@@ -920,6 +1162,27 @@ fn browser_tools() -> Vec<(&'static str, &'static str, Value)> {
         json!({
             "type": "object",
             "properties": { "tab": { "type": "string" }, "x": { "type": "integer" }, "y": { "type": "integer" } },
+        }),
+    ),
+    (
+        "browser_cursor_double_click",
+        "Double-click with the visible AI cursor at current position (or given coordinates).",
+        json!({
+            "type": "object",
+            "properties": { "tab": { "type": "string" }, "x": { "type": "integer" }, "y": { "type": "integer" } },
+        }),
+    ),
+    (
+        "browser_cursor_drag",
+        "Drag with the visible AI cursor from one point to another (press, glide, release).",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "from": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } },
+                "to": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } },
+            },
+            "required": ["from", "to"],
         }),
     ),
     (
@@ -1062,6 +1325,7 @@ async fn call_tool(mcp: &Arc<BrowserMcp>, name: &str, args: Value) -> Result<Val
         "browser_tabs_list" => mcp.tool_tabs_list().await,
         "browser_tab_new" => mcp.tool_tab_new(args).await,
         "browser_tab_close" => mcp.tool_tab_close(args).await,
+        "browser_tab_get" => mcp.tool_tab_get(args).await,
         "browser_goto" => mcp.tool_goto(args).await,
         "browser_dom_snapshot" => mcp.tool_dom_snapshot(args).await,
         "browser_get_by_role" | "browser_get_by_text" | "browser_get_by_label"
@@ -1074,10 +1338,15 @@ async fn call_tool(mcp: &Arc<BrowserMcp>, name: &str, args: Value) -> Result<Val
         "browser_screenshot" => mcp.tool_screenshot(args).await,
         "browser_wait_for" => mcp.tool_wait_for(args).await,
         "browser_wait_for_url" => mcp.tool_wait_for_url(args).await,
+        "browser_wait_for_load_state" => mcp.tool_wait_for_load_state(args).await,
         "browser_assert" => mcp.tool_assert(args).await,
+        "browser_evaluate" => mcp.tool_evaluate(args).await,
         "browser_cursor_move" => mcp.tool_cursor_move(args).await,
+        "browser_cursor_move_by" => mcp.tool_cursor_move_by(args).await,
         "browser_cursor_move_to" => mcp.tool_cursor_move_to(args).await,
         "browser_cursor_click" => mcp.tool_cursor_click(args).await,
+        "browser_cursor_double_click" => mcp.tool_cursor_double_click(args).await,
+        "browser_cursor_drag" => mcp.tool_cursor_drag(args).await,
         "browser_cursor_type" => mcp.tool_cursor_type(args).await,
         "browser_cursor_keypress" => mcp.tool_cursor_keypress(args).await,
         "browser_cua_scroll" => mcp.tool_cua_scroll(args).await,
@@ -1090,10 +1359,10 @@ async fn call_tool(mcp: &Arc<BrowserMcp>, name: &str, args: Value) -> Result<Val
 // ── Dashboard-facing HTTP endpoint ─────────────────────────────────────────
 
 use axum::{
-    extract::{Path as AxumPath, State as AxumState},
+    extract::{Json as AxumJson, Path as AxumPath, State as AxumState},
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 
@@ -1129,11 +1398,30 @@ async fn http_snapshot_handler(
     Html(format!("tab {tab_id}")) // placeholder; state endpoint carries the live snapshot
 }
 
+/// Invoke a `browser_*` tool over HTTP. Used by the dashboard to drive the
+/// agent's CDP engine manually (address bar, reload, …) — the same tools the
+/// agent calls over stdio, so manual actions land in the timeline too.
+async fn http_tool_handler(
+    AxumState(mcp): AxumState<Arc<BrowserMcp>>,
+    AxumJson(body): AxumJson<Value>,
+) -> impl IntoResponse {
+    let name = body.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+    let args = body.get("arguments").cloned().unwrap_or(json!({}));
+    match call_tool(&mcp, &name, args).await {
+        Ok(value) => (StatusCode::OK, AxumJson(json!({ "ok": true, "result": value }))),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            AxumJson(json!({ "ok": false, "error": error.to_string() })),
+        ),
+    }
+}
+
 async fn run_http_server(mcp: Arc<BrowserMcp>, requested_port: u16) {
     let app = Router::new()
         .route("/state", get(http_state_handler))
         .route("/screenshot/{tab}", get(http_screenshot_handler))
         .route("/snapshot/{tab}", get(http_snapshot_handler))
+        .route("/tool", post(http_tool_handler))
         .with_state(mcp);
 
     // Bind to a random free port when none was configured.

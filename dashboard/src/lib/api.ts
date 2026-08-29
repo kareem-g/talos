@@ -520,6 +520,17 @@ export const browserApi = {
       `/api/browser/${encodeURIComponent(sessionId)}/state`,
     ),
 
+  /** Drive the agent's CDP engine manually (goto, reload, …). Same tools the
+   * agent calls over MCP, so manual actions land in the timeline too. */
+  tool: (sessionId: string, name: string, args: Record<string, unknown> = {}) =>
+    request<{ ok: boolean; result?: unknown; error?: string }>(
+      `/api/browser/${encodeURIComponent(sessionId)}/tool`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ name, arguments: args }),
+      },
+    ),
+
   screenshotUrl: (sessionId: string, tabId: string) =>
     `/api/browser/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(tabId)}`,
 }

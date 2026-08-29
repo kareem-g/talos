@@ -95,6 +95,7 @@ pub async fn start(
         .route("/api/browser/event", post(crate::api::routes::browser_event))
         .route("/api/browser/{session}/state", get(crate::api::routes::browser_state_proxy))
         .route("/api/browser/{session}/screenshot/{tab}", get(crate::api::routes::browser_screenshot_proxy))
+        .route("/api/browser/{session}/tool", post(crate::api::routes::browser_tool_proxy))
 
         // Tunnel
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))

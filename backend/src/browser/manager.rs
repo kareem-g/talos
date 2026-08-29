@@ -116,6 +116,23 @@ impl BrowserManager {
         resp.json::<Value>().await.map_err(|e| format!("proxy json: {e}"))
     }
 
+    /// Proxy a POST (JSON body) to the browser MCP server's HTTP endpoint —
+    /// used by the dashboard to drive the engine manually (`/tool`).
+    pub async fn proxy_post(&self, session_id: &str, path: &str, body: Value) -> Result<Value, String> {
+        let port = self
+            .resolve_http_port(session_id)
+            .await
+            .ok_or_else(|| "Browser not running".to_string())?;
+        let url = format!("http://127.0.0.1:{port}{path}");
+        let resp = reqwest::Client::new()
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("proxy: {e}"))?;
+        resp.json::<Value>().await.map_err(|e| format!("proxy json: {e}"))
+    }
+
     /// Proxy a GET request that returns raw bytes (screenshot).
     pub async fn proxy_screenshot(&self, session_id: &str, tab_id: &str) -> Result<Vec<u8>, String> {
         let port = self

@@ -319,6 +319,7 @@ export function BrowserView({
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const [screenshotFailed, setScreenshotFailed] = useState(false)
+  const [mirrorNavPending, setMirrorNavPending] = useState(false)
   const screenshotRef = useRef(0)
   // Fire `onEngineActive` once per engine start, not on every 2s poll.
   const engineNotifiedRef = useRef(false)
@@ -414,7 +415,7 @@ export function BrowserView({
     if (lastBrowserStep) screenshotRef.current += 1
     // …and as a slow fallback so a page that changes without agent steps
     // (animations, timers, streams) still stays live.
-    const interval = setInterval(() => { screenshotRef.current += 1 }, 5000)
+    const interval = setInterval(() => { screenshotRef.current += 1 }, 8000)
     return () => clearInterval(interval)
   }, [browserRunning, lastBrowserStep])
 
@@ -454,6 +455,28 @@ export function BrowserView({
     setLoading(true)
   }
 
+  const activeTabInfo = browserTabs.find((t) => t.id === activeTab) ?? null
+  // The agent is mid-action while the latest timeline browser step is running.
+  const acting = lastBrowserStep.length > 0 && lastBrowserStep.endsWith(':running')
+
+  // Drive the agent's CDP engine from the mirror's address bar / reload — the
+  // same browser_goto the agent calls over MCP, so manual navigation lands in
+  // the timeline too and the mirror refreshes on the resulting step.
+  async function mirrorNavigate(raw: string) {
+    const v = raw.trim()
+    if (!v || !sessionId || !activeTab) return
+    const url = /^https?:\/\//i.test(v) ? v : `https://${v}`
+    setDraft(url)
+    setMirrorNavPending(true)
+    try {
+      const { browserApi } = await import('@/lib/api')
+      await browserApi.tool(sessionId, 'browser_goto', { tab: activeTab, url })
+    } catch {
+      /* transient — the next state poll will reconcile */
+    }
+    setMirrorNavPending(false)
+  }
+
   // CDP mirror mode
   if (browserRunning && activeTab) {
     const screenshotUrl = `/api/browser/${encodeURIComponent(sessionId ?? '')}/screenshot/${encodeURIComponent(activeTab)}`
@@ -464,7 +487,9 @@ export function BrowserView({
           right={
             <span className="flex items-center gap-1.5">
               <span className="font-mono text-[10px] text-green">CDP</span>
+              {acting ? <span className="font-mono text-[9px] text-amber-400">acting…</span> : null}
               {aiCursor ? <span className="font-mono text-[9px] text-ink-3">AI cursor {aiCursor.x},{aiCursor.y}</span> : null}
+              {activeTabInfo ? <span className="max-w-[140px] truncate font-mono text-[9.5px] text-ink-3">{activeTabInfo.title}</span> : null}
               {browserTabs.length > 1 ? browserTabs.map((t) => (
                 <button key={t.id} type="button" onClick={() => setActiveTab(t.id)}
                   className={cn('rounded px-1 py-0.5 font-mono text-[9px]', t.id === activeTab ? 'bg-hover-2 text-ink' : 'text-ink-3 hover:bg-hover-2')}
@@ -474,6 +499,26 @@ export function BrowserView({
             </span>
           }
         />
+        <div className="flex items-center gap-1.5 border-b border-line/40 bg-surface px-2 py-1">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void mirrorNavigate(draft) }}
+            placeholder={activeTabInfo?.url ?? 'https://example.com'}
+            aria-label="Address"
+            className="h-6 min-w-0 flex-1 rounded-md border border-line/50 bg-field px-2 font-mono text-[10.5px] text-ink outline-none placeholder:text-ink-3"
+          />
+          <Button variant="surface" className="min-h-6 rounded-md px-2 py-0 text-[11px]" onClick={() => void mirrorNavigate(draft)}>{mirrorNavPending ? '…' : 'Go'}</Button>
+          <button
+            type="button"
+            onClick={() => activeTabInfo?.url ? void mirrorNavigate(activeTabInfo.url) : undefined}
+            aria-label="Reload"
+            disabled={mirrorNavPending}
+            className="rounded-md p-1 text-ink-3 hover:bg-hover-2 hover:text-ink disabled:opacity-40"
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
         <div ref={browserBoxRef} className="relative min-h-0 flex-1 bg-white">
           <img
             ref={browserImgRef}

@@ -153,6 +153,8 @@ export function sessionStatusToAgentState(status: SessionStatus): AgentState {
     case 'archived':
     case 'exited':
       return 'completed'
+    default:
+      return 'ready'
   }
 }
 

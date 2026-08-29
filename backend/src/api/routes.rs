@@ -2630,6 +2630,24 @@ pub async fn browser_screenshot_proxy(
     }
 }
 
+/// POST /api/browser/{session}/tool — drive the agent's CDP engine from the
+/// dashboard (address bar, reload, …). Proxies to the browser MCP server's
+/// `/tool` endpoint, which invokes the same `browser_*` tools the agent uses.
+pub async fn browser_tool_proxy(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(session): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    match state.browser_manager.proxy_post(&session, "/tool", body).await {
+        Ok(value) => (StatusCode::OK, Json(value)).into_response(),
+        Err(message) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": message })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct BrowserEventQuery {
     pub session_id: String,

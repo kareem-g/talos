@@ -43,8 +43,12 @@ After the first step, settle into the cycle in §2. Every cycle ends with one ob
 Start by selecting which browser backend to use:
 
 - `browser_select { backend: "cdp" }` — headless Chromium engine owned by this session. Spawns the engine lazily; the first call is the only one that incurs startup cost.
-- `browser_select { backend: "builtin" }` — attach to the dashboard's live Browser tab (manual browsing mirror, requires an active session).
-- If you are unsure which backends are available, call `browser_select` with no arguments to list them.
+
+`cdp` is currently the only backend. (A `builtin` backend that attaches to the
+dashboard's manual webview iframe is planned but not implemented — the iframe
+is a plain sandboxed webview and cannot be driven over CDP.)
+
+If you are unsure which backends are available, call `browser_select` with no arguments to list them.
 
 After selecting, read the tool list from the MCP server manifest to confirm what's available.
 
@@ -205,6 +209,9 @@ A read-only JavaScript evaluation. Returns `{ pass: true/false, actual: "..." }`
 
 **Never use `browser_assert` for destructive actions.** It is read-only by design.
 
+To get a value back without comparing (e.g. to feed a later step), use
+`browser_evaluate { tab: "...", expression: "..." }` — also read-only.
+
 ## 6. Escape hatches
 
 When the DOM snapshot can't see the target (canvas, custom widgets, shadow DOM, SVG):
@@ -248,10 +255,11 @@ A short, opinionated guide to keeping the takeover legible:
 
 | Step | Tool | Notes |
 |---|---|---|
-| Select | `browser_select { backend }` | `"cdp"` or `"builtin"` |
+| Select | `browser_select { backend }` | `"cdp"` (headless Chromium) |
 | List tabs | `browser_tabs_list` | Choose by id or URL |
 | New tab | `browser_tab_new { url }` | |
-| Navigate | `browser_goto { tab, url }` | Blocks until loaded |
+| Get tab | `browser_tab_get { tab }` | Makes it the active tab |
+| Navigate | `browser_goto { tab, url }` | Blocks until the page loads |
 | Snapshot | `browser_dom_snapshot { tab }` | Ground truth for locators |
 | Locate | `browser_get_by_role/text/label/placeholder/test_id` | Only from snapshot facts |
 | Count | `browser_count { tab, ... }` | Confirm uniqueness |
@@ -260,8 +268,11 @@ A short, opinionated guide to keeping the takeover legible:
 | Press | `browser_press { tab, locator, key }` | |
 | Screenshot | `browser_screenshot { tab }` | Read the image |
 | Assert | `browser_assert { expression, expected }` | Read-only eval |
+| Evaluate | `browser_evaluate { expression }` | Read-only eval, returns value |
 | Cursor move | `browser_cursor_move_to { locator }` | Prefer over raw x,y |
-| Cursor click | `browser_cursor_click { x, y }` | |
+| Cursor click | `browser_cursor_click { x, y }` | `browser_cursor_double_click` too |
+| Cursor drag | `browser_cursor_drag { from, to }` | Press, glide, release |
 | CUA fallback | `browser_cua_click/scroll/keypress` | Coordinate path only |
 | Wait for URL | `browser_wait_for_url { tab, url }` | |
 | Wait for state | `browser_wait_for { tab, ... }` | |
+| Wait for load | `browser_wait_for_load_state { tab, state }` | `"load"` or `"domcontentloaded"` |

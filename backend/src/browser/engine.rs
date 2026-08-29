@@ -108,6 +108,10 @@ impl BrowserEngine {
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--hide-scrollbars",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--mute-audio",
+            "--force-device-scale-factor=1",
             "--window-size=1280,900",
             "about:blank",
         ]);
