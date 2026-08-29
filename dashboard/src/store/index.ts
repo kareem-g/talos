@@ -453,7 +453,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const message = (get().queues[sessionId] ?? []).find((m) => m.id === id)
     if (!message) return
     get().removeQueued(sessionId, id)
-    get().sendPrompt(sessionId, withAttachmentBlock(message.text, message.attachments))
+    get().sendPrompt(sessionId, message.text, message.attachments)
   },
 
   /** Pull a queued message back into the composer for editing. */
@@ -483,7 +483,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (queue.length === 0) return
     const [head, ...rest] = queue
     set((state) => ({ queues: { ...state.queues, [sessionId]: rest } }))
-    get().sendPrompt(sessionId, withAttachmentBlock(head.text, head.attachments))
+    get().sendPrompt(sessionId, head.text, head.attachments)
   },
 
   /**
