@@ -61,8 +61,16 @@ pub async fn start(
 
         // Providers: discovery, capabilities, and real model lists. The
         // frontend renders these verbatim and hardcodes no CLI or model.
+        // Static `/api/providers/api*` routes must be registered BEFORE the
+        // dynamic `/api/providers/{id}` so `api` is not captured as an id.
         .route("/api/providers", get(crate::api::providers::list_providers))
         .route("/api/providers/refresh", post(crate::api::providers::refresh_providers))
+        .route(
+            "/api/providers/api",
+            get(crate::api::providers::list_api_providers).post(crate::api::providers::create_api_provider),
+        )
+        .route("/api/providers/api/test", post(crate::api::providers::test_api_provider))
+        .route("/api/providers/api/{id}", delete(crate::api::providers::delete_api_provider))
         .route("/api/providers/{id}", get(crate::api::providers::get_provider))
 
         // Attachments (multipart upload)
@@ -72,6 +80,14 @@ pub async fn start(
         .route("/api/mcp", get(crate::api::routes::list_mcp))
         .route("/api/mcp", post(crate::api::routes::add_mcp))
         .route("/api/mcp/{name}", delete(crate::api::routes::remove_mcp))
+
+        // Browser automation (built-in browser engine + MCP tools)
+        .route("/api/browser", get(crate::api::routes::browser_status))
+        .route("/api/browser/start", post(crate::api::routes::browser_start))
+        .route("/api/browser/stop", post(crate::api::routes::browser_stop))
+        .route("/api/browser/event", post(crate::api::routes::browser_event))
+        .route("/api/browser/{session}/state", get(crate::api::routes::browser_state_proxy))
+        .route("/api/browser/{session}/screenshot/{tab}", get(crate::api::routes::browser_screenshot_proxy))
 
         // Tunnel
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))
@@ -96,6 +112,7 @@ pub async fn start(
         .route("/api/workspace/file", get(crate::api::routes::workspace_file))
         .route("/api/workspace/dirs", get(crate::api::routes::workspace_dirs))
         .route("/api/skills", get(crate::api::routes::list_skills))
+        .route("/api/skills/{name}", get(crate::api::routes::get_skill))
 
         // Git operations for the branch panel / git tab
         .route("/api/git/branches", get(crate::api::routes::git_branches_handler))

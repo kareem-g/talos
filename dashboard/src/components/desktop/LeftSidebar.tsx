@@ -13,8 +13,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, Folder, GitBranch as GitBranchIcon, Plus, Search } from 'lucide-react'
-import { gitApi } from '@/lib/api'
+import { Check, ChevronDown, Folder, GitBranch as GitBranchIcon, Plus, RefreshCw, Search } from 'lucide-react'
+import { gitApi, type GitBranch } from '@/lib/api'
 import { getConversation, useStore } from '@/store'
 import { cn, relativeTime } from '@/lib/format'
 import { sessionUIState } from '@/lib/sessionState'
@@ -26,6 +26,49 @@ interface BranchStats {
   changed: number
   added: number
   removed: number
+}
+
+/** A branch as rendered in the sidebar, with refs normalized and deduped. */
+interface BranchEntry {
+  /** Clean display name (no refs/heads/, refs/remotes/ or stray ref/ prefixes). */
+  name: string
+  /** Original name from the API — what checkout actually needs. */
+  raw: string
+  current: boolean
+  origin: boolean
+}
+
+/**
+ * Normalize a ref name for display, stripping each known prefix exactly once.
+ * Guards against the ref/ref/… double-prefix bug: if the daemon ever hands back
+ * a full ref ("refs/heads/x") or a half-stripped one ("ref/refs/heads/x"),
+ * the display stays clean.
+ */
+function normalizeBranchName(raw: string): string {
+  let name = raw.trim()
+  name = name.replace(/^refs\/(heads|remotes|tags)\//, '')
+  name = name.replace(/^refs\//, '')
+  name = name.replace(/^ref\//, '')
+  return name
+}
+
+/** Collapse local + remote-tracking views of the same branch into one row. */
+function dedupeBranches(branches: GitBranch[]): BranchEntry[] {
+  const byName = new Map<string, BranchEntry>()
+  for (const branch of branches) {
+    const name = normalizeBranchName(branch.name)
+    const origin =
+      /^refs\/remotes\//.test(branch.name) || branch.name.startsWith('origin/')
+    const existing = byName.get(name)
+    // Prefer the current branch, then local over remote, then first-seen.
+    if (existing && (existing.current || (!origin && existing.origin))) continue
+    byName.set(name, { name, raw: branch.name, current: branch.current ?? false, origin })
+  }
+  return [...byName.values()].sort((a, b) => {
+    if (a.current) return -1
+    if (b.current) return 1
+    return a.name.localeCompare(b.name)
+  })
 }
 
 export function LeftSidebar({
@@ -83,25 +126,49 @@ export function LeftSidebar({
       .sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
   }, [sessions, connection, activeWorkspace, query])
 
-  /* ── Branch stats for this workspace ──────────────────────────────────── */
+  /* ── Branch state for this workspace ──────────────────────────────────── */
   const [branchStats, setBranchStats] = useState<BranchStats | null>(null)
+  const [branches, setBranches] = useState<BranchEntry[]>([])
+  const [gitBusy, setGitBusy] = useState(false)
 
   const refreshBranch = useCallback(async () => {
     if (!projectPath) {
       setBranchStats(null)
+      setBranches([])
       return
     }
+    setGitBusy(true)
     try {
       const data = await gitApi.branches(projectPath)
       setBranchStats({ current: data.current, changed: data.changed_count, added: data.added, removed: data.removed })
+      setBranches(dedupeBranches(data.branches ?? []))
     } catch {
       setBranchStats(null)
+      setBranches([])
+    } finally {
+      setGitBusy(false)
     }
   }, [projectPath])
 
   useEffect(() => {
     void refreshBranch()
   }, [refreshBranch])
+
+  const checkoutBranch = useCallback(
+    async (branch: BranchEntry) => {
+      if (!projectPath || branch.current || gitBusy) return
+      setGitBusy(true)
+      try {
+        await gitApi.checkout(projectPath, branch.raw)
+        await refreshBranch()
+      } catch {
+        /* best effort — the branch simply stays where it is */
+      } finally {
+        setGitBusy(false)
+      }
+    },
+    [projectPath, gitBusy, refreshBranch],
+  )
 
   /* ── New session ─────────────────────────────────────────────────────── */
   const [creating, setCreating] = useState(false)
@@ -151,28 +218,7 @@ export function LeftSidebar({
         ) : null}
       </div>
 
-      {/* 2. Active branch + change stats */}
-      {projectPath && branchStats?.current ? (
-        <div className="border-y border-white/[0.07] px-3 py-2">
-          <div className="flex items-center gap-1.5">
-            <GitBranchIcon size={12} className="shrink-0 text-zinc-500" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-200" title={branchStats.current}>
-              {branchStats.current}
-            </span>
-            <span className="shrink-0 font-mono text-[9.5px] tabular-nums">
-              <span className="text-emerald-400">+{branchStats.added.toLocaleString()}</span>{' '}
-              <span className="text-red-400">−{branchStats.removed.toLocaleString()}</span>
-            </span>
-          </div>
-          {branchStats.changed > 0 ? (
-            <p className="mt-1 pl-[18px] text-[10px] text-zinc-500">
-              {branchStats.changed} uncommitted change{branchStats.changed === 1 ? '' : 's'}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* 3. Search (pinned above sessions) */}
+      {/* 2. Search (pinned above sessions) */}
       <div className="px-3 py-2">
         <div className="flex h-7 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/40 px-2">
           <Search size={12} className="shrink-0 text-zinc-600" />
@@ -188,7 +234,7 @@ export function LeftSidebar({
         </div>
       </div>
 
-      {/* 4. Sessions header + new task */}
+      {/* 3. Sessions header + new task */}
       <div className="flex items-center justify-between px-3 pb-1">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
           Sessions{visibleSessions.length ? ` · ${visibleSessions.length}` : ''}
@@ -203,7 +249,7 @@ export function LeftSidebar({
         </button>
       </div>
 
-      {/* 5. Session list */}
+      {/* 4. Session list */}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {visibleSessions.length === 0 ? (
           <p className="px-2 py-4 text-[11px] leading-relaxed text-zinc-500">
@@ -260,6 +306,77 @@ export function LeftSidebar({
           })
         )}
       </div>
+
+      {/* 5. Git branch list — deduped, current branch with live diffstat */}
+      {projectPath ? (
+        <div className="shrink-0 border-t border-white/[0.07]">
+          <div className="flex items-center justify-between px-3 pb-1 pt-2">
+            <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+              <GitBranchIcon size={11} className="text-zinc-500" />
+              Git branch
+            </p>
+            <button
+              type="button"
+              onClick={() => void refreshBranch()}
+              disabled={gitBusy}
+              title="Refresh branches"
+              aria-label="Refresh branches"
+              className="rounded-md p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+            >
+              <RefreshCw size={11} className={cn(gitBusy && 'animate-spin')} />
+            </button>
+          </div>
+          <div className="scroll-thin max-h-[34%] min-h-0 overflow-y-auto px-2 pb-2">
+            {branches.length === 0 ? (
+              <p className="px-2 py-2 text-[10px] text-zinc-600">
+                {branchStats ? 'No branches yet.' : 'Loading…'}
+              </p>
+            ) : (
+              branches.map((branch) => {
+                const active = branch.current
+                return (
+                  <button
+                    key={branch.raw}
+                    type="button"
+                    onClick={() => void checkoutBranch(branch)}
+                    disabled={active || gitBusy}
+                    title={active ? 'Current branch' : `Check out ${branch.name}`}
+                    aria-current={active ? 'true' : undefined}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition',
+                      active
+                        ? 'bg-white/[0.07] text-zinc-100'
+                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100 disabled:opacity-50',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'size-1.5 shrink-0 rounded-full',
+                        active ? 'bg-emerald-400' : branch.origin ? 'bg-zinc-600' : 'bg-zinc-700',
+                      )}
+                      aria-hidden
+                    />
+                    <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', !active && 'text-zinc-400')}>
+                      {branch.name}
+                    </span>
+                    {active && branchStats ? (
+                      <span className="shrink-0 font-mono text-[9.5px] tabular-nums">
+                        <span className="text-emerald-400">+{branchStats.added.toLocaleString()}</span>{' '}
+                        <span className="text-red-400">−{branchStats.removed.toLocaleString()}</span>
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })
+            )}
+            {branchStats && branchStats.changed > 0 ? (
+              <p className="px-2 pb-1 pt-1.5 text-[10px] text-zinc-500">
+                {branchStats.changed} uncommitted change{branchStats.changed === 1 ? '' : 's'}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {/* New session layer */}
       {creating ? (

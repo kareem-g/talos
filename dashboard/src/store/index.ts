@@ -25,6 +25,7 @@ import {
   sealConversation,
 } from '@/lib/events'
 import { configApi, providersApi, sessionsApi } from '@/lib/api'
+import { readableAgentError } from '@/lib/errors'
 import { socket } from '@/lib/socket'
 import { emptyConversation, type Conversation } from '@/types/conversation'
 import type { ApprovalMeta, ConnectionState, IncomingFrame } from '@/types/protocol'
@@ -33,6 +34,14 @@ import type { Session, SessionStatus, DiscoverResponse, SyncResponse } from '@/t
 
 /** Conversations, keyed by session id. Mutated in place; see the module docs. */
 const conversations = new Map<string, Conversation>()
+
+/** Live AI-cursor position on the mirrored browser page. */
+export interface BrowserCursor {
+  x: number
+  y: number
+  button: string
+  pressed: boolean
+}
 
 export function getConversation(sessionId: string): Conversation {
   let conversation = conversations.get(sessionId)
@@ -66,6 +75,12 @@ interface StoreState {
   /** Transient per-session notices (a declined model change, an agent error). */
   notices: Record<string, string | undefined>
 
+  /**
+   * Live AI-cursor position per session, driven by `browser_cursor_*` WS
+   * events so the dashboard can animate a pointer over the mirrored page.
+   */
+  browserCursors: Record<string, BrowserCursor>
+
   /** Starred session ids (local-only, persisted to localStorage). */
   starred: string[]
 
@@ -93,6 +108,8 @@ interface StoreState {
   setConfig: (sessionId: string, configId: string, value: string) => Promise<ConfigApplied>
   respondToApproval: (sessionId: string, requestId: string, decision: string, meta?: ApprovalMeta) => void
   dismissNotice: (sessionId: string) => void
+  /** Update the live AI-cursor position for a session (from WS cursor events). */
+  setBrowserCursor: (sessionId: string, cursor: BrowserCursor) => void
   /** Toggle star for a session (local-only). */
   toggleStar: (sessionId: string) => void
   /** Check if a session is starred. */
@@ -109,6 +126,7 @@ export const useStore = create<StoreState>((set, get) => ({
   configs: {},
   revisions: {},
   notices: {},
+  browserCursors: {},
   starred: (() => {
     try {
       const raw = localStorage.getItem('agentdeck-starred')
@@ -517,6 +535,12 @@ export const useStore = create<StoreState>((set, get) => ({
     set((state) => ({ notices: { ...state.notices, [sessionId]: undefined } }))
   },
 
+  setBrowserCursor(sessionId, cursor) {
+    set((state) => ({
+      browserCursors: { ...state.browserCursors, [sessionId]: cursor },
+    }))
+  },
+
   toggleStar(sessionId) {
     set((state) => {
       const starred = new Set(state.starred)
@@ -613,6 +637,27 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
         }
         return
       }
+      // `browser_cursor_moved` / `browser_cursor_clicked` drive the live
+      // pointer overlay over the mirrored page — transient UI, not timeline.
+      if (event.kind === 'browser_cursor_moved' || event.kind === 'browser_cursor_clicked') {
+        const payload = event.payload as Record<string, unknown>
+        const x = typeof payload['x'] === 'number' ? payload['x'] : undefined
+        const y = typeof payload['y'] === 'number' ? payload['y'] : undefined
+        if (x !== undefined && y !== undefined) {
+          set((state) => ({
+            browserCursors: {
+              ...state.browserCursors,
+              [event.session_id]: {
+                x,
+                y,
+                button: typeof payload['button'] === 'string' ? payload['button'] : 'left',
+                pressed: payload['pressed'] === true,
+              },
+            },
+          }))
+        }
+        return
+      }
       if (applyAgentEvent(conversation, event, frame.event_id)) {
         bump(set, event.session_id)
       }
@@ -694,7 +739,7 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
     }
 
     case 'SessionError': {
-      setNotice(set, frame.payload.session_id, frame.payload.message)
+      setNotice(set, frame.payload.session_id, readableAgentError(frame.payload.message))
       return
     }
 

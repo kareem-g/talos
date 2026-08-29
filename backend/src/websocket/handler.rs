@@ -219,9 +219,11 @@ async fn handle_message(msg: crate::websocket::WsMessage, state: &Arc<AppState>)
             handle_input(state, &session_id, &data).await;
         }
         crate::websocket::WsMessage::TerminalInput { session_id, data } => {
-            // ACP agents have no interactive PTY: raw keystrokes are not
+            // ACP and API agents have no interactive PTY: raw keystrokes are not
             // meaningful. Report clearly instead of silently dropping them.
-            if state.acp_manager.has_active_session(&session_id).await {
+            if state.acp_manager.has_active_session(&session_id).await
+                || state.api_manager.has_active_session(&*state, &session_id).await
+            {
                 state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                     session_id,
                     code: "pty_error".to_string(),
@@ -326,13 +328,29 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         return;
     }
 
+    // Custom API providers (openai_compatible, anthropic_compatible) — direct HTTP, no process.
+    if state.api_manager.is_api_provider(&*state, &session.agent).await {
+        let state = Arc::clone(state);
+        let session = session.clone();
+        let prompt = clean_data.clone();
+        tokio::spawn(async move {
+            if let Err(error) = crate::agents::api::spawn_api_turn(&state, &session, &prompt).await {
+                // spawn_api_turn already broadcasts its own error; this is a fallback.
+                tracing::warn!(session_id=%session.id, %error, "API turn failed");
+            }
+        });
+        return;
+    }
+
     // A prompt needs a live agent to receive it. Without this check the session
     // was marked `running` and the user's message was recorded, but nothing was
     // listening — the prompt silently vanished and the UI stopped offering the
     // Resume action that would actually have helped.
+    // API providers are always "live" (on-demand HTTP) so include them.
     let has_agent = state.acp_manager.has_active_session(session_id).await
         || state.pty_manager.has_active_session(session_id).await
-        || state.claude_stream.has_active_session(session_id).await;
+        || state.claude_stream.has_active_session(session_id).await
+        || state.api_manager.has_active_session(&*state, session_id).await;
     if !has_agent {
         state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
             session_id: session_id.to_string(),

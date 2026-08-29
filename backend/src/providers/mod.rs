@@ -17,8 +17,10 @@
 //!   config options.
 //! - [`discovery`] — model listing for CLIs that need to be asked instead.
 //! - [`registry`] — merges config with the catalog, probes concurrently, caches.
+//! - [`api`] — custom API providers (OpenAI-compatible, Anthropic-compatible).
 
 pub mod acp_probe;
+pub mod api;
 pub mod catalog;
 pub mod discovery;
 pub mod native;
@@ -30,3 +32,4 @@ pub use types::{
     ConfigApplied, ConfigChoice, ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource,
     Model, ModelCapabilities, ProviderCapabilities, ProviderDescriptor, ProviderState, Transport,
 };
+pub use api::{ApiProvider, ApiProbeResult, ApiTransport};

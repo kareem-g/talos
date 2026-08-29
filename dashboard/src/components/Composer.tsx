@@ -149,7 +149,8 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  // Slash menu items: agent-announced first, then curated built-ins.
+  // Slash menu items: agent-announced first, then curated built-ins, then
+  // AgentDeck's own commands (/side, /btw).
   const slashItems = useMemo<MenuItem[]>(() => {
     const announced = (commands ?? []).map((name) => ({
       insert: name.replace(/^\//, ''),
@@ -161,7 +162,15 @@ export function Composer({
       label: name,
       hint: 'built-in',
     }))
-    return [...announced, ...builtin.filter((b) => !announced.some((a) => a.insert === b.insert))]
+    const custom: MenuItem[] = [
+      { insert: 'side', label: 'side', hint: 'open side session' },
+      { insert: 'btw', label: 'btw', hint: 'note to side session' },
+    ]
+    const agentHints = [...announced, ...builtin]
+    return [
+      ...agentHints,
+      ...custom.filter((c) => !agentHints.some((a) => a.insert === c.insert)),
+    ]
   }, [commands, agentId])
 
   // @context browsing state.
@@ -176,7 +185,7 @@ export function Composer({
   const [menuIndex, setMenuIndex] = useState(0)
 
   function loadSkills() {
-    if (skills.length > 0) return
+    // Always (re)load; a transient empty result must not stick forever.
     skillsApi
       .list()
       .then((body) => setSkills(body.skills ?? []))
@@ -184,7 +193,6 @@ export function Composer({
   }
 
   function loadMentions() {
-    if (mentions.length > 0) return
     import('@/lib/api')
       .then(({ sessionsApi }) => sessionsApi.list())
       .then((all) =>

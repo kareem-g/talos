@@ -94,8 +94,12 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
             let config = state.config.read().await;
             config.settings().agents.providers.clone()
         };
+        let api_providers = {
+            let config = state.config.read().await;
+            config.settings().agents.api_providers.clone()
+        };
         let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-        if let Some(mut provider) = state.providers.get(&session.agent, &custom, &cwd).await {
+        if let Some(mut provider) = state.providers.get(&session.agent, &custom, &cwd, &api_providers).await {
             // Overlay any pending model choice so the chip shows what will run next,
             // and mark it live so the UI doesn't show "applies next turn".
             if let Ok(pending) = state.session_manager.pending_config(session_id).await {
@@ -126,8 +130,12 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
         let config = state.config.read().await;
         config.settings().agents.providers.clone()
     };
+    let api_providers = {
+        let config = state.config.read().await;
+        config.settings().agents.api_providers.clone()
+    };
     let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-    let provider_opt = state.providers.get(&session.agent, &custom, &cwd).await;
+    let provider_opt = state.providers.get(&session.agent, &custom, &cwd, &api_providers).await;
     let transport = provider_opt.as_ref().map(|p| p.transport).unwrap_or(Transport::Pty);
     let mut options = provider_opt.map(|p| p.config_options).unwrap_or_default();
     if let Ok(pending) = state.session_manager.pending_config(session_id).await {

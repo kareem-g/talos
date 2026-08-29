@@ -16,10 +16,12 @@
  */
 
 import { describeApproval } from '@/lib/approvals'
+import { readableAgentError } from '@/lib/errors'
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
 import type {
   ApprovalOptionData,
   ApprovalPart,
+  BrowserStepPart,
   CommandPart,
   Conversation,
   Message,
@@ -261,6 +263,10 @@ function activityFor(kind: string, payload: Record<string, unknown>): string | n
     }
     case 'permission_required':
       return 'Waiting for approval'
+    case 'browser_step': {
+      const action = str(payload, 'action')
+      return action ? `Browsing: ${action}` : 'Browsing'
+    }
     default:
       return null
   }
@@ -438,6 +444,30 @@ export function applyAgentEvent(
       return true
     }
 
+    case 'browser_step': {
+      const turn = currentTurn(conversation, event)
+      // One id pairs the running step with its ok/failed completion. A fresh
+      // running step pushes a new part; a completion updates the open one.
+      const stepId = strAny(payload, 'event_id', 'id') ?? `browser-${event.event_id}`
+      const existing = turn.parts.find((part): part is BrowserStepPart => part.kind === 'browser' && part.id === stepId)
+      if (existing) {
+        existing.status = str(payload, 'status') === 'failed' ? 'failed' : 'ok'
+        existing.detail = str(payload, 'detail') ?? existing.detail
+        existing.screenshotRef = str(payload, 'screenshot_ref') ?? existing.screenshotRef
+        return true
+      }
+      turn.parts.push({
+        kind: 'browser',
+        id: stepId,
+        action: (str(payload, 'action') as BrowserStepPart['action']) ?? 'goto',
+        target: str(payload, 'target'),
+        detail: str(payload, 'detail'),
+        status: str(payload, 'status') === 'failed' ? 'failed' : 'running',
+        screenshotRef: str(payload, 'screenshot_ref'),
+      })
+      return true
+    }
+
     case 'plan': {
       const turn = currentTurn(conversation, event)
       // Entries carry per-step status (Grok Build, ACP agents); plain strings
@@ -523,6 +553,94 @@ export function applyAgentEvent(
             .filter((mode) => mode.id !== '')
         : []
       conversation.mode = { id: modeId, modes }
+      return true
+    }
+
+    /** A config change the agent applied mid-session (recorded in the timeline). */
+    case 'session_config_changed': {
+      const turn = currentTurn(conversation, event)
+      const key = strAny(payload, 'key', 'option_id', 'config_id') ?? 'config'
+      const value = strAny(payload, 'value', 'new_value') ?? 'changed'
+      turn.parts.push({ kind: 'config_changed', key, value })
+      return true
+    }
+
+    /** A subagent the agent spawned — first-class lifecycle event. */
+    case 'subagent_started': {
+      const turn = currentTurn(conversation, event)
+      const id = strAny(payload, 'id', 'tool_id', 'task_id') ?? `${event.event_id}`
+      if (!id) return false
+      turn.parts.push({
+        kind: 'subagent',
+        id,
+        name: strAny(payload, 'name', 'description') ?? 'Subagent',
+        kindType: strAny(payload, 'kind', 'subagent_type') ?? '',
+        status: 'running',
+        startedAt: event.timestamp,
+      })
+      return true
+    }
+
+    /** Resolve the matching subagent part (same turn or the last open one). */
+    case 'subagent_finished': {
+      const id = strAny(payload, 'id', 'tool_id', 'task_id')
+      const status = str(payload, 'status') === 'failed' ? 'failed' : 'completed'
+      const turn = currentTurn(conversation, event)
+      const target =
+        (id ? turn.parts.find((part) => part.kind === 'subagent' && part.id === id) : undefined) ??
+        [...turn.parts].reverse().find((part) => part.kind === 'subagent')
+      if (target && target.kind === 'subagent') {
+        target.status = status
+        return true
+      }
+      turn.parts.push({
+        kind: 'subagent',
+        id: id ?? `${event.event_id}`,
+        name: strAny(payload, 'name', 'description') ?? 'Subagent',
+        kindType: strAny(payload, 'kind', 'subagent_type') ?? '',
+        status,
+        startedAt: event.timestamp,
+      })
+      return true
+    }
+
+    /** Live progress (percent / message / current step). */
+    case 'progress': {
+      const turn = currentTurn(conversation, event)
+      turn.parts.push({
+        kind: 'progress',
+        percent: numAny(payload, 'percent', 'progress', 'pct'),
+        message: strAny(payload, 'message', 'text', 'label'),
+        step: strAny(payload, 'step', 'current_step', 'task'),
+      })
+      return true
+    }
+
+    /** The agent searched for context. */
+    case 'search_started':
+    case 'search_result': {
+      const turn = currentTurn(conversation, event)
+      const query = strAny(payload, 'query', 'prompt', 'text') ?? ''
+      const rawResults = payload['results']
+      const results = Array.isArray(rawResults)
+        ? rawResults.map((r) => (typeof r === 'string' ? r : typeof r === 'object' && r !== null ? JSON.stringify(r) : String(r)))
+        : undefined
+      turn.parts.push({ kind: 'search', query, results: results && results.length ? results : undefined })
+      return true
+    }
+
+    /** The agent made a git commit. */
+    case 'git_commit': {
+      const turn = currentTurn(conversation, event)
+      const sha = strAny(payload, 'sha', 'commit', 'hash') ?? ''
+      if (!sha) return false
+      const rawFiles = payload['files']
+      turn.parts.push({
+        kind: 'git_commit',
+        sha: sha.slice(0, 12),
+        message: strAny(payload, 'message', 'title'),
+        files: Array.isArray(rawFiles) ? rawFiles.map(String).slice(0, 12) : undefined,
+      })
       return true
     }
 
@@ -677,7 +795,7 @@ export function applyAgentEvent(
       const turn = currentTurn(conversation, event)
       turn.parts.push({
         kind: 'error',
-        message: str(payload, 'message') ?? 'The agent reported an error.',
+        message: readableAgentError(str(payload, 'message') ?? 'The agent reported an error.'),
       })
       finishTurn(turn)
       conversation.activity = undefined

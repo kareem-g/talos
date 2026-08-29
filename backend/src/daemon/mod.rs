@@ -70,8 +70,10 @@ impl Daemon {
             hook_starts: Arc::new(RwLock::new(std::collections::HashMap::new())),
             permissions: Arc::new(crate::permissions::PermissionBroker::default()),
             pi_stream: Arc::new(crate::agents::pi_stream::PiStreamManager::new()),
+            api_manager: Arc::new(crate::agents::api::ApiManager::new()),
             broadcast,
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
+            browser_manager: Arc::new(crate::browser::manager::BrowserManager::new()),
         });
 
         // Reconcile sessions left mid-flight by a previous run.

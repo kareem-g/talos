@@ -2,7 +2,6 @@
  * TasksPanel — Progress checklist (real plan state) + Automations card grid.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import {
   ArrowRight,
   Bot,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react'
 import { getConversation, useStore } from '@/store'
 import { cn } from '@/lib/format'
+import { DropdownList } from '@/components/ui'
 import type { Session } from '@/types/session'
 
 /* ── Progress checklist ─────────────────────────────────────────────────── */
@@ -257,14 +257,20 @@ export function ComposerControls({
     const options = config?.options ?? []
     // permission_mode is rendered by the dedicated (icon) PermissionChip, not
     // as a generic icon-less config chip — exclude it here to avoid a duplicate.
-    const configOptions = options.filter((o) => o.id !== 'permission_mode')
+    // The `mode` dimension is likewise rendered by SessionModeChip when the
+    // agent reports live modes (opencode's build/plan), so a config `mode`
+    // option must not render twice either.
+    const liveModeShown = Boolean(mode && mode.modes.length > 0)
+    const configOptions = options.filter(
+      (o) => o.id !== 'permission_mode' && !(liveModeShown && o.id === 'mode'),
+    )
     const isThinking = (o: ConfigOptionLike) => ['effort', 'thinking', 'reasoning'].includes(o.id) || o.id.includes('effort')
     const models = configOptions.filter(isModelOption)
     // Thinking controls sit right after the model; everything else follows.
     const thinking = configOptions.filter((o) => !isModelOption(o) && isThinking(o))
     const rest = configOptions.filter((o) => !isModelOption(o) && !isThinking(o))
     return [...models, ...thinking, ...rest]
-  }, [config?.options])
+  }, [config?.options, mode])
 
   return (
     <>
@@ -340,7 +346,6 @@ export function PermissionChip({
   // When the agent reports a live permission mode, reflect it back into the UI.
   const effective = currentMode ?? mode
   const selected = PERMISSION_MODES.find((m) => m.id === effective) ?? PERMISSION_MODES[0]
-  const SelectedIcon = selected.icon
 
   // All four modes send distinct, functional values to the backend.
   // The config_id is 'permission_mode' (AgentDeck-specific), not 'mode' (agent-native).
@@ -360,7 +365,6 @@ export function PermissionChip({
           open && 'bg-hover border-line-strong',
         )}
       >
-        <SelectedIcon size={12} className="shrink-0 text-emerald-400" />
         <span className="max-w-[120px] truncate font-medium">{selected.label}</span>
         <ChevronDown size={11} className={cn('shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
@@ -485,89 +489,6 @@ function ModeIcon({ size, className }: { size?: number; className?: string }) {
 }
 
 /* ── Inline config chips (dropdown lists, no modal) ─────────────────────── */
-
-/**
- * Anchored option list rendered in a portal (fixed positioning), so the
- * composer's overflow clipping can never hide it. Opens above the anchor,
- * flipping below when there is no room.
- */
-function DropdownList({
-  anchorRef,
-  onClose,
-  width = 288,
-  children,
-}: {
-  anchorRef: React.RefObject<HTMLElement | null>
-  onClose: () => void
-  width?: number
-  children: React.ReactNode
-}) {
-  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean } | null>(null)
-  const listRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const anchor = anchorRef.current
-    if (!anchor) return
-    function place() {
-      const anchorEl = anchorRef.current
-      if (!anchorEl) return
-      const rect = anchorEl.getBoundingClientRect()
-      const spaceAbove = rect.top
-      const spaceBelow = window.innerHeight - rect.bottom
-      // Open above unless there's clearly more room below.
-      const openUp = spaceAbove >= spaceBelow || spaceAbove > 300
-      setPos({
-        left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
-        top: openUp ? rect.top : rect.bottom + 6,
-        openUp,
-      })
-    }
-    place()
-    function onPointerDown(e: PointerEvent) {
-      const target = e.target as Node
-      if (listRef.current?.contains(target)) return // inside the list — let the click land
-      if (anchorRef.current?.contains(target)) return // clicking the chip toggles it
-      onClose()
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [anchorRef, onClose, width])
-
-  if (!pos) return null
-
-  return createPortal(
-    <div
-      ref={listRef}
-      style={{
-        position: 'fixed',
-        left: pos.left,
-        top: pos.openUp ? undefined : pos.top,
-        bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
-        maxHeight: pos.openUp ? pos.top - 8 : undefined,
-      }}
-      className="z-[90]"
-    >
-      <div
-        className="animate-up flex max-h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-overlay"
-        style={{ width }}
-      >
-        {children}
-      </div>
-    </div>,
-    document.body,
-  )
-}
 
 /** One config dimension as an inline chip whose options drop down. */
 

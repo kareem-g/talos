@@ -21,6 +21,7 @@
 //! Results are cached with a TTL because a probe spawns real processes.
 
 use super::acp_probe;
+use super::api;
 use super::catalog::{self, CATALOG};
 use super::discovery;
 use super::native;
@@ -82,13 +83,13 @@ impl ProviderRegistry {
     }
 
     /// All known providers, ready or not. Served from cache when fresh.
-    pub async fn list(&self, custom: &[CustomProvider], cwd: &str) -> Vec<ProviderDescriptor> {
+    pub async fn list(&self, custom: &[CustomProvider], cwd: &str, api_providers: &[api::ApiProvider]) -> Vec<ProviderDescriptor> {
         if let Some((probed_at, cached)) = self.cache.read().await.as_ref() {
             if probed_at.elapsed() < CACHE_TTL {
                 return cached.clone();
             }
         }
-        let discovered = self.sweep(custom, cwd).await;
+        let discovered = self.sweep(custom, cwd, api_providers).await;
         *self.cache.write().await = Some((Instant::now(), discovered.clone()));
         discovered
     }
@@ -105,14 +106,15 @@ impl ProviderRegistry {
         id: &str,
         custom: &[CustomProvider],
         cwd: &str,
+        api_providers: &[api::ApiProvider],
     ) -> Option<ProviderDescriptor> {
-        self.list(custom, cwd)
+        self.list(custom, cwd, api_providers)
             .await
             .into_iter()
             .find(|provider| provider.id == id)
     }
 
-    async fn sweep(&self, custom: &[CustomProvider], cwd: &str) -> Vec<ProviderDescriptor> {
+    async fn sweep(&self, custom: &[CustomProvider], cwd: &str, api_providers: &[api::ApiProvider]) -> Vec<ProviderDescriptor> {
         let candidates = build_candidates(custom);
         let cwd = cwd.to_string();
 
@@ -122,6 +124,18 @@ impl ProviderRegistry {
             async move { probe_candidate(candidate, &cwd).await }
         });
         let mut providers = futures::future::join_all(probes).await;
+
+        // Probe API providers concurrently with CLI candidates.
+        let api_providers = api_providers.to_vec();
+        let api_descriptors = futures::future::join_all(
+            api_providers.into_iter().map(|provider| {
+                async move {
+                    let result = api::probe_api_provider(&provider).await;
+                    api::build_api_descriptor(&provider, &result)
+                }
+            }),
+        ).await;
+        providers.extend(api_descriptors);
 
         // Ready first, then alphabetical, so the UI's default ordering is useful
         // without the client having to sort.
@@ -516,7 +530,7 @@ mod tests {
     #[tokio::test]
     async fn missing_binaries_are_reported_with_a_remedy_not_dropped() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".").await;
+        let providers = registry.list(&[], ".", &[]).await;
 
         assert_eq!(
             providers.len(),
@@ -541,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn ready_providers_sort_first() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".").await;
+        let providers = registry.list(&[], ".", &[]).await;
         let first_unready = providers.iter().position(|p| !p.state.is_ready());
         let last_ready = providers.iter().rposition(|p| p.state.is_ready());
         if let (Some(first_unready), Some(last_ready)) = (first_unready, last_ready) {
@@ -560,11 +574,11 @@ mod tests {
     #[tokio::test]
     async fn cache_is_reused_then_invalidated() {
         let registry = ProviderRegistry::new();
-        let first = registry.list(&[], ".").await;
+        let first = registry.list(&[], ".", &[]).await;
         assert!(registry.cache.read().await.is_some());
 
         // Second call must not re-probe: identical probe timestamps prove it.
-        let second = registry.list(&[], ".").await;
+        let second = registry.list(&[], ".", &[]).await;
         assert_eq!(
             first.first().map(|p| p.probed_at),
             second.first().map(|p| p.probed_at),

@@ -11,7 +11,7 @@
  * counting.
  */
 
-import { Settings } from 'lucide-react'
+import { PanelLeft, PanelRight, Settings } from 'lucide-react'
 import { Button, IconButton, StatusPill } from '../ui'
 import { cn } from '@/lib/format'
 import type { UIState, UIStateDisplay } from '@/lib/sessionState'
@@ -26,6 +26,10 @@ export function TopBar({
   onNewSession,
   onBack,
   onOpenSettings,
+  leftOpen,
+  rightOpen,
+  onToggleLeft,
+  onToggleRight,
 }: {
   session: Session
   uiState: UIState
@@ -34,6 +38,11 @@ export function TopBar({
   onNewSession: () => void
   onBack: () => void
   onOpenSettings?: () => void
+  /** Sidebar visibility (collapsible sidebars). */
+  leftOpen?: boolean
+  rightOpen?: boolean
+  onToggleLeft?: () => void
+  onToggleRight?: () => void
 }) {
   const display: UIStateDisplay = uiStateDisplay(uiState)
 
@@ -78,7 +87,26 @@ export function TopBar({
       {/* Spacer pushes the rest to the right. */}
       <span className="min-w-0 flex-1" />
 
-      {/* ── Right: live read-out ─────────────────────────────────────────── */}
+      {/* ── Right: sidebar toggles + live read-out ───────────────────────── */}
+      {onToggleLeft ? (
+        <IconButton
+          label={leftOpen ? 'Hide left sidebar' : 'Show left sidebar'}
+          onClick={onToggleLeft}
+          className={cn('size-8', !leftOpen && 'text-ink-3')}
+        >
+          <PanelLeft size={15} strokeWidth={1.8} />
+        </IconButton>
+      ) : null}
+      {onToggleRight ? (
+        <IconButton
+          label={rightOpen ? 'Hide right sidebar' : 'Show right sidebar'}
+          onClick={onToggleRight}
+          className={cn('size-8', !rightOpen && 'text-ink-3')}
+        >
+          <PanelRight size={15} strokeWidth={1.8} />
+        </IconButton>
+      ) : null}
+
       <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} />
       <span className="hidden shrink-0 font-mono text-[10px] tabular-nums text-ink-3 sm:inline">{runtime}</span>
 

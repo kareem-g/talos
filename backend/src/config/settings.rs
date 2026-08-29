@@ -1,3 +1,4 @@
+use crate::providers::api::ApiProvider;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +71,10 @@ pub struct AgentsConfig {
     /// serialized to a client.
     #[serde(default)]
     pub providers: Vec<crate::providers::CustomProvider>,
+    /// Custom API providers (OpenAI-compatible, Anthropic-compatible).
+    /// These connect via HTTP rather than a local CLI binary.
+    #[serde(default)]
+    pub api_providers: Vec<ApiProvider>,
 }
 
 impl AgentBinary {
@@ -309,6 +314,7 @@ impl Default for Settings {
                 auto_detect: true,
                 custom: vec![],
                 providers: vec![],
+                api_providers: vec![],
             },
             worktree: WorktreeConfig {
                 enabled: true,

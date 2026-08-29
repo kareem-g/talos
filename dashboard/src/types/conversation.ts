@@ -147,6 +147,65 @@ export interface ErrorPart {
   message: string
 }
 
+/** A subagent the agent spawned (first-class event, when the backend forwards it). */
+export interface SubagentPart {
+  kind: 'subagent'
+  /** Provider-native task/tool id; the pairing key for start/finish. */
+  id: string
+  /** Human task label (description). */
+  name: string
+  /** Subagent type/kind (e.g. "explore", "general"). */
+  kindType: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: string
+}
+
+/** Live progress (percent / message / current step) from the agent. */
+export interface ProgressPart {
+  kind: 'progress'
+  percent?: number
+  message?: string
+  step?: string
+}
+
+/** A search the agent ran, with any returned results. */
+export interface SearchPart {
+  kind: 'search'
+  query: string
+  results?: string[]
+}
+
+/** The agent made a git commit. */
+export interface GitCommitPart {
+  kind: 'git_commit'
+  sha: string
+  message?: string
+  files?: string[]
+}
+
+/** A live config change (model/mode/permission) the agent applied mid-session. */
+export interface ConfigChangedPart {
+  kind: 'config_changed'
+  key: string
+  value: string
+}
+
+/**
+ * A browser-automation step the agent (or the manual Browser-tab toolbar) ran
+ * against the built-in CDP browser. Rendered inline in the timeline like tool
+ * calls / commands, with a status dot and a screenshot thumb.
+ */
+export interface BrowserStepPart {
+  kind: 'browser'
+  /** Provider-native event id; the pairing key for upserting running→ok/failed. */
+  id: string
+  action: 'goto' | 'click' | 'type' | 'press' | 'check' | 'select' | 'scroll' | 'screenshot' | 'assert' | 'wait_for' | 'cursor_move' | 'cursor_click' | 'cursor_type' | 'cursor_keypress'
+  target?: string
+  detail?: string
+  status: 'running' | 'ok' | 'failed'
+  screenshotRef?: string
+}
+
 export type MessagePart =
   | TextPart
   | ReasoningPart
@@ -158,6 +217,12 @@ export type MessagePart =
   | UsagePart
   | TurnSummaryPart
   | ErrorPart
+  | SubagentPart
+  | ProgressPart
+  | SearchPart
+  | GitCommitPart
+  | ConfigChangedPart
+  | BrowserStepPart
 
 export type MessageRole = 'user' | 'assistant'
 

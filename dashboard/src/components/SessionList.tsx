@@ -109,9 +109,10 @@ function SessionRow({
 /** Provider state as a compact trailing chip. */
 function ProviderBadge({ provider }: { provider: Provider }) {
   if (provider.state === 'ready') {
+    const isApi = provider.executable?.startsWith('api:')
     return (
       <Chip tone="default">
-        {provider.models.length > 0 ? `${provider.models.length} models` : provider.transport}
+        {provider.models.length > 0 ? `${provider.models.length} models` : isApi ? 'API' : provider.transport}
       </Chip>
     )
   }

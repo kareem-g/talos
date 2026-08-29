@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod api;
 pub mod catalog;
 pub mod claude;
 pub mod claude_stream;

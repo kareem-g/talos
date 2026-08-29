@@ -22,7 +22,7 @@
 use crate::agent_events::AgentEvent;
 use crate::websocket::broadcast::BroadcastHub;
 use crate::websocket::WsMessage;
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -350,6 +350,79 @@ impl AcpEventMapper {
                     ));
                 }
             }
+            // Subagents the agent spawns (ACP task lifecycle) — forwarded as
+            // first-class events so the Agents tab / strip show them live.
+            "task_started" => {
+                let task_id = update.get("taskId").and_then(Value::as_str).unwrap_or("").to_string();
+                if task_id.is_empty() {
+                    return events;
+                }
+                let name = update
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .or_else(|| update.get("message").and_then(Value::as_str))
+                    .unwrap_or("Subagent")
+                    .to_string();
+                events.push(AgentEvent::new(
+                    session_id,
+                    "subagent_started",
+                    json!({ "id": task_id, "name": name, "kind": "subagent", "source": source }),
+                ));
+            }
+            "task_finished" | "task_cancelled" => {
+                let task_id = update.get("taskId").and_then(Value::as_str).unwrap_or("").to_string();
+                let status = if kind == "task_cancelled" {
+                    "failed"
+                } else {
+                    update
+                        .get("result")
+                        .and_then(Value::as_bool)
+                        .map(|ok| if ok { "completed" } else { "failed" })
+                        .unwrap_or("completed")
+                };
+                events.push(AgentEvent::new(
+                    session_id,
+                    "subagent_finished",
+                    json!({ "id": task_id, "status": status, "source": source }),
+                ));
+            }
+            // Live progress (percent / message) from ACP agents that emit it.
+            "progress" => {
+                let percent = update
+                    .get("progress")
+                    .and_then(Value::as_number)
+                    .and_then(Number::as_f64)
+                    .or_else(|| update.get("percent").and_then(Value::as_number).and_then(Number::as_f64));
+                let message = update.get("message").and_then(Value::as_str).unwrap_or("");
+                events.push(AgentEvent::new(
+                    session_id,
+                    "progress",
+                    json!({ "percent": percent, "message": message, "source": source }),
+                ));
+            }
+            // Search activity (what the agent looked up).
+            "search_started" => {
+                let query = update
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .or_else(|| update.get("prompt").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                events.push(AgentEvent::new(
+                    session_id,
+                    "search_started",
+                    json!({ "query": query, "source": source }),
+                ));
+            }
+            "search_result" => {
+                let query = update.get("query").and_then(Value::as_str).unwrap_or("").to_string();
+                let results: Vec<Value> = update.get("results").and_then(Value::as_array).cloned().unwrap_or_default();
+                events.push(AgentEvent::new(
+                    session_id,
+                    "search_result",
+                    json!({ "query": query, "results": results, "source": source }),
+                ));
+            }
             // Slash commands the agent can run (Grok Build and other ACP
             // agents announce these). Forwarded so the composer can offer them;
             // stored as conversation state on the client, never as chat rows.
@@ -466,6 +539,11 @@ impl AcpManager {
     /// Spawn an ACP subprocess for `session_id` and complete the
     /// `initialize` + `session/new` handshake. The process is kept alive so
     /// follow-up prompts reuse the same conversation.
+    ///
+    /// `mcp_servers` are attached to the `session/new` request so the agent
+    /// (opencode, …) starts with the browser-automation MCP server — the ACP
+    /// equivalent of the `--mcp-config` the claude path passes on the command
+    /// line. `None` sends an empty list.
     pub async fn spawn_session(
         &self,
         session_id: &str,
@@ -473,8 +551,10 @@ impl AcpManager {
         project: Option<&str>,
         binary: &str,
         args: &[String],
+        mcp_servers: Option<Vec<Value>>,
     ) -> crate::Result<AcpSessionInfo> {
-        self.start(session_id, agent, project, binary, args, None).await
+        self.start(session_id, agent, project, binary, args, None, mcp_servers)
+            .await
     }
 
     /// Reopen a conversation the agent already has, via `session/load`.
@@ -489,8 +569,9 @@ impl AcpManager {
         binary: &str,
         args: &[String],
         resume_id: &str,
+        mcp_servers: Option<Vec<Value>>,
     ) -> crate::Result<AcpSessionInfo> {
-        self.start(session_id, agent, project, binary, args, Some(resume_id))
+        self.start(session_id, agent, project, binary, args, Some(resume_id), mcp_servers)
             .await
     }
 
@@ -507,6 +588,7 @@ impl AcpManager {
         binary: &str,
         args: &[String],
         resume_id: Option<&str>,
+        mcp_servers: Option<Vec<Value>>,
     ) -> crate::Result<AcpSessionInfo> {
         let mut command = Command::new(binary);
         command
@@ -632,20 +714,23 @@ impl AcpManager {
         }
 
         // Create a new conversation, or reopen the one the agent already has.
+        // MCP servers (e.g. the browser-automation server) are attached so the
+        // agent starts with the tools available, mirroring claude's --mcp-config.
+        let servers = mcp_servers.unwrap_or_default();
         let (method, params) = match resume_id {
             Some(resume_id) => (
                 "session/load",
                 json!({
                     "sessionId": resume_id,
                     "cwd": project.unwrap_or("."),
-                    "mcpServers": [],
+                    "mcpServers": servers,
                 }),
             ),
             None => (
                 "session/new",
                 json!({
                     "cwd": project.unwrap_or("."),
-                    "mcpServers": [],
+                    "mcpServers": servers,
                 }),
             ),
         };
@@ -1727,7 +1812,7 @@ mod tests {
         eprintln!("probe supported: {}", supported);
         assert!(supported, "opencode should answer the ACP handshake");
         let info = manager
-            .spawn_session("live-acp-test", "opencode", Some("/tmp/e2e-proj"), &resolved, &args)
+            .spawn_session("live-acp-test", "opencode", Some("/tmp/e2e-proj"), &resolved, &args, None)
             .await
             .expect("spawn_session should complete the handshake");
         eprintln!("spawned acp_session={} pid={} version={}", info.acp_session_id, info.pid, info.version);

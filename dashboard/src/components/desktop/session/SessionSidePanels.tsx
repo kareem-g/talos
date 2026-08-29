@@ -313,9 +313,13 @@ export function FilesPanel({ session }: { session: Session }) {
 /* ── Agents ──────────────────────────────────────────────────────────────── */
 
 /**
- * Launcher + roster: every installed provider CLI with its live state, one
- * click to start an agent (or a raw shell via the bundled `cmd` provider),
- * plus the sessions already running in this workspace.
+ * Roster: every installed provider CLI with its live state, plus the sessions
+ * already running in this workspace.
+ *
+ * Subagent spawning is the agent's job — the agent's CLI manages its own
+ * subagents (Claude Code, opencode, …) natively, so this panel shows what's
+ * available and what's running instead of pretending to spawn subagents for
+ * the user. To use a subagent, ask in chat; the agent handles the rest.
  */
 export function SubagentsPanel({
   session,
@@ -326,9 +330,6 @@ export function SubagentsPanel({
 }) {
   const providers = useStore((s) => s.providers)
   const sessions = useStore((s) => s.sessions)
-  const createSession = useStore((s) => s.createSession)
-  const [starting, setStarting] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const here = useMemo(
     () =>
@@ -341,51 +342,34 @@ export function SubagentsPanel({
     [sessions, session.project, session.id],
   )
 
-  const start = useCallback(
-    async (agentId: string) => {
-      setStarting(agentId)
-      setError(null)
-      try {
-        const created = await createSession({
-          agent: agentId,
-          project: session.project ?? undefined,
-          prompt: ' ',
-        })
-        onOpenSession?.(created.id)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
-      } finally {
-        setStarting(null)
-      }
-    },
-    [createSession, session.project, onOpenSession],
-  )
+  const readyCount = providers.filter((p) => p.state === 'ready').length
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PanelHeader title="subagents" />
-      {error ? <PanelError message={error} /> : null}
 
-      {/* Installed CLIs — click to launch in this workspace */}
+      {/* Agent-driven by design: the agent spawns its own subagents. */}
+      <div className="mx-3 mb-2 rounded-control border border-line/60 bg-inset px-2.5 py-2">
+        <p className="text-[11px] leading-[1.55] text-ink-2">
+          Subagents are spawned by the agent itself — ask in chat (e.g. “spawn a
+          subagent to review this diff”) and it handles the rest.
+        </p>
+      </div>
+
+      {/* Installed CLIs — status only */}
       <section className="px-3 pb-2">
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-3">Launch</span>
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-3">
+          Available agents · {readyCount} ready
+        </span>
         {providers.map((provider) => {
           const ready = provider.state === 'ready'
-          const busyHere = starting === provider.id
           return (
-            <button
+            <div
               key={provider.id}
-              type="button"
-              disabled={!ready || busyHere}
-              onClick={() => void start(provider.id)}
-              title={
-                ready
-                  ? `Start ${provider.name} in ${session.project ? session.project.split('/').pop() : 'inbox'}`
-                  : `${provider.name}: ${provider.remedy ?? provider.state}`
-              }
+              title={ready ? undefined : (provider.remedy ?? provider.state)}
               className={cn(
-                'flex w-full items-center gap-2 rounded-control px-1.5 py-1 text-left transition-colors',
-                ready && !busyHere ? 'hover:bg-hover-2' : 'cursor-not-allowed opacity-55',
+                'flex w-full items-center gap-2 rounded-control px-1.5 py-1',
+                !ready && 'cursor-help opacity-70',
               )}
             >
               <span
@@ -399,16 +383,16 @@ export function SubagentsPanel({
               <span className="shrink-0 font-mono text-[9.5px] uppercase text-ink-3">
                 {provider.transport}
               </span>
-              <span className={cn('shrink-0 font-mono text-[9.5px]', busyHere ? 'text-orange' : 'text-ink-3')}>
-                {busyHere ? 'starting…' : ready ? 'start' : provider.state}
+              <span className="shrink-0 font-mono text-[9.5px] text-ink-3">
+                {ready ? 'ready' : provider.state}
               </span>
-            </button>
+            </div>
           )
         })}
         {providers.length === 0 ? <EmptyText>No agent CLIs detected yet.</EmptyText> : null}
       </section>
 
-      {/* Sessions in this workspace */}
+      {/* Sessions in this workspace — click to switch */}
       <section className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-3">
           This workspace ({here.length})

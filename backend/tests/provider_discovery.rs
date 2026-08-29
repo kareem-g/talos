@@ -23,7 +23,7 @@ fn installed(binary: &str) -> bool {
 
 async fn discover(id: &str) -> Option<agentdeck_backend::providers::ProviderDescriptor> {
     ProviderRegistry::new()
-        .list(&[], ".")
+        .list(&[], ".", &[])
         .await
         .into_iter()
         .find(|provider| provider.id == id)
@@ -176,7 +176,7 @@ async fn flag_driven_clis_allow_models_we_did_not_discover() {
 /// reported as usable-with-caveats, not dropped and not falsely advertised.
 #[tokio::test]
 async fn installed_but_non_acp_clis_are_downgraded_not_hidden() {
-    let providers = ProviderRegistry::new().list(&[], ".").await;
+    let providers = ProviderRegistry::new().list(&[], ".", &[]).await;
 
     for provider in &providers {
         match (&provider.state, provider.transport) {
@@ -217,7 +217,7 @@ async fn a_broken_custom_provider_does_not_break_discovery() {
         transport: None,
     }];
 
-    let providers = ProviderRegistry::new().list(&custom, ".").await;
+    let providers = ProviderRegistry::new().list(&custom, ".", &[]).await;
     let ghost = providers
         .iter()
         .find(|provider| provider.id == "definitely-not-real")

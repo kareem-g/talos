@@ -3,10 +3,12 @@
  *
  *   TopBar (40px)  — identity, project, status, timer, connection.
  *   LeftSidebar    — project selector, branch+stats, session navigator (~280px).
- *   Center         — Chat|Terminal tabs, the conversation, the composer.
- *   RightGitPanel  — always-visible git tools (~380px).
+ *   Center         — Chat|Terminal tabs, the conversation, a floating Progress
+ *                    contexture menu, the subagent strip, and the composer.
+ *   RightRail      — browser-like Agent Workspace (~380px): browser session
+ *                    tab chrome + a Git tools card and a Progress card.
  *
- * The whole thing is a single grid. The center column is fluid; the sidebars
+ * The whole thing is a single flex row. The center column is fluid; the sidebars
  * are fixed. Every data source here is real and daemon-backed — git state,
  * session state, conversation events, terminal bytes. Nothing is mocked.
  *
@@ -27,7 +29,10 @@ import { StateZone } from '../StateZone'
 import { TerminalView } from '../TerminalView'
 import { TopBar } from './TopBar'
 import { LeftSidebar } from './LeftSidebar'
-import { RightGitPanel } from './RightGitPanel'
+import { RightRail, type RightRailHandle } from './session/RightRail'
+import { FloatingHud } from './session/FloatingHud'
+import { SubagentsStrip } from './session/SubagentsStrip'
+import { getSideSessionId, setSideSessionId } from './session/RightRailViews'
 
 const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
 
@@ -83,6 +88,123 @@ export function SessionWorkspace({
   const toggleStar = useStore((s) => s.toggleStar)
   const starred = useStore((s) => s.isStarred(session.id))
   const [tab, setTab] = useState<'chat' | 'terminal'>('chat')
+
+  /* ── Sidebar toggles ───────────────────────────────────────────────────── */
+  const [leftOpen, setLeftOpen] = useState(() => {
+    try { return localStorage.getItem('agentdeck-left-open') !== 'false' } catch { return true }
+  })
+  const [rightOpen, setRightOpen] = useState(() => {
+    try { return localStorage.getItem('agentdeck-right-open') !== 'false' } catch { return true }
+  })
+  const toggleLeft = () => {
+    setLeftOpen((v) => {
+      const next = !v
+      try { localStorage.setItem('agentdeck-left-open', String(next)) } catch { /* noop */ }
+      return next
+    })
+  }
+  const toggleRight = () => {
+    setRightOpen((v) => {
+      const next = !v
+      try { localStorage.setItem('agentdeck-right-open', String(next)) } catch { /* noop */ }
+      return next
+    })
+  }
+
+  // Open the right Agent Workspace pane if it is collapsed, then focus the
+  // Agents tab (used by the running-subagent strip above the composer).
+  const rightRailRef = useRef<RightRailHandle>(null)
+  const openSubagent = () => {
+    if (!rightOpen) toggleRight()
+    rightRailRef.current?.openTab('agents')
+  }
+
+  /* ── Side sessions (/side, /btw) + # mention context ───────────────────── */
+
+  /**
+   * A side session's agent exits after finishing a turn (status `idle`), and
+   * the backend rejects prompts to a session with no live process ("not
+   * running"). Resume it first so `/side` and `/btw` keep working on a side
+   * session that finished its last turn.
+   */
+  const ensureSideRunning = async (sideId: string): Promise<boolean> => {
+    const s = useStore.getState().sessions.find((s) => s.id === sideId)
+    if (!s) return false
+    if (s.status === 'running' || s.status === 'starting' || s.status === 'resuming') return true
+    return useStore.getState().resumeSession(sideId)
+  }
+
+  const startSideSession = async (prompt: string) => {
+    if (!rightOpen) toggleRight()
+    let sideId = getSideSessionId(session.project)
+    if (!sideId) {
+      const created = await useStore.getState().createSession({
+        agent: session.agent,
+        project: session.project ?? undefined,
+        prompt,
+      })
+      sideId = created.id
+      setSideSessionId(session.project, sideId)
+    } else if (await ensureSideRunning(sideId)) {
+      useStore.getState().sendPrompt(sideId, prompt)
+    }
+    rightRailRef.current?.openTab('side')
+  }
+
+  const sendSideNote = async (text: string) => {
+    if (!rightOpen) toggleRight()
+    let sideId = getSideSessionId(session.project)
+    if (!sideId) {
+      const created = await useStore.getState().createSession({
+        agent: session.agent,
+        project: session.project ?? undefined,
+        prompt: text,
+      })
+      sideId = created.id
+      setSideSessionId(session.project, sideId)
+    } else if (await ensureSideRunning(sideId)) {
+      useStore.getState().sendPrompt(sideId, text)
+    }
+    rightRailRef.current?.openTab('side')
+  }
+
+  /** Expand `# Name (id)` mentions into the referenced sessions' context. */
+  const expandMentionContext = async (text: string): Promise<string> => {
+    const ids = Array.from(text.matchAll(/#[^#\n]*\(([0-9a-f-]{8,})\)/g))
+      .map((match) => match[1])
+      .filter((id) => id !== session.id)
+    if (ids.length === 0) return text
+    const blocks: string[] = []
+    for (const id of ids) {
+      try {
+        const { sessionsApi } = await import('@/lib/api')
+        const history = await sessionsApi.history(id)
+        const lines = history.messages
+          .map((m) => `${m.role === 'user' ? 'You' : 'Agent'}: ${(m.content ?? '').slice(0, 400)}`)
+          .filter((line) => line.length > 3)
+        if (lines.length) blocks.push(`[Context from session ${id}:\n${lines.slice(-10).join('\n')}\n]`)
+      } catch {
+        /* skip unreachable sessions */
+      }
+    }
+    return blocks.length ? `${blocks.join('\n\n')}\n\n${text}` : text
+  }
+
+  // Intercept custom slash commands; otherwise send (attaching # mention context).
+  const handleSend = (text: string) => {
+    const trimmed = text.trim()
+    const sideMatch = /^\/side\s+([\s\S]+)$/.exec(trimmed)
+    const btwMatch = /^\/btw\s+([\s\S]+)$/.exec(trimmed)
+    if (sideMatch) {
+      void startSideSession(sideMatch[1].trim() || 'I opened a side session.')
+      return
+    }
+    if (btwMatch) {
+      void sendSideNote(btwMatch[1].trim())
+      return
+    }
+    void expandMentionContext(text).then((augmented) => sendPrompt(session.id, augmented))
+  }
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(session.name)
@@ -187,15 +309,6 @@ export function SessionWorkspace({
     void state.createSession({ agent: prov.id }).then((s) => onOpenSession?.(s.id))
   }
 
-  function focusComposer() {
-    setTab('chat')
-    // The composer textarea is rendered by StateZone → Composer. Query it after the tab flips.
-    requestAnimationFrame(() => {
-      const ta = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')
-      ta?.focus()
-    })
-  }
-
   return (
     <div className="flex h-dvh min-w-0 flex-1 flex-col bg-canvas text-ink">
       {/* ── Notice banner ─────────────────────────────────────────────────── */}
@@ -219,16 +332,22 @@ export function SessionWorkspace({
         runtime={runtime}
         onNewSession={handleNewSession}
         onBack={onBack}
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
+        onToggleLeft={toggleLeft}
+        onToggleRight={toggleRight}
       />
 
       {/* ── 4-zone body ───────────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
-        {/* Left sidebar (~280px) */}
-        <LeftSidebar
-          session={session}
-          onSelect={(id) => onOpenSession?.(id)}
-          searchRef={searchRef}
-        />
+        {/* Left sidebar (~280px) — collapsible */}
+        {leftOpen ? (
+          <LeftSidebar
+            session={session}
+            onSelect={(id) => onOpenSession?.(id)}
+            searchRef={searchRef}
+          />
+        ) : null}
 
         {/* Center — fluid */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
@@ -365,19 +484,33 @@ export function SessionWorkspace({
           <div ref={centerRef} className="flex min-h-0 flex-1 flex-col bg-canvas">
             {tab === 'chat' ? (
               <>
-                <Timeline
-                  conversation={conversation}
-                  onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)}
-                  project={session.project ?? undefined}
-                  sessionId={session.id}
-                />
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <Timeline
+                    conversation={conversation}
+                    onRespond={(id, d, m) => useStore.getState().respondToApproval(session.id, id, d, m)}
+                    project={session.project ?? undefined}
+                    sessionId={session.id}
+                  />
+                  {/* Floating contexture HUD (Progress / Goal / Git / Agents) —
+                      section actions open the matching right-panel tab. */}
+                  <FloatingHud
+                    session={session}
+                    onSelectTab={(tab) => {
+                      if (!rightOpen) toggleRight()
+                      rightRailRef.current?.openTab(tab)
+                    }}
+                  />
+                </div>
+                {/* Running subagents, above the composer — click to open that
+                    subagent's session tab in the right Agent Workspace pane. */}
+                <SubagentsStrip session={session} onOpenAgentPanel={openSubagent} />
                 <StateZone
                   session={session}
                   conversation={conversation}
                   connection={connection}
                   config={config}
                   provider={provider}
-                  onSend={(t) => sendPrompt(session.id, t)}
+                  onSend={handleSend}
                   onSetConfig={(id, v) => void setConfig(session.id, id, v)}
                 />
               </>
@@ -395,20 +528,21 @@ export function SessionWorkspace({
           </div>
         </main>
 
-        {/* Right git panel (~380px, always visible) */}
-        <RightGitPanel
-          session={session}
-          notify={(message, tone) => {
-            // Surface git errors as session notices so they reach the user even
-            // if the panel is scrolled. Ok messages are transient (the panel
-            // re-renders on success), so we don't spam the notice banner.
-            if (tone === 'error') {
-              useStore.setState((state) => ({ notices: { ...state.notices, [session.id]: message } }))
-            }
-          }}
-          onFocusComposer={focusComposer}
-          onFocusSearch={() => searchRef.current?.focus()}
-        />
+        {/* Right sidebar — browser-like Agent Workspace (multi-tab), collapsible */}
+        {rightOpen ? (
+          <RightRail
+            ref={rightRailRef}
+            session={session}
+            onOpenSession={(id) => onOpenSession?.(id)}
+            notify={(message, tone) => {
+              // Surface errors as session notices so they reach the user even
+              // if the panel is scrolled. Ok messages stay transient toasts.
+              if (tone === 'error') {
+                useStore.setState((state) => ({ notices: { ...state.notices, [session.id]: message } }))
+              }
+            }}
+          />
+        ) : null}
       </div>
     </div>
   )

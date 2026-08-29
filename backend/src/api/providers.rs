@@ -40,7 +40,11 @@ pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResp
         let config = state.config.read().await;
         config.settings().agents.providers.clone()
     };
-    let providers = state.providers.list(&custom, &discovery_cwd()).await;
+    let api_providers = {
+        let config = state.config.read().await;
+        config.settings().agents.api_providers.clone()
+    };
+    let providers = state.providers.list(&custom, &discovery_cwd(), &api_providers).await;
     Json(providers_response(providers))
 }
 
@@ -54,7 +58,11 @@ pub async fn refresh_providers(State(state): State<Arc<AppState>>) -> impl IntoR
         let config = state.config.read().await;
         config.settings().agents.providers.clone()
     };
-    let providers = state.providers.list(&custom, &discovery_cwd()).await;
+    let api_providers = {
+        let config = state.config.read().await;
+        config.settings().agents.api_providers.clone()
+    };
+    let providers = state.providers.list(&custom, &discovery_cwd(), &api_providers).await;
     Json(providers_response(providers))
 }
 
@@ -67,7 +75,11 @@ pub async fn get_provider(
         let config = state.config.read().await;
         config.settings().agents.providers.clone()
     };
-    match state.providers.get(&id, &custom, &discovery_cwd()).await {
+    let api_providers = {
+        let config = state.config.read().await;
+        config.settings().agents.api_providers.clone()
+    };
+    match state.providers.get(&id, &custom, &discovery_cwd(), &api_providers).await {
         Some(provider) => (StatusCode::OK, Json(json!({ "provider": provider }))),
         None => (
             StatusCode::NOT_FOUND,
@@ -86,6 +98,165 @@ fn providers_response(providers: Vec<ProviderDescriptor>) -> serde_json::Value {
         "ready": ready,
         "total": providers.len(),
     })
+}
+
+// ── Custom API providers (OpenAI-compatible / Anthropic-compatible) ──────────
+
+#[derive(serde::Deserialize)]
+pub struct ApiProviderRequest {
+    pub id: String,
+    pub name: String,
+    pub api_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub transport: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+}
+
+/// `GET /api/providers/api` — raw configured API providers, api_key masked.
+pub async fn list_api_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+    let items: Vec<serde_json::Value> = cfg
+        .settings()
+        .agents
+        .api_providers
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "name": p.name,
+                "api_url": p.api_url,
+                "transport": p.transport,
+                "models": p.models,
+                "default_model": p.default_model,
+                "has_key": p.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false),
+            })
+        })
+        .collect();
+    Json(json!({ "providers": items }))
+}
+
+/// `POST /api/providers/api` — create or update a custom API provider.
+pub async fn create_api_provider(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ApiProviderRequest>,
+) -> impl IntoResponse {
+    if body.id.trim().is_empty() || body.name.trim().is_empty() || body.api_url.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "id, name and api_url are required", "code": "invalid_request" })),
+        )
+            .into_response();
+    }
+    if !body.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "id may only contain alphanumeric, dash, underscore, dot", "code": "invalid_request" })),
+        )
+            .into_response();
+    }
+    let transport = match body.transport.as_deref().unwrap_or("openai_compatible") {
+        "anthropic_compatible" | "anthropic" => crate::providers::api::ApiTransport::AnthropicCompatible,
+        _ => crate::providers::api::ApiTransport::OpenAiCompatible,
+    };
+    let mut cfg = state.config.write().await;
+    // Replace if exists, else push.
+    let mut found = false;
+    for existing in &mut cfg.settings_mut().agents.api_providers {
+        if existing.id == body.id {
+            existing.name = body.name.clone();
+            existing.api_url = body.api_url.clone();
+            if let Some(key) = body.api_key.clone() {
+                if !key.is_empty() {
+                    existing.api_key = Some(key);
+                }
+            }
+            existing.transport = transport;
+            existing.models = body.models.clone();
+            existing.default_model = body.default_model.clone();
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        cfg.settings_mut().agents.api_providers.push(crate::providers::api::ApiProvider {
+            id: body.id.clone(),
+            name: body.name.clone(),
+            api_url: body.api_url.clone(),
+            api_key: body.api_key.clone(),
+            transport,
+            models: body.models.clone(),
+            default_model: body.default_model.clone(),
+            extra_headers: Default::default(),
+        });
+    }
+    if let Err(e) = cfg.save().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string(), "code": "save_failed" })),
+        )
+            .into_response();
+    }
+    drop(cfg);
+    state.providers.invalidate().await;
+    (StatusCode::OK, Json(json!({ "ok": true, "id": body.id }))).into_response()
+}
+
+/// `DELETE /api/providers/api/{id}`
+pub async fn delete_api_provider(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let mut cfg = state.config.write().await;
+    let before = cfg.settings().agents.api_providers.len();
+    cfg.settings_mut().agents.api_providers.retain(|p| p.id != id);
+    if cfg.settings().agents.api_providers.len() == before {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("No API provider with id '{}'", id), "code": "provider_unknown" })),
+        )
+            .into_response();
+    }
+    if let Err(e) = cfg.save().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string(), "code": "save_failed" })),
+        )
+            .into_response();
+    }
+    drop(cfg);
+    state.providers.invalidate().await;
+    (StatusCode::OK, Json(json!({ "ok": true, "id": id }))).into_response()
+}
+
+/// `POST /api/providers/api/test` — probe an endpoint without saving, returns models or error.
+pub async fn test_api_provider(
+    State(_state): State<Arc<AppState>>,
+    Json(body): Json<ApiProviderRequest>,
+) -> impl IntoResponse {
+    let transport = match body.transport.as_deref().unwrap_or("openai_compatible") {
+        "anthropic_compatible" | "anthropic" => crate::providers::api::ApiTransport::AnthropicCompatible,
+        _ => crate::providers::api::ApiTransport::OpenAiCompatible,
+    };
+    let provider = crate::providers::api::ApiProvider {
+        id: body.id.clone(),
+        name: body.name.clone(),
+        api_url: body.api_url.clone(),
+        api_key: body.api_key.clone(),
+        transport,
+        models: body.models.clone(),
+        default_model: body.default_model.clone(),
+        extra_headers: Default::default(),
+    };
+    let result = crate::providers::api::probe_api_provider(&provider).await;
+    if let Some(err) = result.error {
+        return Json(json!({ "ok": false, "error": err })).into_response();
+    }
+    Json(json!({ "ok": true, "models": result.models.iter().map(|m| &m.id).collect::<Vec<_>>() })).into_response()
 }
 
 /// `GET /api/sessions/{id}/config`
@@ -172,7 +343,7 @@ mod tests {
         }];
 
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&custom, ".").await;
+        let providers = registry.list(&custom, ".", &[]).await;
         let payload = serde_json::to_string(&super::providers_response(providers)).expect("serialize");
 
         assert!(
@@ -190,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn unavailable_providers_are_reported_with_a_remedy() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".").await;
+        let providers = registry.list(&[], ".", &[]).await;
         let response = super::providers_response(providers);
 
         let listed = response["providers"].as_array().expect("providers array");

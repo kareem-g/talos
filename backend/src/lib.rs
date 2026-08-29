@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod browser;
 pub mod config;
 pub mod daemon;
 pub mod hooks;

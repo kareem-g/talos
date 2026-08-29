@@ -111,6 +111,37 @@ export const providersApi = {
     ),
 }
 
+/** Custom API provider configs (OpenAI-compatible / Anthropic-compatible). */
+export interface ApiProviderConfig {
+  id: string
+  name: string
+  api_url: string
+  transport: 'openai_compatible' | 'anthropic_compatible'
+  models: string[]
+  default_model?: string | null
+  has_key: boolean
+}
+
+export const apiProvidersApi = {
+  list: () => request<{ providers: ApiProviderConfig[] }>('/api/providers/api').then((r) => r.providers),
+  create: (body: {
+    id: string
+    name: string
+    api_url: string
+    api_key?: string
+    transport?: string
+    models?: string[]
+    default_model?: string
+  }) => request<{ ok: boolean; id: string }>('/api/providers/api', { method: 'POST', body: JSON.stringify(body) }),
+  remove: (id: string) =>
+    request<{ ok: boolean }>('/api/providers/api/' + encodeURIComponent(id), { method: 'DELETE' }),
+  test: (body: { id: string; name: string; api_url: string; api_key?: string; transport?: string }) =>
+    request<{ ok: boolean; models?: string[]; error?: string }>('/api/providers/api/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+}
+
 /**
  * Guarantee that collections are arrays and capabilities is an object.
  *
@@ -309,10 +340,15 @@ export const workspaceApi = {
     ),
 }
 
-/** Skills live as SKILL.md files on this machine (~/.hermes/skills). */
+/** Skills live as SKILL.md files on this machine (~/.hermes/skills) or bundled
+ *  in the repo (docs/skills/, source: "agentdeck"). */
 export const skillsApi = {
   list: () =>
     request<{ skills: Array<{ name: string; description: string; source?: string }> }>('/api/skills'),
+  get: (name: string) =>
+    request<{ name: string; source: string; content: string }>(
+      `/api/skills/${encodeURIComponent(name)}`,
+    ),
 }
 
 /* ── Git operations (branch panel / git tab) ─────────────────────────────── */
@@ -388,6 +424,39 @@ export const gitApi = {
         .filter(Boolean)
         .join('&')}`,
     ),
+}
+
+/* ── Built-in browser (CDP) automation ────────────────────────────────────── */
+
+export interface BrowserInstance {
+  session_id: string
+  pid: number
+  http_port: number
+  state?: { ok: boolean } | Record<string, unknown>
+}
+
+export const browserApi = {
+  status: () => request<{ sessions: BrowserInstance[] }>('/api/browser'),
+
+  start: (sessionId: string) =>
+    request<{ ok: boolean; http_port?: number; pid?: number; error?: string }>('/api/browser/start', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    }),
+
+  stop: (sessionId: string) =>
+    request<{ ok: boolean }>('/api/browser/stop', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    }),
+
+  state: (sessionId: string) =>
+    request<{ ok: boolean; tabs?: Array<{ id: string; url: string; title: string }> }>(
+      `/api/browser/${encodeURIComponent(sessionId)}/state`,
+    ),
+
+  screenshotUrl: (sessionId: string, tabId: string) =>
+    `/api/browser/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(tabId)}`,
 }
 
 /* ── Standalone PTY terminals ────────────────────────────────────────────── */

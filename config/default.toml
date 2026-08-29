@@ -40,6 +40,18 @@ path = "opencode"
 args = []
 env = {}
 
+# Custom API providers (OpenAI-compatible / Anthropic-compatible).
+# Each appears alongside CLI agents in the picker; sessions run on-demand over HTTP.
+# Example:
+# [[agents.api_providers]]
+# id = "openrouter"
+# name = "OpenRouter"
+# api_url = "https://openrouter.ai/api/v1"
+# api_key = "sk-or-..."
+# transport = "openai_compatible" # or "anthropic_compatible"
+# models = ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"]
+# default_model = "openai/gpt-4o-mini"
+
 [worktree]
 enabled = true
 base_dir = "~/.agentdeck/worktrees"

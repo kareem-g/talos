@@ -26,7 +26,7 @@ async fn opencode_launch() -> Option<(String, Vec<String>)> {
         return None;
     }
     let provider = ProviderRegistry::new()
-        .list(&[], ".")
+        .list(&[], ".", &[])
         .await
         .into_iter()
         .find(|provider| provider.id == "opencode")?;
@@ -47,7 +47,7 @@ async fn model_switch_reaches_the_live_agent_and_is_confirmed() {
     let manager = AcpManager::new(BroadcastHub::new());
     let session_id = "test-model-switch";
     let info = manager
-        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args)
+        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args, None)
         .await
         .expect("opencode ACP session starts");
 
@@ -112,7 +112,7 @@ async fn a_custom_or_local_model_id_survives_the_round_trip() {
     let manager = AcpManager::new(BroadcastHub::new());
     let session_id = "test-opaque-id";
     let info = manager
-        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args)
+        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args, None)
         .await
         .expect("opencode ACP session starts");
 
@@ -165,7 +165,7 @@ async fn a_non_model_dimension_switches_through_the_same_path() {
     let manager = AcpManager::new(BroadcastHub::new());
     let session_id = "test-mode-switch";
     let info = manager
-        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args)
+        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args, None)
         .await
         .expect("opencode ACP session starts");
 
@@ -207,7 +207,7 @@ async fn a_rejected_value_reports_the_agents_reason() {
     let manager = AcpManager::new(BroadcastHub::new());
     let session_id = "test-bad-model";
     manager
-        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args)
+        .spawn_session(session_id, "opencode", Some("/tmp"), &binary, &args, None)
         .await
         .expect("opencode ACP session starts");
 

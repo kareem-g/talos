@@ -476,8 +476,7 @@ export function Layer({
 }
 
 /** A selectable row inside a layer. */
-export function Row({
-  selected,
+export function Row({  selected,
   onSelect,
   primary,
   secondary,
@@ -535,6 +534,93 @@ export function SectionLabel({ children }: { children: ReactNode }) {
     <h3 className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
       {children}
     </h3>
+  )
+}
+
+/* ── Popover / dropdown list (portal-anchored) ───────────────────────────── */
+
+/**
+ * Anchored option list rendered in a portal (fixed positioning), so no parent
+ * overflow can clip it. Opens above the anchor by default, flipping below when
+ * there is no room.
+ *
+ * Closes on `pointerdown` outside the list or the anchor, and on `Escape`.
+ */
+export function DropdownList({
+  anchorRef,
+  onClose,
+  width = 288,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  onClose: () => void
+  width?: number
+  children: ReactNode
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean } | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const anchor = anchorRef.current
+    if (!anchor) return
+    function place() {
+      const anchorEl = anchorRef.current
+      if (!anchorEl) return
+      const rect = anchorEl.getBoundingClientRect()
+      const spaceAbove = rect.top
+      const spaceBelow = window.innerHeight - rect.bottom
+      // Open above unless there's clearly more room below.
+      const openUp = spaceAbove >= spaceBelow || spaceAbove > 300
+      setPos({
+        left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
+        top: openUp ? rect.top : rect.bottom + 6,
+        openUp,
+      })
+    }
+    place()
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Node
+      if (listRef.current?.contains(target)) return // inside the list — let the click land
+      if (anchorRef.current?.contains(target)) return // clicking the chip toggles it
+      onClose()
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [anchorRef, onClose, width])
+
+  if (!pos) return null
+
+  return createPortal(
+    <div
+      ref={listRef}
+      style={{
+        position: 'fixed',
+        left: pos.left,
+        top: pos.openUp ? undefined : pos.top,
+        bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
+        maxHeight: pos.openUp ? pos.top - 8 : undefined,
+      }}
+      className="z-[90]"
+    >
+      <div
+        className="animate-up flex max-h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-overlay"
+        style={{ width }}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
   )
 }
 

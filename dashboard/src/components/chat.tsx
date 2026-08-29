@@ -932,7 +932,117 @@ export function Part({
       return <ErrorCard message={part.message} />
     case 'file':
       return null
+    case 'subagent':
+      return <SubagentRow part={part} />
+    case 'progress':
+      return <ProgressRow part={part} />
+    case 'search':
+      return <SearchRow part={part} />
+    case 'git_commit':
+      return <GitCommitRow part={part} />
+    case 'config_changed':
+      return <ConfigRow part={part} />
+    case 'browser':
+      return <BrowserStepRow part={part} />
   }
+}
+
+/* ── New AI-event part rows ──────────────────────────────────────────────── */
+
+function SubagentRow({ part }: { part: Extract<MessagePart, { kind: 'subagent' }> }) {
+  const running = part.status === 'running'
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+        {running ? 'Subagent running' : part.status === 'failed' ? 'Subagent failed' : 'Subagent done'} · {part.name}
+      </span>
+      {part.kindType ? <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{part.kindType}</span> : null}
+    </div>
+  )
+}
+
+function ProgressRow({ part }: { part: Extract<MessagePart, { kind: 'progress' }> }) {
+  const pct = part.percent
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-field">
+        <div className="h-full rounded-full bg-accent-2 transition-all duration-300" style={{ width: `${Math.max(0, Math.min(100, pct ?? 0))}%` }} />
+      </div>
+      <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-ink-3">{pct !== undefined ? `${Math.round(pct)}%` : '…'}</span>
+      {part.message ? <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">{part.message}</span> : null}
+    </div>
+  )
+}
+
+function SearchRow({ part }: { part: Extract<MessagePart, { kind: 'search' }> }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden>🔍</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11px] text-ink-2">Search: {part.query}</span>
+        {part.results && part.results.length > 0 ? (
+          <span className="block truncate font-mono text-[9.5px] text-ink-3">{part.results[0]}</span>
+        ) : null}
+      </span>
+    </div>
+  )
+}
+
+function GitCommitRow({ part }: { part: Extract<MessagePart, { kind: 'git_commit' }> }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <span className="shrink-0 font-mono text-[10px] font-semibold text-green">⬆</span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">Commit {part.sha}{part.message ? ` — ${part.message}` : ''}</span>
+      {part.files && part.files.length > 0 ? <span className="shrink-0 font-mono text-[9px] text-ink-3">{part.files.length} files</span> : null}
+    </div>
+  )
+}
+
+function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_changed' }> }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <span className="shrink-0 text-ink-3" aria-hidden>⚙</span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+        {part.key} → <span className="font-mono text-ink">{part.value}</span>
+      </span>
+    </div>
+  )
+}
+
+/* Icon per browser action — mirrors the plan's vocabulary (🌐 goto, 🖱 click, 📷 screenshot, ✅ assert, ✋ cursor). */
+const BROWSER_ACTION_ICON: Record<string, string> = {
+  goto: '🌐',
+  click: '🖱',
+  type: '⌨',
+  press: '⌨',
+  check: '☑',
+  select: '▾',
+  scroll: '↕',
+  screenshot: '📷',
+  assert: '✅',
+  wait_for: '⏳',
+  cursor_move: '✋',
+  cursor_click: '🖱',
+  cursor_type: '⌨',
+  cursor_keypress: '⌨',
+}
+
+function BrowserStepRow({ part }: { part: Extract<MessagePart, { kind: 'browser' }> }) {
+  const running = part.status === 'running'
+  const icon = BROWSER_ACTION_ICON[part.action] ?? '🌐'
+  const detail = part.detail ?? part.target
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <span className="shrink-0 text-ink-3" aria-hidden>{icon}</span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+        <span className="font-mono uppercase text-[9px] text-ink-3">{part.action}</span>
+        {detail ? <span className="text-ink-2"> · {detail}</span> : null}
+      </span>
+      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+      <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{part.status}</span>
+    </div>
+  )
 }
 
 export { Dots }
