@@ -1684,9 +1684,13 @@ async fn finish_acp_spawn(
 
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let mut clean_prompt = prompt.trim().to_string();
-        // First turn: point the agent at the browser skill if the browser MCP
-        // server is attached to this session (it is, for every ACP spawn).
-        clean_prompt = format!("{}{}", browser_skill_prompt_injection().await, clean_prompt);
+        // Only inject the browser-skill instructions when the user opted in by
+        // naming the browser (via the `$` skills menu, the MCP tools, …).
+        clean_prompt = format!(
+            "{}{}",
+            browser_skill_prompt_injection_for(&clean_prompt).await,
+            clean_prompt
+        );
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
             message: crate::agent_events::AgentMessage {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -1776,15 +1780,28 @@ fn acp_browser_mcp_entry(exe: &str, daemon_url: &str, token: &str, session_id: &
     })
 }
 
-/// Compact instructions prepended to a session's first prompt so the agent
-/// knows the built-in browser MCP tools exist and where to load the full skill.
+/// Browser-skill instructions for a prompt — but ONLY when the user opted in.
 ///
-/// Only a pointer is injected — the full workflow lives in the repo's
-/// `docs/skills/browser-test-automation.md` (also served by `/api/skills`), so
-/// sessions that never touch the browser don't carry ~9KB of dead instructions.
+/// Selecting the skill from the composer's `$` menu inserts its name
+/// (`browser-test-automation`); naming the browser MCP tools (`browser_*`) or
+/// saying "browser automation" counts too. Any other prompt gets nothing, so
+/// ~900 tokens of instructions are not burned on sessions that never touch the
+/// browser, and the block never shows up in unrelated chats.
+///
 /// Returns empty when the bundled skill is not present in this installation.
-async fn browser_skill_prompt_injection() -> String {
-    if bundled_skills_dir().is_none() {
+pub(crate) async fn browser_skill_prompt_injection_for(prompt: &str) -> String {
+    let lower = prompt.to_lowercase();
+    let opts_in = [
+        "browser-test-automation", // the `$` skills-menu insert
+        "browser_",                // the MCP tool prefix (browser_goto, browser_click, …)
+        "browser skill",
+        "browser mcp",
+        "browser automation",
+        "browser test",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if !opts_in || bundled_skills_dir().is_none() {
         return String::new();
     }
     let mut block = String::from("\n\n<skills_instructions>\n");
@@ -2236,9 +2253,13 @@ async fn finish_claude_stream_spawn(
     let mut prompted = false;
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let mut clean_prompt = prompt.trim().to_string();
-        // First turn: point the agent at the browser skill if the browser MCP
-        // server is attached to this session (it is, for every claude stream spawn).
-        clean_prompt = format!("{}{}", browser_skill_prompt_injection().await, clean_prompt);
+        // Only inject the browser-skill instructions when the user opted in by
+        // naming the browser (via the `$` skills menu, the MCP tools, …).
+        clean_prompt = format!(
+            "{}{}",
+            browser_skill_prompt_injection_for(&clean_prompt).await,
+            clean_prompt
+        );
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
             message: crate::agent_events::AgentMessage {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -3744,16 +3765,37 @@ mod tests {
 
     #[tokio::test]
     async fn browser_skill_prompt_injection_points_at_the_skill() {
-        let injection = browser_skill_prompt_injection().await;
         if bundled_skills_dir().is_none() {
-            assert!(injection.is_empty(), "no bundled skill, no injection expected");
             return;
         }
+        let injection = browser_skill_prompt_injection_for(
+            "Use the browser-test-automation skill to click the button.",
+        )
+        .await;
         assert!(!injection.is_empty());
         assert!(injection.contains("mcp__browser__browser_*"));
         assert!(injection.contains("browser-test-automation"));
         assert!(injection.contains("docs/skills/browser-test-automation.md"));
         assert!(injection.contains("browser_dom_snapshot"));
         assert!(injection.contains("UNTRUSTED"));
+    }
+
+    #[tokio::test]
+    async fn browser_skill_prompt_injection_is_opt_in_only() {
+        // A prompt that never mentions the browser gets no injected block.
+        let plain = browser_skill_prompt_injection_for("Refactor the auth module.").await;
+        assert!(plain.is_empty());
+        // Naming the MCP tools is an explicit opt-in.
+        let tools = browser_skill_prompt_injection_for(
+            "Use browser_goto to open the page, then browser_dom_snapshot.",
+        )
+        .await;
+        assert!(tools.contains("<skills_instructions>"));
+        // A one-off capital-letter mention still counts (case-insensitive).
+        let mixed = browser_skill_prompt_injection_for(
+            "Run the BROWSER automation and screenshot the result.",
+        )
+        .await;
+        assert!(mixed.contains("<skills_instructions>"));
     }
 }

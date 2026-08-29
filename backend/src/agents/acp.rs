@@ -313,8 +313,14 @@ impl AcpEventMapper {
                     _ => {}
                 }
             }
-            "plan" => {
-                let steps: Vec<String> = update
+            // Plan / todo updates (ACP v1 `plan`; v2 `plan_update` with the
+            // plan payload nested under a `plan` object — both carry the same
+            // entries shape). This is the ONLY source of todos: tool calls,
+            // commands and file changes are not plan steps and must never
+            // surface as one.
+            "plan" | "plan_update" => {
+                let plan = update.get("plan").unwrap_or(update);
+                let steps: Vec<String> = plan
                     .get("entries")
                     .and_then(Value::as_array)
                     .map(|entries| {
@@ -327,7 +333,7 @@ impl AcpEventMapper {
                 // Entries carry a live status ("pending" | "in_progress" |
                 // "completed"), which is what lets the UI draw progress rather
                 // than a flat list. Agents that omit status render as before.
-                let entries: Vec<Value> = update
+                let entries: Vec<Value> = plan
                     .get("entries")
                     .and_then(Value::as_array)
                     .map(|list| {
@@ -1604,6 +1610,34 @@ mod tests {
         // Entries keep their live status so the UI can draw progress.
         assert_eq!(events[0].payload["entries"][0]["content"], "Check syntax");
         assert_eq!(events[0].payload["entries"][0]["status"], "pending");
+    }
+
+    /// ACP v2 (agentclientprotocol.com/protocol/v2/agent-plan) names the
+    /// update `plan_update` and nests the plan payload under a `plan` object.
+    /// Both spellings must map to the same `plan` event — the client's todo
+    /// list depends on it.
+    #[test]
+    fn maps_v2_plan_update_nested_plan_object() {
+        let mut mapper = AcpEventMapper::default();
+        mapper.begin_turn();
+        let update = json!({
+            "sessionUpdate": "plan_update",
+            "plan": {
+                "type": "items",
+                "planId": "plan-1",
+                "entries": [
+                    { "content": "Read the codebase", "priority": "high", "status": "in_progress" },
+                    { "content": "Write the fix", "priority": "medium", "status": "pending" },
+                ],
+            },
+        });
+        let events = mapper.map("s1", &update);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "plan");
+        assert_eq!(events[0].payload["steps"][0], "Read the codebase");
+        assert_eq!(events[0].payload["steps"][1], "Write the fix");
+        assert_eq!(events[0].payload["entries"][0]["status"], "in_progress");
+        assert_eq!(events[0].payload["entries"][1]["status"], "pending");
     }
 
     /// Slash-command announcements become a `commands_available` event the

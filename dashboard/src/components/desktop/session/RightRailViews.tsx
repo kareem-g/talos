@@ -14,7 +14,7 @@
  * to one CLI.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity as ActivityIcon,
   FileText,
@@ -330,12 +330,31 @@ export function BrowserView({ session }: { session?: Session }) {
     }
   }, [sessionId, activeTab, browserRunning])
 
-  // Force screenshot refresh
+  // The live mirror refreshes when the agent actually acts — a `browser_step`
+  // lands (navigate/click/type/…) — with a slow idle fallback for pages that
+  // change without steps. Never remount the <img> or rebuild its URL on every
+  // render: that made the mirror look like it was "constantly reloading".
+  const revision = useStore((s) => (sessionId ? s.revisions[sessionId] : 0))
+  const lastBrowserStep = useMemo(() => {
+    const conv = sessionId ? getConversation(sessionId) : undefined
+    if (!conv) return ''
+    for (let i = conv.messages.length - 1; i >= 0; i -= 1) {
+      for (const part of conv.messages[i].parts) {
+        if (part.kind === 'browser') return `${part.id}:${part.status}`
+      }
+    }
+    return ''
+  }, [revision, sessionId])
+
   useEffect(() => {
     if (!browserRunning) return
-    const interval = setInterval(() => { screenshotRef.current += 1 }, 3000)
+    // Refresh on real activity…
+    if (lastBrowserStep) screenshotRef.current += 1
+    // …and as a slow fallback so a page that changes without agent steps
+    // (animations, timers, streams) still stays live.
+    const interval = setInterval(() => { screenshotRef.current += 1 }, 5000)
     return () => clearInterval(interval)
-  }, [browserRunning])
+  }, [browserRunning, lastBrowserStep])
 
   async function startBrowser() {
     if (!sessionId) return
@@ -394,7 +413,7 @@ export function BrowserView({ session }: { session?: Session }) {
           }
         />
         <div ref={browserBoxRef} className="relative min-h-0 flex-1 bg-white">
-          <img ref={browserImgRef} key={screenshotRef.current} src={`${screenshotUrl}?t=${Date.now()}`} alt="Browser page" className="size-full object-contain" />
+          <img ref={browserImgRef} src={`${screenshotUrl}?t=${screenshotRef.current}`} alt="Browser page" className="size-full object-contain" />
           {cursorOverlay ? (
             <div
               className="pointer-events-none absolute z-20 transition-[left,top] duration-150 ease-out"

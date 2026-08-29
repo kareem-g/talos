@@ -289,10 +289,10 @@ describe('parseDiff', () => {
   })
 })
 
-/* ── tasksFromPlanParts: real-AI-event fallback (no structured plan) ──────── */
+/* ── tasksFromPlanParts: only real plan/todo events become tasks ──────────── */
 
-describe('tasksFromPlanParts real-event fallback', () => {
-  it('derives tasks from the agent’s real tool / command / file events', () => {
+describe('tasksFromPlanParts ignores non-plan events', () => {
+  it('returns [] when only tool / command / file events exist (no plan)', () => {
     const tasks = tasksFromPlanParts([
       message([
         { kind: 'tool', toolId: 't1', name: 'Read', status: 'ok', input: 'a.ts' },
@@ -301,17 +301,14 @@ describe('tasksFromPlanParts real-event fallback', () => {
         { kind: 'tool', toolId: 't3', name: 'Write', status: 'failed', input: 'b.ts' },
       ], { createdAt: '2026-08-28T10:00:00Z' }),
     ])
-    expect(tasks.map((t) => t.title)).toEqual(['Write', 'lib.rs', 'run cargo build', 'Read'])
-    expect(tasks[0].status).toBe('failed')
-    expect(tasks[1].status).toBe('failed')
-    expect(tasks[2].status).toBe('completed')
+    expect(tasks).toEqual([])
   })
 
-  it('returns [] for plain text with no plan part and no actions', () => {
+  it('returns [] for plain text with no plan part', () => {
     expect(tasksFromPlanParts([message([{ kind: 'text', text: 'hello there', streaming: false }])])).toEqual([])
   })
 
-  it('still prefers a structured plan part over derived events', () => {
+  it('still prefers a structured plan part when one exists', () => {
     const tasks = tasksFromPlanParts([
       message([
         { kind: 'text', text: '# Plan: old markdown\n1. ignored', streaming: false },

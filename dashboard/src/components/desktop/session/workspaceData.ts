@@ -98,10 +98,10 @@ export interface AgentSummary {
  * Newest `plan` part in the conversation wins — agents replace their plan each
  * turn. A missing `entries` status renders as pending.
  *
- * When the agent does NOT emit a structured `plan` part (Claude/LongCat and
- * opencode/LongCat write plans as prose), we fall back to the agent's REAL
- * executed actions — the tool, command and file-change parts in the transcript —
- * so the todo list always reflects actual AI events, never parsed markdown.
+ * The todo list reflects ONLY real plan/todo events (ACP `plan_update` /
+ * `agent-plan` and their mapped `plan` parts). Other transcript activity —
+ * tool calls, commands, file edits, subagents — is NOT a todo and must not
+ * leak in here; that surface is the timeline / Agents activity view.
  */
 export function tasksFromPlanParts(messages: Message[]): TaskItem[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -117,54 +117,7 @@ export function tasksFromPlanParts(messages: Message[]): TaskItem[] {
       })
     }
   }
-  return tasksFromEvents(messages)
-}
-
-/**
- * Derive working tasks from the agent's REAL executed actions — the tool,
- * command and file-change parts. Each entry reflects an actual AI event with a
- * live status, so "todos" mirrors what the agent is genuinely doing (like the
- * chat timeline), for any CLI.
- */
-function tasksFromEvents(messages: Message[]): TaskItem[] {
-  const tasks: TaskItem[] = []
-  for (let i = messages.length - 1; i >= 0 && tasks.length < 40; i -= 1) {
-    const message = messages[i]
-    if (message.role !== 'assistant') continue
-    for (let j = message.parts.length - 1; j >= 0 && tasks.length < 40; j -= 1) {
-      const part = message.parts[j]
-      if (part.kind === 'tool') {
-        tasks.push({
-          id: `${i}-${j}`,
-          title: part.name,
-          status: part.status === 'ok' ? 'completed' : part.status === 'failed' ? 'failed' : 'in_progress',
-          createdAt: message.createdAt,
-        })
-      } else if (part.kind === 'command') {
-        tasks.push({
-          id: `${i}-${j}`,
-          title: `run ${part.command}`.slice(0, 80),
-          status: part.status === 'ok' ? 'completed' : part.status === 'failed' ? 'failed' : 'in_progress',
-          createdAt: message.createdAt,
-        })
-      } else if (part.kind === 'file') {
-        tasks.push({
-          id: `${i}-${j}`,
-          title: part.path.split('/').pop() ?? part.path,
-          status: part.ok ? 'completed' : 'failed',
-          createdAt: message.createdAt,
-        })
-      } else if (part.kind === 'subagent') {
-        tasks.push({
-          id: part.id,
-          title: part.name,
-          status: part.status === 'running' ? 'in_progress' : part.status === 'failed' ? 'failed' : 'completed',
-          createdAt: message.createdAt,
-        })
-      }
-    }
-  }
-  return tasks
+  return []
 }
 
 /** A subagent the agent spawned (from `Agent` tool parts in the transcript). */

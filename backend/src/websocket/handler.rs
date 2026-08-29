@@ -382,7 +382,12 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
     // `session/prompt` on the same live subprocess — true multi-turn chat,
     // not keystrokes typed into a TUI.
     if state.acp_manager.has_active_session(session_id).await {
-        if let Err(error) = state.acp_manager.send_prompt(session_id, &clean_data).await {
+        let agent_prompt = format!(
+            "{}{}",
+            crate::api::routes::browser_skill_prompt_injection_for(&clean_data).await,
+            clean_data
+        );
+        if let Err(error) = state.acp_manager.send_prompt(session_id, &agent_prompt).await {
             state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                 session_id: session_id.to_string(),
                 code: "acp_error".to_string(),
@@ -394,7 +399,12 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
 
     // Claude (structured stream-json transport) receives follow-ups over stdin.
     if state.claude_stream.has_active_session(session_id).await {
-        if let Err(error) = state.claude_stream.send_prompt(session_id, &clean_data).await {
+        let agent_prompt = format!(
+            "{}{}",
+            crate::api::routes::browser_skill_prompt_injection_for(&clean_data).await,
+            clean_data
+        );
+        if let Err(error) = state.claude_stream.send_prompt(session_id, &agent_prompt).await {
             state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
                 session_id: session_id.to_string(),
                 code: "claude_error".to_string(),
