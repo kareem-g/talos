@@ -173,6 +173,37 @@ export const RightRail = forwardRef<RightRailHandle, {
   // Imperatively open/focus a tab (the subagent strip opens the Agents tab).
   useImperativeHandle(ref, () => ({ openTab: addTab }), [addTab])
 
+  // Auto-open the Browser tab the moment the agent's CDP engine goes live.
+  // This must live HERE, not inside BrowserView — BrowserView only mounts once
+  // its tab is already open, so it can never surface itself.
+  useEffect(() => {
+    if (!session.project) return
+    let stopped = false
+    let notified = false
+    const poll = async () => {
+      try {
+        const { browserApi } = await import('@/lib/api')
+        const data = await browserApi.state(session.id)
+        if (stopped) return
+        const engineActive = Boolean(data.ok && data.tabs && data.tabs.length > 0)
+        if (engineActive && !notified) {
+          notified = true
+          addTab('browser')
+        } else if (!engineActive) {
+          notified = false
+        }
+      } catch {
+        // Transient error — keep polling, don't flap.
+      }
+    }
+    void poll()
+    const interval = setInterval(poll, 2000)
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [session.id, session.project, addTab])
+
   useEffect(() => {
     saveTabs(session.id, tabs)
     if (tabs.length > 0 && !tabs.includes(tab)) setTab(tabs[0])
@@ -189,7 +220,10 @@ export const RightRail = forwardRef<RightRailHandle, {
       case 'git-files':
         return <GitFilesView session={session} notify={railNotify} refreshKey={refreshKey} />
       case 'browser':
-        return <BrowserView session={session} />
+        // Auto-open + focus when the agent's CDP engine goes live, so an
+        // agent driving the browser surfaces itself instead of hiding behind
+        // the tab picker.
+        return <BrowserView session={session} onEngineActive={() => addTab('browser')} />
       case 'goal':
         return <GoalView session={session} />
       case 'subsessions':

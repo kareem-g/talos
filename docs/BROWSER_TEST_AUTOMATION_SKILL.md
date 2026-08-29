@@ -226,7 +226,7 @@ screen log + screenshot).
 
 ### Phase D — The skill file (ZCode-style, our adaptation)  *(~0.5d)*
 Ship the actual skill content the agent reads (Appendix A below) at
-`docs/skills/browser-test-automation.md` **and** register it via the existing
+`docs/skills/browser-control.md` **and** register it via the existing
 skills surface (`/api/skills`) so in-session agents can load it. Mirror ZCode's
 structure exactly: bootstrap → select browser → read API → core workflow
 (tabs → goto → domSnapshot → locators → act → observe) → screenshots →
@@ -283,10 +283,10 @@ Acceptance:
 
 ---
 
-## Appendix A — `browser-test-automation` skill (AgentDeck adaptation of ZCode's control-browser)
+## Appendix A — `browser-control` skill (AgentDeck adaptation of ZCode's control-browser)
 
 ```markdown
-# Skill: browser-test-automation
+# Skill: browser control
 # Browser automation for AgentDeck's built-in browser (CDP engine + MCP tools).
 
 Use this skill for browser / web-UI tasks and test automation: opening and
@@ -361,7 +361,7 @@ Automation screen and gated by AgentDeck permissions.
 ## 7. Files to touch (summary)
 
 - New: `backend/src/browser/{mod,cdp,engine}.rs`, `backend/src/mcp/servers/browser.rs`,
-  `dashboard/src/components/AutomationScreen.tsx`, `docs/skills/browser-test-automation.md`,
+  `dashboard/src/components/AutomationScreen.tsx`, `docs/skills/browser-control.md`,
   `backend/tests/fixtures/*.html`, `backend/tests/browser_*.rs`.
 - Modified: `backend/src/mcp/mod.rs` (register server), `backend/src/agents/*`
   (no-op — MCP tools just appear), `dashboard/src/components/desktop/session/RightRailViews.tsx`

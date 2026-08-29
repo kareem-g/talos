@@ -258,7 +258,14 @@ export function GitFilesView({ session, notify, refreshKey }: { session: Session
 
 /* ── 4. Browser ────────────────────────────────────────────────────────────── */
 
-export function BrowserView({ session }: { session?: Session }) {
+export function BrowserView({
+  session,
+  onEngineActive,
+}: {
+  session?: Session
+  /** Fired once when the agent's CDP engine goes live (tab detected). */
+  onEngineActive?: () => void
+}) {
   const [draft, setDraft] = useState('')
   const [url, setUrl] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -267,7 +274,10 @@ export function BrowserView({ session }: { session?: Session }) {
   const [browserTabs, setBrowserTabs] = useState<Array<{ id: string; url: string; title: string }>>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [browserError, setBrowserError] = useState<string | null>(null)
+  const [screenshotFailed, setScreenshotFailed] = useState(false)
   const screenshotRef = useRef(0)
+  // Fire `onEngineActive` once per engine start, not on every 2s poll.
+  const engineNotifiedRef = useRef(false)
 
   const sessionId = session?.id
   // Live AI-cursor position from WS `browser_cursor_*` events.
@@ -308,6 +318,13 @@ export function BrowserView({ session }: { session?: Session }) {
           setBrowserTabs(data.tabs)
           if (data.tabs.length > 0) {
             setBrowserRunning(true)
+            // Auto-open the Browser tab the first time the agent's CDP engine
+            // goes live — browsing should surface itself, not hide behind the
+            // tab picker.
+            if (!engineNotifiedRef.current) {
+              engineNotifiedRef.current = true
+              onEngineActive?.()
+            }
             if (!activeTab || !data.tabs.some((t) => t.id === activeTab)) {
               setActiveTab(data.tabs[0].id)
             }
@@ -317,6 +334,7 @@ export function BrowserView({ session }: { session?: Session }) {
           setBrowserRunning(false)
           setBrowserTabs([])
           setActiveTab(null)
+          engineNotifiedRef.current = false
         }
       } catch {
         // Transient error — keep the button available, don't flap.
@@ -328,7 +346,7 @@ export function BrowserView({ session }: { session?: Session }) {
       stopped = true
       clearInterval(interval)
     }
-  }, [sessionId, activeTab, browserRunning])
+  }, [sessionId, activeTab, browserRunning, onEngineActive])
 
   // The live mirror refreshes when the agent actually acts — a `browser_step`
   // lands (navigate/click/type/…) — with a slow idle fallback for pages that
@@ -413,7 +431,20 @@ export function BrowserView({ session }: { session?: Session }) {
           }
         />
         <div ref={browserBoxRef} className="relative min-h-0 flex-1 bg-white">
-          <img ref={browserImgRef} src={`${screenshotUrl}?t=${screenshotRef.current}`} alt="Browser page" className="size-full object-contain" />
+          <img
+            ref={browserImgRef}
+            src={`${screenshotUrl}?t=${screenshotRef.current}`}
+            alt="Browser page"
+            className={cn('size-full object-contain', screenshotFailed && 'hidden')}
+            onLoad={() => setScreenshotFailed(false)}
+            onError={() => setScreenshotFailed(true)}
+          />
+          {screenshotFailed ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-canvas">
+              <Loader2 size={18} className="animate-spin text-ink-3" />
+              <p className="text-[11px] text-ink-3">Waiting for the page to render…</p>
+            </div>
+          ) : null}
           {cursorOverlay ? (
             <div
               className="pointer-events-none absolute z-20 transition-[left,top] duration-150 ease-out"

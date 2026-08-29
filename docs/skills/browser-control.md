@@ -1,4 +1,4 @@
-# Skill: browser-test-automation
+# Skill: browser control
 
 Browser automation for AgentDeck's built-in browser (CDP engine + MCP tools).
 

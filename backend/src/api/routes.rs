@@ -1783,8 +1783,8 @@ fn acp_browser_mcp_entry(exe: &str, daemon_url: &str, token: &str, session_id: &
 /// Browser-skill instructions for a prompt — but ONLY when the user opted in.
 ///
 /// Selecting the skill from the composer's `$` menu inserts its name
-/// (`browser-test-automation`); naming the browser MCP tools (`browser_*`) or
-/// saying "browser automation" counts too. Any other prompt gets nothing, so
+/// (`browser-control`); naming the browser MCP tools (`browser_*`) or saying
+/// "browser control/automation" counts too. Any other prompt gets nothing, so
 /// ~900 tokens of instructions are not burned on sessions that never touch the
 /// browser, and the block never shows up in unrelated chats.
 ///
@@ -1792,7 +1792,9 @@ fn acp_browser_mcp_entry(exe: &str, daemon_url: &str, token: &str, session_id: &
 pub(crate) async fn browser_skill_prompt_injection_for(prompt: &str) -> String {
     let lower = prompt.to_lowercase();
     let opts_in = [
-        "browser-test-automation", // the `$` skills-menu insert
+        "browser-control",         // the `$` skills-menu insert
+        "browser control",
+        "browser-test-automation", // previous skill name, kept for old prompts
         "browser_",                // the MCP tool prefix (browser_goto, browser_click, …)
         "browser skill",
         "browser mcp",
@@ -1810,8 +1812,8 @@ pub(crate) async fn browser_skill_prompt_injection_for(prompt: &str) -> String {
          (tools callable as mcp__browser__browser_*).\n",
     );
     block.push_str(
-        "The browser-test-automation skill explains the exact workflow. Before your first \
-         browser action, load it from docs/skills/browser-test-automation.md in the working tree.\n",
+        "The browser-control skill explains the exact workflow. Before your first \
+         browser action, load it from docs/skills/browser-control.md in the working tree.\n",
     );
     block.push_str(
         "Core workflow: browser_select -> browser_tabs_list/browser_tab_new -> browser_goto -> \
@@ -3769,15 +3771,21 @@ mod tests {
             return;
         }
         let injection = browser_skill_prompt_injection_for(
-            "Use the browser-test-automation skill to click the button.",
+            "Use the browser-control skill to click the button.",
         )
         .await;
         assert!(!injection.is_empty());
         assert!(injection.contains("mcp__browser__browser_*"));
-        assert!(injection.contains("browser-test-automation"));
-        assert!(injection.contains("docs/skills/browser-test-automation.md"));
+        assert!(injection.contains("browser-control"));
+        assert!(injection.contains("docs/skills/browser-control.md"));
         assert!(injection.contains("browser_dom_snapshot"));
         assert!(injection.contains("UNTRUSTED"));
+        // The old skill name still opts in (existing prompts keep working).
+        let legacy = browser_skill_prompt_injection_for(
+            "Use the browser-test-automation skill to click the button.",
+        )
+        .await;
+        assert!(legacy.contains("<skills_instructions>"));
     }
 
     #[tokio::test]

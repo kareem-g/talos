@@ -1,6 +1,6 @@
 //! Tests for the skills surface (`/api/skills` + `/api/skills/{name}`).
 //!
-//! The bundled skill (`docs/skills/browser-test-automation.md`) is resolved via
+//! The bundled skill (`docs/skills/browser-control.md`) is resolved via
 //! the executable's ancestors during tests, so no fixture directory is needed —
 //! these tests exercise the real repo layout the daemon ships with.
 
@@ -21,8 +21,8 @@ async fn list_skills_includes_bundled_browser_skill() {
 
     let browser = skills
         .iter()
-        .find(|s| s["name"] == "browser-test-automation")
-        .expect("bundled browser-test-automation skill is listed");
+        .find(|s| s["name"] == "browser-control")
+        .expect("bundled browser-control skill is listed");
 
     assert_eq!(browser["source"], "agentdeck");
     assert!(
@@ -41,11 +41,11 @@ async fn list_skills_includes_bundled_browser_skill() {
 #[tokio::test]
 async fn get_skill_returns_full_markdown() {
     let json = body_json(
-        get_skill(Path("browser-test-automation".to_string())).await,
+        get_skill(Path("browser-control".to_string())).await,
     )
     .await;
 
-    assert_eq!(json["name"], "browser-test-automation");
+    assert_eq!(json["name"], "browser-control");
     assert_eq!(json["source"], "agentdeck");
     let content = json["content"].as_str().expect("content string");
     // The skill must contain the operational primitives an agent needs.

@@ -203,6 +203,10 @@ impl BrowserMcp {
         let _ = client.call("Runtime.enable", json!({})).await;
         if url != "about:blank" {
             let _ = client.call("Page.navigate", json!({ "url": url })).await;
+            // Auto-capture so the dashboard mirror shows the loaded site even
+            // if the agent never calls browser_screenshot.
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            let _ = self.capture_screenshot(&tab.id, &client).await;
         }
         self.tabs.lock().await.insert(tab.id.clone(), (tab.clone(), client));
         let step = self.emit_step_start("goto", &url).await;
@@ -223,13 +227,18 @@ impl BrowserMcp {
     async fn tool_goto(&self, args: Value) -> Result<Value> {
         let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
         let url = args.get("url").and_then(Value::as_str).unwrap_or("").to_string();
-        let (_info, client) = if tab_id.is_empty() {
+        let (info, client) = if tab_id.is_empty() {
             self.active_tab().await?
         } else {
             self.ensure_tab(&tab_id).await?
         };
         let step = self.emit_step_start("goto", &url).await;
         let result = client.call("Page.navigate", json!({ "url": url })).await?;
+        // Let the page settle, then capture so the dashboard mirror shows the
+        // loaded site immediately — it must not wait for an explicit
+        // browser_screenshot (which is what left it as a broken image icon).
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        let _ = self.capture_screenshot(&info.id, &client).await;
         self.emit_step_end(&step, "ok", &format!("Navigated to {url}")).await;
         Ok(json!({ "ok": true, "result": result }))
     }
@@ -437,31 +446,40 @@ impl BrowserMcp {
             self.ensure_tab(&tab_id).await?
         };
         let step = self.emit_step_start("screenshot", "page").await;
-        let result = client
-            .call("Page.captureScreenshot", json!({ "format": "png", "fromSurface": true }))
-            .await?;
-        let base64_data = result.get("data").and_then(Value::as_str).unwrap_or("").to_string();
-        if base64_data.is_empty() {
+        let Some((path, base64_data)) = self.capture_screenshot(&info.id, &client).await else {
             self.emit_step_end(&step, "failed", "Screenshot returned no data").await;
             return Ok(json!({ "ok": false, "error": "Screenshot returned no data" }));
-        }
-        use base64::Engine;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&base64_data)
-            .unwrap_or_default();
-        let safe_id = info.id.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-        let file = self.screenshot_dir.join(format!("{safe_id}.png"));
-        std::fs::write(&file, &bytes)?;
-        let screenshot_ref = file.to_string_lossy().to_string();
+        };
         self.emit_step_end(&step, "ok", "Captured screenshot").await;
         Ok(json!({
             "ok": true,
             "tab": tab_id,
-            "path": file.to_string_lossy().to_string(),
+            "path": path.to_string_lossy().to_string(),
             "data": base64_data,
             "width": 1280,
             "height": 900,
         }))
+    }
+
+    /// Capture the current page state of `client` into `{tab_id}.png` — the
+    /// file the dashboard mirror serves — and return the file plus the raw
+    /// PNG as base64 for the tool result. Best-effort: the mirror must never
+    /// block an agent step because a capture failed.
+    async fn capture_screenshot(&self, tab_id: &str, client: &CdpClient) -> Option<(std::path::PathBuf, String)> {
+        let result = client
+            .call("Page.captureScreenshot", json!({ "format": "png", "fromSurface": true }))
+            .await
+            .ok()?;
+        let base64_data = result.get("data").and_then(Value::as_str).unwrap_or("").to_string();
+        if base64_data.is_empty() {
+            return None;
+        }
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&base64_data).ok()?;
+        let safe_id = tab_id.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+        let file = self.screenshot_dir.join(format!("{safe_id}.png"));
+        std::fs::write(&file, &bytes).ok()?;
+        Some((file, base64_data))
     }
 
     async fn tool_wait_for(&self, args: Value) -> Result<Value> {
