@@ -206,6 +206,15 @@ export interface BrowserStepPart {
   screenshotRef?: string
 }
 
+/** An image attached to a message. */
+export interface ImagePart {
+  kind: 'image'
+  ref: string
+  fileName: string
+  contentType?: string
+  size: number
+}
+
 export type MessagePart =
   | TextPart
   | ReasoningPart
@@ -223,6 +232,7 @@ export type MessagePart =
   | GitCommitPart
   | ConfigChangedPart
   | BrowserStepPart
+  | ImagePart
 
 /**
  * A file the user attached to a message. The daemon stores it under the

@@ -14,6 +14,7 @@ export type SessionStatus =
   | 'waiting_for_approval'
   | 'idle'
   | 'needs_resume'
+  | 'paused'
   | 'resuming'
   | 'error'
   | 'archived'

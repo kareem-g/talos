@@ -36,6 +36,7 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   waiting_for_approval: 'Needs approval',
   idle: 'Idle',
   needs_resume: 'Needs resume',
+  paused: 'Paused',
   resuming: 'Resuming...',
   error: 'Failed',
   archived: 'Archived',

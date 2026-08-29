@@ -75,6 +75,7 @@ pub async fn start(
 
         // Attachments (multipart upload)
         .route("/api/attachments/upload", post(crate::api::routes::upload_attachment))
+        .route("/api/attachments/{session}/{file_name}", get(crate::api::routes::get_attachment))
 
         // MCP
         .route("/api/mcp", get(crate::api::routes::list_mcp))

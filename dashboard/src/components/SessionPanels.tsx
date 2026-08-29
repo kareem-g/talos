@@ -129,12 +129,7 @@ export function SessionPanels({
               <p className="text-[10px] text-ink-3">Turns</p>
               <p className="font-mono text-[13px] font-medium text-ink tabular-nums">{usage.turns}</p>
             </div>
-            {usage.cost > 0 ? (
-              <div className="rounded-lg border border-line/40 bg-surface/60 px-2.5 py-2">
-                <p className="text-[10px] text-ink-3">Cost</p>
-                <p className="font-mono text-[13px] font-medium text-accent tabular-nums">${usage.cost < 0.01 ? usage.cost.toFixed(4) : usage.cost.toFixed(2)}</p>
-              </div>
-            ) : null}
+
           </div>
         </Section>
       ) : null}

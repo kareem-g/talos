@@ -246,7 +246,6 @@ export function StateZone({
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
   const notice = useStore((s) => s.notices[session.id])
-  const stopSession = useStore((s) => s.stopSession)
   const resumeSession = useStore((s) => s.resumeSession)
   const queue = useStore((s) => s.queues[session.id])
   const queueMessage = useStore((s) => s.queueMessage)

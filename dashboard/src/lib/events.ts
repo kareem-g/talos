@@ -21,10 +21,12 @@ import type { AgentEvent, AgentMessage } from '@/types/protocol'
 import type {
   ApprovalOptionData,
   ApprovalPart,
+  AttachmentRef,
   BrowserStepPart,
   CommandPart,
   Conversation,
   Message,
+  MessagePart,
   ReasoningPart,
   TextPart,
   ToolPart,
@@ -909,11 +911,22 @@ export function applyMessage(conversation: Conversation, message: AgentMessage):
 export function addOptimisticUserMessage(
   conversation: Conversation,
   content: string,
+  attachments: AttachmentRef[] = [],
 ): Message {
+  const parts: MessagePart[] = [{ kind: 'text', text: content, streaming: false }]
+  for (const att of attachments) {
+    parts.push({
+      kind: 'image',
+      ref: att.ref,
+      fileName: att.fileName,
+      contentType: att.contentType,
+      size: att.size,
+    })
+  }
   const message: Message = {
     id: `optimistic-${Date.now()}`,
     role: 'user',
-    parts: [{ kind: 'text', text: content, streaming: false }],
+    parts,
     sequence: Number.MAX_SAFE_INTEGER,
     createdAt: new Date().toISOString(),
     streaming: false,

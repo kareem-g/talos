@@ -511,6 +511,19 @@ export const attachmentsApi = {
     }
     return parsed?.attachments ?? []
   },
+  /** Fetch a previously uploaded attachment by session and file name. */
+  get: async (sessionId: string, fileName: string): Promise<Blob> => {
+    const token = deviceToken()
+    const headers = new Headers()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+
+    const response = await fetch(
+      `/api/attachments/${encodeURIComponent(sessionId)}/${encodeURIComponent(fileName)}`,
+      { headers },
+    )
+    if (!response.ok) throw new ApiError(`Fetch attachment failed (${response.status})`, response.status)
+    return response.blob()
+  },
 }
 
 /* ── Standalone PTY terminals ────────────────────────────────────────────── */

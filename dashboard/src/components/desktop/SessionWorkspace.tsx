@@ -19,7 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Segmented } from '../ui'
-import { useConversation, useStore, withAttachmentBlock } from '@/store'
+import { useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
@@ -206,7 +206,7 @@ export function SessionWorkspace({
       return
     }
     void expandMentionContext(text).then((augmented) =>
-      sendPrompt(session.id, withAttachmentBlock(augmented, attachments)),
+      sendPrompt(session.id, augmented, attachments),
     )
   }
 

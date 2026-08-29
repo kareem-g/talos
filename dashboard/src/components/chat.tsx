@@ -885,6 +885,27 @@ export function ErrorCard({ message }: { message: string }) {
   )
 }
 
+/* ── Image ─────────────────────────────────────────────── */
+
+/** Rendered inline in user messages for pasted/attached images. */
+export function Image({ url }: { url: string }) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <img
+      src={url}
+      alt="attachment"
+      className={cn(
+        'max-h-64 w-auto rounded-xl border border-line/40 shadow-card',
+        loaded ? 'opacity-100' : 'opacity-0',
+        'transition-opacity duration-200',
+      )}
+      onLoad={() => setLoaded(true)}
+      loading="lazy"
+    />
+  )
+}
+
+
 /* ── Dispatch ────────────────────────────────────────────────────────────── */
 
 /**
@@ -897,13 +918,17 @@ export function ErrorCard({ message }: { message: string }) {
 export function Part({
   part,
   onRespond,
+  sessionId,
 }: {
   part: MessagePart
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
+  sessionId?: string
 }) {
   switch (part.kind) {
     case 'text':
       return <Prose text={part.text} streaming={part.streaming} />
+    case 'image':
+      return <Image url={sessionId ? `/api/attachments/${sessionId}/${part.fileName}` : ''} />
     case 'reasoning':
       return <Reasoning part={part} />
     case 'tool':

@@ -121,7 +121,7 @@ interface StoreState {
     name?: string
     model?: string
   }) => Promise<Session>
-  sendPrompt: (sessionId: string, text: string) => void
+  sendPrompt: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   /** Queue a follow-up message (typed while the agent is working). */
   queueMessage: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   /** Drop a queued message without sending it. */
@@ -405,11 +405,11 @@ export const useStore = create<StoreState>((set, get) => ({
    * the current turn must not leave the session dead, and the next message or
    * steer should just work.
    */
-  sendPrompt(sessionId, text) {
+  sendPrompt(sessionId, text, attachments = []) {
     const trimmed = text.trim()
     if (!trimmed) return
     const conversation = getConversation(sessionId)
-    addOptimisticUserMessage(conversation, trimmed)
+    addOptimisticUserMessage(conversation, trimmed, attachments)
     bump(set, sessionId)
     const session = get().sessions.find((s) => s.id === sessionId)
     const resumable = Boolean(
@@ -418,10 +418,10 @@ export const useStore = create<StoreState>((set, get) => ({
     if (resumable) {
       void get()
         .resumeSession(sessionId)
-        .then(() => socket.sendInput(sessionId, trimmed))
+        .then(() => socket.sendInput(sessionId, withAttachmentBlock(trimmed, attachments)))
       return
     }
-    socket.sendInput(sessionId, trimmed)
+    socket.sendInput(sessionId, withAttachmentBlock(trimmed, attachments))
   },
 
   /** Queue a follow-up typed while the agent is working. */

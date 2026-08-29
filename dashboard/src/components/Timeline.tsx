@@ -113,7 +113,7 @@ const Turn = memo(function Turn({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           {inline.map((part, index) => (
-            <Part key={index} part={part} onRespond={onRespond} />
+            <Part key={index} part={part} onRespond={onRespond} sessionId={sessionId} />
           ))}
           {files.length > 0 ? <FileChips files={files} project={project} sessionId={sessionId} /> : null}
         </div>

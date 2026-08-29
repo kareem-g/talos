@@ -389,6 +389,30 @@ export function Composer({
     submit()
   }
 
+  /** Handle pasted images from clipboard: upload and add to draft. */
+  async function handlePaste(event: React.ClipboardEvent) {
+    const items = event.clipboardData?.items
+    if (!items || !onUploadFiles) return
+    const imageFiles: File[] = []
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length === 0) return
+    event.preventDefault()
+    setUploading(true)
+    try {
+      const refs = await onUploadFiles(imageFiles)
+      if (refs.length > 0) setAttachments((current) => [...current, ...refs])
+    } catch (error) {
+      console.error('attachment upload failed', error)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   /** Upload picked files and add their references to the draft. */
   async function handleFiles(files: File[]) {
     if (!onUploadFiles || files.length === 0) return
@@ -648,6 +672,7 @@ export function Composer({
                 if (backdropRef.current) backdropRef.current.scrollTop = (scrollEvent.target as HTMLTextAreaElement).scrollTop
               }}
               onBlurCapture={() => setTimeout(() => setMenu(null), 120)}
+              onPaste={handlePaste}
               onKeyDown={(keyEvent) => {
                 if (keyEvent.key === 'Backspace') {
                   // Delete a whole chip (token) as a single unit when the caret
