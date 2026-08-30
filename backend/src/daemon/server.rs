@@ -42,6 +42,7 @@ pub async fn start(
         .route("/api/sessions/sync", post(crate::api::sync::sync_sessions))
         .route("/api/sessions/{id}", get(crate::api::routes::get_session).delete(crate::api::routes::delete_session))
         .route("/api/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
+        .route("/api/sessions/{id}/subagents", post(crate::api::routes::spawn_subagent))
         .route("/api/sessions/{id}/attach", post(crate::api::routes::attach_session))
         .route("/api/sessions/{id}/kill", post(crate::api::routes::kill_session))
         .route("/api/sessions/{id}/archive", post(crate::api::routes::archive_session))

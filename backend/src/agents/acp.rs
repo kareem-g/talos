@@ -89,6 +89,8 @@ struct AcpHandle {
     /// `session/set_config_option`. This is the authoritative live state: the
     /// agent tells us what is selected, we never assume.
     config_options: Arc<Mutex<Vec<crate::providers::ConfigOption>>>,
+    /// The project dir this session was spawned in, for tool-policy lookups.
+    project: Option<String>,
 }
 
 pub struct AcpSessionInfo {
@@ -667,6 +669,7 @@ impl AcpManager {
             child: Arc::new(Mutex::new(Some(child))),
             mapper: Arc::clone(&mapper),
             config_options: Arc::new(Mutex::new(Vec::new())), // filled in from session/new
+            project: project.map(str::to_string),
         });
         self.sessions.write().await.insert(session_id.to_string(), Arc::clone(&handle));
         let reader = AcpManager::spawn_reader(self.sessions.clone(), self.broadcast.clone(), session_id.to_string(), stdout, Arc::clone(&handle));
@@ -835,7 +838,7 @@ impl AcpManager {
                             tracing::debug!("[AgentDeck][ACP][{}] Non-JSON line: {}", session_id, trimmed);
                             continue;
                         };
-                        dispatch_message(&session_id, &msg, &conn, &approvals, &mapper, &broadcast).await;
+                        dispatch_message(&session_id, &msg, &conn, &approvals, &mapper, &broadcast, &handle.project).await;
                     }
                 }
             }
@@ -1107,6 +1110,7 @@ async fn dispatch_message(
     approvals: &Arc<Mutex<HashMap<String, AcpApproval>>>,
     mapper: &Arc<Mutex<AcpEventMapper>>,
     broadcast: &BroadcastHub,
+    project: &Option<String>,
 ) {
     // Response to one of our requests.
     if let Some(id) = msg.get("id").and_then(Value::as_u64) {
@@ -1209,6 +1213,37 @@ async fn dispatch_message(
                 })
                 .collect();
             let is_plan = is_plan_approval_options(&option_names);
+
+            // Project tool policy: auto-allow/deny before the card is shown.
+            // Same guardrail as the Claude permission path — questions are
+            // never auto-decided.
+            let policy_decision = crate::policy::ToolPolicy::load(project.as_deref()).decide(&tool_title);
+            if policy_decision != crate::policy::PolicyDecision::Ask {
+                let decision = match policy_decision {
+                    crate::policy::PolicyDecision::Allow => "allow",
+                    _ => "deny",
+                };
+                let option_id = pick_option_id(&options, decision);
+                let result = json!({ "outcome": "selected", "optionId": option_id });
+                if let Some(id) = msg.get("id").cloned() {
+                    let _ = conn.tx.send(Outbound::Response {
+                        id,
+                        result: Some(result),
+                        error: None,
+                    });
+                }
+                broadcast.broadcast_agent_event(AgentEvent::new(
+                    session_id,
+                    "permission_resolved",
+                    json!({ "request_id": request_key, "decision": decision, "source": "policy" }),
+                ));
+                broadcast.broadcast(WsMessage::StateChange {
+                    session_id: session_id.to_string(),
+                    state: "running".to_string(),
+                });
+                return;
+            }
+
             broadcast.broadcast_agent_event(AgentEvent::new(
                 session_id,
                 "permission_required",

@@ -138,6 +138,42 @@ pub async fn request_user_decision(
     // no default answer to synthesize.
     let is_question = query.tool_name.eq_ignore_ascii_case("AskUserQuestion");
 
+    // Project tool policy overrides the mode defaults: a rule that denies a
+    // tool is honored even in `full` mode, and an allow rule skips the card.
+    // Questions are never auto-decided by policy.
+    if !is_question {
+        let project = state
+            .session_manager
+            .get_session(&query.session_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.project);
+        match crate::policy::ToolPolicy::load(project.as_deref()).decide(&query.tool_name) {
+            crate::policy::PolicyDecision::Allow => {
+                state.permissions.resolve(&request_id, "allow".to_string()).await;
+                return PermissionOutcome {
+                    allowed: true,
+                    input: query.input,
+                    reason: "Auto-approved (project policy)".to_string(),
+                    waited_ms: 0,
+                    answer_text: None,
+                };
+            }
+            crate::policy::PolicyDecision::Deny => {
+                state.permissions.resolve(&request_id, "deny".to_string()).await;
+                return PermissionOutcome {
+                    allowed: false,
+                    input: query.input,
+                    reason: "Denied (project policy)".to_string(),
+                    waited_ms: 0,
+                    answer_text: None,
+                };
+            }
+            crate::policy::PolicyDecision::Ask => {}
+        }
+    }
+
     match permission_mode.as_str() {
         "full" if !is_question => {
             // Auto-allow everything.

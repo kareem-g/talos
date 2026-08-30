@@ -90,8 +90,12 @@ over them so the harness governs every tool call from any backend.
   timeline.
 
 **Steps:**
-1. [ ] Policy model + defaults (ask on write/network, allow on read).
-2. [ ] Enforce on ACP tool starts + Claude permission path; log decisions.
+1. [x] Policy model: `backend/src/policy.rs` — `.agentdeck/policy.toml` rules (tool substring
+      match, allow/deny, `"all"`), first match wins, no rule → mode/human. Unit tests.
+2. [x] Enforce in the Claude permission path (`permissions::request_user_decision`, rules
+      override mode defaults, questions never auto-decided) and ACP `request_permission`
+      (auto-responds the JSON-RPC request + `permission_resolved`). Verified live: a project
+      denying `Write` auto-denied a real claude Write call ("Denied (project policy)").
 3. [ ] Tool-audit UI (filter by tool, decision, backend).
 
 **Acceptance:** a project can forbid/auto-allow a tool across all backends from one file; the
@@ -112,8 +116,11 @@ harness can do.
   finished` event handling in `events.ts`).
 
 **Steps:**
-1. [ ] Child-session spawn API + parent linkage.
-2. [ ] Budget enforcement + cancel.
+1. [x] Child-session spawn API: `POST /api/sessions/{parent}/subagents` spawns a child session
+      through the same harness path, emits `subagent_started`/`subagent_finished` on the
+      parent (frontend already renders the cards), returns reply/tokens/cost/duration.
+      Budget: `max_cost_usd` stops the child and marks the run failed. Verified live.
+2. [ ] Cancel propagation (parent stop → children stop).
 3. [ ] UI: subagent cards link to child session views.
 
 **Acceptance:** "split this task across claude and opencode" runs two harness turns and

@@ -240,6 +240,150 @@ pub async fn get_session_transcripts(
     }
 }
 
+/// Spawn a harness-owned subagent: a child session that runs one prompt on
+/// behalf of the parent session. The parent's chat shows a `subagent_started`
+/// card, the child runs through the exact same harness path (spawn → turn →
+/// canonical log), and a `subagent_finished` card lands when it completes —
+/// optionally killed early when it exceeds a cost budget.
+///
+/// Body: `{ "prompt": string, "agent"?: string, "max_cost_usd"?: number }`.
+pub async fn spawn_subagent(
+    State(state): State<Arc<AppState>>,
+    Path(parent_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use std::time::Duration;
+
+    let prompt = match body.get("prompt").and_then(|v| v.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.to_string(),
+        _ => {
+            return Json(json!({ "error": "prompt is required", "status": "error" }));
+        }
+    };
+    let agent = body
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude")
+        .to_string();
+    let max_cost_usd = body.get("max_cost_usd").and_then(|v| v.as_f64());
+
+    let Some(parent) = state.session_manager.get_session(&parent_id).await.ok().flatten() else {
+        return Json(json!({ "error": "parent session not found", "id": parent_id }));
+    };
+    let project = parent.project.clone();
+
+    // Subscribe before spawning so no child event is missed.
+    let mut rx = state.broadcast.subscribe();
+
+    let child = match spawn_session(
+        &state,
+        &format!("subagent-{agent}"),
+        &agent,
+        project.as_deref(),
+        Some(&prompt),
+        &body,
+    )
+    .await
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return Json(json!({ "error": error, "status": "error" }));
+        }
+    };
+
+    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+        &parent_id,
+        "subagent_started",
+        json!({ "id": child.id, "name": agent, "status": "running" }),
+    ));
+
+    let mut reply = String::new();
+    let mut result = json!({
+        "child_session_id": child.id,
+        "agent": agent,
+        "completed": false,
+        "reply": "",
+    });
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let recv = match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(recv) => recv,
+            Err(_) => {
+                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                    &parent_id,
+                    "subagent_finished",
+                    json!({ "id": child.id, "status": "failed", "reason": "timeout" }),
+                ));
+                result["error"] = json!("timeout waiting for subagent completion");
+                return Json(result);
+            }
+        };
+        let Ok(frame) = recv else { break };
+        let crate::websocket::WsMessage::AgentEvent { event } = frame.message else { continue };
+        if event.session_id != child.id {
+            continue;
+        }
+        match event.kind.as_str() {
+            "assistant_text" => {
+                if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
+                    reply.push_str(text);
+                }
+            }
+            "agent_completed" => {
+                let input_tokens = event.payload.get("input_tokens").and_then(|v| v.as_u64());
+                let output_tokens = event.payload.get("output_tokens").and_then(|v| v.as_u64());
+                let cost = event.payload.get("cost_usd").and_then(|v| v.as_f64());
+                let duration_ms = event.payload.get("duration_ms").and_then(|v| v.as_u64());
+
+                // Budget enforcement: stop the child and mark the run failed.
+                if let Some(limit) = max_cost_usd
+                    && let Some(cost) = cost
+                    && cost > limit
+                {
+                    if let Some(turn) = crate::agents::harness::resolve_turn(&state, &child).await {
+                        let _ = turn.stop(&state, &child.id).await;
+                    }
+                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                        &parent_id,
+                        "subagent_finished",
+                        json!({ "id": child.id, "status": "failed", "reason": "budget exceeded" }),
+                    ));
+                    result["completed"] = json!(false);
+                    result["error"] = json!("budget exceeded");
+                    return Json(result);
+                }
+
+                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                    &parent_id,
+                    "subagent_finished",
+                    json!({ "id": child.id, "status": "completed" }),
+                ));
+                result["completed"] = json!(true);
+                result["reply"] = json!(reply.trim());
+                result["input_tokens"] = json!(input_tokens);
+                result["output_tokens"] = json!(output_tokens);
+                result["cost_usd"] = json!(cost);
+                result["duration_ms"] = json!(duration_ms);
+                return Json(result);
+            }
+            "agent_error" => {
+                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                    &parent_id,
+                    "subagent_finished",
+                    json!({ "id": child.id, "status": "failed" }),
+                ));
+                result["completed"] = json!(false);
+                result["error"] = json!(event.payload.get("message").cloned().unwrap_or(json!("subagent failed")));
+                return Json(result);
+            }
+            _ => {}
+        }
+    }
+
+    Json(result)
+}
+
 pub async fn attach_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
