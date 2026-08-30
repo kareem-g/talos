@@ -57,3 +57,6 @@ release:
 
 package:
 	@./scripts/package.sh
+
+eval: cli
+	./target/debug/agentdeck eval -s eval/suite.json --agents claude

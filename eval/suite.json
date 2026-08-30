@@ -1,0 +1,20 @@
+[
+  {
+    "name": "identity-pong",
+    "prompt": "Reply with exactly: pong",
+    "expect": "pong"
+  },
+  {
+    "name": "math-add",
+    "prompt": "What is 127 + 33? Reply with only the number.",
+    "expect": "160"
+  },
+  {
+    "name": "self-intro",
+    "prompt": "Introduce yourself in one sentence. Do not use any tools."
+  },
+  {
+    "name": "list-repo",
+    "prompt": "List the top-level files of this repository (run ls) and reply with their names. Do not modify anything."
+  }
+]

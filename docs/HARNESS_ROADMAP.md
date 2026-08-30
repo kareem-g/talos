@@ -62,10 +62,15 @@ must be answerable with numbers: pass rate, cost, latency, trajectory diffs.
 - Wire the CLI headless mode as the runner (also consumes the JSON-RPC surface from #8).
 
 **Steps:**
-1. [ ] `agentdeck run` subcommand (reuse daemon API or spawn sessions directly).
-2. [ ] `eval run <suite> [--agents claude,opencode]` → table of pass/cost/latency + trajectory
-      diff summary.
-3. [ ] Add 5–10 benchmark tasks; a CI job (`make eval`) that fails on regression.
+1. [x] `agentdeck run -p "<prompt>" --agent claude [--json]` — headless one-shot through the
+      real daemon path (create → spawn → poll canonical-log transcripts until
+      `agent_completed`) → JSON with reply/completed/tokens/cost/duration. (`cli/src/eval.rs`.)
+2. [x] `agentdeck eval -s <suite.json> --agents claude,opencode [--json]` — runs every task
+      across every agent and prints a pass/cost/latency/events table; `expect` substring
+      drives pass/fail. Sample suite: `eval/suite.json` (4 tasks).
+3. [ ] Trajectory diff: compare event-kind sequences between runs (agent A vs B on the same
+      task) and report similarity — the raw numbers exist (`events` column); add the diff view.
+4. [ ] Grow the suite (10–20 tasks); a CI job (`make eval`) that fails on regression.
 
 **Acceptance:** `make eval` prints a per-agent table and exits non-zero on regression.
 

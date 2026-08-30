@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use tracing::info;
 
+mod eval;
+
 #[derive(Parser)]
 #[command(name = "agentdeck")]
 #[command(about = "AgentDeck Linux - Visual agent terminal companion")]
@@ -19,6 +21,36 @@ enum Commands {
     Daemon {
         #[command(subcommand)]
         action: DaemonAction,
+    },
+    /// Run one headless prompt and print the result (eval / automation)
+    Run {
+        /// The prompt to run
+        #[arg(short, long)]
+        prompt: String,
+        /// Agent to run (claude, opencode, codex, pi, …)
+        #[arg(short, long, default_value = "claude")]
+        agent: String,
+        /// Project directory for the session
+        #[arg(short = 'P', long)]
+        project: Option<String>,
+        /// Print the result as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run an eval suite across agents and report pass/cost/latency
+    Eval {
+        /// Suite file (JSON array of {name, prompt, expect?})
+        #[arg(short, long)]
+        suite: std::path::PathBuf,
+        /// Comma-separated agents to run against
+        #[arg(long, default_value = "claude")]
+        agents: String,
+        /// Project directory for the sessions
+        #[arg(short = 'P', long)]
+        project: Option<String>,
+        /// Print results as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Launch Claude Code
     Claude {
@@ -231,6 +263,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
         },
+        Commands::Run { prompt, agent, project, json } => {
+            let result = eval::run_headless(&agent, &prompt, project.as_deref(), std::time::Duration::from_secs(300)).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("agent:        {}", result.agent);
+                println!("session:      {}", result.session_id);
+                println!("completed:    {}", result.completed);
+                println!("tokens:       {} in / {} out", result.input_tokens.unwrap_or(0), result.output_tokens.unwrap_or(0));
+                println!("duration:     {} ms", result.duration_ms.map(|d| d.to_string()).unwrap_or_else(|| "-".to_string()));
+                if let Some(error) = &result.error {
+                    println!("error:        {error}");
+                }
+                println!("reply:\n{}", result.reply);
+            }
+        }
+        Commands::Eval { suite, agents, project, json } => {
+            let agents: Vec<String> = agents
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            eval::run_eval(&suite, &agents, project.as_deref(), json).await?;
+        }
         Commands::Claude { project } => {
             let mut cmd = tokio::process::Command::new("claude");
             if let Some(proj) = project {
