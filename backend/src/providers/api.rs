@@ -77,6 +77,10 @@ pub struct ApiProvider {
     /// Extra headers to send with each request (e.g. `{"X-Foo": "bar"}`).
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
+    /// Output token cap for each turn. Defaults to 8192 when unset — generous
+    /// enough for thinking + code, and overridable per provider.
+    #[serde(default)]
+    pub max_output_tokens: Option<usize>,
 }
 
 /// Result of probing an API provider — discovered models and capabilities.
@@ -348,7 +352,7 @@ pub fn build_api_descriptor(
         id: provider.id.clone(),
         name: provider.name.clone(),
         state,
-        transport: Transport::Acp,
+        transport: Transport::Api,
         executable: Some(format!("api:{}", provider.id)),
         version: None,
         capabilities: result.capabilities.clone(),
@@ -446,6 +450,7 @@ mod tests {
             models: vec!["my-custom-model".to_string()],
             default_model: None,
             extra_headers: BTreeMap::new(),
+            max_output_tokens: None,
         };
         // Simulate an empty API response.
         let body = serde_json::json!({ "data": [] });

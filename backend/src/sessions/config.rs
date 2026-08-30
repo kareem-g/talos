@@ -234,6 +234,17 @@ pub async fn apply_config(
                 session.agent, config_id
             ),
         },
+        // Custom HTTP providers read the model from the request body, so a
+        // change applies to the next turn just like a spawn-time flag.
+        (Some(option), Transport::Api) => match option.mutability {
+            ConfigMutability::Live => ConfigApplied::Immediate,
+            ConfigMutability::NextRun | ConfigMutability::StartOnly => ConfigApplied::NextRun {
+                reason: format!(
+                    "{} applies '{}' on the next request.",
+                    session.agent, config_id
+                ),
+            },
+        },
         // Flag-driven CLIs fix their model at spawn. Recording it for the next
         // run is the honest outcome — the alternative would be claiming a live
         // change that the process cannot make.

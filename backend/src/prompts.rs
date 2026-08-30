@@ -254,6 +254,9 @@ pub const CUSTOM_TRANSPORT: &str = "\
 ## Custom transport
 You are running through a generic provider or CLI connection, so your tool
 surface is whatever that connection exposes — possibly only text in/out.
+- You have NO tools in this session unless the harness tells you otherwise.
+  Never emit tool-call markup (e.g. `<antml:invoke>`, `tool_calls`, XML
+  blocks) in your reply — it is not executed and renders as noise.
 - Work with what you have: if you cannot run commands or edit files directly,
   produce exact instructions, diffs, or commands the user can execute, and say
   clearly what you cannot do yourself.

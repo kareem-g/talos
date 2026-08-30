@@ -361,6 +361,14 @@ export function SessionWorkspace({
             <span className="hidden items-center gap-1.5 sm:flex">
               <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: hueFor(session.agent) }} aria-hidden />
               <span className="shrink-0 text-[12px] font-medium text-ink-2">{provider?.name ?? session.agent}</span>
+              {provider?.transport === 'api' ? (
+                <span
+                  className="rounded-full border border-line/60 bg-surface px-1.5 py-px font-mono text-[9px] uppercase tracking-wide text-ink-3"
+                  title="Custom HTTP provider — no native tools; the agent answers in text or gives instructions"
+                >
+                  text-only
+                </span>
+              ) : null}
             </span>
 
             {/* Editable session title */}

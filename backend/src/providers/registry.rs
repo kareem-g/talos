@@ -200,6 +200,9 @@ async fn probe_candidate(candidate: Candidate, cwd: &str) -> ProviderDescriptor 
         Transport::StreamJson | Transport::Jsonl | Transport::Pty => {
             probe_flag_provider(&candidate, executable).await
         }
+        // API providers are probed over HTTP in `sweep`; they never become
+        // CLI candidates, so this arm is unreachable.
+        Transport::Api => probe_flag_provider(&candidate, executable).await,
     }
 }
 

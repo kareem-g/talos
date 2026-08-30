@@ -20,4 +20,5 @@ tracing-subscriber = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
 xdg = { workspace = true }
+chrono = { workspace = true }
 agentdeck-shared = { path = "../shared" }

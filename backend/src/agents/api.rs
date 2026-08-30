@@ -448,7 +448,7 @@ async fn call_anthropic_stream(
     let mut body = json!({
         "model": model,
         "messages": filtered,
-        "max_tokens": 4096,
+        "max_tokens": provider.max_output_tokens.unwrap_or(8192),
         "stream": true
     });
     if let Some(s) = system {

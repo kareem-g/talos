@@ -95,29 +95,46 @@ pub async fn run_headless(
         let events = data.get("events").and_then(Value::as_array).cloned().unwrap_or_default();
 
         // The canonical log is the wire-ordered source; the last completion
-        // wins. Assistant text is delta-joined in arrival order.
+        // wins. Assistant text is delta-joined in arrival order, then cleaned:
+        // custom providers may emit tool-call markup as text (e.g.
+        // <antml:invoke>), which is never executed and must not pollute the
+        // answer the benchmark compares.
         let mut reply = String::new();
         let mut completed_payload: Option<&Value> = None;
         let mut error_payload: Option<&Value> = None;
+        let mut usage_input: Option<u64> = None;
+        let mut usage_output: Option<u64> = None;
+        let mut first_ts: Option<String> = None;
+        let mut last_ts: Option<String> = None;
         for event in &events {
+            let ts = event.get("timestamp").and_then(Value::as_str).map(str::to_string);
+            if first_ts.is_none() { first_ts = ts.clone(); }
+            if ts.is_some() { last_ts = ts; }
             match event.get("kind").and_then(Value::as_str) {
                 Some("assistant_text") => {
                     if let Some(text) = event.pointer("/payload/text").and_then(Value::as_str) {
                         reply.push_str(text);
                     }
                 }
+                Some("usage") => {
+                    // API providers report usage as separate events, not in
+                    // agent_completed — capture them as the fallback.
+                    usage_input = event.pointer("/payload/input_tokens").and_then(Value::as_u64).or(usage_input);
+                    usage_output = event.pointer("/payload/output_tokens").and_then(Value::as_u64).or(usage_output);
+                }
                 Some("agent_completed") => completed_payload = Some(event),
                 Some("agent_error") => error_payload = Some(event),
                 _ => {}
             }
         }
+        let cleaned = strip_tool_call_markup(&reply);
 
         let mut result = RunResult {
             agent: agent.to_string(),
             session_id: session_id.clone(),
             completed: false,
             error: None,
-            reply: reply.trim().to_string(),
+            reply: cleaned.trim().to_string(),
             input_tokens: None,
             output_tokens: None,
             cost_usd: None,
@@ -129,14 +146,17 @@ pub async fn run_headless(
             result.completed = true;
             result.input_tokens = payload
                 .pointer("/payload/input_tokens")
-                .and_then(Value::as_u64);
+                .and_then(Value::as_u64)
+                .or(usage_input);
             result.output_tokens = payload
                 .pointer("/payload/output_tokens")
-                .and_then(Value::as_u64);
+                .and_then(Value::as_u64)
+                .or(usage_output);
             result.cost_usd = payload.pointer("/payload/cost_usd").and_then(Value::as_f64);
             result.duration_ms = payload
                 .pointer("/payload/duration_ms")
-                .and_then(Value::as_u64);
+                .and_then(Value::as_u64)
+                .or_else(|| duration_ms(&first_ts, &last_ts));
             return Ok(result);
         }
         if let Some(payload) = error_payload {
@@ -148,6 +168,58 @@ pub async fn run_headless(
             return Ok(result);
         }
         tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Remove tool-call markup a model may emit as literal text (Anthropic's
+/// `<antml:invoke>…</antml:invoke>`, OpenAI-style `<tool_calls>…</tool_calls>`),
+/// which the harness does not execute on custom transports.
+fn strip_tool_call_markup(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let patterns: &[(&str, &str)] = &[
+        ("<antml:invoke", "</antml:invoke>"),
+        ("<antml:parameter", ">"),
+        ("</antml:parameter>", "</antml:parameter>"),
+        ("<tool_calls>", "</tool_calls>"),
+    ];
+    while !rest.is_empty() {
+        // Find the earliest opening marker.
+        let mut earliest: Option<(usize, &(&str, &str))> = None;
+        for p in patterns {
+            if let Some(idx) = rest.find(p.0) {
+                if earliest.map(|(e, _)| idx < e).unwrap_or(true) {
+                    earliest = Some((idx, p));
+                }
+            }
+        }
+        let Some((idx, (_, close))) = earliest else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..idx]);
+        rest = &rest[idx..];
+        // Skip to the matching close marker.
+        if let Some(end) = rest.find(close) {
+            rest = &rest[end + close.len()..];
+        } else {
+            // Unterminated block: drop the remainder.
+            rest = "";
+        }
+    }
+    out
+}
+
+/// Approximate wall time from the first/last event timestamps when the
+/// completion payload carries no duration.
+fn duration_ms(first: &Option<String>, last: &Option<String>) -> Option<u64> {
+    let (Some(first), Some(last)) = (first, last) else {
+        return None;
+    };
+    let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis());
+    match (parse(first), parse(last)) {
+        (Some(a), Some(b)) if b >= a => Some((b - a) as u64),
+        _ => None,
     }
 }
 

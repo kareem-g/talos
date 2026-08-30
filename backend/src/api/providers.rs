@@ -115,6 +115,8 @@ pub struct ApiProviderRequest {
     pub models: Vec<String>,
     #[serde(default)]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub max_output_tokens: Option<usize>,
 }
 
 /// `GET /api/providers/api` — raw configured API providers, api_key masked.
@@ -178,6 +180,7 @@ pub async fn create_api_provider(
             existing.transport = transport;
             existing.models = body.models.clone();
             existing.default_model = body.default_model.clone();
+            existing.max_output_tokens = body.max_output_tokens;
             found = true;
             break;
         }
@@ -192,6 +195,7 @@ pub async fn create_api_provider(
             models: body.models.clone(),
             default_model: body.default_model.clone(),
             extra_headers: Default::default(),
+            max_output_tokens: body.max_output_tokens,
         });
     }
     if let Err(e) = cfg.save().await {
@@ -251,6 +255,7 @@ pub async fn test_api_provider(
         models: body.models.clone(),
         default_model: body.default_model.clone(),
         extra_headers: Default::default(),
+        max_output_tokens: body.max_output_tokens,
     };
     let result = crate::providers::api::probe_api_provider(&provider).await;
     if let Some(err) = result.error {

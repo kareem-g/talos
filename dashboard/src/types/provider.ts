@@ -19,7 +19,7 @@
  */
 
 /** How the backend drives this provider's process. */
-export type Transport = 'acp' | 'stream_json' | 'jsonl' | 'pty'
+export type Transport = 'acp' | 'stream_json' | 'jsonl' | 'pty' | 'api'
 
 /** Whether a provider is usable, and if not, what to do about it. */
 export type ProviderState =

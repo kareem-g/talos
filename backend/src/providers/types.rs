@@ -36,6 +36,9 @@ pub enum Transport {
     /// Interactive TUI under a pseudo-terminal, output scraped. Lossy and
     /// provider-specific; the fallback for CLIs with no structured mode.
     Pty,
+    /// A custom HTTP API provider (OpenAI- or Anthropic-compatible). No
+    /// subprocess, no native tools — the harness drives it over REST.
+    Api,
 }
 
 impl Transport {

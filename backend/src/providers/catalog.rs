@@ -86,6 +86,19 @@ pub fn baseline_capabilities(transport: Transport) -> ProviderCapabilities {
             resume: None,
             interrupt: Some(true),
         },
+        // Custom HTTP providers: streaming text and plan detection work, but
+        // there is no native tool surface, permission channel, or file layer.
+        Transport::Api => ProviderCapabilities {
+            streaming: Some(true),
+            reasoning: Some(true),
+            permissions: Some(false),
+            file_changes: Some(false),
+            plans: Some(true),
+            attachments: Some(false),
+            terminal: Some(false),
+            resume: Some(false),
+            interrupt: Some(false),
+        },
         Transport::StreamJson => ProviderCapabilities {
             streaming: Some(true),
             reasoning: Some(true),
