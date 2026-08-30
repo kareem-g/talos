@@ -5,7 +5,7 @@ pub mod config;
 pub mod context_assembler;
 pub mod daemon;
 pub mod hooks;
-pub mod harness_charter;
+pub mod prompts;
 pub mod mcp;
 pub mod memory;
 pub mod models;

@@ -349,13 +349,18 @@ pub async fn spawn_subagent(
     // Subscribe before spawning so no child event is missed.
     let mut rx = state.broadcast.subscribe();
 
+    // Subagents get the subagent role as their instruction set (replacing the
+    // standing set) so they behave bounded and result-oriented.
+    let mut child_body = body.clone();
+    child_body["instructions"] = json!(crate::prompts::subagent_prompt());
+
     let child = match spawn_session(
         &state,
         &format!("subagent-{agent}"),
         &agent,
         project.as_deref(),
         Some(&prompt),
-        &body,
+        &child_body,
     )
     .await
     {
@@ -1700,8 +1705,18 @@ async fn spawn_session(
     // a first message") must get the same harness context enrichment as
     // websocket turns: environment, skills, similar trajectories, memory.
     // Without this the first turn bypassed context assembly entirely.
+    // `instructions`/`mode` let callers swap in a custom instruction set
+    // (subagent role, eval determinism).
+    let instructions: Option<String> = body
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            (body.get("mode").and_then(|v| v.as_str()) == Some("eval"))
+                .then(crate::prompts::eval_prompt)
+        });
     let prompt = match prompt {
-        Some(prompt) => match crate::context_assembler::assemble(state, &session, prompt).await {
+        Some(prompt) => match crate::context_assembler::assemble(state, &session, prompt, instructions.as_deref()).await {
             Ok((ctx, breakdown)) => {
                 let injected_something = breakdown.environment
                     || !breakdown.skills.is_empty()

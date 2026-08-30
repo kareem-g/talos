@@ -331,7 +331,7 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         // the turn. The assembler never fails the turn: on any error it falls
         // back to an uninjected context so a prompt is never dropped.
         let (ctx, breakdown) =
-            match crate::context_assembler::assemble(&state, &session, &clean_data).await {
+            match crate::context_assembler::assemble(&state, &session, &clean_data, None).await {
                 Ok((ctx, breakdown)) => (ctx, breakdown),
                 Err(error) => {
                     tracing::warn!(session_id = %session.id, %error, "context assembly failed");

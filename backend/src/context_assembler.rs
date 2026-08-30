@@ -52,10 +52,16 @@ pub struct MemoryRef {
 /// which similar runs), for broadcasting the assembly to the UI. Every source
 /// is individually disabled by config or skipped on error; the caller-facing
 /// contract is "never fail, never block the turn".
+///
+/// `instructions` overrides the standing instruction set (used by subagents
+/// and eval runs); when `None`, the standing set is used — the first-turn
+/// variant when the session has no prior conversation, otherwise the plain
+/// standing set.
 pub async fn assemble(
     state: &AppState,
     session: &Session,
     prompt: &str,
+    instructions: Option<&str>,
 ) -> crate::Result<(
     crate::agents::harness::TurnContext,
     ContextBreakdown,
@@ -68,8 +74,26 @@ pub async fn assemble(
     let mut breakdown = ContextBreakdown::default();
 
     // Standing instructions — always first, never gated, never shown in the
-    // context chip (it is the agent's charter, not per-turn enrichment).
-    sections.push(crate::harness_charter::charter().to_string());
+    // context chip (it is the agent's instruction set, not per-turn
+    // enrichment). First turns get the first-turn variant; custom instruction
+    // sets (subagent role, eval determinism) replace the standing set.
+    let instructions = match instructions {
+        Some(custom) => custom.to_string(),
+        None => {
+            let has_history = !state
+                .session_manager
+                .get_messages(&session.id)
+                .await
+                .unwrap_or_default()
+                .is_empty();
+            if has_history {
+                crate::prompts::standing_prompt()
+            } else {
+                crate::prompts::first_turn_prompt()
+            }
+        }
+    };
+    sections.push(instructions);
 
     if context_assembly.environment_enabled {
         let env_ctx = environment_context(session.project.as_deref()).await;

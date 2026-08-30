@@ -177,3 +177,12 @@ resolve approvals). First consumer: `agentdeck run` (#2).
 - Cordis-style plugin composition — `AgentTurn` + config backends + skills registry covers the
   extensibility we need; revisit only for third-party backend plugins.
 - Matching dsh's doc volume — one architecture doc, not 10k files.
+
+## Done beyond the numbered list
+
+- **Prompt library** (`backend/src/prompts.rs`): 11 curated instruction sections
+  (charter, safety, context-usage, planning, execution, verification, subagent
+  role, first-turn, resume, eval, tool-use) composed per role/phase — standing
+  set on every turn, first-turn variant on fresh sessions, subagent role on
+  harness-owned children, eval set on benchmark runs, and a general
+  `instructions` hook on session create for anything custom. Live-verified.

@@ -53,6 +53,8 @@ pub async fn run_headless(
             "project": project,
             "prompt": prompt,
             "name": "eval-run",
+            // Eval determinism: the harness swaps in its eval instruction set.
+            "mode": "eval",
         }))
         .send()
         .await?
