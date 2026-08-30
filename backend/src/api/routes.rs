@@ -285,6 +285,7 @@ pub async fn save_session_memory(
         created_at: chrono::Utc::now().to_rfc3339(),
         source_session: id,
         text,
+        kind: "memory".to_string(),
     };
     let entry_id = entry.id.clone();
     match crate::memory::save_memory(session.project.as_deref(), entry) {
