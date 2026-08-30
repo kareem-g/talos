@@ -52,6 +52,25 @@ impl TrajectoryRecorder {
         session_id: &str,
         path: PathBuf,
     ) -> Result<PathBuf> {
+        self.start_with(hub, session_id, path, false).await
+    }
+
+    /// Start (or resume) recording a session's **canonical log**: the stable
+    /// `<session-id>.jsonl` file, opened in append mode so it stays continuous
+    /// across daemon restarts. Idempotent. This is the harness's source of
+    /// truth for a session's stream — the DB is a query index over it.
+    pub async fn start_append(&self, hub: &BroadcastHub, session_id: &str) -> Result<PathBuf> {
+        let path = session_log_path(session_id)?;
+        self.start_with(hub, session_id, path, true).await
+    }
+
+    async fn start_with(
+        &self,
+        hub: &BroadcastHub,
+        session_id: &str,
+        path: PathBuf,
+        append: bool,
+    ) -> Result<PathBuf> {
         let mut sinks = self.sinks.write().await;
         if let Some(existing) = sinks.get(session_id) {
             return Ok(existing.path.clone());
@@ -59,7 +78,15 @@ impl TrajectoryRecorder {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let file = File::create(&path).await?;
+        let file = if append {
+            tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .await?
+        } else {
+            File::create(&path).await?
+        };
         let mut writer = BufWriter::new(file);
         let mut rx = hub.subscribe();
         let cancel = CancellationToken::new();
@@ -81,6 +108,12 @@ impl TrajectoryRecorder {
                                 };
                                 line.push('\n');
                                 if writer.write_all(line.as_bytes()).await.is_err() {
+                                    break;
+                                }
+                                // The canonical log is read live by the history
+                                // endpoint, so it must be flushed per event —
+                                // not just on stop.
+                                if writer.flush().await.is_err() {
                                     break;
                                 }
                             }
@@ -312,6 +345,24 @@ pub fn default_dir() -> Result<PathBuf> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix("agentdeck")
         .map_err(|e| crate::AgentDeckError::Config(e.to_string()))?;
     Ok(xdg_dirs.get_data_home().join("trajectories"))
+}
+
+/// The stable canonical-log path for `session_id`: `<session-id>.jsonl`.
+/// Unlike the timestamped `record` paths, this one is continuous across daemon
+/// restarts and is the harness's source of truth for a session's stream.
+pub fn session_log_path(session_id: &str) -> Result<PathBuf> {
+    let safe = session_id.replace(['/', '\\'], "_");
+    Ok(default_dir()?.join(format!("{safe}.jsonl")))
+}
+
+/// Read a session's canonical log, if one exists. Returns `None` when the
+/// session has never streamed since canonical logging was enabled.
+pub async fn read_session_log(session_id: &str) -> Result<Option<Vec<WsMessage>>> {
+    let path = session_log_path(session_id)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(read_trajectory(&path).await?))
 }
 
 /// A unique trajectory path for `session_id` under the default directory.

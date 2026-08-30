@@ -17,36 +17,62 @@
 use crate::config::AppState;
 use crate::sessions::Session;
 use crate::trajectory;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-/// Assemble the enriched context for a turn and attach it to a [`TurnContext`].
-/// Every source is individually disabled by config or skipped on error; the
-/// caller-facing contract is "never fail, never block the turn".
+/// Structured summary of what the harness injected into a turn — the
+/// machine-readable counterpart of `injected_context`, so the UI can render a
+/// "context" chip instead of hiding the enrichment. Serialized into the
+/// `context_assembled` agent event.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ContextBreakdown {
+    pub environment: bool,
+    pub skills: Vec<String>,
+    pub trajectories: Vec<TrajectoryRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrajectoryRef {
+    pub session_id: String,
+    pub similarity: f64,
+}
+
+/// Assemble the enriched context for a turn. Returns the [`TurnContext`] plus
+/// a [`ContextBreakdown`] naming exactly what was injected (which skills,
+/// which similar runs), for broadcasting the assembly to the UI. Every source
+/// is individually disabled by config or skipped on error; the caller-facing
+/// contract is "never fail, never block the turn".
 pub async fn assemble(
     state: &AppState,
     session: &Session,
     prompt: &str,
-) -> crate::Result<crate::agents::harness::TurnContext> {
+) -> crate::Result<(
+    crate::agents::harness::TurnContext,
+    ContextBreakdown,
+)> {
     let cfg = state.config.read().await;
     let context_assembly = cfg.settings().context_assembly.clone();
     drop(cfg);
 
     let mut sections: Vec<String> = Vec::new();
+    let mut breakdown = ContextBreakdown::default();
 
     if context_assembly.environment_enabled {
         let env_ctx = environment_context(session.project.as_deref()).await;
         if !env_ctx.trim().is_empty() {
             sections.push(env_ctx);
+            breakdown.environment = true;
         }
     }
 
     if context_assembly.skills_enabled {
-        let skills_ctx = load_skills(session.project.as_deref()).await;
+        let (skills_ctx, names) = load_skills(session.project.as_deref()).await;
         if !skills_ctx.trim().is_empty() {
             sections.push(skills_ctx);
+            breakdown.skills = names;
         }
     }
 
@@ -63,10 +89,11 @@ pub async fn assemble(
     } else {
         None
     };
-    if let Some(trajectory_ctx) = trajectory_ctx
+    if let Some((trajectory_ctx, refs)) = trajectory_ctx
         && !trajectory_ctx.trim().is_empty()
     {
         sections.push(trajectory_ctx);
+        breakdown.trajectories = refs;
     }
 
     let injected_context = if sections.is_empty() {
@@ -75,11 +102,14 @@ pub async fn assemble(
         Some(sections.join("\n\n"))
     };
 
-    Ok(crate::agents::harness::TurnContext {
-        session: session.clone(),
-        prompt: prompt.to_string(),
-        injected_context,
-    })
+    Ok((
+        crate::agents::harness::TurnContext {
+            session: session.clone(),
+            prompt: prompt.to_string(),
+            injected_context,
+        },
+        breakdown,
+    ))
 }
 
 /// Markdown section describing the working environment: OS, working
@@ -118,20 +148,22 @@ pub async fn environment_context(project: Option<&str>) -> String {
     }
 }
 
-/// Markdown section listing the project's enabled skills (`.agentdeck/skills/`).
-/// A `.disabled` marker file in a skill directory excludes it. Returns empty
-/// string when the directory is missing or empty.
-pub async fn load_skills(project: Option<&str>) -> String {
+/// Markdown section listing the project's enabled skills (`.agentdeck/skills/`),
+/// plus the injected skill names for the [`ContextBreakdown`]. A `.disabled`
+/// marker file in a skill directory excludes it. Returns empty text (and no
+/// names) when the directory is missing or empty.
+pub async fn load_skills(project: Option<&str>) -> (String, Vec<String>) {
     let Some(base) = project else {
-        return String::new();
+        return (String::new(), Vec::new());
     };
     let skills_dir = Path::new(base).join(".agentdeck/skills");
     let mut entries = match tokio::fs::read_dir(&skills_dir).await {
         Ok(entries) => entries,
-        Err(_) => return String::new(),
+        Err(_) => return (String::new(), Vec::new()),
     };
 
     let mut sections: Vec<String> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
         if !path.is_dir() {
@@ -149,22 +181,24 @@ pub async fn load_skills(project: Option<&str>) -> String {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
+        names.push(name.to_string());
         sections.push(format!("<skill name=\"{name}\">\n{content}\n</skill>"));
     }
 
     if sections.is_empty() {
-        String::new()
+        (String::new(), Vec::new())
     } else {
         let mut out = "<skills>".to_string();
         out.push_str(&sections.join("\n\n"));
         out.push_str("\n</skills>");
-        out
+        (out, names)
     }
 }
 
 /// Find past completed sessions whose trajectories are most similar to
 /// `prompt` (Jaccard word overlap), read their trajectory files, and format
-/// the key turns as few-shot examples. Returns `None` when nothing clears
+/// the key turns as few-shot examples. Returns the formatted section plus the
+/// referenced runs (for the [`ContextBreakdown`]); `None` when nothing clears
 /// `threshold` or the feature can't find usable data.
 pub async fn find_similar_trajectories(
     state: &AppState,
@@ -172,7 +206,7 @@ pub async fn find_similar_trajectories(
     prompt: &str,
     max: usize,
     threshold: f64,
-) -> crate::Result<Option<String>> {
+) -> crate::Result<Option<(String, Vec<TrajectoryRef>)>> {
     if max == 0 {
         return Ok(None);
     }
@@ -204,6 +238,7 @@ pub async fn find_similar_trajectories(
     }
 
     let mut examples: Vec<String> = Vec::new();
+    let mut refs: Vec<TrajectoryRef> = Vec::new();
     for (score, session_id) in ranked {
         let Some(trajectory_path) = find_trajectory_for_session(&session_id).await else {
             continue;
@@ -217,14 +252,21 @@ pub async fn find_similar_trajectories(
         examples.push(format!(
             "<example_trajectory session_id=\"{session_id}\" similarity=\"{score:.2}\">\n{transcript}\n</example_trajectory>"
         ));
+        refs.push(TrajectoryRef {
+            session_id,
+            similarity: score,
+        });
     }
 
     if examples.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(format!(
-            "<similar_trajectories>\n{}\n</similar_trajectories>",
-            examples.join("\n\n")
+        Ok(Some((
+            format!(
+                "<similar_trajectories>\n{}\n</similar_trajectories>",
+                examples.join("\n\n")
+            ),
+            refs,
         )))
     }
 }

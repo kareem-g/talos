@@ -377,7 +377,8 @@ describe('approvals', () => {
     expect(approval).toMatchObject({
       kind: 'approval',
       requestId: 'p2',
-      options: ['prod', 'staging', 'both'],
+      // The buttons render labels; the raw values stay in `optionData`.
+      options: ['Production', 'Staging', 'Both'],
       multiSelect: true,
       allowsCustomText: true,
     })
@@ -612,5 +613,102 @@ describe('describeApproval', () => {
     expect(view.options.map((o) => o.value)).toEqual(['allow', 'deny'])
     expect(view.multiSelect).toBe(false)
     expect(view.allowsCustomText).toBe(false)
+  })
+})
+
+describe('harness context chip', () => {
+  it('stashes context_assembled without creating a transcript row', () => {
+    const conversation = emptyConversation('s1')
+    const changed = applyAgentEvent(conversation, event('context_assembled', {
+      environment: true,
+      skills: ['tdd', 'frontend-design'],
+      trajectories: [{ session_id: 'past-1', similarity: 0.55 }],
+    }))
+
+    expect(changed).toBe(true)
+    expect(conversation.messages).toHaveLength(0)
+    expect(conversation.pendingContext).toMatchObject({
+      kind: 'context',
+      environment: true,
+      skills: ['tdd', 'frontend-design'],
+      trajectories: [{ sessionId: 'past-1', similarity: 0.55 }],
+    })
+  })
+
+  it('ignores an empty assembly', () => {
+    const conversation = emptyConversation('s1')
+    const changed = applyAgentEvent(conversation, event('context_assembled', {
+      environment: false,
+      skills: [],
+      trajectories: [],
+    }))
+
+    expect(changed).toBe(false)
+    expect(conversation.pendingContext).toBeUndefined()
+  })
+
+  it('attaches the pending context to the next user message', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('context_assembled', {
+      environment: false,
+      skills: ['tdd'],
+      trajectories: [],
+    }))
+    applyMessage(conversation, {
+      id: 'm1',
+      session_id: 's1',
+      role: 'user',
+      content: 'fix the auth bug',
+      timestamp: new Date().toISOString(),
+    })
+
+    const user = conversation.messages[0]
+    expect(user.role).toBe('user')
+    expect(user.parts.some((part) => part.kind === 'context')).toBe(true)
+    // The chip is consumed exactly once.
+    expect(conversation.pendingContext).toBeUndefined()
+  })
+
+  it('attaches to the optimistic message the server confirms', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('context_assembled', {
+      environment: true,
+      skills: [],
+      trajectories: [],
+    }))
+    addOptimisticUserMessage(conversation, 'hi')
+    applyMessage(conversation, {
+      id: 'm2',
+      session_id: 's1',
+      role: 'user',
+      content: 'hi',
+      timestamp: new Date().toISOString(),
+    })
+
+    const user = conversation.messages[0]
+    expect(user.parts.some((part) => part.kind === 'context')).toBe(true)
+    expect(conversation.pendingContext).toBeUndefined()
+  })
+})
+
+describe('harness plan lifecycle', () => {
+  it('sets the plan status from plan_status events', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('plan', { title: 'Fix auth', steps: ['a', 'b'] }))
+    applyAgentEvent(conversation, event('plan_status', { status: 'approved', title: 'Fix auth' }))
+    applyAgentEvent(conversation, event('plan_status', { status: 'completed', title: 'Fix auth' }))
+
+    const plan = conversation.messages[0].parts.find((part) => part.kind === 'plan')
+    expect(plan).toMatchObject({ kind: 'plan', title: 'Fix auth' })
+    expect((plan as { status?: string }).status).toBe('completed')
+  })
+
+  it('ignores unknown plan statuses', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('plan', { title: 'P', steps: ['x'] }))
+    const changed = applyAgentEvent(conversation, event('plan_status', { status: 'running' }))
+    expect(changed).toBe(false)
+    const plan = conversation.messages[0].parts.find((part) => part.kind === 'plan')
+    expect((plan as { status?: string }).status).toBeUndefined()
   })
 })

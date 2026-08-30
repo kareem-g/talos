@@ -81,6 +81,12 @@ export interface PlanPart {
    * extracted todo list. Absent for agents that only report structured steps.
    */
   text?: string
+  /**
+   * Harness-owned plan lifecycle, driven by the backend `plan_status` event:
+   * "proposed" | "approved" | "declined" | "completed". Undefined before the
+   * harness reports a status.
+   */
+  status?: 'proposed' | 'approved' | 'declined' | 'completed'
 }
 
 /**
@@ -199,6 +205,18 @@ export interface ConfigChangedPart {
 }
 
 /**
+ * What the harness injected into a prompt (environment facts, project skills,
+ * similar past runs) before it reached the agent. Rendered as a small chip
+ * under the user message so the enrichment is visible instead of hidden.
+ */
+export interface ContextPart {
+  kind: 'context'
+  environment: boolean
+  skills: string[]
+  trajectories: Array<{ sessionId: string; similarity: number }>
+}
+
+/**
  * A browser-automation step the agent (or the manual Browser-tab toolbar) ran
  * against the built-in CDP browser. Rendered inline in the timeline like tool
  * calls / commands, with a status dot and a screenshot thumb.
@@ -241,6 +259,7 @@ export type MessagePart =
   | ConfigChangedPart
   | BrowserStepPart
   | ImagePart
+  | ContextPart
 
 /**
  * A file the user attached to a message. The daemon stores it under the
@@ -325,6 +344,11 @@ export interface Conversation {
   lastEventId: number
   /** Applied event ids, for idempotency across a replay overlap. */
   seenEvents: Set<string>
+  /**
+   * The most recent `context_assembled` announcement, waiting to be attached
+   * to the next user message so the context chip renders under that prompt.
+   */
+  pendingContext?: ContextPart
 }
 
 export function emptyConversation(sessionId: string): Conversation {

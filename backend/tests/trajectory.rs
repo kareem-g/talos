@@ -72,3 +72,43 @@ async fn records_and_replays_a_session_through_the_hub() {
 
     let _ = tokio::fs::remove_file(&path).await;
 }
+
+#[tokio::test]
+async fn canonical_log_appends_across_starts() {
+    // Isolate from the real data dir.
+    let data_home = temp_path("datahome").with_extension("");
+    let _ = std::fs::create_dir_all(&data_home);
+    // SAFETY: test-only env isolation; no other thread reads this var.
+    unsafe { std::env::set_var("XDG_DATA_HOME", &data_home) };
+
+    let hub = BroadcastHub::new();
+    let recorder = TrajectoryRecorder::new();
+
+    // First "daemon run": start_append records to the stable per-session path.
+    let path = recorder.start_append(&hub, "s-canon").await.unwrap();
+    assert!(path.to_str().unwrap().ends_with("s-canon.jsonl"));
+    hub.broadcast_agent_event(agent_event("s-canon", "thinking_started", 1));
+    hub.broadcast_agent_event(agent_event("s-canon", "assistant_text", 2));
+    recorder.stop("s-canon").await.unwrap();
+
+    // Second "daemon run": same path, append not truncate.
+    let path2 = recorder.start_append(&hub, "s-canon").await.unwrap();
+    assert_eq!(path, path2);
+    hub.broadcast_agent_event(agent_event("s-canon", "agent_completed", 3));
+    recorder.stop("s-canon").await.unwrap();
+
+    let log = agentdeck_backend::trajectory::read_session_log("s-canon")
+        .await
+        .unwrap()
+        .expect("canonical log exists");
+    let kinds: Vec<String> = log
+        .iter()
+        .filter_map(|m| match m {
+            WsMessage::AgentEvent { event } => Some(event.kind.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds, vec!["thinking_started", "assistant_text", "agent_completed"]);
+
+    let _ = std::fs::remove_dir_all(&data_home);
+}

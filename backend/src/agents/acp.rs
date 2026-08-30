@@ -44,6 +44,15 @@ struct AcpPermissionOption {
     kind: String,
 }
 
+/// A plan approval looks like approve/accept plus decline/reject (or
+/// suggest-changes) — mirror of the frontend's `isPlanApprovalOptions`, so ACP
+/// plan cards render identically to the Claude/MCP path.
+fn is_plan_approval_options(names: &[String]) -> bool {
+    let lower: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    let has = |needles: &[&str]| lower.iter().any(|n| needles.iter().any(|needle| n.contains(needle)));
+    has(&["approve", "accept"]) && (has(&["decline", "reject", "deny"]) || has(&["suggest changes", "suggest"]))
+}
+
 /// A pending `session/request_permission` we have surfaced to the UI.
 #[derive(Debug, Clone)]
 struct AcpApproval {
@@ -1182,7 +1191,24 @@ async fn dispatch_message(
                     },
                 );
             }
+            // Single approval surface: the payload must look exactly like the
+            // Claude/MCP path so the UI renders one card shape for every
+            // backend. ACP's native options carry ids + names + kinds — map
+            // them to `option_data` (value=id, label=name) and flag plan
+            // approvals (approve/decline/suggest-changes option sets) with
+            // `is_plan` so they render as plan cards.
             let option_names: Vec<String> = options.iter().map(|option| option.name.clone()).collect();
+            let option_data: Vec<Value> = options
+                .iter()
+                .map(|option| {
+                    json!({
+                        "value": option.option_id,
+                        "label": option.name,
+                        "description": option.kind,
+                    })
+                })
+                .collect();
+            let is_plan = is_plan_approval_options(&option_names);
             broadcast.broadcast_agent_event(AgentEvent::new(
                 session_id,
                 "permission_required",
@@ -1190,8 +1216,13 @@ async fn dispatch_message(
                     "id": request_key,
                     "prompt": prompt,
                     "options": option_names,
+                    "option_data": option_data,
+                    "selection_mode": "single",
+                    "allows_custom_text": false,
+                    "tool_name": tool_title,
                     "risk_level": "medium",
                     "source": "acp",
+                    "is_plan": is_plan,
                 }),
             ));
             broadcast.broadcast(WsMessage::StateChange {
@@ -1489,6 +1520,21 @@ fn pick_option_id(options: &[AcpPermissionOption], decision: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_approval_option_sets_are_detected() {
+        let approve_deny = vec!["Approve".to_string(), "Decline".to_string()];
+        assert!(is_plan_approval_options(&approve_deny));
+
+        let approve_suggest = vec!["Approve".to_string(), "Suggest changes".to_string()];
+        assert!(is_plan_approval_options(&approve_suggest));
+
+        let allow_deny = vec!["Allow".to_string(), "Deny".to_string()];
+        assert!(!is_plan_approval_options(&allow_deny));
+
+        let yes_no = vec!["Yes".to_string(), "No".to_string()];
+        assert!(!is_plan_approval_options(&yes_no));
+    }
 
     #[test]
     fn maps_agent_message_chunk_to_text_delta() {

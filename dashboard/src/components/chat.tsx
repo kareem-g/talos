@@ -528,6 +528,18 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
       <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
         <FileIcon size={13} className="shrink-0 text-zinc-500" />
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Plan</span>
+        {part.status && part.status !== 'proposed' ? (
+          <span
+            className={cn(
+              'shrink-0 rounded-full border px-1.5 py-px font-mono text-[9px] uppercase tracking-wide',
+              part.status === 'approved' && 'border-green/30 bg-green/10 text-green',
+              part.status === 'declined' && 'border-red/30 bg-red/10 text-red',
+              part.status === 'completed' && 'border-line bg-inset text-ink-2',
+            )}
+          >
+            {part.status}
+          </span>
+        ) : null}
         {body ? (
           <span className="ml-auto">
             <CopyButton value={body} label="Copy plan" />
@@ -1202,6 +1214,8 @@ export function Part({
       return <GitCommitRow part={part} />
     case 'config_changed':
       return <ConfigRow part={part} />
+    case 'context':
+      return <ContextChip part={part} />
     case 'browser':
       return <BrowserStepRow part={part} />
   }
@@ -1266,6 +1280,28 @@ function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_change
       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
         {part.key} → <span className="font-mono text-ink">{part.value}</span>
       </span>
+    </div>
+  )
+}
+
+/**
+ * The harness-context chip: what the AgentDeck harness injected into the user's
+ * prompt before it reached the agent (environment, project skills, similar past
+ * runs). Rendered under the user message so the enrichment is visible.
+ */
+export function ContextChip({ part }: { part: Extract<MessagePart, { kind: 'context' }> }) {
+  const bits: string[] = []
+  if (part.environment) bits.push('environment')
+  if (part.skills.length > 0) bits.push(`skills: ${part.skills.join(', ')}`)
+  const runs = part.trajectories.length
+  if (runs > 0) bits.push(`${runs} similar run${runs > 1 ? 's' : ''}`)
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-ink-3"
+      title="Injected by the AgentDeck harness before this prompt reached the agent"
+    >
+      <span aria-hidden>🧠</span>
+      <span className="truncate">Context: {bits.join(' · ')}</span>
     </div>
   )
 }

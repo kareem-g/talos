@@ -8,6 +8,7 @@ pub mod harness;
 pub mod opencode;
 pub mod pi_stream;
 pub mod plan;
+pub mod plans;
 pub mod stream;
 
 use crate::pty::parser::ParsedOutput;

@@ -528,6 +528,26 @@ export function applyAgentEvent(
     }
 
     /**
+     * The harness reported the plan lifecycle (proposed → approved/declined →
+     * completed). Sets the status on the session's current plan part.
+     */
+    case 'plan_status': {
+      const status = str(payload, 'status')
+      if (status !== 'proposed' && status !== 'approved' && status !== 'declined' && status !== 'completed') {
+        return false
+      }
+      for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+        for (const part of conversation.messages[index].parts) {
+          if (part.kind === 'plan') {
+            part.status = status
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    /**
      * Token/cost accounting. Merges into a trailing usage part so a stream of
      * updates renders as one meter that ticks up, not one card per event.
      */
@@ -824,6 +844,29 @@ export function applyAgentEvent(
       return true
     }
 
+    /**
+     * The harness announced what it injected into the upcoming prompt
+     * (environment facts, project skills, similar past runs). Rendered as a
+     * context chip under the next user message, not as a transcript row.
+     */
+    case 'context_assembled': {
+      const rawTrajectories = payload['trajectories']
+      const trajectories = Array.isArray(rawTrajectories)
+        ? rawTrajectories
+            .filter((t): t is Record<string, unknown> => t !== null && typeof t === 'object')
+            .map((t) => ({
+              sessionId: str(t, 'session_id') ?? str(t, 'sessionId') ?? '',
+              similarity: num(t, 'similarity') ?? 0,
+            }))
+            .filter((t) => t.sessionId !== '')
+        : []
+      const skills = stringList(payload, 'skills')
+      const environment = bool(payload, 'environment') === true
+      if (!environment && skills.length === 0 && trajectories.length === 0) return false
+      conversation.pendingContext = { kind: 'context', environment, skills, trajectories }
+      return true
+    }
+
     case 'agent_error': {
       const turn = currentTurn(conversation, event)
       turn.parts.push({
@@ -882,6 +925,17 @@ export function applyAgentEvent(
 }
 
 /**
+ * Attach the pending harness-context chip to a user message, then clear it.
+ * The chip renders under the prompt the harness actually enriched.
+ */
+function attachPendingContext(message: Message, conversation: Conversation): void {
+  const context = conversation.pendingContext
+  if (!context) return
+  message.parts.push(context)
+  conversation.pendingContext = undefined
+}
+
+/**
  * Apply a `Message` frame.
  *
  * The server echoes user input back, so a matching optimistic message is
@@ -901,16 +955,19 @@ export function applyMessage(conversation: Conversation, message: AgentMessage):
       pending.id = message.id
       pending.optimistic = false
       pending.createdAt = message.timestamp
+      attachPendingContext(pending, conversation)
       return true
     }
-    conversation.messages.push({
+    const row: Message = {
       id: message.id,
       role: 'user',
       parts: [{ kind: 'text', text: message.content, streaming: false }],
       sequence: 0,
       createdAt: message.timestamp,
       streaming: false,
-    })
+    }
+    attachPendingContext(row, conversation)
+    conversation.messages.push(row)
     return true
   }
 

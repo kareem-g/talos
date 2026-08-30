@@ -412,7 +412,7 @@ async fn trajectory_similarity_finds_and_formats_past_runs() {
         trajectories: std::sync::Arc::new(trajectory::TrajectoryRecorder::new()),
     };
 
-    let found = find_similar_trajectories(&state, &current, "fix the auth bug", 3, 0.3)
+    let (found, refs) = find_similar_trajectories(&state, &current, "fix the auth bug", 3, 0.3)
         .await
         .unwrap()
         .expect("similar trajectory found");
@@ -428,6 +428,9 @@ async fn trajectory_similarity_finds_and_formats_past_runs() {
     assert!(found.contains("Assistant: Let me fix the auth bug."));
     assert!(found.contains("Tool call: Bash"));
     assert!(found.contains("Tool result: auth fixed"));
+    // The breakdown must name the referenced run and its score.
+    assert!(refs.iter().any(|r| r.session_id == past.id));
+    assert!(refs.iter().all(|r| r.similarity >= 0.3));
 
     let _ = std::fs::remove_file(&past_path);
     let _ = std::fs::remove_dir_all(trajectory::default_dir().unwrap());

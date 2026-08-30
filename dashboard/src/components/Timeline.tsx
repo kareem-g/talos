@@ -17,7 +17,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Part } from './chat'
 import { FileChips } from './chat'
-import { Chips } from './chat'
+import { Chips, ContextChip } from './chat'
 import LoadingState from './LoadingState'
 import { CopyButton, IconButton, RefreshIcon } from './ui'
 import { cn } from '@/lib/format'
@@ -78,6 +78,9 @@ const Turn = memo(function Turn({
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
+    const context = message.parts.find(
+      (part): part is Extract<MessagePart, { kind: 'context' }> => part.kind === 'context',
+    )
     const time = new Date(message.createdAt)
     return (
       <div className="group flex justify-end">
@@ -99,6 +102,7 @@ const Turn = memo(function Turn({
             <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
               <Chips text={text} />
             </p>
+            {context ? <ContextChip part={context} /> : null}
           </div>
         </div>
       </div>

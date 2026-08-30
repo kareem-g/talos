@@ -330,17 +330,37 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         // Enrich the prompt (environment, skills, similar trajectories) before
         // the turn. The assembler never fails the turn: on any error it falls
         // back to an uninjected context so a prompt is never dropped.
-        let ctx = match crate::context_assembler::assemble(&state, &session, &clean_data).await {
-            Ok(ctx) => ctx,
-            Err(error) => {
-                tracing::warn!(session_id = %session.id, %error, "context assembly failed");
-                crate::agents::harness::TurnContext {
-                    session: session.clone(),
-                    prompt: clean_data.clone(),
-                    injected_context: None,
+        let (ctx, breakdown) =
+            match crate::context_assembler::assemble(&state, &session, &clean_data).await {
+                Ok((ctx, breakdown)) => (ctx, breakdown),
+                Err(error) => {
+                    tracing::warn!(session_id = %session.id, %error, "context assembly failed");
+                    (
+                        crate::agents::harness::TurnContext {
+                            session: session.clone(),
+                            prompt: clean_data.clone(),
+                            injected_context: None,
+                        },
+                        crate::context_assembler::ContextBreakdown::default(),
+                    )
                 }
-            }
-        };
+            };
+        // Surface what the harness injected (env, skills, similar runs) so the
+        // UI can render a context chip next to the prompt instead of hiding the
+        // enrichment. The event is persisted and trajectory-recorded like any
+        // other agent event. Nothing injected → nothing broadcast.
+        let injected_something = breakdown.environment
+            || !breakdown.skills.is_empty()
+            || !breakdown.trajectories.is_empty();
+        if injected_something
+            && let Ok(payload) = serde_json::to_value(&breakdown)
+        {
+            state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                &session.id,
+                "context_assembled",
+                payload,
+            ));
+        }
         tokio::spawn(async move {
             if let Err(error) = turn.start_turn(&state, ctx).await {
                 if turn.name() == "pi" {

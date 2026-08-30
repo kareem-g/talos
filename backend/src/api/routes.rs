@@ -164,10 +164,39 @@ pub async fn get_session_transcripts(
     tracing::debug!("[AgentDeck][Session] Getting transcripts for session={}", id);
     match state.session_manager.get_transcripts(&id).await {
         Ok(transcripts) => {
-            let messages = state.session_manager.get_messages(&id).await.unwrap_or_default();
-            let events = state.session_manager.get_agent_events(&id).await.unwrap_or_default();
+            let mut messages = state.session_manager.get_messages(&id).await.unwrap_or_default();
+            let mut events = state.session_manager.get_agent_events(&id).await.unwrap_or_default();
             let terminal_output = state.session_manager.get_terminal_output(&id).await.unwrap_or_default();
             let agent_states = state.session_manager.get_agent_states(&id).await.unwrap_or_default();
+            // Canonical session log: when present, it is the authoritative,
+            // wire-ordered source for messages + events. The DB backfills
+            // anything that predates the log (that data is strictly older, so
+            // appending the log after the DB-only rows keeps chronology).
+            if let Ok(Some(log)) = crate::trajectory::read_session_log(&id).await {
+                let mut log_messages: Vec<crate::agent_events::AgentMessage> = Vec::new();
+                let mut log_events: Vec<crate::agent_events::AgentEvent> = Vec::new();
+                for frame in log {
+                    match frame {
+                        crate::websocket::WsMessage::Message { message } => log_messages.push(message),
+                        crate::websocket::WsMessage::AgentEvent { event } => log_events.push(event),
+                        _ => {}
+                    }
+                }
+                let log_message_ids: std::collections::HashSet<String> =
+                    log_messages.iter().map(|m| m.id.clone()).collect();
+                let log_event_ids: std::collections::HashSet<String> =
+                    log_events.iter().map(|e| e.event_id.clone()).collect();
+                messages = messages
+                    .into_iter()
+                    .filter(|m| !log_message_ids.contains(&m.id))
+                    .chain(log_messages)
+                    .collect();
+                events = events
+                    .into_iter()
+                    .filter(|e| !log_event_ids.contains(&e.event_id))
+                    .chain(log_events)
+                    .collect();
+            }
             // Pending questions/approvals are not in the event log (question_started
             // is broadcast-only), so attach them here to survive a replay.
             let questions = state.session_manager.get_pending_questions(&id).await.unwrap_or_default();

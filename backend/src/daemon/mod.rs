@@ -100,10 +100,21 @@ impl Daemon {
         {
             let sm = Arc::clone(&session_manager);
             let event_broadcast = state.broadcast.clone();
+            let trajectories = state.trajectories.clone();
             let mut rx = state.broadcast.subscribe();
             tokio::spawn(async move {
                 use crate::websocket::WsMessage;
                 while let Ok(broadcast_event) = rx.recv().await {
+                    // Canonical session log: lazily start (or resume) each
+                    // session's stable JSONL log on its first hub event, so
+                    // every session's stream is captured without opt-in.
+                    if let Some(sid) = crate::trajectory::session_id_of(&broadcast_event.message) {
+                        if !trajectories.is_recording(sid).await
+                            && let Err(e) = trajectories.start_append(&event_broadcast, sid).await
+                        {
+                            tracing::warn!("[AgentDeck][Persistence] Failed to start session log: {}", e);
+                        }
+                    }
                     match broadcast_event.message {
                         WsMessage::TerminalOutput { session_id, data } => {
                             if !data.is_empty() {
@@ -213,9 +224,20 @@ impl Daemon {
             });
         }
 
+        // Harness-owned plan lifecycle: track propose → approve/decline →
+        // complete per session and broadcast `plan_status` events.
+        crate::agents::plans::PlanTracker::new().spawn(state.broadcast.clone());
+
         let cfg = self.config.read().await;
         let settings = cfg.settings().clone();
         drop(cfg);
+
+        // A daemon restart silently orphans every agent subprocess. The claude
+        // process's "exited" StateChange — which normally marks the session
+        // resumable — never fires, so sessions stay persisted as idle with no
+        // live process, no Resume affordance, and every send failing. Sweep
+        // once at startup and recover any resumable claude session.
+        recover_orphaned_claude_sessions(&state).await;
 
         // Start mDNS service
         let mdns_handle = mdns::start_service(&settings).await.ok();
@@ -251,6 +273,48 @@ fn state_is_terminal(state: &str) -> bool {
 /// to `needs_resume` so the UI can offer a structured Resume action. No-op for
 /// other agents, sessions without prior history, or sessions that are already
 /// in a non-resumable state.
+/// At startup, recover claude sessions whose subprocess silently vanished with
+/// the previous daemon. Without this, a session persisted as `idle` has no live
+/// process, no Resume affordance, and every send fails with "not running".
+/// Mirrors `maybe_mark_needs_resume`: only claude sessions with prior history
+/// become resumable; everything else is left alone.
+async fn recover_orphaned_claude_sessions(state: &crate::config::AppState) {
+    let Ok(sessions) = state.session_manager.list_sessions().await else {
+        return;
+    };
+    for session in sessions {
+        if session.agent != "claude" {
+            continue;
+        }
+        let has_history = !state
+            .session_manager
+            .get_messages(&session.id)
+            .await
+            .unwrap_or_default()
+            .is_empty()
+            || !state
+                .session_manager
+                .get_transcripts(&session.id)
+                .await
+                .unwrap_or_default()
+                .is_empty();
+        if !has_history {
+            continue;
+        }
+        if state
+            .session_manager
+            .mark_needs_resume(&session.id)
+            .await
+            .is_ok()
+        {
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: session.id,
+                state: "needs_resume".to_string(),
+            });
+        }
+    }
+}
+
 async fn maybe_mark_needs_resume(
     sm: &SessionManager,
     session_id: &str,
