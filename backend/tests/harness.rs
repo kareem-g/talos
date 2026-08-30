@@ -53,6 +53,7 @@ async fn test_state() -> AppState {
             models: vec!["fake-model".to_string()],
             default_model: Some("fake-model".to_string()),
             extra_headers: BTreeMap::new(),
+            max_output_tokens: None,
         });
 
     AppState {
