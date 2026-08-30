@@ -91,6 +91,10 @@ fn spec(
     ToolSpec { name, description, category, risk, input_schema }
 }
 
+/// The name of the fan-out tool, exported so transports can filter it out of
+/// subagent sessions (bounded workers must not dispatch their own children).
+pub const DISPATCH_TOOL: &str = "Dispatch";
+
 /// The built-in tool set the harness executes on behalf of custom providers.
 /// Adding a tool here makes it appear on both API transports and in
 /// `GET /api/tools`; wiring its execution happens in `api_tools.rs`.
@@ -235,6 +239,24 @@ pub fn registry() -> &'static [ToolSpec] {
                         "kind": { "type": "string", "enum": ["memory", "convention"], "description": "memory (default) or convention" }
                     },
                     "required": ["content"]
+                }),
+            ),
+            spec(
+                "Dispatch",
+                "Fan a task out to other agents in parallel and get back one merged answer. Use it when a task has independent parts different agents could do, or when you want independent opinions to compare. Each agent runs the SAME self-contained task; a merge step synthesizes their answers into one. agent ids come from the environment (e.g. claude, opencode, or a custom provider id). Children run to completion, so this can take minutes.",
+                ToolCategory::Communication,
+                Risk::Medium,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "task": { "type": "string", "description": "The self-contained task to give every agent" },
+                        "agents": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Agent ids to fan out to, e.g. [\"claude\", \"opencode\"]"
+                        }
+                    },
+                    "required": ["task", "agents"]
                 }),
             ),
         ]

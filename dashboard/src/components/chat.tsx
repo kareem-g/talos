@@ -1206,6 +1206,8 @@ export function Part({
       return null
     case 'subagent':
       return <SubagentRow part={part} />
+    case 'orchestration':
+      return <OrchestrationRow part={part} />
     case 'progress':
       return <ProgressRow part={part} />
     case 'search':
@@ -1227,13 +1229,50 @@ export function Part({
 
 function SubagentRow({ part }: { part: Extract<MessagePart, { kind: 'subagent' }> }) {
   const running = part.status === 'running'
+  const cancelled = part.status === 'cancelled'
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
-      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : cancelled ? 'bg-ink-3' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
-        {running ? 'Subagent running' : part.status === 'failed' ? 'Subagent failed' : 'Subagent done'} · {part.name}
+        {running
+          ? 'Subagent running'
+          : cancelled
+            ? 'Subagent cancelled'
+            : part.status === 'failed'
+              ? 'Subagent failed'
+              : 'Subagent done'}{' '}
+        · {part.name}
       </span>
       {part.kindType ? <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{part.kindType}</span> : null}
+    </div>
+  )
+}
+
+function OrchestrationRow({ part }: { part: Extract<MessagePart, { kind: 'orchestration' }> }) {
+  const running = part.status === 'running' || part.status === 'merging'
+  const label =
+    part.status === 'merging'
+      ? 'Merging answers'
+      : part.status === 'running'
+        ? 'Fan-out running'
+        : part.status === 'failed'
+          ? 'Fan-out failed'
+          : 'Fan-out done'
+  const children = part.children ?? []
+  return (
+    <div className="rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <div className="flex items-center gap-2">
+        <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+          {label} · {part.agents.length > 0 ? part.agents.join(' + ') : children.map((child) => child.agent).join(' + ')}
+        </span>
+        <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">
+          {children.length > 0
+            ? `${children.filter((child) => child.status === 'completed').length}/${children.length} ok`
+            : `${part.agents.length} agents`}
+        </span>
+      </div>
+      {part.reply ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-ink-2">{part.reply}</p> : null}
     </div>
   )
 }

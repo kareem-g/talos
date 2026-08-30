@@ -7,6 +7,7 @@ pub mod claude_stream;
 pub mod codex;
 pub mod harness;
 pub mod opencode;
+pub mod orchestrate;
 pub mod pi_stream;
 pub mod plan;
 pub mod plans;

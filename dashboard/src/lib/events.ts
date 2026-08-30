@@ -656,7 +656,9 @@ export function applyAgentEvent(
     /** Resolve the matching subagent part (same turn or the last open one). */
     case 'subagent_finished': {
       const id = strAny(payload, 'id', 'tool_id', 'task_id')
-      const status = str(payload, 'status') === 'failed' ? 'failed' : 'completed'
+      const raw = str(payload, 'status')
+      const status: 'completed' | 'failed' | 'cancelled' =
+        raw === 'failed' ? 'failed' : raw === 'cancelled' || raw === 'timeout' ? 'cancelled' : 'completed'
       const turn = currentTurn(conversation, event)
       const target =
         (id ? turn.parts.find((part) => part.kind === 'subagent' && part.id === id) : undefined) ??
@@ -671,6 +673,68 @@ export function applyAgentEvent(
         name: strAny(payload, 'name', 'description') ?? 'Subagent',
         kindType: strAny(payload, 'kind', 'subagent_type') ?? '',
         status,
+        startedAt: event.timestamp,
+      })
+      return true
+    }
+
+    /** A multi-agent fan-out started: one task, several agents in parallel. */
+    case 'orchestration_started': {
+      const turn = currentTurn(conversation, event)
+      const agents = Array.isArray(payload.agents)
+        ? (payload.agents as unknown[]).filter((a): a is string => typeof a === 'string')
+        : []
+      turn.parts.push({
+        kind: 'orchestration',
+        id: `${event.event_id}`,
+        agents,
+        merge: payload.merge !== false,
+        status: 'running',
+        startedAt: event.timestamp,
+      })
+      return true
+    }
+
+    /** The fan-out finished; a merge step is synthesizing the answers. */
+    case 'merge_started': {
+      const turn = currentTurn(conversation, event)
+      const target = [...turn.parts].reverse().find((part) => part.kind === 'orchestration')
+      if (target && target.kind === 'orchestration' && target.status === 'running') {
+        target.status = 'merging'
+        return true
+      }
+      return false
+    }
+
+    /** The whole fan-out (+ merge) run finished. */
+    case 'orchestration_finished': {
+      const turn = currentTurn(conversation, event)
+      const reply = str(payload, 'reply')
+      const children = Array.isArray(payload.children)
+        ? (payload.children as Record<string, unknown>[])
+            .map((child) => ({
+              agent: typeof child.agent === 'string' ? child.agent : '?',
+              status: typeof child.status === 'string' ? child.status : '?',
+            }))
+            .filter((child) => child.agent !== '?')
+        : undefined
+      const anyCompleted = (children ?? []).some((child) => child.status === 'completed')
+      const mergeStatus = str(payload, 'merge_status')
+      const target = [...turn.parts].reverse().find((part) => part.kind === 'orchestration')
+      if (target && target.kind === 'orchestration') {
+        target.status = anyCompleted || (mergeStatus === 'completed') ? 'completed' : 'failed'
+        if (reply !== undefined) target.reply = reply
+        if (children) target.children = children
+        return true
+      }
+      turn.parts.push({
+        kind: 'orchestration',
+        id: `${event.event_id}`,
+        agents: [],
+        merge: payload.merged === true,
+        status: anyCompleted ? 'completed' : 'failed',
+        reply,
+        children,
         startedAt: event.timestamp,
       })
       return true

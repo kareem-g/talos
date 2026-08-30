@@ -50,6 +50,7 @@ impl SessionManager {
             resume_command: None,
             external_id: None,
             source: "agentdeck".to_string(),
+            parent_id: None,
         };
 
         sqlx::query(
@@ -107,6 +108,7 @@ impl SessionManager {
             resume_command: None,
             external_id: Some(external_id.to_string()),
             source: agent.to_string(),
+            parent_id: None,
         };
 
         sqlx::query(
@@ -176,6 +178,41 @@ impl SessionManager {
             session.external_id = Some(external_id.to_string());
         }
         Ok(())
+    }
+
+    /// Link a session to the session that spawned it. Called right after a
+    /// subagent / orchestration child is created; the link is what makes
+    /// cancellation cascade and spawned-row UI possible.
+    pub async fn set_parent(&self, id: &str, parent_id: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET parent_id = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(parent_id)
+            .bind(chrono::Utc::now())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut active = self.active_sessions.write().await;
+        if let Some(session) = active.get_mut(id) {
+            session.parent_id = Some(parent_id.to_string());
+        }
+        Ok(())
+    }
+
+    /// The not-yet-finished children spawned by `parent_id` — the set a
+    /// cancellation cascade must stop. Ended children (exited / archived /
+    /// errored) are excluded so killing a parent never resurrects old rows.
+    pub async fn child_sessions(&self, parent_id: &str) -> Result<Vec<Session>> {
+        let rows: Vec<SessionRow> = sqlx::query_as(
+            r#"
+            SELECT * FROM sessions
+            WHERE parent_id = ?1
+              AND status NOT IN ('exited', 'archived', 'error', 'needs_resume')
+            "#,
+        )
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(Session::from).collect())
     }
 
     /// Mark sessions left `running`/`starting` by a previous daemon run as
@@ -898,6 +935,7 @@ struct SessionRow {
     resume_command: Option<String>,
     external_id: Option<String>,
     source: Option<String>,
+    parent_id: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -929,6 +967,7 @@ impl From<SessionRow> for Session {
             resume_command: row.resume_command,
             external_id: row.external_id,
             source: row.source.unwrap_or_else(|| "agentdeck".to_string()),
+            parent_id: row.parent_id,
         }
     }
 }

@@ -149,7 +149,7 @@ export function deriveSubagents(messages: Message[]): DerivedSubagent[] {
           id: part.id,
           name: part.name,
           kind: part.kindType,
-          status: part.status === 'running' ? 'working' : part.status,
+          status: part.status === 'running' ? 'working' : part.status === 'cancelled' ? 'failed' : part.status,
           startedAt: part.startedAt,
         })
         continue

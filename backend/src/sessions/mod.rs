@@ -30,6 +30,10 @@ pub struct Session {
     /// it was imported from.
     #[serde(default = "default_source")]
     pub source: String,
+    /// The session that spawned this one as a subagent / orchestration child.
+    /// Opaque session id; drives cancellation cascades and spawned-row UI.
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 fn default_source() -> String {
@@ -67,6 +71,7 @@ impl Default for Session {
             resume_command: None,
             external_id: None,
             source: default_source(),
+            parent_id: None,
         }
     }
 }

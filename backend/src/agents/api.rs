@@ -243,6 +243,9 @@ async fn call_openai_stream(
             .pending_config(session_id)
             .await
             .unwrap_or_default();
+        // Bounded workers (subagent children) must not see Dispatch — a
+        // worker fanning out its own children would recurse.
+        let is_subagent = pending.iter().any(|(k, v)| k == "subagent" && v == "true");
         let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
         if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
             && let Ok(parsed) = value.parse::<usize>()
@@ -256,7 +259,7 @@ async fn call_openai_stream(
             "max_tokens": max_tokens,
             "stream": true,
             "stream_options": { "include_usage": true },
-            "tools": crate::agents::api_tools::openai_tool_definitions(),
+            "tools": crate::agents::api_tools::openai_tool_definitions(is_subagent),
         });
         if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
             body["reasoning_effort"] = Value::String(effort.clone());
@@ -528,6 +531,9 @@ async fn call_anthropic_stream(
             .pending_config(session_id)
             .await
             .unwrap_or_default();
+        // Bounded workers (subagent children) must not see Dispatch — a
+        // worker fanning out its own children would recurse.
+        let is_subagent = pending.iter().any(|(k, v)| k == "subagent" && v == "true");
         let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
         if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
             && let Ok(parsed) = value.parse::<usize>()
@@ -540,7 +546,7 @@ async fn call_anthropic_stream(
             "messages": filtered,
             "max_tokens": max_tokens,
             "stream": true,
-            "tools": crate::agents::api_tools::tool_definitions(),
+            "tools": crate::agents::api_tools::tool_definitions(is_subagent),
         });
         // Identity: the model is served under the configured provider/model.
         // Without a firm statement, models latch onto the most repeated name

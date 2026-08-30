@@ -123,6 +123,42 @@ through the policy pipeline, and `GET /api/tools` lists all 11 tools.
 agentrouter + claude + opencode and merge", parent→child cancel propagation,
 per-child budget already present.
 
+**Done:** `backend/src/agents/orchestrate.rs` is the harness-owned
+orchestration primitive, exposed three ways:
+
+- **`POST /api/sessions/{id}/orchestrate`** — fan one prompt out to N agents
+  concurrently (`join_all`; children are I/O-bound) and, by default, run a
+  **merge step**: one more child whose prompt carries every answer labeled by
+  agent (failures included), asked to synthesize one final reply. The parent's
+  timeline shows `orchestration_started` → per-child subagent cards →
+  `orchestration_finished` with the merged answer; the dashboard renders a
+  fan-out card (`agentrouter + claude`, `2/2 ok`, reply preview).
+- **The `Dispatch` tool** (registry category `communication`, risk `medium`)
+  — API-provider agents can fan work out themselves: the tool runs the same
+  orchestration and returns the merged answer plus per-agent results as the
+  tool output. Children spawned by `run_child` carry the `subagent` flag, and
+  both API transports drop `Dispatch` from a subagent's advertised tools, so
+  fan-out cannot recurse.
+- **`spawn_subagent`** now delegates to the same runner (one code path for
+  spawn/wait/budget/timeout/cancel).
+
+**Parent→child cancel propagation:** sessions gained `parent_id` (migration
+`011_parent_link.sql`; `set_parent`/`child_sessions` on the manager). Killing
+a session broadcasts `session_killed` — in-flight orchestration loops watch
+for it, stop their children, and return `cancelled` outcomes — and then a
+cascade stops any remaining unfinished children (all three transports +
+status update), emitting `subagent_finished {status: cancelled}` cards.
+`subagent` cards now render a cancelled state instead of "done".
+
+Per-child budget (`max_cost_usd`) and timeout (`timeout_secs`, default 300s)
+apply to every child including the merge step.
+
+Verified live: fan-out to `[agentrouter, claude]` + merge synthesized both
+answers (noting the identity disagreement) with the card rendering in the
+dashboard; killing a parent mid-flight cancelled the in-flight claude child
+(`"parent session was killed"`, no orphan process); an AgentRouter session
+called `Dispatch` on its own and reported the merged answer back.
+
 ## 7. Memory: auto-save + conventions
 
 **Why:** memory is keyword-ranked and requires a manual save. Add auto-save on

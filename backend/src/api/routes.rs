@@ -331,13 +331,13 @@ pub async fn delete_memory(
 /// optionally killed early when it exceeds a cost budget.
 ///
 /// Body: `{ "prompt": string, "agent"?: string, "max_cost_usd"?: number }`.
+/// The child is linked to this session (`parent_id`), so killing the parent
+/// cancels the child.
 pub async fn spawn_subagent(
     State(state): State<Arc<AppState>>,
     Path(parent_id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    use std::time::Duration;
-
     let prompt = match body.get("prompt").and_then(|v| v.as_str()) {
         Some(p) if !p.trim().is_empty() => p.to_string(),
         _ => {
@@ -350,127 +350,60 @@ pub async fn spawn_subagent(
         .unwrap_or("claude")
         .to_string();
     let max_cost_usd = body.get("max_cost_usd").and_then(|v| v.as_f64());
+    let timeout_secs = body
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .filter(|s| *s > 0)
+        .unwrap_or(crate::agents::orchestrate::DEFAULT_CHILD_TIMEOUT_SECS);
 
-    let Some(parent) = state.session_manager.get_session(&parent_id).await.ok().flatten() else {
+    if state.session_manager.get_session(&parent_id).await.ok().flatten().is_none() {
         return Json(json!({ "error": "parent session not found", "id": parent_id }));
-    };
-    let project = parent.project.clone();
-
-    // Subscribe before spawning so no child event is missed.
-    let mut rx = state.broadcast.subscribe();
-
-    // Subagents get the subagent role as their instruction set (replacing the
-    // standing set) so they behave bounded and result-oriented.
-    let mut child_body = body.clone();
-    child_body["instructions"] = json!(crate::prompts::subagent_prompt());
-
-    let child = match spawn_session(
-        &state,
-        &format!("subagent-{agent}"),
-        &agent,
-        project.as_deref(),
-        Some(&prompt),
-        &child_body,
-    )
-    .await
-    {
-        Ok(child) => child,
-        Err(error) => {
-            return Json(json!({ "error": error, "status": "error" }));
-        }
-    };
-
-    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-        &parent_id,
-        "subagent_started",
-        json!({ "id": child.id, "name": agent, "status": "running" }),
-    ));
-
-    let mut reply = String::new();
-    let mut result = json!({
-        "child_session_id": child.id,
-        "agent": agent,
-        "completed": false,
-        "reply": "",
-    });
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let recv = match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(recv) => recv,
-            Err(_) => {
-                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                    &parent_id,
-                    "subagent_finished",
-                    json!({ "id": child.id, "status": "failed", "reason": "timeout" }),
-                ));
-                result["error"] = json!("timeout waiting for subagent completion");
-                return Json(result);
-            }
-        };
-        let Ok(frame) = recv else { break };
-        let crate::websocket::WsMessage::AgentEvent { event } = frame.message else { continue };
-        if event.session_id != child.id {
-            continue;
-        }
-        match event.kind.as_str() {
-            "assistant_text" => {
-                if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                    reply.push_str(text);
-                }
-            }
-            "agent_completed" => {
-                let input_tokens = event.payload.get("input_tokens").and_then(|v| v.as_u64());
-                let output_tokens = event.payload.get("output_tokens").and_then(|v| v.as_u64());
-                let cost = event.payload.get("cost_usd").and_then(|v| v.as_f64());
-                let duration_ms = event.payload.get("duration_ms").and_then(|v| v.as_u64());
-
-                // Budget enforcement: stop the child and mark the run failed.
-                if let Some(limit) = max_cost_usd
-                    && let Some(cost) = cost
-                    && cost > limit
-                {
-                    if let Some(turn) = crate::agents::harness::resolve_turn(&state, &child).await {
-                        let _ = turn.stop(&state, &child.id).await;
-                    }
-                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                        &parent_id,
-                        "subagent_finished",
-                        json!({ "id": child.id, "status": "failed", "reason": "budget exceeded" }),
-                    ));
-                    result["completed"] = json!(false);
-                    result["error"] = json!("budget exceeded");
-                    return Json(result);
-                }
-
-                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                    &parent_id,
-                    "subagent_finished",
-                    json!({ "id": child.id, "status": "completed" }),
-                ));
-                result["completed"] = json!(true);
-                result["reply"] = json!(reply.trim());
-                result["input_tokens"] = json!(input_tokens);
-                result["output_tokens"] = json!(output_tokens);
-                result["cost_usd"] = json!(cost);
-                result["duration_ms"] = json!(duration_ms);
-                return Json(result);
-            }
-            "agent_error" => {
-                state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                    &parent_id,
-                    "subagent_finished",
-                    json!({ "id": child.id, "status": "failed" }),
-                ));
-                result["completed"] = json!(false);
-                result["error"] = json!(event.payload.get("message").cloned().unwrap_or(json!("subagent failed")));
-                return Json(result);
-            }
-            _ => {}
-        }
     }
 
-    Json(result)
+    // The shared orchestration runner owns the whole lifecycle: spawn with the
+    // subagent instruction set, parent link, budget, timeout, and
+    // parent-kill cancellation.
+    let name = format!("subagent-{agent}");
+    let outcome = crate::agents::orchestrate::run_child(
+        &state,
+        &parent_id,
+        &name,
+        &agent,
+        &prompt,
+        max_cost_usd,
+        std::time::Duration::from_secs(timeout_secs),
+    )
+    .await;
+
+    Json(json!({
+        "child_session_id": outcome.session_id,
+        "agent": outcome.agent,
+        "completed": outcome.status == "completed",
+        "status": outcome.status,
+        "reply": outcome.reply,
+        "error": outcome.error,
+        "input_tokens": outcome.input_tokens,
+        "output_tokens": outcome.output_tokens,
+        "cost_usd": outcome.cost_usd,
+        "duration_ms": outcome.duration_ms,
+    }))
+}
+
+/// Fan one task out to several agents and merge their answers — the
+/// harness-owned multi-agent orchestration primitive.
+///
+/// Body: `{ "prompt": string, "agents": string[], "merge"?: bool (default
+/// true), "merge_agent"?: string, "max_cost_usd"?: number, "timeout_secs"?:
+/// number }`. Children run concurrently; when `merge` is on, a final merge
+/// child synthesizes one answer from all of them. The parent's timeline shows
+/// `orchestration_started`, per-child subagent cards, and
+/// `orchestration_finished` with the merged reply.
+pub async fn orchestrate_session(
+    State(state): State<Arc<AppState>>,
+    Path(parent_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    Json(crate::agents::orchestrate::orchestrate(&state, &parent_id, &body).await)
 }
 
 pub async fn attach_session(
@@ -514,6 +447,16 @@ pub async fn kill_session(
         .update_status(&id, SessionStatus::Exited)
         .await
         .is_ok();
+
+    // Parent→child cancel propagation: announce the kill (in-flight
+    // orchestration loops watch for this and abort), then stop any unfinished
+    // children this session spawned.
+    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+        &id,
+        "session_killed",
+        json!({ "reason": "killed" }),
+    ));
+    crate::agents::orchestrate::cancel_children(&state, &id).await;
 
     Json(json!({
         "killed": pty_killed || acp_killed || claude_killed || status_updated,
@@ -1640,6 +1583,16 @@ pub async fn mobile_kill_session(
         .update_status(&id, SessionStatus::Exited)
         .await
         .is_ok();
+
+    // Same cancel propagation as `kill_session`: children die with their
+    // parent, no matter which surface issued the kill.
+    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+        &id,
+        "session_killed",
+        json!({ "reason": "killed" }),
+    ));
+    crate::agents::orchestrate::cancel_children(&state, &id).await;
+
     Json(json!({
         "killed": pty_killed || acp_killed || claude_killed || status_updated,
         "session_id": id,
@@ -1697,7 +1650,7 @@ async fn resolve_acp_launch(state: &AppState, agent: &str) -> Option<AcpLaunch> 
     None
 }
 
-async fn spawn_session(
+pub(crate) async fn spawn_session(
     state: &AppState,
     name: &str,
     agent: &str,
@@ -1710,6 +1663,19 @@ async fn spawn_session(
         .create_session(name, agent, project)
         .await
         .map_err(|error| error.to_string())?;
+
+    // Orchestration children identify their spawning session via the body.
+    // The link lets a killed parent cascade cancellation to its children and
+    // lets the UI tell spawned rows apart.
+    if let Some(parent_id) = body.get("parent_id").and_then(|v| v.as_str()) {
+        let _ = state.session_manager.set_parent(&session.id, parent_id).await;
+    }
+    // Bounded workers: subagent children must not fan out again (a child
+    // Dispatching its own children would recurse). API transports read this
+    // flag and drop the Dispatch tool from their advertised set.
+    if body.get("subagent").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let _ = state.session_manager.set_pending_config(&session.id, "subagent", "true").await;
+    }
 
     // The chat shows the RAW prompt the user sent — the enriched prompt
     // (charter + context) goes to the agent but is never displayed. This is

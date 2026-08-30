@@ -712,3 +712,72 @@ describe('harness plan lifecycle', () => {
     expect((plan as { status?: string }).status).toBeUndefined()
   })
 })
+
+describe('multi-agent orchestration', () => {
+  it('renders a fan-out as one part that walks running → merging → done', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(
+      conversation,
+      event('orchestration_started', { agents: ['claude', 'agentrouter'], merge: true }),
+    )
+    let part = conversation.messages[0].parts.find((p) => p.kind === 'orchestration')
+    expect(part).toMatchObject({
+      kind: 'orchestration',
+      agents: ['claude', 'agentrouter'],
+      merge: true,
+      status: 'running',
+    })
+
+    applyAgentEvent(conversation, event('merge_started', { agent: 'claude' }))
+    part = conversation.messages[0].parts.find((p) => p.kind === 'orchestration')
+    expect((part as { status?: string }).status).toBe('merging')
+
+    applyAgentEvent(
+      conversation,
+      event('orchestration_finished', {
+        agents: ['claude', 'agentrouter'],
+        merged: true,
+        merge_status: 'completed',
+        reply: 'use pytest',
+        children: [
+          { agent: 'claude', status: 'completed', reply: 'pytest' },
+          { agent: 'agentrouter', status: 'completed', reply: 'pytest too' },
+        ],
+      }),
+    )
+    part = conversation.messages[0].parts.find((p) => p.kind === 'orchestration')
+    expect(part).toMatchObject({
+      status: 'completed',
+      reply: 'use pytest',
+      children: [
+        { agent: 'claude', status: 'completed' },
+        { agent: 'agentrouter', status: 'completed' },
+      ],
+    })
+  })
+
+  it('marks a fan-out failed when no child completed', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('orchestration_started', { agents: ['x'], merge: true }))
+    applyAgentEvent(
+      conversation,
+      event('orchestration_finished', {
+        merged: false,
+        children: [{ agent: 'x', status: 'failed', error: '401' }],
+      }),
+    )
+    const part = conversation.messages[0].parts.find((p) => p.kind === 'orchestration')
+    expect((part as { status?: string }).status).toBe('failed')
+  })
+
+  it('shows a cancelled subagent as cancelled, not done', () => {
+    const conversation = emptyConversation('s1')
+    applyAgentEvent(conversation, event('subagent_started', { id: 'c1', name: 'claude' }))
+    applyAgentEvent(
+      conversation,
+      event('subagent_finished', { id: 'c1', status: 'cancelled', reason: 'parent killed' }),
+    )
+    const part = conversation.messages[0].parts.find((p) => p.kind === 'subagent')
+    expect((part as { status?: string }).status).toBe('cancelled')
+  })
+})

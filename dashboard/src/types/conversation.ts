@@ -170,7 +170,24 @@ export interface SubagentPart {
   name: string
   /** Subagent type/kind (e.g. "explore", "general"). */
   kindType: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  startedAt: string
+}
+
+/** A multi-agent fan-out run the harness executed for this session. */
+export interface OrchestrationPart {
+  kind: 'orchestration'
+  id: string
+  /** The agents the task was fanned out to, in request order. */
+  agents: string[]
+  /** Whether a merge step synthesizes the answers into one reply. */
+  merge: boolean
+  /** `running` (children working) → `merging` → terminal. */
+  status: 'running' | 'merging' | 'completed' | 'failed'
+  /** The merged reply, when the run finished with one. */
+  reply?: string
+  /** Per-child outcome summary. */
+  children?: { agent: string; status: string }[]
   startedAt: string
 }
 
@@ -262,6 +279,7 @@ export type MessagePart =
   | TurnSummaryPart
   | ErrorPart
   | SubagentPart
+  | OrchestrationPart
   | ProgressPart
   | SearchPart
   | GitCommitPart

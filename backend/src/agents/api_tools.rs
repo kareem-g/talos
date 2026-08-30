@@ -19,13 +19,33 @@ use tokio::process::Command;
 /// The tool schemas advertised to the model (Anthropic `tools` array format).
 /// Served from the unified registry so both API transports and
 /// `GET /api/tools` describe the same tool set.
-pub fn tool_definitions() -> Vec<Value> {
-    crate::tools::anthropic_definitions()
+///
+/// `subagent` sessions (bounded workers spawned by subagent/orchestration
+/// paths) do not get `Dispatch`: a worker fanning out its own children would
+/// recurse, and every orchestration needs exactly one dispatcher.
+pub fn tool_definitions(subagent: bool) -> Vec<Value> {
+    filter_dispatch(crate::tools::anthropic_definitions(), subagent)
 }
 
 /// The same tools in OpenAI function-calling format (for `/chat/completions`).
-pub fn openai_tool_definitions() -> Vec<Value> {
-    crate::tools::openai_definitions()
+pub fn openai_tool_definitions(subagent: bool) -> Vec<Value> {
+    filter_dispatch(crate::tools::openai_definitions(), subagent)
+}
+
+/// Drop the Dispatch tool for subagent sessions. Works on either wire format
+/// by keying on the tool's name field.
+fn filter_dispatch(mut definitions: Vec<Value>, subagent: bool) -> Vec<Value> {
+    if !subagent {
+        return definitions;
+    }
+    definitions.retain(|tool| {
+        let name = tool
+            .get("name")
+            .or_else(|| tool.pointer("/function/name"))
+            .and_then(Value::as_str);
+        name != Some(crate::tools::DISPATCH_TOOL)
+    });
+    definitions
 }
 
 /// Cap tool output so a runaway command cannot flood the conversation.
@@ -160,6 +180,60 @@ pub async fn execute_api_tool(
                 match crate::memory::save_memory(project, entry) {
                     Ok(()) => Ok(format!("Remembered: {title}")),
                     Err(e) => Err(e.to_string()),
+                }
+            }
+        }
+        "dispatch" => {
+            let task = args.get("task").and_then(Value::as_str).unwrap_or("");
+            let agents: Vec<String> = args
+                .get("agents")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .filter(|a| !a.trim().is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if task.trim().is_empty() || agents.is_empty() {
+                Err("task and a non-empty agents list are required".to_string())
+            } else {
+                // The full orchestration primitive: fan out, wait, merge. The
+                // dispatcher's own session is the parent, so the fan-out
+                // renders on its timeline and dies with it.
+                let body = json!({ "prompt": task, "agents": agents, "merge": true });
+                let result = crate::agents::orchestrate::orchestrate(state, session_id, &body).await;
+                if let Some(error) = result.get("error").and_then(Value::as_str) {
+                    Err(error.to_string())
+                } else {
+                    // Compact report for the model: the merged answer first,
+                    // then each agent's own result and status.
+                    let mut report = String::new();
+                    if let Some(reply) = result.get("merged_reply").and_then(Value::as_str) {
+                        if !reply.trim().is_empty() {
+                            report.push_str("Merged answer:\n");
+                            report.push_str(reply.trim());
+                            report.push_str("\n\n");
+                        }
+                    }
+                    report.push_str("Per-agent results:");
+                    for child in result
+                        .get("children")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                    {
+                        let agent = child.get("agent").and_then(Value::as_str).unwrap_or("?");
+                        let status = child.get("status").and_then(Value::as_str).unwrap_or("?");
+                        let reply = child.get("reply").and_then(Value::as_str).unwrap_or("");
+                        let error = child.get("error").and_then(Value::as_str);
+                        report.push_str(&format!("\n## {agent} ({status})\n{reply}"));
+                        if let Some(error) = error {
+                            report.push_str(&format!("\nerror: {error}"));
+                        }
+                    }
+                    Ok(report.trim().to_string())
                 }
             }
         }
