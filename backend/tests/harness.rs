@@ -292,3 +292,21 @@ async fn api_turn_failure_broadcasts_full_error_lifecycle() {
         agentdeck_backend::sessions::SessionStatus::Error
     ));
 }
+
+#[tokio::test]
+async fn custom_provider_sessions_get_transport_guidance() {
+    let state = test_state().await;
+    // fakeapi is the registered custom OpenAI-compatible provider.
+    let session = create_session(&state, "s-generic", "fakeapi").await;
+
+    let (ctx, breakdown) =
+        agentdeck_backend::context_assembler::assemble(&state, &session, "fix the bug", None)
+            .await
+            .unwrap();
+    let context = ctx.injected_context.expect("context injected");
+    // The generic-transport section is appended for custom providers…
+    assert!(context.contains("## Custom transport"), "missing transport guidance");
+    // …alongside the coding work sections.
+    assert!(context.contains("## Code quality"));
+    assert!(context.contains("Lead with the outcome"));
+}

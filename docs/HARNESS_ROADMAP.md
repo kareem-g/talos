@@ -180,9 +180,13 @@ resolve approvals). First consumer: `agentdeck run` (#2).
 
 ## Done beyond the numbered list
 
-- **Prompt library** (`backend/src/prompts.rs`): 11 curated instruction sections
+- **Prompt library** (`backend/src/prompts.rs`): 19 curated instruction sections
   (charter, safety, context-usage, planning, execution, verification, subagent
   role, first-turn, resume, eval, tool-use) composed per role/phase — standing
   set on every turn, first-turn variant on fresh sessions, subagent role on
   harness-owned children, eval set on benchmark runs, and a general
-  `instructions` hook on session create for anything custom. Live-verified.
+  `instructions` hook on session create for anything custom. Coding work gets
+  seven extra sections (code quality, git discipline, problem solving, output
+  format, tool economy, multi-agent, context discipline), and generic
+  transports (custom OpenAI-compatible providers, custom CLIs, pi) get
+  custom-transport guidance appended automatically. Live-verified.

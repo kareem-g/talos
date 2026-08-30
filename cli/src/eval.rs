@@ -44,18 +44,22 @@ pub async fn run_headless(
     prompt: &str,
     project: Option<&str>,
     timeout: Duration,
+    eval_mode: bool,
 ) -> Result<RunResult, Box<dyn Error + Send + Sync>> {
     let client = reqwest::Client::new();
+    let mut body = serde_json::json!({
+        "agent": agent,
+        "project": project,
+        "prompt": prompt,
+        "name": "eval-run",
+    });
+    if eval_mode {
+        // Eval determinism: the harness swaps in its eval instruction set.
+        body["mode"] = serde_json::json!("eval");
+    }
     let created: Value = client
         .post(format!("{DAEMON}/api/sessions"))
-        .json(&serde_json::json!({
-            "agent": agent,
-            "project": project,
-            "prompt": prompt,
-            "name": "eval-run",
-            // Eval determinism: the harness swaps in its eval instruction set.
-            "mode": "eval",
-        }))
+        .json(&body)
         .send()
         .await?
         .json()
@@ -163,7 +167,7 @@ pub async fn run_eval(
     let mut rows: Vec<(String, String, RunResult, bool)> = Vec::new();
     for task in &tasks {
         for agent in agents {
-            let result = run_headless(agent, &task.prompt, project, DEFAULT_TIMEOUT).await?;
+            let result = run_headless(agent, &task.prompt, project, DEFAULT_TIMEOUT, true).await?;
             let pass = result.completed
                 && task
                     .expect

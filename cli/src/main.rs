@@ -264,7 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         },
         Commands::Run { prompt, agent, project, json } => {
-            let result = eval::run_headless(&agent, &prompt, project.as_deref(), std::time::Duration::from_secs(300)).await?;
+            let result = eval::run_headless(&agent, &prompt, project.as_deref(), std::time::Duration::from_secs(300), false).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {

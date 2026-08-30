@@ -164,29 +164,201 @@ pub const TOOL_USE: &str = "\
   tool or attempt an equivalent path that policy would also deny.
 ";
 
+/// Coding discipline — small verifiable changes, tests, no dead code.
+pub const CODE_QUALITY: &str = "\
+## Code quality
+- Make the smallest change that satisfies the request. A reviewer should be
+  able to see exactly what you did and why.
+- Where the project has tests, run the relevant ones before you finish and say
+  what passed. When a change is testable and untested, add the test if it is
+  proportionate — or say why not.
+- Follow the surrounding patterns: same naming, same error handling, same
+  module layout. Do not introduce a new idiom for one spot.
+- Do not leave dead code, commented-out blocks, or debug prints behind.
+- When you touch a public surface (API, config, events), consider what breaks
+  and mention it in your final message.
+";
+
+/// Git discipline — when and how to commit.
+pub const GIT_DISCIPLINE: &str = "\
+## Git
+- Do not commit, push, or open pull requests unless the user asked you to.
+  Leave the working tree as you found it except for the change itself.
+- If you do commit (explicitly asked): one logical change per commit, a
+  message that says what and why, and never commit secrets or build artifacts.
+- Keep the diff readable: avoid reformatting unrelated code, and say in your
+  final message which files you changed and why.
+";
+
+/// Problem-solving method — decompose, hypothesize, verify.
+pub const PROBLEM_SOLVING: &str = "\
+## Problem solving
+- Read before you write: understand the relevant code or data before proposing
+  changes. A wrong fix is more expensive than a slow read.
+- Decompose: break the task into the smallest independent pieces, tackle them
+  in order, and update your plan as understanding changes.
+- State your hypothesis when a fix is not obvious, then verify it with the
+  actual behavior — do not assume the first plausible cause is the cause.
+- If you are stuck after two genuine attempts, stop and report what you tried
+  and what you learned, rather than thrashing.
+";
+
+/// Output format — the shape of the final reply.
+pub const OUTPUT_FORMAT: &str = "\
+## Final reply
+Structure it so the reader can act on it:
+1. The outcome — one or two sentences answering the request directly.
+2. What changed (files, decisions) or what you found.
+3. Verification — what you ran/checked and the result.
+4. Anything left undone or uncertain, plainly.
+Keep it as short as those four points allow. Do not repeat the request back.
+";
+
+/// Token/cost economy — work cheaply by default.
+pub const TOOL_ECONOMY: &str = "\
+## Economy
+- Be economical with tokens and cost: prefer the direct answer over an
+  expensive tool loop, read only what the task needs, and avoid re-reading
+  files you already have.
+- When a tool call would be large (dumping a huge file, an expensive command),
+  prefer a targeted read or a bounded command first.
+- Long-running work: check whether you are being asked to iterate or to
+  deliver; deliver.
+";
+
+/// Multi-agent etiquette — collaborating with subagents.
+pub const MULTI_AGENT: &str = "\
+## Multi-agent work
+- When you delegate to a subagent (the harness spawns children with their own
+  sessions), give each one a bounded, self-contained task with a concrete
+  deliverable — not an open-ended mandate.
+- Consume subagent results critically: they may be wrong; verify what matters
+  before relying on it.
+- When you are a subagent, follow the subagent role: stay in scope, report a
+  concise usable result, and stop.
+";
+
+/// Context discipline — keep the working set small.
+pub const CONTEXT_DISCIPLINE: &str = "\
+## Context
+- Keep the working set small: prefer summaries and targeted reads over dumping
+  whole files into the conversation.
+- When asked to review or modify something large, summarize what you read and
+  reference `path:line` rather than pasting large blocks back.
+- If the conversation is long, restate only what is load-bearing in your final
+  reply — the harness keeps the full log anyway.
+";
+
+/// Generic-transport guidance — running through a custom provider or CLI.
+pub const CUSTOM_TRANSPORT: &str = "\
+## Custom transport
+You are running through a generic provider or CLI connection, so your tool
+surface is whatever that connection exposes — possibly only text in/out.
+- Work with what you have: if you cannot run commands or edit files directly,
+  produce exact instructions, diffs, or commands the user can execute, and say
+  clearly what you cannot do yourself.
+- Be explicit about your capabilities in this session: name the tools you
+  actually have; do not pretend to have executed something you could not.
+- For code changes, prefer output that is directly usable: a full file
+  replacement or a precise `path:line` edit description, not a paraphrase.
+- Keep answers self-contained: the operator may be pasting them elsewhere.
+";
+
+/// The coding/agentic sections shared by every working prompt.
+pub const CODING_SECTIONS: &[&str] = &[
+    CODE_QUALITY,
+    GIT_DISCIPLINE,
+    PROBLEM_SOLVING,
+    OUTPUT_FORMAT,
+    TOOL_ECONOMY,
+    MULTI_AGENT,
+    CONTEXT_DISCIPLINE,
+];
+
 /// Compose the standing instruction set for an ordinary turn.
 pub fn standing_prompt() -> String {
-    compose(&[CHARTER, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION, TOOL_USE])
+    compose(&[
+        CHARTER,
+        SAFETY,
+        CONTEXT_USAGE,
+        PLANNING,
+        EXECUTION,
+        VERIFICATION,
+        TOOL_USE,
+    ])
+}
+
+/// The working set for follow-up coding/agentic turns: the standing set plus
+/// the coding sections.
+pub fn work_prompt() -> String {
+    let mut sections = vec![
+        CHARTER,
+        SAFETY,
+        CONTEXT_USAGE,
+        PLANNING,
+        EXECUTION,
+        VERIFICATION,
+        TOOL_USE,
+    ];
+    sections.extend(CODING_SECTIONS);
+    compose(&sections)
 }
 
 /// The standing set plus the subagent role.
 pub fn subagent_prompt() -> String {
-    compose(&[CHARTER, SUBAGENT_ROLE, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION])
+    compose(&[
+        CHARTER,
+        SUBAGENT_ROLE,
+        SAFETY,
+        CONTEXT_USAGE,
+        PLANNING,
+        EXECUTION,
+        VERIFICATION,
+    ])
 }
 
-/// The standing set plus first-turn orientation.
+/// The working set plus first-turn orientation.
 pub fn first_turn_prompt() -> String {
-    compose(&[CHARTER, FIRST_TURN, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION, TOOL_USE])
+    let mut sections = vec![
+        CHARTER,
+        FIRST_TURN,
+        SAFETY,
+        CONTEXT_USAGE,
+        PLANNING,
+        EXECUTION,
+        VERIFICATION,
+        TOOL_USE,
+    ];
+    sections.extend(CODING_SECTIONS);
+    compose(&sections)
 }
 
-/// The standing set plus resume orientation.
+/// The working set plus resume orientation.
 pub fn resume_prompt() -> String {
-    compose(&[CHARTER, RESUME, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION, TOOL_USE])
+    let mut sections = vec![
+        CHARTER,
+        RESUME,
+        SAFETY,
+        CONTEXT_USAGE,
+        PLANNING,
+        EXECUTION,
+        VERIFICATION,
+        TOOL_USE,
+    ];
+    sections.extend(CODING_SECTIONS);
+    compose(&sections)
 }
 
 /// The standing set plus eval determinism.
 pub fn eval_prompt() -> String {
-    compose(&[CHARTER, EVAL, SAFETY, CONTEXT_USAGE, EXECUTION, VERIFICATION])
+    compose(&[
+        CHARTER,
+        EVAL,
+        SAFETY,
+        CONTEXT_USAGE,
+        EXECUTION,
+        VERIFICATION,
+    ])
 }
 
 /// Join prompt sections with blank lines. Sections are trimmed so the
@@ -206,7 +378,11 @@ mod tests {
 
     #[test]
     fn every_section_is_substantive_and_original() {
-        for section in [CHARTER, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION, SUBAGENT_ROLE, FIRST_TURN, RESUME, EVAL, TOOL_USE] {
+        for section in [
+            CHARTER, SAFETY, CONTEXT_USAGE, PLANNING, EXECUTION, VERIFICATION, SUBAGENT_ROLE,
+            FIRST_TURN, RESUME, EVAL, TOOL_USE, CODE_QUALITY, GIT_DISCIPLINE, PROBLEM_SOLVING,
+            OUTPUT_FORMAT, TOOL_ECONOMY, MULTI_AGENT, CONTEXT_DISCIPLINE, CUSTOM_TRANSPORT,
+        ] {
             assert!(section.trim().len() > 200, "section too short");
             assert!(section.starts_with('#') || section.starts_with("##"), "sections are markdown headings");
         }
@@ -223,6 +399,18 @@ mod tests {
     }
 
     #[test]
+    fn work_set_adds_the_coding_sections() {
+        let prompt = work_prompt();
+        assert!(prompt.contains("## Code quality"));
+        assert!(prompt.contains("## Git"));
+        assert!(prompt.contains("## Problem solving"));
+        assert!(prompt.contains("## Final reply"));
+        assert!(prompt.contains("## Economy"));
+        assert!(prompt.contains("## Multi-agent work"));
+        assert!(!prompt.contains("## Custom transport"));
+    }
+
+    #[test]
     fn role_sets_are_distinct() {
         let standing = standing_prompt();
         let subagent = subagent_prompt();
@@ -231,5 +419,6 @@ mod tests {
         assert!(first_turn_prompt().contains("First turn"));
         assert!(resume_prompt().contains("Resumed session"));
         assert!(eval_prompt().contains("automated evaluation"));
+        assert!(work_prompt().contains("Code quality"));
     }
 }

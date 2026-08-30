@@ -77,7 +77,7 @@ pub async fn assemble(
     // context chip (it is the agent's instruction set, not per-turn
     // enrichment). First turns get the first-turn variant; custom instruction
     // sets (subagent role, eval determinism) replace the standing set.
-    let instructions = match instructions {
+    let mut instructions = match instructions {
         Some(custom) => custom.to_string(),
         None => {
             let has_history = !state
@@ -87,12 +87,27 @@ pub async fn assemble(
                 .unwrap_or_default()
                 .is_empty();
             if has_history {
-                crate::prompts::standing_prompt()
+                crate::prompts::work_prompt()
             } else {
                 crate::prompts::first_turn_prompt()
             }
         }
     };
+    // Generic transports (custom OpenAI-compatible providers, custom CLIs, pi)
+    // get the custom-transport guidance appended — they have a different tool
+    // surface than the native backends.
+    {
+        let cfg = state.config.read().await;
+        let settings = cfg.settings();
+        let is_generic = settings.agents.api_providers.iter().any(|p| p.id == session.agent)
+            || settings.agents.custom.iter().any(|c| c.id == session.agent)
+            || session.agent == "pi";
+        drop(cfg);
+        if is_generic && !instructions.contains("## Custom transport") {
+            instructions.push('\n');
+            instructions.push_str(crate::prompts::CUSTOM_TRANSPORT.trim());
+        }
+    }
     sections.push(instructions);
 
     if context_assembly.environment_enabled {
