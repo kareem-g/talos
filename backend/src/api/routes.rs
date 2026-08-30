@@ -83,6 +83,15 @@ pub async fn health_handler() -> impl IntoResponse {
     }))
 }
 
+// ===== TOOLS =====
+/// The harness's unified tool registry: every built-in tool the harness can
+/// execute on a provider's behalf, with its category and risk level. This is
+/// the same data both API transports advertise, so the dashboard can show
+/// exactly what an agent can do before a session starts.
+pub async fn list_tools() -> impl IntoResponse {
+    Json(json!({ "tools": crate::tools::summary() }))
+}
+
 // ===== SESSIONS =====
 #[derive(Debug, Default, Deserialize)]
 pub struct SessionListQuery {

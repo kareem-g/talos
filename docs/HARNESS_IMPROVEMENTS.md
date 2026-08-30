@@ -90,6 +90,33 @@ search backend; defer.
 A harness-level registry with guarded execution makes policy, telemetry, and
 approvals apply uniformly to every tool call from every backend.
 
+**Done:** `backend/src/tools.rs` is the single source of truth. It holds the
+11 built-in tools as `ToolSpec`s (name, description, schema, **category**,
+**risk**) and serves both wire formats from the same specs
+(`anthropic_definitions` / `openai_definitions`), so the Anthropic and
+OpenAI-compatible transports advertise identical tools. `classify(name)`
+maps *any* tool name — ours, Claude's `WebSearch`, an ACP agent's
+`run_command` — to a category/risk pair used by the permission card, the
+tool events, and the policy gates, replacing three ad-hoc substring
+heuristics. Three concrete uniformity wins:
+
+- **One pre-policy for every backend.** `ToolPolicy::decide_input` applies
+  network → path → tool rules to a whole tool call.
+  `permissions::request_user_decision` (Claude hook + API tools) and the
+  ACP permission handler now share it — ACP previously checked only tool
+  rules, so `[[paths]]` and `[[network]]` were silently ignored there, and
+  its card hardcoded `risk_level: "medium"`.
+- **Registry-tagged telemetry.** API tool events now carry
+  `category`/`risk` on `tool_started` and `duration_ms` on
+  `tool_finished`, from the same classifier.
+- **The registry is visible.** `GET /api/tools` returns every tool with its
+  category and risk (groundwork for the per-tool allowlist UI in #9).
+
+Verified live: an AgentRouter Bash call produced
+`tool_started {category: "shell", risk: "high"}` and
+`tool_finished {duration_ms: 40}` in the canonical session log, executed
+through the policy pipeline, and `GET /api/tools` lists all 11 tools.
+
 ## 6. Multi-agent orchestration depth
 
 **Why:** subagents exist but one-level. Finish: "split this task across

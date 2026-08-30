@@ -24,12 +24,29 @@
 //! anything not explicitly ruled.
 
 use serde::Deserialize;
+use serde_json::Value;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyDecision {
     Allow,
     Deny,
+    Ask,
+}
+
+/// The pre-card policy verdict for a whole tool call: network rules, then
+/// path rules, then tool rules — the exact order the permission pipeline
+/// applies. Every backend consults this same helper (the Claude hook path and
+/// the API tool executor through `permissions::request_user_decision`, ACP
+/// directly), so one `policy.toml` means the same thing no matter which agent
+/// is calling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputDecision {
+    /// Auto-approve, with the reason shown on the resolved card.
+    Allow(&'static str),
+    /// Auto-deny, with the reason handed back to the agent.
+    Deny(&'static str),
+    /// No rule matched; fall through to the permission mode / human card.
     Ask,
 }
 
@@ -156,11 +173,61 @@ impl ToolPolicy {
         }
         PolicyDecision::Ask
     }
+
+    /// Decide a whole tool call before the permission card is shown, applying
+    /// every rule family in specificity order:
+    ///
+    /// 1. **Network** — network-category tools whose input carries a `url` are
+    ///    deny-by-default; only allowlisted hosts fall through.
+    /// 2. **Path** — the path the input would touch (`file_path` / `path`, or
+    ///    a bare string input).
+    /// 3. **Tool** — the tool-name rules.
+    ///
+    /// Tool identity comes from the unified registry's classifier
+    /// (`crate::tools::classify`), so native backends' tools (Claude's
+    /// `WebSearch`, an ACP agent's fetch) are gated by the same network rules
+    /// as ours.
+    pub fn decide_input(&self, tool_name: &str, input: &Value) -> InputDecision {
+        if crate::tools::classify(tool_name).0 == crate::tools::ToolCategory::Network {
+            let url = input.get("url").and_then(Value::as_str).unwrap_or("");
+            if let Some(host) = url_host(url)
+                && self.decide_network(&host) == PolicyDecision::Deny
+            {
+                return InputDecision::Deny("Denied (project network policy)");
+            }
+        }
+
+        let input_path = match input {
+            Value::String(text) => Some(text.clone()),
+            Value::Object(map) => map
+                .get("file_path")
+                .or_else(|| map.get("path"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            _ => None,
+        };
+        if let Some(path) = input_path {
+            match self.decide_path(&path) {
+                PolicyDecision::Allow => {
+                    return InputDecision::Allow("Auto-approved (project path policy)")
+                }
+                PolicyDecision::Deny => return InputDecision::Deny("Denied (project path policy)"),
+                PolicyDecision::Ask => {}
+            }
+        }
+
+        match self.decide(tool_name) {
+            PolicyDecision::Allow => InputDecision::Allow("Auto-approved (project policy)"),
+            PolicyDecision::Deny => InputDecision::Deny("Denied (project policy)"),
+            PolicyDecision::Ask => InputDecision::Ask,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn policy(rules: &[(&str, &str)]) -> ToolPolicy {
         ToolPolicy {
@@ -260,5 +327,69 @@ mod tests {
         };
         // First match wins: the deny prefix comes first, so it wins.
         assert_eq!(p.decide_path("/home/kareem/.ssh/authorized_keys"), PolicyDecision::Deny);
+    }
+
+    #[test]
+    fn decide_input_orders_network_path_then_tool() {
+        let p = ToolPolicy {
+            rules: vec![ToolRule { tool: "all".to_string(), action: "allow".to_string() }],
+            paths: vec![PathRule {
+                prefix: "/etc".to_string(),
+                action: "deny".to_string(),
+            }],
+            network: vec![NetworkRule { domain: "example.com".to_string(), action: "allow".to_string() }],
+        };
+        // Path deny wins over the catch-all tool allow.
+        assert_eq!(
+            p.decide_input("Write", &json!({ "file_path": "/etc/passwd", "content": "x" })),
+            InputDecision::Deny("Denied (project path policy)")
+        );
+        // Network tools to non-allowlisted hosts are denied before anything else.
+        assert_eq!(
+            p.decide_input("WebFetch", &json!({ "url": "https://evil.com/x" })),
+            InputDecision::Deny("Denied (project network policy)")
+        );
+        // Allowlisted host + no path hit → falls to the tool rule (allow).
+        assert_eq!(
+            p.decide_input("WebFetch", &json!({ "url": "https://example.com/x" })),
+            InputDecision::Allow("Auto-approved (project policy)")
+        );
+        // Path rule for the input's path.
+        assert_eq!(
+            p.decide_input("Read", &json!({ "path": "/etc/hosts" })),
+            InputDecision::Deny("Denied (project path policy)")
+        );
+        // Bare string input counts as a path.
+        assert_eq!(p.decide_input("read", &json!("/etc/hosts")), InputDecision::Deny("Denied (project path policy)"));
+    }
+
+    #[test]
+    fn decide_input_gates_foreign_network_tools() {
+        // Claude's WebSearch is not in our registry but classifies as network.
+        let p = ToolPolicy::default();
+        assert_eq!(
+            p.decide_input("WebSearch", &json!({ "url": "https://example.com/q" })),
+            InputDecision::Deny("Denied (project network policy)")
+        );
+    }
+
+    #[test]
+    fn decide_input_no_rules_means_ask() {
+        let p = ToolPolicy::default();
+        assert_eq!(p.decide_input("Bash", &json!({ "command": "ls" })), InputDecision::Ask);
+        // A network tool with no url in the input cannot be gated by host.
+        assert_eq!(p.decide_input("WebFetch", &json!({})), InputDecision::Ask);
+    }
+}
+
+/// Best-effort host extraction from a URL string
+/// ("https://sub.example.com/x" → "sub.example.com").
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
     }
 }

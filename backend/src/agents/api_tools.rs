@@ -1,12 +1,13 @@
 //! Tool execution for custom HTTP API providers.
 //!
 //! Custom providers have no CLI tool surface, so the harness gives them a
-//! small built-in tool set — `Bash`, `Read`, `Write` — that it executes on
-//! their behalf. Every call goes through the same permission pipeline as the
-//! native backends (`permissions::request_user_decision`): permission mode,
-//! project policy (including path rules), and the human approval card all
-//! apply. Results are streamed back to the model as `tool_result` blocks so it
-//! can continue the turn.
+//! built-in tool set. The definitions live in the unified registry
+//! (`crate::tools`); this module wires them to actual execution. Every call
+//! goes through the same permission pipeline as the native backends
+//! (`permissions::request_user_decision`): permission mode, project policy
+//! (including path and network rules), and the human approval card all apply.
+//! Results are streamed back to the model as `tool_result` blocks so it can
+//! continue the turn.
 
 use crate::agent_events::AgentEvent;
 use crate::config::AppState;
@@ -16,143 +17,15 @@ use std::path::PathBuf;
 use tokio::process::Command;
 
 /// The tool schemas advertised to the model (Anthropic `tools` array format).
+/// Served from the unified registry so both API transports and
+/// `GET /api/tools` describe the same tool set.
 pub fn tool_definitions() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "Bash",
-            "description": "Run a shell command in the project directory. Use for builds, tests, git, and any command-line work. Output is capped.",
-            "input_schema": {
-                "type": "object",
-                "properties": { "command": { "type": "string", "description": "The shell command to run" } },
-                "required": ["command"]
-            }
-        }),
-        json!({
-            "name": "Read",
-            "description": "Read a file from disk. Returns its contents, capped to a reasonable size.",
-            "input_schema": {
-                "type": "object",
-                "properties": { "path": { "type": "string", "description": "Absolute or project-relative file path" } },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "Write",
-            "description": "Write content to a file, creating parent directories as needed. Overwrites existing content.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "file_path": { "type": "string", "description": "Absolute or project-relative file path" },
-                    "content": { "type": "string", "description": "The full file content" }
-                },
-                "required": ["file_path", "content"]
-            }
-        }),
-        json!({
-            "name": "TodoWrite",
-            "description": "Write a plan as a todo list. The harness records it as the session plan. Use it before starting non-trivial work.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "todos": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string" },
-                                "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
-                            },
-                            "required": ["content"]
-                        }
-                    }
-                },
-                "required": ["todos"]
-            }
-        }),
-        json!({
-            "name": "Glob",
-            "description": "Find files matching a glob pattern (e.g. \"**/*.rs\", \"src/**\"). Returns matching paths relative to the project.",
-            "input_schema": {
-                "type": "object",
-                "properties": { "pattern": { "type": "string", "description": "Glob pattern" } },
-                "required": ["pattern"]
-            }
-        }),
-        json!({
-            "name": "Grep",
-            "description": "Search file contents for a regex pattern in the project. Returns up to 20 matches with file:line.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pattern": { "type": "string", "description": "Regex to search for" },
-                    "path": { "type": "string", "description": "Optional path/dir to scope the search to" }
-                },
-                "required": ["pattern"]
-            }
-        }),
-        json!({
-            "name": "Edit",
-            "description": "Replace the first occurrence of old_string with new_string in a file. Safer than rewriting the whole file.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "file_path": { "type": "string", "description": "Absolute or project-relative file path" },
-                    "old_string": { "type": "string", "description": "Exact text to find" },
-                    "new_string": { "type": "string", "description": "Replacement text" }
-                },
-                "required": ["file_path", "old_string", "new_string"]
-            }
-        }),
-        json!({
-            "name": "GitStatus",
-            "description": "Show the git working tree status (short format with branch).",
-            "input_schema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "GitDiff",
-            "description": "Show uncommitted changes (git diff). Output is capped.",
-            "input_schema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "WebFetch",
-            "description": "Fetch a URL and return its text content (HTML stripped). Subject to the project's network policy — domains must be allowlisted in .agentdeck/policy.toml.",
-            "input_schema": {
-                "type": "object",
-                "properties": { "url": { "type": "string", "description": "http(s) URL to fetch" } },
-                "required": ["url"]
-            }
-        }),
-        json!({
-            "name": "Remember",
-            "description": "Save a note to the project's memory so future sessions can recall it. Use for decisions, findings, or conventions the project should remember. kind 'memory' (recall when relevant) or 'convention' (always injected project rule).",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string", "description": "Short title" },
-                    "content": { "type": "string", "description": "What to remember" },
-                    "kind": { "type": "string", "enum": ["memory", "convention"], "description": "memory (default) or convention" }
-                },
-                "required": ["content"]
-            }
-        }),
-    ]
+    crate::tools::anthropic_definitions()
 }
 
 /// The same tools in OpenAI function-calling format (for `/chat/completions`).
 pub fn openai_tool_definitions() -> Vec<Value> {
-    tool_definitions()
-        .into_iter()
-        .map(|t| {
-            json!({
-                "type": "function",
-                "function": {
-                    "name": t.get("name"),
-                    "description": t.get("description"),
-                    "parameters": t.get("input_schema"),
-                }
-            })
-        })
-        .collect()
+    crate::tools::openai_definitions()
 }
 
 /// Cap tool output so a runaway command cannot flood the conversation.
@@ -191,10 +64,15 @@ pub async fn execute_api_tool(
     name: &str,
     args: &Value,
 ) -> String {
+    let started = std::time::Instant::now();
+    // Registry classification rides on every tool event: the timeline, the
+    // approval card, and the verification gate all read the same category and
+    // risk instead of re-guessing from the tool name.
+    let (category, risk) = crate::tools::classify(name);
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         session_id,
         "tool_started",
-        json!({ "tool_name": name, "tool_id": tool_use_id, "source": "api" }),
+        json!({ "tool_name": name, "tool_id": tool_use_id, "source": "api", "category": category.as_str(), "risk": risk.as_str() }),
     ));
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         session_id,
@@ -216,7 +94,7 @@ pub async fn execute_api_tool(
     let outcome = crate::permissions::request_user_decision(state, query).await;
     if !outcome.allowed {
         let message = format!("Permission denied: {}", outcome.reason);
-        broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message);
+        broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message, started.elapsed());
         return message;
     }
 
@@ -291,23 +169,33 @@ pub async fn execute_api_tool(
     match result {
         Ok(output) => {
             let output = cap(output);
-            broadcast_tool_finished(state, session_id, tool_use_id, name, true, &output);
+            broadcast_tool_finished(state, session_id, tool_use_id, name, true, &output, started.elapsed());
             output
         }
         Err(error) => {
             let message = format!("Tool error: {error}");
-            broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message);
+            broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message, started.elapsed());
             message
         }
     }
 }
 
-fn broadcast_tool_finished(state: &AppState, session_id: &str, tool_use_id: &str, name: &str, success: bool, output: &str) {
-    state.broadcast.broadcast_agent_event(AgentEvent::new(
+fn broadcast_tool_finished(
+    state: &AppState,
+    session_id: &str,
+    tool_use_id: &str,
+    name: &str,
+    success: bool,
+    output: &str,
+    duration: std::time::Duration,
+) {
+    let mut event = AgentEvent::new(
         session_id,
         "tool_finished",
         json!({ "tool_id": tool_use_id, "tool_name": name, "success": success, "output": output, "source": "api" }),
-    ));
+    );
+    event.duration_ms = Some(duration.as_millis() as u64);
+    state.broadcast.broadcast_agent_event(event);
 }
 
 async fn run_bash(project: Option<&str>, command: &str) -> Result<String, String> {

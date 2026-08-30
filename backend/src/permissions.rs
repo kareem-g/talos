@@ -140,8 +140,9 @@ pub async fn request_user_decision(
 
     // Project tool policy overrides the mode defaults: a rule that denies a
     // tool is honored even in `full` mode, and an allow rule skips the card.
-    // Questions are never auto-decided by policy. Path rules are more specific
-    // than tool rules, so they are consulted first.
+    // Questions are never auto-decided by policy. The rule order (network →
+    // path → tool) lives in `policy::ToolPolicy::decide_input`, shared with
+    // the ACP permission path so every backend honors the same policy.
     if !is_question {
         let project = state
             .session_manager
@@ -152,89 +153,28 @@ pub async fn request_user_decision(
             .and_then(|s| s.project);
         let policy = crate::policy::ToolPolicy::load(project.as_deref());
 
-        // Network tools (WebFetch/WebSearch) are deny-by-default: only hosts
-        // the project explicitly allowlists fall through to the normal
-        // permission flow. A denied host is final, like a denied path.
-        if query.tool_name.eq_ignore_ascii_case("WebFetch")
-            || query.tool_name.eq_ignore_ascii_case("WebSearch")
-        {
-            let url = query
-                .input
-                .get("url")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            if let Some(host) = url_host(url) {
-                match policy.decide_network(&host) {
-                    crate::policy::PolicyDecision::Deny => {
-                        state.permissions.resolve(&request_id, "deny".to_string()).await;
-                        return PermissionOutcome {
-                            allowed: false,
-                            input: query.input,
-                            reason: "Denied (project network policy)".to_string(),
-                            waited_ms: 0,
-                            answer_text: None,
-                        };
-                    }
-                    crate::policy::PolicyDecision::Ask => {}
-                    crate::policy::PolicyDecision::Allow => {}
-                }
-            }
-        }
-
-        // Filesystem rules key on the path the tool would touch (Write/Edit/
-        // Read inputs are either a bare path string or carry a file_path).
-        let input_path = match &query.input {
-            Value::String(text) => Some(text.clone()),
-            Value::Object(map) => map
-                .get("file_path")
-                .or_else(|| map.get("path"))
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            _ => None,
-        };
-        if let Some(path) = input_path
-            && let Some(decision) = match policy.decide_path(&path) {
-                crate::policy::PolicyDecision::Ask => None,
-                other => Some(other),
-            }
-        {
-            let (allowed, reason) = match decision {
-                crate::policy::PolicyDecision::Allow => (true, "Auto-approved (project path policy)".to_string()),
-                crate::policy::PolicyDecision::Deny => (false, "Denied (project path policy)".to_string()),
-                crate::policy::PolicyDecision::Ask => unreachable!(),
-            };
-            state.permissions.resolve(&request_id, if allowed { "allow" } else { "deny" }.to_string()).await;
-            return PermissionOutcome {
-                allowed,
-                input: query.input,
-                reason,
-                waited_ms: 0,
-                answer_text: None,
-            };
-        }
-
-        match policy.decide(&query.tool_name) {
-            crate::policy::PolicyDecision::Allow => {
+        match policy.decide_input(&query.tool_name, &query.input) {
+            crate::policy::InputDecision::Allow(reason) => {
                 state.permissions.resolve(&request_id, "allow".to_string()).await;
                 return PermissionOutcome {
                     allowed: true,
                     input: query.input,
-                    reason: "Auto-approved (project policy)".to_string(),
+                    reason: reason.to_string(),
                     waited_ms: 0,
                     answer_text: None,
                 };
             }
-            crate::policy::PolicyDecision::Deny => {
+            crate::policy::InputDecision::Deny(reason) => {
                 state.permissions.resolve(&request_id, "deny".to_string()).await;
                 return PermissionOutcome {
                     allowed: false,
                     input: query.input,
-                    reason: "Denied (project policy)".to_string(),
+                    reason: reason.to_string(),
                     waited_ms: 0,
                     answer_text: None,
                 };
             }
-            crate::policy::PolicyDecision::Ask => {}
+            crate::policy::InputDecision::Ask => {}
         }
     }
 
@@ -449,12 +389,9 @@ pub async fn request_user_decision(
 }
 
 fn risk_for(tool_name: &str) -> &'static str {
-    let name = tool_name.to_lowercase();
-    if name.contains("bash") || name.contains("exec") || name.contains("write") || name.contains("edit") || name.contains("delete") || name.contains("remove") {
-        "high"
-    } else {
-        "low"
-    }
+    // The unified registry's classifier — the same one that tags tool events —
+    // decides the card's risk level, so a tool reads identically everywhere.
+    crate::tools::classify(tool_name).1.as_str()
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -600,19 +537,7 @@ mod tests {
 
     #[test]
     fn leaves_normal_executable_paths_unchanged() {
-        let path = PathBuf::from("/tmp/agentdeck-backend");
-        assert_eq!(usable_executable_path(path.clone()), path);
-    }
-}
-
-
-/// Best-effort host extraction from a URL string ("https://sub.example.com/x" -> "sub.example.com").
-fn url_host(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_string())
+        let path = usable_executable_path(PathBuf::from("/tmp/agentdeck-backend"));
+        assert_eq!(path, PathBuf::from("/tmp/agentdeck-backend"));
     }
 }

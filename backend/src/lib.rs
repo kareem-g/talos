@@ -13,6 +13,7 @@ pub mod notifications;
 pub mod pty;
 pub mod permissions;
 pub mod policy;
+pub mod tools;
 pub mod providers;
 pub mod protocol;
 pub mod sessions;

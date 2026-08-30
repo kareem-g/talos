@@ -62,6 +62,9 @@ pub async fn start(
         // Agents
         .route("/api/agents", get(crate::api::routes::list_agents))
 
+        // Unified tool registry
+        .route("/api/tools", get(crate::api::routes::list_tools))
+
         // Trajectories: record/replay/export a session's event stream
         .route("/api/trajectories/record", post(crate::api::trajectory::record))
         .route("/api/trajectories/stop", post(crate::api::trajectory::stop))

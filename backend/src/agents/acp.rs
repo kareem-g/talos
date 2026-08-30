@@ -1215,13 +1215,18 @@ async fn dispatch_message(
             let is_plan = is_plan_approval_options(&option_names);
 
             // Project tool policy: auto-allow/deny before the card is shown.
-            // Same guardrail as the Claude permission path — questions are
-            // never auto-decided.
-            let policy_decision = crate::policy::ToolPolicy::load(project.as_deref()).decide(&tool_title);
-            if policy_decision != crate::policy::PolicyDecision::Ask {
-                let decision = match policy_decision {
-                    crate::policy::PolicyDecision::Allow => "allow",
-                    _ => "deny",
+            // Same guardrail — and the same rule order (network → path →
+            // tool) — as the Claude permission path, so one policy.toml means
+            // the same thing for ACP agents. Questions are never
+            // auto-decided.
+            let tool_input = tool_call.get("rawInput").cloned().unwrap_or_else(|| tool_call.clone());
+            let policy_decision =
+                crate::policy::ToolPolicy::load(project.as_deref()).decide_input(&tool_title, &tool_input);
+            if policy_decision != crate::policy::InputDecision::Ask {
+                let (decision, reason) = match policy_decision {
+                    crate::policy::InputDecision::Allow(reason) => ("allow", reason),
+                    crate::policy::InputDecision::Deny(reason) => ("deny", reason),
+                    crate::policy::InputDecision::Ask => unreachable!(),
                 };
                 let option_id = pick_option_id(&options, decision);
                 let result = json!({ "outcome": "selected", "optionId": option_id });
@@ -1235,7 +1240,7 @@ async fn dispatch_message(
                 broadcast.broadcast_agent_event(AgentEvent::new(
                     session_id,
                     "permission_resolved",
-                    json!({ "request_id": request_key, "decision": decision, "source": "policy" }),
+                    json!({ "request_id": request_key, "decision": decision, "reason": reason, "source": "policy" }),
                 ));
                 broadcast.broadcast(WsMessage::StateChange {
                     session_id: session_id.to_string(),
@@ -1244,6 +1249,9 @@ async fn dispatch_message(
                 return;
             }
 
+            // Registry classification for the card: category + risk from the
+            // same classifier the API tool path uses.
+            let (category, risk) = crate::tools::classify(&tool_title);
             broadcast.broadcast_agent_event(AgentEvent::new(
                 session_id,
                 "permission_required",
@@ -1255,7 +1263,8 @@ async fn dispatch_message(
                     "selection_mode": "single",
                     "allows_custom_text": false,
                     "tool_name": tool_title,
-                    "risk_level": "medium",
+                    "category": category.as_str(),
+                    "risk_level": risk.as_str(),
                     "source": "acp",
                     "is_plan": is_plan,
                 }),
