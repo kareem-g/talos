@@ -459,6 +459,39 @@ mod tests {
     }
 }
 
+/// Reasoning effort for models that expose it (maps to the request's
+/// `reasoning_effort` / thinking budget).
+pub(crate) fn effort_config_option() -> ConfigOption {
+    ConfigOption {
+        id: "effort".to_string(),
+        name: "Effort".to_string(),
+        category: Some("model".to_string()),
+        option_type: ConfigOptionType::Select,
+        current_value: None,
+        choices: vec![
+            ConfigChoice { value: "low".to_string(), name: "Low".to_string(), description: Some("Fast, cheaper reasoning".to_string()) },
+            ConfigChoice { value: "medium".to_string(), name: "Medium".to_string(), description: Some("Balanced reasoning".to_string()) },
+            ConfigChoice { value: "high".to_string(), name: "High".to_string(), description: Some("Deep reasoning, slower".to_string()) },
+        ],
+        allows_custom_value: false,
+        mutability: ConfigMutability::Live,
+    }
+}
+
+/// Output token cap per turn — the "context window" knob for the request.
+pub(crate) fn max_output_tokens_config_option() -> ConfigOption {
+    ConfigOption {
+        id: "max_tokens".to_string(),
+        name: "Context window".to_string(),
+        category: Some("model".to_string()),
+        option_type: ConfigOptionType::Number,
+        current_value: None,
+        choices: Vec::new(),
+        allows_custom_value: true,
+        mutability: ConfigMutability::Live,
+    }
+}
+
 /// The permission mode dimension for AgentDeck.
 ///
 /// Controls how the permission broker handles tool requests:

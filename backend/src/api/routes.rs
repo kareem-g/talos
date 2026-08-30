@@ -1701,6 +1701,22 @@ async fn spawn_session(
         .await
         .map_err(|error| error.to_string())?;
 
+    // The chat shows the RAW prompt the user sent — the enriched prompt
+    // (charter + context) goes to the agent but is never displayed. This is
+    // the single user-message broadcast for create-with-prompt runs; backend
+    // spawn paths must not broadcast it again.
+    if let Some(raw) = prompt.filter(|p| !p.trim().is_empty()) {
+        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
+            message: crate::agent_events::AgentMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session.id.clone(),
+                role: "user".to_string(),
+                content: raw.trim().to_string(),
+                timestamp: chrono::Utc::now(),
+            },
+        });
+    }
+
     // Create-with-prompt runs (headless `agentdeck run`, dashboard "start with
     // a first message") must get the same harness context enrichment as
     // websocket turns: environment, skills, similar trajectories, memory.
@@ -1983,15 +1999,6 @@ async fn finish_acp_spawn(
             browser_skill_prompt_injection_for(&clean_prompt).await,
             clean_prompt
         );
-        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-            message: crate::agent_events::AgentMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                session_id: session.id.clone(),
-                role: "user".to_string(),
-                content: clean_prompt.clone(),
-                timestamp: chrono::Utc::now(),
-            },
-        });
         state
             .acp_manager
             .send_prompt(&session.id, &clean_prompt)
@@ -2456,15 +2463,6 @@ pub(crate) async fn spawn_pi_turn(
         return Err("Pi CLI is not installed".to_string());
     };
 
-    state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-        message: crate::agent_events::AgentMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session.id.clone(),
-            role: "user".to_string(),
-            content: prompt.to_string(),
-            timestamp: chrono::Utc::now(),
-        },
-    });
     state
         .session_manager
         .update_status(&session.id, SessionStatus::Running)
@@ -2554,15 +2552,6 @@ async fn finish_claude_stream_spawn(
             browser_skill_prompt_injection_for(&clean_prompt).await,
             clean_prompt
         );
-        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-            message: crate::agent_events::AgentMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                session_id: session.id.clone(),
-                role: "user".to_string(),
-                content: clean_prompt.clone(),
-                timestamp: chrono::Utc::now(),
-            },
-        });
         state
             .claude_stream
             .send_prompt(&session.id, &clean_prompt)
@@ -2703,15 +2692,6 @@ async fn finish_spawn(
     let prompt_in_cmd = crate::agents::agent_prompt_in_command(&session.agent);
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let clean_prompt = prompt.trim().to_string();
-        state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-            message: crate::agent_events::AgentMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                session_id: session.id.clone(),
-                role: "user".to_string(),
-                content: clean_prompt.clone(),
-                timestamp: chrono::Utc::now(),
-            },
-        });
         if prompt_in_cmd {
             // Prompt is already in the command line; just activate the normalizer
             // so streaming events are captured from the PTY output.

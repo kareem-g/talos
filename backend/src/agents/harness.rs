@@ -151,6 +151,9 @@ impl AgentTurn for ApiTurn {
     }
 
     async fn start_turn(&self, state: &AppState, ctx: TurnContext) -> Result<()> {
+        // Broadcast the raw prompt only — spawn_api_turn owns the running and
+        // completion state broadcasts.
+        broadcast_user_message_only(state, &ctx.session.id, &ctx.prompt).await;
         crate::agents::api::spawn_api_turn(state, &ctx.session, &ctx.enriched_prompt())
             .await
             .map_err(crate::AgentDeckError::Unknown)
@@ -176,6 +179,8 @@ impl AgentTurn for PiTurn {
     }
 
     async fn start_turn(&self, state: &AppState, ctx: TurnContext) -> Result<()> {
+        // Broadcast the raw prompt only — spawn_pi_turn owns the running state.
+        broadcast_user_message_only(state, &ctx.session.id, &ctx.prompt).await;
         crate::api::routes::spawn_pi_turn(state, &ctx.session, &ctx.enriched_prompt())
             .await
             .map_err(crate::AgentDeckError::Unknown)
@@ -297,6 +302,23 @@ async fn broadcast_user_message(state: &AppState, session_id: &str, content: &st
         .broadcast(crate::websocket::WsMessage::StateChange {
             session_id: session_id.to_string(),
             state: "running".to_string(),
+        });
+}
+
+/// Broadcast only the user's raw message — no state change. Used by the
+/// on-demand backends (api, pi), whose turn functions own the running and
+/// completion state broadcasts themselves.
+async fn broadcast_user_message_only(state: &AppState, session_id: &str, content: &str) {
+    state
+        .broadcast
+        .broadcast(crate::websocket::WsMessage::Message {
+            message: crate::agent_events::AgentMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                role: "user".to_string(),
+                content: content.to_string(),
+                timestamp: chrono::Utc::now(),
+            },
         });
 }
 

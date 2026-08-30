@@ -346,6 +346,8 @@ pub fn build_api_descriptor(
     let permission_option = crate::providers::types::permission_mode_config_option();
 
     let mut config_options = vec![model_config_option(&result.models)];
+    config_options.push(crate::providers::types::effort_config_option());
+    config_options.push(crate::providers::types::max_output_tokens_config_option());
     config_options.push(permission_option);
 
     crate::providers::types::ProviderDescriptor {

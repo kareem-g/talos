@@ -92,16 +92,9 @@ pub async fn spawn_api_turn(
 ) -> Result<(), String> {
     use crate::providers::api::ApiTransport;
 
-    // Single broadcast for the user turn — daemon persistence will insert it.
-    state.broadcast.broadcast(crate::websocket::WsMessage::Message {
-        message: crate::agent_events::AgentMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session.id.clone(),
-            role: "user".to_string(),
-            content: prompt.to_string(),
-            timestamp: chrono::Utc::now(),
-        },
-    });
+    // The user message is broadcast by the caller — spawn_session for
+    // create-with-prompt runs, ApiTurn::start_turn for websocket turns — with
+    // the RAW prompt. Never broadcast the enriched prompt here.
 
     state
         .session_manager
@@ -431,237 +424,308 @@ async fn call_anthropic_stream(
         req = req.header(k.as_str(), v.as_str());
     }
 
-    // Anthropic wants system + messages (system not in messages array)
-    let (system, filtered): (Option<String>, Vec<Value>) = {
-        let mut sys: Option<String> = None;
-        let mut msgs = Vec::new();
-        for m in messages {
-            if m.get("role").and_then(|r| r.as_str()) == Some("system") {
-                sys = m.get("content").and_then(|c| c.as_str()).map(|s| s.to_string());
-            } else {
-                msgs.push(m.clone());
+    let project = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.project);
+
+    // The conversation grows as tool results are appended; the loop re-requests
+    // until the model stops calling tools.
+    let mut conversation: Vec<Value> = messages.to_vec();
+    for _iteration in 0..MAX_API_TOOL_ITERATIONS {
+        // Anthropic wants system + messages (system not in messages array).
+        let (system, filtered): (Option<String>, Vec<Value>) = {
+            let mut sys: Option<String> = None;
+            let mut msgs = Vec::new();
+            for m in &conversation {
+                if m.get("role").and_then(|r| r.as_str()) == Some("system") {
+                    sys = m.get("content").and_then(|c| c.as_str()).map(|s| s.to_string());
+                } else {
+                    msgs.push(m.clone());
+                }
             }
+            (sys, msgs)
+        };
+
+        let pending = state
+            .session_manager
+            .pending_config(session_id)
+            .await
+            .unwrap_or_default();
+        let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
+        if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            max_tokens = parsed;
         }
-        (sys, msgs)
-    };
+        let mut body = json!({
+            "model": model,
+            "messages": filtered,
+            "max_tokens": max_tokens,
+            "stream": true,
+            "tools": crate::agents::api_tools::tool_definitions(),
+        });
+        if let Some(s) = system {
+            body["system"] = Value::String(s);
+        }
+        // Reasoning effort rides as `reasoning_effort` when the user picked one
+        // (routers and compatible endpoints pass it through).
+        if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
+            body["reasoning_effort"] = Value::String(effort.clone());
+        }
 
-    let mut body = json!({
-        "model": model,
-        "messages": filtered,
-        "max_tokens": provider.max_output_tokens.unwrap_or(8192),
-        "stream": true
-    });
-    if let Some(s) = system {
-        body["system"] = Value::String(s);
-    }
+        let resp = req
+            .try_clone()
+            .expect("request is clonable")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("API request failed: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("API {status}: {text}"));
+        }
 
-    let resp = req.json(&body).send().await.map_err(|e| format!("API request failed: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API {status}: {text}"));
-    }
+        let mut stream = resp.bytes_stream();
+        let mut buffer = String::new();
+        let mut current_block_type: Option<String> = None;
+        // Tool-use blocks (Anthropic) accumulate by block index: (id, name, args).
+        let mut tool_blocks: std::collections::HashMap<i64, (String, String, String)> = Default::default();
+        let mut turn_text = String::new();
+        let mut stop_reason: Option<String> = None;
 
-    let mut stream = resp.bytes_stream();
-    let mut buffer = String::new();
-    // Track content block type for thinking support
-    let mut current_block_type: Option<String> = None;
-    // Tool-use blocks (Anthropic) accumulate input by block index so a
-    // TodoWrite tool can be promoted to a `plan` event.
-    let mut tool_blocks: std::collections::HashMap<i64, (String, String)> = Default::default();
-    let mut turn_text = String::new();
+        while let Some(item) = stream.next().await {
+            let bytes = item.map_err(|e| format!("Stream read error: {e}"))?;
+            buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-    while let Some(item) = stream.next().await {
-        let bytes = item.map_err(|e| format!("Stream read error: {e}"))?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
 
-        while let Some(newline_pos) = buffer.find('\n') {
-            let line = buffer[..newline_pos].trim().to_string();
-            buffer = buffer[newline_pos + 1..].to_string();
-
-            if line.is_empty() || line.starts_with(':') {
-                continue;
-            }
-            if let Some(data) = line.strip_prefix("data: ") {
-                let data = data.trim();
-                match serde_json::from_str::<Value>(data) {
-                    Ok(v) => {
-                        let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        let index = v.get("index").and_then(|i| i.as_i64()).unwrap_or(-1);
-                        match event_type {
-                            "content_block_start" => {
-                                let block = v.get("content_block");
-                                current_block_type = block
-                                    .and_then(|b| b.get("type"))
-                                    .and_then(|t| t.as_str())
-                                    .map(|s| s.to_string());
-                                // If this is a thinking block, emit thinking_started
-                                match current_block_type.as_deref() {
-                                    Some("thinking") => {
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+                if let Some(data) = line.strip_prefix("data: ") {
+                    let data = data.trim();
+                    match serde_json::from_str::<Value>(data) {
+                        Ok(v) => {
+                            let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            let index = v.get("index").and_then(|i| i.as_i64()).unwrap_or(-1);
+                            match event_type {
+                                "content_block_start" => {
+                                    let block = v.get("content_block");
+                                    current_block_type = block
+                                        .and_then(|b| b.get("type"))
+                                        .and_then(|t| t.as_str())
+                                        .map(|s| s.to_string());
+                                    match current_block_type.as_deref() {
+                                        Some("thinking") => {
+                                            state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                                session_id,
+                                                "thinking_started",
+                                                json!({ "source": "api" }),
+                                            ));
+                                        }
+                                        Some("tool_use") => {
+                                            let id = block
+                                                .and_then(|b| b.get("id"))
+                                                .and_then(|i| i.as_str())
+                                                .unwrap_or_default()
+                                                .to_string();
+                                            let name = block
+                                                .and_then(|b| b.get("name"))
+                                                .and_then(|n| n.as_str())
+                                                .unwrap_or("Tool")
+                                                .to_string();
+                                            tool_blocks.entry(index)
+                                                .or_insert_with(|| (id, name, String::new()));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                "content_block_delta" => {
+                                    let delta_type = v
+                                        .get("delta")
+                                        .and_then(|d| d.get("type"))
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("");
+                                    match delta_type {
+                                        "text_delta" => {
+                                            if let Some(text) = v
+                                                .get("delta")
+                                                .and_then(|d| d.get("text"))
+                                                .and_then(|t| t.as_str())
+                                            {
+                                                if !text.is_empty() {
+                                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                                        session_id,
+                                                        "assistant_text",
+                                                        json!({ "text": text, "delta": true, "source": "api" }),
+                                                    ));
+                                                    turn_text.push_str(text);
+                                                }
+                                            }
+                                        }
+                                        "thinking_delta" => {
+                                            if let Some(thinking) = v
+                                                .get("delta")
+                                                .and_then(|d| d.get("thinking"))
+                                                .and_then(|t| t.as_str())
+                                            {
+                                                if !thinking.is_empty() {
+                                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                                        session_id,
+                                                        "thinking_delta",
+                                                        json!({ "text": thinking, "delta": true, "source": "api" }),
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            if let Some(partial) = v
+                                                .get("delta")
+                                                .and_then(|d| d.get("partial_json"))
+                                                .and_then(|t| t.as_str())
+                                            {
+                                                if let Some(entry) = tool_blocks.get_mut(&index) {
+                                                    entry.2.push_str(partial);
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                "content_block_stop" => {
+                                    if current_block_type.as_deref() == Some("thinking") {
                                         state.broadcast.broadcast_agent_event(AgentEvent::new(
                                             session_id,
-                                            "thinking_started",
+                                            "thinking_finished",
                                             json!({ "source": "api" }),
                                         ));
                                     }
-                                    Some("tool_use") => {
-                                        let name = block
-                                            .and_then(|b| b.get("name"))
-                                            .and_then(|n| n.as_str())
-                                            .unwrap_or("Tool");
-                                        tool_blocks.entry(index)
-                                            .or_insert_with(|| (name.to_string(), String::new()));
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            "content_block_delta" => {
-                                let delta_type = v
-                                    .get("delta")
-                                    .and_then(|d| d.get("type"))
-                                    .and_then(|t| t.as_str())
-                                    .unwrap_or("");
-                                match delta_type {
-                                    "text_delta" => {
-                                        if let Some(text) = v
-                                            .get("delta")
-                                            .and_then(|d| d.get("text"))
-                                            .and_then(|t| t.as_str())
-                                        {
-                                            if !text.is_empty() {
-                                                state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                                    session_id,
-                                                    "assistant_text",
-                                                    json!({ "text": text, "delta": true, "source": "api" }),
-                                                ));
-                                                turn_text.push_str(text);
+                                    if let Some((_, name, args)) = tool_blocks.get(&index) {
+                                        if name.eq_ignore_ascii_case("TodoWrite") {
+                                            if let Ok(parsed) = serde_json::from_str::<Value>(args) {
+                                                if let Some(payload) = crate::agents::plan::todo_payload(&parsed.to_string(), "Plan") {
+                                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                                        session_id,
+                                                        "plan",
+                                                        payload,
+                                                    ));
+                                                }
                                             }
                                         }
                                     }
-                                    "thinking_delta" => {
-                                        if let Some(thinking) = v
-                                            .get("delta")
-                                            .and_then(|d| d.get("thinking"))
-                                            .and_then(|t| t.as_str())
-                                        {
-                                            if !thinking.is_empty() {
-                                                state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                                    session_id,
-                                                    "thinking_delta",
-                                                    json!({ "text": thinking, "delta": true, "source": "api" }),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                    "input_json_delta" => {
-                                        // Anthropic streams tool input as partial JSON.
-                                        if let Some(partial) = v
-                                            .get("delta")
-                                            .and_then(|d| d.get("partial_json"))
-                                            .and_then(|t| t.as_str())
-                                        {
-                                            if let Some(entry) = tool_blocks.get_mut(&index) {
-                                                entry.1.push_str(partial);
-                                            }
-                                        }
-                                    }
-                                    _ => {}
+                                    current_block_type = None;
                                 }
-                            }
-                            "content_block_stop" => {
-                                // Emit thinking_finished if we were in a thinking block
-                                if current_block_type.as_deref() == Some("thinking") {
-                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                        session_id,
-                                        "thinking_finished",
-                                        json!({ "source": "api" }),
-                                    ));
-                                }
-                                // Promote TodoWrite tool blocks to a plan event.
-                                if let Some((name, args)) = tool_blocks.remove(&index) {
-                                    if name.eq_ignore_ascii_case("TodoWrite") {
-                                        if let Some(payload) = crate::agents::plan::todo_payload(&args, "Plan") {
+                                "message_delta" => {
+                                    stop_reason = v
+                                        .get("delta")
+                                        .and_then(|d| d.get("stop_reason"))
+                                        .and_then(|r| r.as_str())
+                                        .map(str::to_string);
+                                    if let Some(usage) = v.get("usage") {
+                                        let output_tokens = usage.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+                                        if output_tokens > 0 {
                                             state.broadcast.broadcast_agent_event(AgentEvent::new(
                                                 session_id,
-                                                "plan",
-                                                payload,
+                                                "usage",
+                                                json!({ "output_tokens": output_tokens, "source": "api" }),
                                             ));
                                         }
                                     }
                                 }
-                                current_block_type = None;
-                            }
-                            "message_delta" => {
-                                // Capture stop_reason and usage from message_delta
-                                let stop_reason = v
-                                    .get("delta")
-                                    .and_then(|d| d.get("stop_reason"))
-                                    .and_then(|r| r.as_str());
-                                if let Some(reason) = stop_reason {
-                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                        session_id,
-                                        "usage",
-                                        json!({ "finish_reason": reason, "source": "api" }),
-                                    ));
+                                "message_start" => {
+                                    if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
+                                        let input_tokens = usage.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+                                        if input_tokens > 0 {
+                                            state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                                session_id,
+                                                "usage",
+                                                json!({ "input_tokens": input_tokens, "source": "api" }),
+                                            ));
+                                        }
+                                    }
                                 }
-                                if let Some(usage) = v.get("usage") {
-                                    let output_tokens = usage.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-                                    if output_tokens > 0 {
+                                "message_stop" => {
+                                    if let Some(payload) = crate::agents::plan::checklists_from_text(&turn_text) {
                                         state.broadcast.broadcast_agent_event(AgentEvent::new(
                                             session_id,
-                                            "usage",
-                                            json!({
-                                                "output_tokens": output_tokens,
-                                                "source": "api"
-                                            }),
+                                            "plan",
+                                            payload,
                                         ));
                                     }
                                 }
+                                _ => {}
                             }
-                            "message_start" => {
-                                if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
-                                    let input_tokens = usage.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-                                    if input_tokens > 0 {
-                                        state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                            session_id,
-                                            "usage",
-                                            json!({
-                                                "input_tokens": input_tokens,
-                                                "source": "api"
-                                            }),
-                                        ));
-                                    }
-                                }
-                            }
-                            "message_stop" => {
-                                // Markdown checklists written in prose still
-                                // become a plan for the HUD Progress section.
-                                if let Some(payload) = crate::agents::plan::checklists_from_text(&turn_text) {
-                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                        session_id,
-                                        "plan",
-                                        payload,
-                                    ));
-                                }
-                            }
-                            _ => {}
                         }
+                        Err(_) => { /* skip malformed SSE lines */ }
                     }
-                    Err(_) => { /* skip malformed SSE lines */ }
                 }
             }
         }
-    }
 
-    // Stream ended without message_stop — still flush any checklist-derived plan.
-    if !turn_text.is_empty() {
-        if let Some(payload) = crate::agents::plan::checklists_from_text(&turn_text) {
-            state.broadcast.broadcast_agent_event(AgentEvent::new(
-                session_id,
-                "plan",
-                payload,
-            ));
+        if !turn_text.is_empty() {
+            if let Some(payload) = crate::agents::plan::checklists_from_text(&turn_text) {
+                state.broadcast.broadcast_agent_event(AgentEvent::new(
+                    session_id,
+                    "plan",
+                    payload,
+                ));
+            }
         }
+
+        // Execute any tool calls the model requested, then loop back.
+        if tool_blocks.is_empty() {
+            break;
+        }
+        let mut ordered: Vec<(i64, (String, String, String))> = tool_blocks.into_iter().collect();
+        ordered.sort_by_key(|(index, _)| *index);
+
+        // The assistant message must carry the tool_use blocks so the API
+        // accepts the tool_result messages that follow.
+        let mut assistant_content: Vec<Value> = Vec::new();
+        if !turn_text.trim().is_empty() {
+            assistant_content.push(json!({ "type": "text", "text": turn_text }));
+        }
+        let mut results: Vec<Value> = Vec::new();
+        for (_index, (id, name, args)) in ordered {
+            let parsed_args = serde_json::from_str::<Value>(&args).unwrap_or_else(|_| json!({ "raw": args }));
+            assistant_content.push(json!({
+                "type": "tool_use",
+                "id": id,
+                "name": name,
+                "input": parsed_args,
+            }));
+            if name.eq_ignore_ascii_case("TodoWrite") {
+                // Already surfaced as a plan; nothing to execute.
+                results.push(json!({ "type": "tool_result", "tool_use_id": id, "content": "ok" }));
+                continue;
+            }
+            let output = crate::agents::api_tools::execute_api_tool(
+                state,
+                session_id,
+                project.as_deref(),
+                &id,
+                &name,
+                &parsed_args,
+            )
+            .await;
+            results.push(json!({ "type": "tool_result", "tool_use_id": id, "content": output }));
+        }
+        conversation.push(json!({ "role": "assistant", "content": assistant_content }));
+        for result in results {
+            conversation.push(json!({ "role": "user", "content": [result] }));
+        }
+        let _ = stop_reason;
     }
     Ok(())
 }
+
+const MAX_API_TOOL_ITERATIONS: usize = 12;
+
