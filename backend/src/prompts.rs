@@ -254,8 +254,10 @@ pub const CUSTOM_TRANSPORT: &str = "\
 ## Custom transport
 You are running through a generic provider or CLI connection, so your tool
 surface is whatever that connection exposes.
-- The harness gives you a small built-in tool set it executes on your behalf:
-  `Bash` (run shell commands), `Read` (read files), `Write` (write files).
+- The harness gives you a built-in tool set it executes on your behalf:
+  `Bash` (run shell commands), `Read` (read files), `Write` (write files),
+  `Edit` (targeted replace), `Glob` (find files), `Grep` (search contents),
+  `GitStatus`, `GitDiff`, and `TodoWrite` (plans — the harness records them).
   Use them when the task needs them; tool calls you emit are executed with
   the same permissions as native agents. Do not emit tool-call markup in
   plain text (e.g. `<antml:invoke>`, `tool_calls`, XML blocks) — use the

@@ -48,6 +48,71 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["file_path", "content"]
             }
         }),
+        json!({
+            "name": "TodoWrite",
+            "description": "Write a plan as a todo list. The harness records it as the session plan. Use it before starting non-trivial work.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": { "type": "string" },
+                                "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+                            },
+                            "required": ["content"]
+                        }
+                    }
+                },
+                "required": ["todos"]
+            }
+        }),
+        json!({
+            "name": "Glob",
+            "description": "Find files matching a glob pattern (e.g. \"**/*.rs\", \"src/**\"). Returns matching paths relative to the project.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "pattern": { "type": "string", "description": "Glob pattern" } },
+                "required": ["pattern"]
+            }
+        }),
+        json!({
+            "name": "Grep",
+            "description": "Search file contents for a regex pattern in the project. Returns up to 20 matches with file:line.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "string", "description": "Regex to search for" },
+                    "path": { "type": "string", "description": "Optional path/dir to scope the search to" }
+                },
+                "required": ["pattern"]
+            }
+        }),
+        json!({
+            "name": "Edit",
+            "description": "Replace the first occurrence of old_string with new_string in a file. Safer than rewriting the whole file.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "Absolute or project-relative file path" },
+                    "old_string": { "type": "string", "description": "Exact text to find" },
+                    "new_string": { "type": "string", "description": "Replacement text" }
+                },
+                "required": ["file_path", "old_string", "new_string"]
+            }
+        }),
+        json!({
+            "name": "GitStatus",
+            "description": "Show the git working tree status (short format with branch).",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "GitDiff",
+            "description": "Show uncommitted changes (git diff). Output is capped.",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
     ]
 }
 
@@ -134,6 +199,24 @@ pub async fn execute_api_tool(
             let content = args.get("content").and_then(Value::as_str).unwrap_or("");
             write_file(project, path, content).await
         }
+        "todowrite" => Ok("Plan recorded.".to_string()),
+        "glob" => {
+            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or("");
+            glob_files(project, pattern).await
+        }
+        "grep" => {
+            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or("");
+            let scope = args.get("path").and_then(Value::as_str);
+            grep_files(project, pattern, scope).await
+        }
+        "edit" => {
+            let path = args.get("file_path").and_then(Value::as_str).unwrap_or("");
+            let old = args.get("old_string").and_then(Value::as_str).unwrap_or("");
+            let new = args.get("new_string").and_then(Value::as_str).unwrap_or("");
+            edit_file(project, path, old, new).await
+        }
+        "gitstatus" => run_git(project, &["status", "--short", "--branch"]).await,
+        "gitdiff" => run_git(project, &["diff"]).await,
         other => Err(format!("Unknown tool: {other}")),
     };
 
@@ -202,4 +285,168 @@ async fn write_file(project: Option<&str>, path: &str, content: &str) -> Result<
         .await
         .map_err(|e| format!("{path}: {e}"))?;
     Ok(format!("Wrote {path} ({} bytes)", content.len()))
+}
+
+
+/// Find files matching a glob pattern under the project dir. Supports `*`
+/// (within a path segment), `**` (across segments), and `?` (single char).
+async fn glob_files(project: Option<&str>, pattern: &str) -> Result<String, String> {
+    let Some(project) = project else {
+        return Err("no project directory".to_string());
+    };
+    let pattern = pattern.trim().trim_start_matches("./");
+    if pattern.is_empty() {
+        return Err("no pattern provided".to_string());
+    }
+    let base = PathBuf::from(project);
+    let mut dirs = vec![(base.clone(), String::new())];
+    let mut matches: Vec<String> = Vec::new();
+    while let Some((dir, rel)) = dirs.pop() {
+        let mut entries = tokio::fs::read_dir(&dir).await.map_err(|e| e.to_string())?;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let rel_path = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                // Skip .git and target to keep results useful.
+                if name == ".git" || name == "target" || name == "node_modules" {
+                    continue;
+                }
+                dirs.push((entry.path(), rel_path.clone()));
+            }
+            if glob_match(pattern, &rel_path) {
+                matches.push(rel_path);
+            }
+        }
+    }
+    matches.sort();
+    matches.truncate(200);
+    if matches.is_empty() {
+        Ok("(no matches)".to_string())
+    } else {
+        Ok(matches.join("\n"))
+    }
+}
+
+/// Simple fnmatch-style matcher: `*` within a segment, `**` across segments.
+fn glob_match(pattern: &str, path: &str) -> bool {
+    fn match_here(p: &[char], s: &[char]) -> bool {
+        if p.is_empty() {
+            return s.is_empty();
+        }
+        match p[0] {
+            '*' => {
+                // Collapse consecutive stars.
+                let mut i = 0;
+                while i < p.len() && p[i] == '*' {
+                    i += 1;
+                }
+                let double = i >= 2;
+                let rest = &p[i..];
+                if double {
+                    // `**` matches across any characters, including '/'.
+                    for k in 0..=s.len() {
+                        if match_here(rest, &s[k..]) {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // Single `*` does not cross '/'.
+                    for k in 0..=s.len() {
+                        if k > 0 && s[k - 1] == '/' {
+                            break;
+                        }
+                        if match_here(rest, &s[k..]) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+            }
+            '?' => !s.is_empty() && match_here(&p[1..], &s[1..]),
+            c => !s.is_empty() && s[0] == c && match_here(&p[1..], &s[1..]),
+        }
+    }
+    match_here(&pattern.chars().collect::<Vec<_>>(), &path.chars().collect::<Vec<_>>())
+}
+
+/// Grep file contents with ripgrep, falling back to grep.
+async fn grep_files(project: Option<&str>, pattern: &str, scope: Option<&str>) -> Result<String, String> {
+    if pattern.trim().is_empty() {
+        return Err("no pattern provided".to_string());
+    }
+    let mut dir = project.unwrap_or(".");
+    let mut path_arg = Vec::new();
+    if let Some(scope) = scope.filter(|s| !s.trim().is_empty()) {
+        path_arg.push(scope.to_string());
+    } else if project.is_some() {
+        path_arg.push(dir.to_string());
+    }
+    let mut cmd = Command::new("rg");
+    cmd.args(["-n", "--no-heading", "-m", "20", "--color", "never"]);
+    cmd.arg(pattern);
+    cmd.args(&path_arg);
+    let output = cmd.output().await;
+    let (code, stdout, stderr) = match output {
+        Ok(o) => (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).to_string(), String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(e) => return Err(e.to_string()),
+    };
+    if code == 2 && stderr.contains("command not found") || (code == -1) {
+        // Fall back to grep.
+        let mut cmd = Command::new("grep");
+        cmd.args(["-rn", "-m", "20", "--color=never"]);
+        cmd.arg(pattern);
+        cmd.args(&path_arg);
+        let output = cmd.output().await.map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        return Ok(if stdout.trim().is_empty() { "(no matches)".to_string() } else { stdout.trim().to_string() });
+    }
+    if code != 0 {
+        return Ok("(no matches)".to_string());
+    }
+    let _ = dir;
+    Ok(stdout.trim().to_string())
+}
+
+/// Replace the first occurrence of old_string in a file.
+async fn edit_file(project: Option<&str>, path: &str, old: &str, new: &str) -> Result<String, String> {
+    if path.trim().is_empty() || old.is_empty() {
+        return Err("file_path and old_string are required".to_string());
+    }
+    let resolved = resolve_path(project, path);
+    let content = tokio::fs::read_to_string(&resolved)
+        .await
+        .map_err(|e| format!("{path}: {e}"))?;
+    match content.find(old) {
+        Some(idx) => {
+            let mut updated = content.clone();
+            updated.replace_range(idx..idx + old.len(), new);
+            tokio::fs::write(&resolved, updated)
+                .await
+                .map_err(|e| format!("{path}: {e}"))?;
+            Ok(format!("Edited {path}"))
+        }
+        None => Err(format!("old_string not found in {path}")),
+    }
+}
+
+/// Run a git command in the project dir, capping output.
+async fn run_git(project: Option<&str>, args: &[&str]) -> Result<String, String> {
+    let Some(project) = project else {
+        return Err("no project directory".to_string());
+    };
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(project)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    if text.trim().is_empty() {
+        let err = String::from_utf8_lossy(&output.stderr).to_string();
+        if !err.trim().is_empty() { return Ok(err.trim().to_string()); }
+        Ok("(clean)".to_string())
+    } else {
+        Ok(text.trim().to_string())
+    }
 }
