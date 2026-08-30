@@ -27,6 +27,8 @@ pub struct RunResult {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
     pub event_count: usize,
+    /// Ordered event-kind sequence for trajectory comparison (bounded).
+    pub event_kinds: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +86,7 @@ pub async fn run_headless(
                 cost_usd: None,
                 duration_ms: None,
                 event_count: 0,
+                event_kinds: Vec::new(),
             });
         }
         let data: Value = client
@@ -140,6 +143,11 @@ pub async fn run_headless(
             cost_usd: None,
             duration_ms: None,
             event_count: events.len(),
+            event_kinds: events
+                .iter()
+                .filter_map(|e| e.get("kind").and_then(Value::as_str).map(str::to_string))
+                .take(200)
+                .collect(),
         };
 
         if let Some(payload) = completed_payload {
@@ -223,12 +231,73 @@ fn duration_ms(first: &Option<String>, last: &Option<String>) -> Option<u64> {
     }
 }
 
+/// Normalized Levenshtein similarity between two bounded kind sequences.
+fn sequence_similarity(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let n = a.len();
+    let m = b.len();
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0usize; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    let max = n.max(m) as f64;
+    1.0 - (prev[m] as f64 / max)
+}
+
+/// Print a trajectory-diff block: per task, pairwise agent similarity plus the
+/// kinds that differ.
+fn print_trajectory_diff(rows: &[(String, String, RunResult, bool)]) {
+    println!();
+    println!("trajectory diff (event-kind sequences)");
+    // Group by task name.
+    let mut by_task: std::collections::BTreeMap<&str, Vec<(&str, &RunResult)>> = Default::default();
+    for (task, agent, result, _) in rows {
+        by_task.entry(task.as_str()).or_default().push((agent.as_str(), result));
+    }
+    for (task, runs) in &by_task {
+        if runs.len() < 2 {
+            continue;
+        }
+        for i in 0..runs.len() {
+            for j in (i + 1)..runs.len() {
+                let (a_name, a) = runs[i];
+                let (b_name, b) = runs[j];
+                let seq = sequence_similarity(&a.event_kinds, &b.event_kinds);
+                let a_set: std::collections::HashSet<&str> = a.event_kinds.iter().map(|s| s.as_str()).collect();
+                let b_set: std::collections::HashSet<&str> = b.event_kinds.iter().map(|s| s.as_str()).collect();
+                let only_a: Vec<&str> = a_set.difference(&b_set).copied().collect();
+                let only_b: Vec<&str> = b_set.difference(&a_set).copied().collect();
+                println!(
+                    "  {task}: {a_name} vs {b_name}  sequence={seq:.2}  events {} vs {}",
+                    a.event_kinds.len(),
+                    b.event_kinds.len()
+                );
+                if !only_a.is_empty() || !only_b.is_empty() {
+                    println!("      only {a_name}: {:?} | only {b_name}: {:?}", only_a, only_b);
+                }
+            }
+        }
+    }
+}
+
 /// Run a suite of tasks across a list of agents and print a table (or JSON).
 pub async fn run_eval(
     suite_path: &std::path::Path,
     agents: &[String],
     project: Option<&str>,
     json: bool,
+    diff: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let raw = tokio::fs::read_to_string(suite_path).await?;
     let tasks: Vec<EvalTask> = serde_json::from_str(&raw)?;
@@ -297,7 +366,34 @@ pub async fn run_eval(
             result.reply.chars().take(40).collect::<String>(),
         );
     }
+    if diff {
+        print_trajectory_diff(&rows);
+    }
     let passed = rows.iter().filter(|(_, _, _, pass)| *pass).count();
     println!("\n{passed}/{} passed", rows.len());
+    let failed = rows.len() - passed;
+    if failed > 0 {
+        // CI gate: any failure makes the command exit non-zero.
+        return Err(format!("{failed} task(s) failed").into());
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sequence_similarity_is_normalized() {
+        let a = vec!["thinking".to_string(), "text".to_string(), "done".to_string()];
+        let b = vec!["thinking".to_string(), "text".to_string(), "done".to_string()];
+        assert!((sequence_similarity(&a, &b) - 1.0).abs() < 1e-9);
+
+        let c = vec!["thinking".to_string(), "tool".to_string(), "tool".to_string(), "done".to_string()];
+        let sim = sequence_similarity(&a, &c);
+        assert!(sim > 0.0 && sim < 1.0);
+
+        assert!((sequence_similarity(&a, &[] as &[String]) - 0.0).abs() < 1e-9);
+        assert!((sequence_similarity(&[] as &[String], &[] as &[String]) - 1.0).abs() < 1e-9);
+    }
 }

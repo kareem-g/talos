@@ -51,6 +51,9 @@ enum Commands {
         /// Print results as JSON
         #[arg(long)]
         json: bool,
+        /// Print a trajectory diff between agents (event-kind sequences)
+        #[arg(long)]
+        diff: bool,
     },
     /// Launch Claude Code
     Claude {
@@ -279,13 +282,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("reply:\n{}", result.reply);
             }
         }
-        Commands::Eval { suite, agents, project, json } => {
+        Commands::Eval { suite, agents, project, json, diff } => {
             let agents: Vec<String> = agents
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            eval::run_eval(&suite, &agents, project.as_deref(), json).await?;
+            eval::run_eval(&suite, &agents, project.as_deref(), json, diff).await?;
         }
         Commands::Claude { project } => {
             let mut cmd = tokio::process::Command::new("claude");

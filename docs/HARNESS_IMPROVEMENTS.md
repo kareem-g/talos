@@ -67,7 +67,7 @@ diff (agent A vs B on the same task) plus a 10–20 task suite with a `make eval
 CI gate makes "better than dsh" measurable.
 
 **What to change:** `cli/src/eval.rs` — add `--diff` comparing event-kind
-sequences between runs (Jaccard / edit distance); `eval/suite.json` grow; CI
+sequences between runs (normalized Levenshtein); `eval/suite.json` grow; CI
 step that fails on regression.
 
 ## 4. WebFetch / WebSearch tool for custom providers

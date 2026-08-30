@@ -16,5 +16,30 @@
   {
     "name": "list-repo",
     "prompt": "List the top-level files of this repository (run ls) and reply with their names. Do not modify anything."
+  },
+  {
+    "name": "reverse-string",
+    "prompt": "Write a Python function that reverses a string, in a code block. No tools needed.",
+    "expect": "def"
+  },
+  {
+    "name": "fizzbuzz-explain",
+    "prompt": "Explain the FizzBuzz problem in two sentences and give a Python solution in a code block."
+  },
+  {
+    "name": "git-branch",
+    "prompt": "What git branch is this repository on? Use git to find out, then reply with just the branch name."
+  },
+  {
+    "name": "count-lines",
+    "prompt": "Use a command to count the lines in README.md of this project, then reply with the number."
+  },
+  {
+    "name": "grep-tool",
+    "prompt": "Use Grep to find any line containing 'harness' in this project's docs, then reply with the first file:line you find. If none, say none."
+  },
+  {
+    "name": "plan-then-reply",
+    "prompt": "Use TodoWrite to plan a 2-step task (list steps, then note what each does). Then reply with just the word done."
   }
 ]
