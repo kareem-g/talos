@@ -102,6 +102,15 @@ per-child budget already present.
 plan completion / explicit "remember this" gesture, a memory-management panel,
 and convention entries (project rules the agent should always follow).
 
+**Done:** `MemoryEntry` gained a `kind` (`memory` | `convention`);
+`convention()`/`list_conventions()`/`save_session_summary()` helpers; a
+`Remember` tool for providers (saves memory or convention entries); the
+verifier auto-saves a session summary after code-changing turns (deduped per
+source session); conventions are injected into every turn's context (not
+keyword-ranked). Verified live: the agent Remembered a pytest convention, a
+later turn quoted it back, and a Write turn auto-saved its summary. Remaining:
+memory-management panel in the dashboard.
+
 ## 8. Sandbox isolation
 
 **Why:** path policy is a guardrail. Real isolation (bubblewrap/firejail,

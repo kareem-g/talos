@@ -122,6 +122,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["url"]
             }
         }),
+        json!({
+            "name": "Remember",
+            "description": "Save a note to the project's memory so future sessions can recall it. Use for decisions, findings, or conventions the project should remember. kind 'memory' (recall when relevant) or 'convention' (always injected project rule).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Short title" },
+                    "content": { "type": "string", "description": "What to remember" },
+                    "kind": { "type": "string", "enum": ["memory", "convention"], "description": "memory (default) or convention" }
+                },
+                "required": ["content"]
+            }
+        }),
     ]
 }
 
@@ -246,6 +259,31 @@ pub async fn execute_api_tool(
         "webfetch" => {
             let url = args.get("url").and_then(Value::as_str).unwrap_or("");
             fetch_url(url).await
+        }
+        "remember" => {
+            let content = args.get("content").and_then(Value::as_str).unwrap_or("");
+            if content.trim().is_empty() {
+                Err("content is required".to_string())
+            } else {
+            let title = args.get("title").and_then(Value::as_str).unwrap_or("Memory");
+            let kind = args.get("kind").and_then(Value::as_str).unwrap_or("memory");
+            let entry = if kind.eq_ignore_ascii_case("convention") {
+                crate::memory::convention(title, content)
+            } else {
+                crate::memory::MemoryEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    title: title.to_string(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    source_session: session_id.to_string(),
+                    text: content.to_string(),
+                    kind: "memory".to_string(),
+                }
+            };
+                match crate::memory::save_memory(project, entry) {
+                    Ok(()) => Ok(format!("Remembered: {title}")),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
         }
         other => Err(format!("Unknown tool: {other}")),
     };

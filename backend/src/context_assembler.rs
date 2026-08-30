@@ -110,6 +110,23 @@ pub async fn assemble(
     }
     sections.push(instructions);
 
+    // Project conventions (kind = "convention") are standing rules injected
+    // into every turn, not keyword-ranked like memories.
+    let conventions = crate::memory::list_conventions(session.project.as_deref());
+    if !conventions.is_empty() {
+        let mut conv_sections: Vec<String> = Vec::new();
+        for convention in &conventions {
+            conv_sections.push(format!(
+                "<convention title=\"{}\">\n{}\n</convention>",
+                convention.title, convention.text
+            ));
+        }
+        sections.push(format!(
+            "<project_conventions>\n{}\n</project_conventions>",
+            conv_sections.join("\n\n")
+        ));
+    }
+
     if context_assembly.environment_enabled {
         let env_ctx = environment_context(session.project.as_deref()).await;
         if !env_ctx.trim().is_empty() {

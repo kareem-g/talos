@@ -20,6 +20,34 @@ pub struct MemoryEntry {
     pub created_at: String,
     pub source_session: String,
     pub text: String,
+    /// "memory" (recall-on-relevance) or "convention" (always injected project
+    /// rules). Old entries without the field parse as "memory".
+    #[serde(default = "default_kind")]
+    pub kind: String,
+}
+
+fn default_kind() -> String {
+    "memory".to_string()
+}
+
+/// A project convention — a standing rule injected into every turn.
+pub fn convention(title: &str, text: &str) -> MemoryEntry {
+    MemoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: title.to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source_session: String::new(),
+        text: text.to_string(),
+        kind: "convention".to_string(),
+    }
+}
+
+/// All convention entries (project rules), for always-on injection.
+pub fn list_conventions(project: Option<&str>) -> Vec<MemoryEntry> {
+    list_memories(project)
+        .into_iter()
+        .filter(|e| e.kind == "convention")
+        .collect()
 }
 
 fn memory_path(project: &str) -> PathBuf {
@@ -120,6 +148,7 @@ mod tests {
             created_at: String::new(),
             source_session: String::new(),
             text: text.to_string(),
+            kind: "memory".to_string(),
         }
     }
 
@@ -152,4 +181,49 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+
+/// Distill a session's conversation (user prompts + final reply) into a memory
+/// entry and save it to the project. Returns the entry id, or None when the
+/// session has no conversation worth remembering.
+pub async fn save_session_summary(
+    session_manager: &crate::sessions::manager::SessionManager,
+    session_id: &str,
+    title: &str,
+    kind: &str,
+) -> Option<String> {
+    let session = session_manager.get_session(session_id).await.ok().flatten()?;
+    let mut parts: Vec<String> = Vec::new();
+    for message in session_manager.get_messages(session_id).await.unwrap_or_default() {
+        if message.role == "user" {
+            parts.push(format!("User: {}", message.content.trim()));
+        }
+    }
+    let mut reply = String::new();
+    for event in session_manager.get_agent_events(session_id).await.unwrap_or_default() {
+        if event.kind == "assistant_text"
+            && let Some(text) = event.payload.get("text").and_then(serde_json::Value::as_str)
+        {
+            reply.push_str(text);
+        }
+    }
+    if !reply.trim().is_empty() {
+        parts.push(format!("Assistant: {}", reply.trim()));
+    }
+    let text: String = parts.join("\n").chars().take(3000).collect();
+    if text.trim().is_empty() {
+        return None;
+    }
+    let entry = MemoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: title.to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source_session: session_id.to_string(),
+        text,
+        kind: kind.to_string(),
+    };
+    let id = entry.id.clone();
+    save_memory(session.project.as_deref(), entry).ok()?;
+    Some(id)
 }

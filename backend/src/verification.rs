@@ -164,6 +164,22 @@ pub fn spawn(state: &AppState) {
                             .flatten()
                             .and_then(|s| s.project);
                         verify_and_broadcast(&broadcast, &event.session_id, project.as_deref()).await;
+                        // Auto-save memory for substantial turns (deduped per
+                        // source session) so cross-session recall works
+                        // without the user clicking save.
+                        let already = project
+                            .as_deref()
+                            .map(|p| crate::memory::list_memories(Some(p)).iter().any(|e| e.source_session == event.session_id))
+                            .unwrap_or(false);
+                        if !already {
+                            let _ = crate::memory::save_session_summary(
+                                &session_manager,
+                                &event.session_id,
+                                "Auto-saved session",
+                                "memory",
+                            )
+                            .await;
+                        }
                     }
                 }
                 _ => {}
