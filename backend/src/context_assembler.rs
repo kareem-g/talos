@@ -67,6 +67,10 @@ pub async fn assemble(
     let mut sections: Vec<String> = Vec::new();
     let mut breakdown = ContextBreakdown::default();
 
+    // Standing instructions — always first, never gated, never shown in the
+    // context chip (it is the agent's charter, not per-turn enrichment).
+    sections.push(crate::harness_charter::charter().to_string());
+
     if context_assembly.environment_enabled {
         let env_ctx = environment_context(session.project.as_deref()).await;
         if !env_ctx.trim().is_empty() {
