@@ -253,13 +253,16 @@ pub const CONTEXT_DISCIPLINE: &str = "\
 pub const CUSTOM_TRANSPORT: &str = "\
 ## Custom transport
 You are running through a generic provider or CLI connection, so your tool
-surface is whatever that connection exposes — possibly only text in/out.
-- You have NO tools in this session unless the harness tells you otherwise.
-  Never emit tool-call markup (e.g. `<antml:invoke>`, `tool_calls`, XML
-  blocks) in your reply — it is not executed and renders as noise.
-- Work with what you have: if you cannot run commands or edit files directly,
-  produce exact instructions, diffs, or commands the user can execute, and say
-  clearly what you cannot do yourself.
+surface is whatever that connection exposes.
+- The harness gives you a small built-in tool set it executes on your behalf:
+  `Bash` (run shell commands), `Read` (read files), `Write` (write files).
+  Use them when the task needs them; tool calls you emit are executed with
+  the same permissions as native agents. Do not emit tool-call markup in
+  plain text (e.g. `<antml:invoke>`, `tool_calls`, XML blocks) — use the
+  structured tool calls the harness provides.
+- Work with what you have: if a tool is not available for something, produce
+  exact instructions, diffs, or commands the user can execute, and say clearly
+  what you cannot do yourself.
 - Be explicit about your capabilities in this session: name the tools you
   actually have; do not pretend to have executed something you could not.
 - For code changes, prefer output that is directly usable: a full file

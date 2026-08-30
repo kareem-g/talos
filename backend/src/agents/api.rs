@@ -469,9 +469,19 @@ async fn call_anthropic_stream(
             "stream": true,
             "tools": crate::agents::api_tools::tool_definitions(),
         });
-        if let Some(s) = system {
-            body["system"] = Value::String(s);
-        }
+        // Identity: the model is served under the configured provider/model,
+        // so tell it exactly who it is. Without this, models fall back to
+        // their trained identity (e.g. a deepseek model claiming it is
+        // Claude/Anthropic) when asked.
+        let identity = format!(
+            "You are the model \"{model}\", served through the AgentDeck provider \"{}\".              When asked who made you or what model you are, report exactly this identity.              You are not Claude, Anthropic, OpenAI, or any other vendor's model.",
+            provider.name
+        );
+        let full_system = match system {
+            Some(s) => format!("{identity}\n\n{s}"),
+            None => identity,
+        };
+        body["system"] = Value::String(full_system);
         // Reasoning effort rides as `reasoning_effort` when the user picked one
         // (routers and compatible endpoints pass it through).
         if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
