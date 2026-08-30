@@ -469,12 +469,16 @@ async fn call_anthropic_stream(
             "stream": true,
             "tools": crate::agents::api_tools::tool_definitions(),
         });
-        // Identity: the model is served under the configured provider/model,
-        // so tell it exactly who it is. Without this, models fall back to
-        // their trained identity (e.g. a deepseek model claiming it is
-        // Claude/Anthropic) when asked.
+        // Identity: the model is served under the configured provider/model.
+        // Without a firm statement, models latch onto the most repeated name
+        // in the prompt (AgentDeck) when asked who made them. This block is
+        // terse and placed FIRST in the system message so it beats the
+        // charter's many "AgentDeck" mentions. The model names its own maker.
         let identity = format!(
-            "You are the model \"{model}\", served through the AgentDeck provider \"{}\".              When asked who made you or what model you are, report exactly this identity.              You are not Claude, Anthropic, OpenAI, or any other vendor's model.",
+            "IDENTITY (follow strictly):\n\
+             - Your model id is \"{model}\", served through the provider \"{}\".\n\
+             - AgentDeck is only the software hosting you; AgentDeck is NOT your creator and did NOT train you.\n\
+             - When asked who made you or which company created you, answer with your own maker — never \"AgentDeck\" or \"AgentDeck team\".",
             provider.name
         );
         let full_system = match system {
@@ -736,6 +740,8 @@ async fn call_anthropic_stream(
     }
     Ok(())
 }
+
+
 
 const MAX_API_TOOL_ITERATIONS: usize = 12;
 
