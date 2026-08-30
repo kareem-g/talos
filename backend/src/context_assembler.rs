@@ -32,12 +32,19 @@ pub struct ContextBreakdown {
     pub environment: bool,
     pub skills: Vec<String>,
     pub trajectories: Vec<TrajectoryRef>,
+    pub memories: Vec<MemoryRef>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrajectoryRef {
     pub session_id: String,
     pub similarity: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryRef {
+    pub id: String,
+    pub title: String,
 }
 
 /// Assemble the enriched context for a turn. Returns the [`TurnContext`] plus
@@ -94,6 +101,31 @@ pub async fn assemble(
     {
         sections.push(trajectory_ctx);
         breakdown.trajectories = refs;
+    }
+
+    // Project memory: saved sessions relevant to this prompt, injected as
+    // first-person recap. Same Jaccard ranking as trajectories.
+    if context_assembly.memory_enabled {
+        let memories = crate::memory::find_relevant(
+            session.project.as_deref(),
+            prompt,
+            context_assembly.max_memories,
+            context_assembly.similarity_threshold,
+        );
+        if !memories.is_empty() {
+            let mut memory_sections: Vec<String> = Vec::new();
+            for memory in &memories {
+                memory_sections.push(format!(
+                    "<memory id=\"{}\" title=\"{}\">\n{}\n</memory>",
+                    memory.id, memory.title, memory.text
+                ));
+                breakdown.memories.push(MemoryRef {
+                    id: memory.id.clone(),
+                    title: memory.title.clone(),
+                });
+            }
+            sections.push(format!("<memories>\n{}\n</memories>", memory_sections.join("\n\n")));
+        }
     }
 
     let injected_context = if sections.is_empty() {

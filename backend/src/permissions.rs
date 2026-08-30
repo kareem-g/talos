@@ -140,7 +140,8 @@ pub async fn request_user_decision(
 
     // Project tool policy overrides the mode defaults: a rule that denies a
     // tool is honored even in `full` mode, and an allow rule skips the card.
-    // Questions are never auto-decided by policy.
+    // Questions are never auto-decided by policy. Path rules are more specific
+    // than tool rules, so they are consulted first.
     if !is_question {
         let project = state
             .session_manager
@@ -149,7 +150,41 @@ pub async fn request_user_decision(
             .ok()
             .flatten()
             .and_then(|s| s.project);
-        match crate::policy::ToolPolicy::load(project.as_deref()).decide(&query.tool_name) {
+        let policy = crate::policy::ToolPolicy::load(project.as_deref());
+
+        // Filesystem rules key on the path the tool would touch (Write/Edit/
+        // Read inputs are either a bare path string or carry a file_path).
+        let input_path = match &query.input {
+            Value::String(text) => Some(text.clone()),
+            Value::Object(map) => map
+                .get("file_path")
+                .or_else(|| map.get("path"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            _ => None,
+        };
+        if let Some(path) = input_path
+            && let Some(decision) = match policy.decide_path(&path) {
+                crate::policy::PolicyDecision::Ask => None,
+                other => Some(other),
+            }
+        {
+            let (allowed, reason) = match decision {
+                crate::policy::PolicyDecision::Allow => (true, "Auto-approved (project path policy)".to_string()),
+                crate::policy::PolicyDecision::Deny => (false, "Denied (project path policy)".to_string()),
+                crate::policy::PolicyDecision::Ask => unreachable!(),
+            };
+            state.permissions.resolve(&request_id, if allowed { "allow" } else { "deny" }.to_string()).await;
+            return PermissionOutcome {
+                allowed,
+                input: query.input,
+                reason,
+                waited_ms: 0,
+                answer_text: None,
+            };
+        }
+
+        match policy.decide(&query.tool_name) {
             crate::policy::PolicyDecision::Allow => {
                 state.permissions.resolve(&request_id, "allow".to_string()).await;
                 return PermissionOutcome {

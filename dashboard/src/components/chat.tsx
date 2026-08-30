@@ -1295,6 +1295,8 @@ export function ContextChip({ part }: { part: Extract<MessagePart, { kind: 'cont
   if (part.skills.length > 0) bits.push(`skills: ${part.skills.join(', ')}`)
   const runs = part.trajectories.length
   if (runs > 0) bits.push(`${runs} similar run${runs > 1 ? 's' : ''}`)
+  const memories = part.memories.length
+  if (memories > 0) bits.push(`memory: ${memories}`)
   return (
     <div
       className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-ink-3"

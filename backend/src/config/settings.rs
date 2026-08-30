@@ -30,6 +30,21 @@ pub struct ContextAssemblyConfig {
     /// Minimum Jaccard similarity (0..1) for a trajectory to be considered
     /// similar enough to inject.
     pub similarity_threshold: f64,
+    /// Inject saved project memories (`.agentdeck/memory.json`) relevant to
+    /// the prompt.
+    #[serde(default = "default_true")]
+    pub memory_enabled: bool,
+    /// How many memory entries to inject (upper bound).
+    #[serde(default = "default_max_memories")]
+    pub max_memories: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_memories() -> usize {
+    2
 }
 
 impl Default for ContextAssemblyConfig {
@@ -40,6 +55,8 @@ impl Default for ContextAssemblyConfig {
             trajectory_injection_enabled: true,
             max_trajectories: 3,
             similarity_threshold: 0.3,
+            memory_enabled: true,
+            max_memories: 2,
         }
     }
 }

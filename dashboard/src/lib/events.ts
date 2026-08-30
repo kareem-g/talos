@@ -862,8 +862,26 @@ export function applyAgentEvent(
         : []
       const skills = stringList(payload, 'skills')
       const environment = bool(payload, 'environment') === true
-      if (!environment && skills.length === 0 && trajectories.length === 0) return false
-      conversation.pendingContext = { kind: 'context', environment, skills, trajectories }
+      const rawMemories = payload['memories']
+      const memories = Array.isArray(rawMemories)
+        ? rawMemories
+            .filter((m): m is Record<string, unknown> => m !== null && typeof m === 'object')
+            .map((m) => ({
+              id: str(m, 'id') ?? '',
+              title: str(m, 'title') ?? '',
+            }))
+            .filter((m) => m.id !== '')
+        : []
+      if (!environment && skills.length === 0 && trajectories.length === 0 && memories.length === 0) {
+        return false
+      }
+      conversation.pendingContext = {
+        kind: 'context',
+        environment,
+        skills,
+        trajectories,
+        memories,
+      }
       return true
     }
 

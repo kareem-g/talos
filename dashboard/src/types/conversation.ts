@@ -214,6 +214,7 @@ export interface ContextPart {
   environment: boolean
   skills: string[]
   trajectories: Array<{ sessionId: string; similarity: number }>
+  memories: Array<{ id: string; title: string }>
 }
 
 /**

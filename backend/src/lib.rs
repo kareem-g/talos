@@ -6,6 +6,7 @@ pub mod context_assembler;
 pub mod daemon;
 pub mod hooks;
 pub mod mcp;
+pub mod memory;
 pub mod models;
 pub mod notifications;
 pub mod pty;

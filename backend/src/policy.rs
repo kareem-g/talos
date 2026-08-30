@@ -39,15 +39,27 @@ pub struct ToolRule {
     pub action: String,
 }
 
+/// A filesystem rule: any tool input whose path starts with `prefix` is
+/// allowed/denied regardless of the tool-level rules. `"all"` is not valid
+/// here — a prefix rule must name a real path.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PathRule {
+    pub prefix: String,
+    pub action: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PolicyFile {
     #[serde(default)]
     pub rules: Vec<ToolRule>,
+    #[serde(default)]
+    pub paths: Vec<PathRule>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ToolPolicy {
     rules: Vec<ToolRule>,
+    paths: Vec<PathRule>,
 }
 
 impl ToolPolicy {
@@ -64,7 +76,10 @@ impl ToolPolicy {
         let Ok(file) = toml::from_str::<PolicyFile>(&content) else {
             return ToolPolicy::default();
         };
-        ToolPolicy { rules: file.rules }
+        ToolPolicy {
+            rules: file.rules,
+            paths: file.paths,
+        }
     }
 
     /// Decide a tool call. First matching rule wins; `"all"` matches anything.
@@ -74,6 +89,26 @@ impl ToolPolicy {
         for rule in &self.rules {
             let pattern = rule.tool.to_lowercase();
             let matches = pattern == "all" || tool.contains(&pattern);
+            if !matches {
+                continue;
+            }
+            return match rule.action.to_lowercase().as_str() {
+                "allow" => PolicyDecision::Allow,
+                "deny" => PolicyDecision::Deny,
+                _ => PolicyDecision::Ask,
+            };
+        }
+        PolicyDecision::Ask
+    }
+
+    /// Decide a filesystem access by path prefix. First matching rule wins;
+    /// no match → [`PolicyDecision::Ask`]. Path rules are more specific than
+    /// tool rules, so callers consult this before `decide`.
+    pub fn decide_path(&self, path: &str) -> PolicyDecision {
+        let normalized = path.replace('\\', "/");
+        for rule in &self.paths {
+            let prefix = rule.prefix.replace('\\', "/");
+            let matches = normalized.starts_with(&prefix);
             if !matches {
                 continue;
             }
@@ -100,6 +135,7 @@ mod tests {
                     action: action.to_string(),
                 })
                 .collect(),
+            paths: Vec::new(),
         }
     }
 
@@ -122,5 +158,39 @@ mod tests {
     fn no_rules_means_ask() {
         let p = ToolPolicy::default();
         assert_eq!(p.decide("anything"), PolicyDecision::Ask);
+    }
+
+    #[test]
+    fn path_rules_deny_by_prefix() {
+        let p = ToolPolicy {
+            rules: Vec::new(),
+            paths: vec![PathRule {
+                prefix: "/home/kareem/.ssh".to_string(),
+                action: "deny".to_string(),
+            }],
+        };
+        assert_eq!(p.decide_path("/home/kareem/.ssh/id_rsa"), PolicyDecision::Deny);
+        assert_eq!(p.decide_path("/home/kareem/.ssh/config"), PolicyDecision::Deny);
+        // Sibling directories are not matched.
+        assert_eq!(p.decide_path("/home/kareem/Documents"), PolicyDecision::Ask);
+    }
+
+    #[test]
+    fn path_rules_allow_override_deny_by_order() {
+        let p = ToolPolicy {
+            rules: Vec::new(),
+            paths: vec![
+                PathRule {
+                    prefix: "/home/kareem/.ssh".to_string(),
+                    action: "deny".to_string(),
+                },
+                PathRule {
+                    prefix: "/home/kareem/.ssh/authorized_keys".to_string(),
+                    action: "allow".to_string(),
+                },
+            ],
+        };
+        // First match wins: the deny prefix comes first, so it wins.
+        assert_eq!(p.decide_path("/home/kareem/.ssh/authorized_keys"), PolicyDecision::Deny);
     }
 }

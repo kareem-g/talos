@@ -240,6 +240,80 @@ pub async fn get_session_transcripts(
     }
 }
 
+/// Save a session as a project-memory entry: its user prompts + final reply,
+/// distilled from the canonical log. `{ "title"?: string }`.
+pub async fn save_session_memory(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use crate::memory::MemoryEntry;
+
+    let Some(session) = state.session_manager.get_session(&id).await.ok().flatten() else {
+        return Json(json!({ "error": "session not found", "id": id }));
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    for message in state.session_manager.get_messages(&id).await.unwrap_or_default() {
+        if message.role == "user" {
+            parts.push(format!("User: {}", message.content.trim()));
+        }
+    }
+    let mut reply = String::new();
+    for event in state.session_manager.get_agent_events(&id).await.unwrap_or_default() {
+        if event.kind == "assistant_text"
+            && let Some(text) = event.payload.get("text").and_then(Value::as_str)
+        {
+            reply.push_str(text);
+        }
+    }
+    if !reply.trim().is_empty() {
+        parts.push(format!("Assistant: {}", reply.trim()));
+    }
+    let text: String = parts.join("\n").chars().take(3000).collect();
+    if text.trim().is_empty() {
+        return Json(json!({ "error": "session has no conversation to remember" }));
+    }
+
+    let entry = MemoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: body
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| session.name.clone()),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source_session: id,
+        text,
+    };
+    let entry_id = entry.id.clone();
+    match crate::memory::save_memory(session.project.as_deref(), entry) {
+        Ok(()) => Json(json!({ "saved": true, "id": entry_id })),
+        Err(error) => Json(json!({ "error": error.to_string(), "saved": false })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct MemoryQuery {
+    pub project: Option<String>,
+}
+
+/// List a project's memory entries.
+pub async fn list_memory(
+    Query(query): Query<MemoryQuery>,
+) -> impl IntoResponse {
+    Json(json!({ "memories": crate::memory::list_memories(query.project.as_deref()) }))
+}
+
+/// Delete a memory entry by id.
+pub async fn delete_memory(
+    Path(id): Path<String>,
+    Query(query): Query<MemoryQuery>,
+) -> impl IntoResponse {
+    let removed = crate::memory::delete_memory(query.project.as_deref(), &id);
+    Json(json!({ "deleted": removed, "id": id }))
+}
+
 /// Spawn a harness-owned subagent: a child session that runs one prompt on
 /// behalf of the parent session. The parent's chat shows a `subagent_started`
 /// card, the child runs through the exact same harness path (spawn → turn →
@@ -1622,6 +1696,36 @@ async fn spawn_session(
         .await
         .map_err(|error| error.to_string())?;
 
+    // Create-with-prompt runs (headless `agentdeck run`, dashboard "start with
+    // a first message") must get the same harness context enrichment as
+    // websocket turns: environment, skills, similar trajectories, memory.
+    // Without this the first turn bypassed context assembly entirely.
+    let prompt = match prompt {
+        Some(prompt) => match crate::context_assembler::assemble(state, &session, prompt).await {
+            Ok((ctx, breakdown)) => {
+                let injected_something = breakdown.environment
+                    || !breakdown.skills.is_empty()
+                    || !breakdown.trajectories.is_empty()
+                    || !breakdown.memories.is_empty();
+                if injected_something
+                    && let Ok(payload) = serde_json::to_value(&breakdown)
+                {
+                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                        &session.id,
+                        "context_assembled",
+                        payload,
+                    ));
+                }
+                Some(ctx.enriched_prompt())
+            }
+            Err(error) => {
+                tracing::warn!(session_id = %session.id, %error, "context assembly failed at spawn");
+                Some(prompt.to_string())
+            }
+        },
+        None => None,
+    };
+
     // Optional model + effort requested by the client (agent-agnostic).
     let requested_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
     let requested_effort = body.get("effort").and_then(|v| v.as_str()).map(str::to_string);
@@ -1636,7 +1740,7 @@ async fn spawn_session(
             if let Some(model) = pending_model {
                 let _ = state.session_manager.set_pending_config(&session.id, "model", &model).await;
             }
-            return crate::agents::api::spawn_api_session(state, session, prompt).await;
+            return crate::agents::api::spawn_api_session(state, session, prompt.as_deref()).await;
         }
     }
 
@@ -1648,7 +1752,7 @@ async fn spawn_session(
             state,
             session,
             project,
-            prompt,
+            prompt.as_deref(),
             launch,
             requested_model,
             requested_effort,
@@ -1661,13 +1765,13 @@ async fn spawn_session(
     // the terminal view is right and the chat view is wrong. stream-json emits
     // real text deltas, thinking deltas, and tool events.
     if agent == "claude" {
-        return finish_claude_stream_spawn(state, session, project, prompt, requested_model, requested_effort).await;
+        return finish_claude_stream_spawn(state, session, project, prompt.as_deref(), requested_model, requested_effort).await;
     }
 
     // Pi: on-demand one-shot turns — no resident process at creation. The
     // first prompt (whenever the user sends it) spawns `pi -p --mode json`.
     if agent == "pi" {
-        let status = if prompt.filter(|p| !p.trim().is_empty()).is_some() {
+        let status = if prompt.as_ref().filter(|p| !p.trim().is_empty()).is_some() {
             SessionStatus::Running
         } else {
             SessionStatus::Idle
@@ -1677,7 +1781,7 @@ async fn spawn_session(
             .update_status(&session.id, status)
             .await
             .map_err(|error| error.to_string())?;
-        if let Some(first) = prompt.filter(|p| !p.trim().is_empty()) {
+        if let Some(first) = prompt.as_ref().filter(|p| !p.trim().is_empty()) {
             spawn_pi_turn(state, &session, first.trim()).await?;
         }
         let current = state
@@ -1703,14 +1807,14 @@ async fn spawn_session(
                 let mut command = vec![custom.binary.clone()];
                 command.extend(custom.args.clone());
                 drop(cfg);
-                return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
+                return finish_spawn(state, session, project, prompt.as_deref(), command, requested_model, requested_effort, false).await;
             }
             // Catalog PTY-tier providers (CommandCode, Aider, …) have no config
             // section of their own — launch the catalog binary directly.
             if let Some(entry) = crate::providers::catalog::entry_for(agent) {
                 let command = vec![entry.binary.to_string()];
                 drop(cfg);
-                return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
+                return finish_spawn(state, session, project, prompt.as_deref(), command, requested_model, requested_effort, false).await;
             }
             let Some(executable) = body.get("executable").and_then(|value| value.as_str()) else {
                 drop(cfg);
@@ -1728,14 +1832,14 @@ async fn spawn_session(
             let mut command = vec![executable.to_string()];
             command.extend(args);
             drop(cfg);
-            return finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await;
+            return finish_spawn(state, session, project, prompt.as_deref(), command, requested_model, requested_effort, false).await;
         }
     };
-    let command = crate::agents::build_agent_command(agent, &configured, project, prompt).await
+    let command = crate::agents::build_agent_command(agent, &configured, project, prompt.as_deref()).await
         .map_err(|error| error.to_string())?;
     drop(cfg);
 
-    finish_spawn(state, session, project, prompt, command, requested_model, requested_effort, false).await
+    finish_spawn(state, session, project, prompt.as_deref(), command, requested_model, requested_effort, false).await
 }
 
 /// ACP spawn path: launch the subprocess, complete the initialize/session/new
