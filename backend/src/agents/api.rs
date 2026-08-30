@@ -225,60 +225,153 @@ async fn call_openai_stream(
     for (k, v) in &provider.extra_headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    let body = json!({
-        "model": model,
-        "messages": messages,
-        "stream": true,
-        "stream_options": { "include_usage": true }
-    });
-    let resp = req.json(&body).send().await.map_err(|e| format!("API request failed: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("API {status}: {text}"));
-    }
 
-    let mut stream = resp.bytes_stream();
-    let mut buffer = String::new();
-    let mut finish_reason: Option<String> = None;
-    // Accumulate tool calls by index (name + arguments) and assistant text so
-    // TodoWrite tools and markdown checklists can become `plan` events.
-    let mut tool_calls: std::collections::HashMap<i64, (String, String)> = Default::default();
-    let mut turn_text = String::new();
+    let project = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.project);
 
-    while let Some(item) = stream.next().await {
-        let bytes = item.map_err(|e| format!("Stream read error: {e}"))?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
+    // Same tool loop as the anthropic path: the conversation grows as tool
+    // results are appended and we re-request until the model stops calling.
+    let mut conversation: Vec<Value> = messages.to_vec();
+    for _iteration in 0..MAX_API_TOOL_ITERATIONS {
+        let pending = state
+            .session_manager
+            .pending_config(session_id)
+            .await
+            .unwrap_or_default();
+        let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
+        if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            max_tokens = parsed;
+        }
+        let mut body = json!({
+            "model": model,
+            "messages": conversation,
+            "max_tokens": max_tokens,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "tools": crate::agents::api_tools::openai_tool_definitions(),
+        });
+        if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
+            body["reasoning_effort"] = Value::String(effort.clone());
+        }
 
-        while let Some(newline_pos) = buffer.find('\n') {
-            let line = buffer[..newline_pos].trim().to_string();
-            buffer = buffer[newline_pos + 1..].to_string();
+        let resp = req
+            .try_clone()
+            .expect("request is clonable")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("API request failed: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("API {status}: {text}"));
+        }
 
-            if line.is_empty() || line.starts_with(':') {
-                continue;
-            }
-            if let Some(data) = line.strip_prefix("data: ") {
-                let data = data.trim();
-                if data == "[DONE]" {
-                    // Broadcast usage if we captured a finish_reason
-                    if let Some(ref reason) = finish_reason {
-                        state.broadcast.broadcast_agent_event(AgentEvent::new(
-                            session_id,
-                            "usage",
-                            json!({ "finish_reason": reason, "source": "api" }),
-                        ));
-                    }
-                    emit_api_plans(state, session_id, &tool_calls, &turn_text);
-                    return Ok(());
+        let mut stream = resp.bytes_stream();
+        let mut buffer = String::new();
+        let mut finish_reason: Option<String> = None;
+        // Tool calls arrive as fragmented deltas keyed by index: (id, name, args).
+        let mut tool_calls: std::collections::HashMap<i64, (String, String, String)> = Default::default();
+        let mut turn_text = String::new();
+        let mut done = false;
+
+        while let Some(item) = stream.next().await {
+            let bytes = item.map_err(|e| format!("Stream read error: {e}"))?;
+            buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
                 }
-                match serde_json::from_str::<Value>(data) {
-                    Ok(v) => {
-                        let Some(first_choice) = v
-                            .get("choices")
-                            .and_then(|c| c.as_array())
-                            .and_then(|a| a.first())
-                        else {
-                            // Capture usage from the final chunk (some providers include it)
+                if let Some(data) = line.strip_prefix("data: ") {
+                    let data = data.trim();
+                    if data == "[DONE]" {
+                        done = true;
+                        break;
+                    }
+                    match serde_json::from_str::<Value>(data) {
+                        Ok(v) => {
+                            let Some(first_choice) = v
+                                .get("choices")
+                                .and_then(|c| c.as_array())
+                                .and_then(|a| a.first())
+                            else {
+                                if let Some(usage) = v.get("usage") {
+                                    let prompt_tokens = usage.get("prompt_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+                                    let completion_tokens = usage.get("completion_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+                                    if prompt_tokens > 0 || completion_tokens > 0 {
+                                        state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                            session_id,
+                                            "usage",
+                                            json!({
+                                                "input_tokens": prompt_tokens,
+                                                "output_tokens": completion_tokens,
+                                                "source": "api"
+                                            }),
+                                        ));
+                                    }
+                                }
+                                continue;
+                            };
+                            let delta = first_choice.get("delta");
+                            if let Some(delta) = delta {
+                                if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                    if !content.is_empty() {
+                                        state.broadcast.broadcast_agent_event(AgentEvent::new(
+                                            session_id,
+                                            "assistant_text",
+                                            json!({ "text": content, "delta": true, "source": "api" }),
+                                        ));
+                                        turn_text.push_str(content);
+                                    }
+                                }
+                                if let Some(calls) = delta.get("tool_calls").and_then(|c| c.as_array()) {
+                                    for call in calls {
+                                        let index = call.get("index").and_then(|i| i.as_i64()).unwrap_or(0);
+                                        let entry = tool_calls.entry(index).or_insert_with(|| (String::new(), String::new(), String::new()));
+                                        if let Some(tid) = call.get("id").and_then(|i| i.as_str()) {
+                                            if entry.0.is_empty() {
+                                                entry.0 = tid.to_string();
+                                            }
+                                        }
+                                        if let Some(fname) = call
+                                            .get("function")
+                                            .and_then(|f| f.get("name"))
+                                            .and_then(|n| n.as_str())
+                                        {
+                                            if entry.1.is_empty() {
+                                                entry.1 = fname.to_string();
+                                            }
+                                        }
+                                        if let Some(args) = call
+                                            .get("function")
+                                            .and_then(|f| f.get("arguments"))
+                                            .and_then(|a| a.as_str())
+                                        {
+                                            entry.2.push_str(args);
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(reason) = first_choice
+                                .get("finish_reason")
+                                .and_then(|r| r.as_str())
+                            {
+                                if !reason.is_empty() {
+                                    finish_reason = Some(reason.to_string());
+                                }
+                            }
                             if let Some(usage) = v.get("usage") {
                                 let prompt_tokens = usage.get("prompt_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
                                 let completion_tokens = usage.get("completion_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
@@ -294,97 +387,77 @@ async fn call_openai_stream(
                                     ));
                                 }
                             }
-                            continue;
-                        };
-                        let delta = first_choice.get("delta");
-                        if let Some(delta) = delta {
-                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                if !content.is_empty() {
-                                    state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                        session_id,
-                                        "assistant_text",
-                                        json!({ "text": content, "delta": true, "source": "api" }),
-                                    ));
-                                    turn_text.push_str(content);
-                                }
-                            }
-                            // Tool calls arrive as fragmented deltas keyed by index.
-                            if let Some(calls) = delta.get("tool_calls").and_then(|c| c.as_array()) {
-                                for call in calls {
-                                    let index = call.get("index").and_then(|i| i.as_i64()).unwrap_or(0);
-                                    let entry = tool_calls.entry(index).or_insert_with(|| (String::new(), String::new()));
-                                    if let Some(fname) = call
-                                        .get("function")
-                                        .and_then(|f| f.get("name"))
-                                        .and_then(|n| n.as_str())
-                                    {
-                                        if entry.0.is_empty() {
-                                            entry.0 = fname.to_string();
-                                        }
-                                    }
-                                    if let Some(args) = call
-                                        .get("function")
-                                        .and_then(|f| f.get("arguments"))
-                                        .and_then(|a| a.as_str())
-                                    {
-                                        entry.1.push_str(args);
-                                    }
-                                }
-                            }
                         }
-                        // Capture finish_reason from the choices
-                        if let Some(reason) = first_choice
-                            .get("finish_reason")
-                            .and_then(|r| r.as_str())
-                        {
-                            if !reason.is_empty() {
-                                finish_reason = Some(reason.to_string());
-                            }
-                        }
-                        // Capture usage from the final chunk (some providers include it)
-                        if let Some(usage) = v.get("usage") {
-                            let prompt_tokens = usage.get("prompt_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-                            let completion_tokens = usage.get("completion_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-                            if prompt_tokens > 0 || completion_tokens > 0 {
-                                state.broadcast.broadcast_agent_event(AgentEvent::new(
-                                    session_id,
-                                    "usage",
-                                    json!({
-                                        "input_tokens": prompt_tokens,
-                                        "output_tokens": completion_tokens,
-                                        "source": "api"
-                                    }),
-                                ));
-                            }
-                        }
+                        Err(_) => { /* skip malformed SSE lines */ }
                     }
-                    Err(_) => { /* skip malformed SSE lines */ }
                 }
             }
+            if done {
+                break;
+            }
         }
-    }
 
-    // Stream ended without [DONE] — broadcast whatever we have
-    if let Some(ref reason) = finish_reason {
-        state.broadcast.broadcast_agent_event(AgentEvent::new(
-            session_id,
-            "usage",
-            json!({ "finish_reason": reason, "source": "api" }),
-        ));
+        if let Some(ref reason) = finish_reason {
+            state.broadcast.broadcast_agent_event(AgentEvent::new(
+                session_id,
+                "usage",
+                json!({ "finish_reason": reason, "source": "api" }),
+            ));
+        }
+        emit_api_plans(state, session_id, &tool_calls, &turn_text);
+
+        if tool_calls.is_empty() {
+            break;
+        }
+        let mut ordered: Vec<(i64, (String, String, String))> = tool_calls.into_iter().collect();
+        ordered.sort_by_key(|(index, _)| *index);
+
+        // Assistant message must carry the tool_calls so the API accepts the
+        // following `tool` role messages.
+        let mut assistant_tool_calls: Vec<Value> = Vec::new();
+        let mut results: Vec<Value> = Vec::new();
+        for (_index, (id, name, args)) in ordered {
+            let parsed_args = serde_json::from_str::<Value>(&args).unwrap_or_else(|_| json!({ "raw": args }));
+            assistant_tool_calls.push(json!({
+                "id": id,
+                "type": "function",
+                "function": { "name": name, "arguments": if parsed_args.is_string() { args.clone() } else { parsed_args.to_string() } },
+            }));
+            if name.eq_ignore_ascii_case("TodoWrite") {
+                results.push(json!({ "role": "tool", "tool_call_id": id, "content": "ok" }));
+                continue;
+            }
+            let output = crate::agents::api_tools::execute_api_tool(
+                state,
+                session_id,
+                project.as_deref(),
+                &id,
+                &name,
+                &parsed_args,
+            )
+            .await;
+            results.push(json!({ "role": "tool", "tool_call_id": id, "content": output }));
+        }
+        conversation.push(json!({
+            "role": "assistant",
+            "content": if turn_text.trim().is_empty() { Value::Null } else { Value::String(turn_text) },
+            "tool_calls": assistant_tool_calls,
+        }));
+        conversation.extend(results);
     }
-    emit_api_plans(state, session_id, &tool_calls, &turn_text);
     Ok(())
 }
+
 
 /// Broadcast `plan` events for TodoWrite tool calls and markdown checklist text
 /// accumulated during an API turn.
 fn emit_api_plans(
     state: &AppState,
     session_id: &str,
-    tool_calls: &std::collections::HashMap<i64, (String, String)>,
+    tool_calls: &std::collections::HashMap<i64, (String, String, String)>,
     turn_text: &str,
 ) {
-    for (_, (name, args)) in tool_calls {
+    for (_, (_, name, args)) in tool_calls {
         if name.eq_ignore_ascii_case("TodoWrite") {
             if let Some(payload) = crate::agents::plan::todo_payload(args, "Plan") {
                 state.broadcast.broadcast_agent_event(AgentEvent::new(

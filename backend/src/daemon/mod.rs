@@ -228,6 +228,10 @@ impl Daemon {
         // complete per session and broadcast `plan_status` events.
         crate::agents::plans::PlanTracker::new().spawn(state.broadcast.clone());
 
+        // Verification gate: after a turn that changed code, run the project's
+        // tests and broadcast pass/fail.
+        crate::verification::spawn(&state);
+
         let cfg = self.config.read().await;
         let settings = cfg.settings().clone();
         drop(cfg);

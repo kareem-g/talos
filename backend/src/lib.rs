@@ -20,6 +20,7 @@ pub mod skills;
 pub mod transcript;
 pub mod trajectory;
 pub mod tunnel;
+pub mod verification;
 pub mod websocket;
 pub mod workspace;
 pub mod worktree;

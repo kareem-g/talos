@@ -116,6 +116,23 @@ pub fn tool_definitions() -> Vec<Value> {
     ]
 }
 
+/// The same tools in OpenAI function-calling format (for `/chat/completions`).
+pub fn openai_tool_definitions() -> Vec<Value> {
+    tool_definitions()
+        .into_iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.get("name"),
+                    "description": t.get("description"),
+                    "parameters": t.get("input_schema"),
+                }
+            })
+        })
+        .collect()
+}
+
 /// Cap tool output so a runaway command cannot flood the conversation.
 const OUTPUT_CAP: usize = 50 * 1024;
 
@@ -177,7 +194,7 @@ pub async fn execute_api_tool(
     let outcome = crate::permissions::request_user_decision(state, query).await;
     if !outcome.allowed {
         let message = format!("Permission denied: {}", outcome.reason);
-        broadcast_tool_finished(state, session_id, tool_use_id, false, &message);
+        broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message);
         return message;
     }
 
@@ -223,22 +240,22 @@ pub async fn execute_api_tool(
     match result {
         Ok(output) => {
             let output = cap(output);
-            broadcast_tool_finished(state, session_id, tool_use_id, true, &output);
+            broadcast_tool_finished(state, session_id, tool_use_id, name, true, &output);
             output
         }
         Err(error) => {
             let message = format!("Tool error: {error}");
-            broadcast_tool_finished(state, session_id, tool_use_id, false, &message);
+            broadcast_tool_finished(state, session_id, tool_use_id, name, false, &message);
             message
         }
     }
 }
 
-fn broadcast_tool_finished(state: &AppState, session_id: &str, tool_use_id: &str, success: bool, output: &str) {
+fn broadcast_tool_finished(state: &AppState, session_id: &str, tool_use_id: &str, name: &str, success: bool, output: &str) {
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         session_id,
         "tool_finished",
-        json!({ "tool_id": tool_use_id, "success": success, "output": output, "source": "api" }),
+        json!({ "tool_id": tool_use_id, "tool_name": name, "success": success, "output": output, "source": "api" }),
     ));
 }
 

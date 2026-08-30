@@ -233,6 +233,14 @@ export interface BrowserStepPart {
   screenshotRef?: string
 }
 
+/** Harness verification of the turn (the project's tests after a code change). */
+export interface VerificationPart {
+  kind: 'verification'
+  status: 'running' | 'passed' | 'failed' | 'skipped'
+  command: string
+  output?: string
+}
+
 /** An image attached to a message. */
 export interface ImagePart {
   kind: 'image'
@@ -261,6 +269,7 @@ export type MessagePart =
   | BrowserStepPart
   | ImagePart
   | ContextPart
+  | VerificationPart
 
 /**
  * A file the user attached to a message. The daemon stores it under the

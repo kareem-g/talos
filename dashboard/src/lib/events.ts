@@ -527,6 +527,29 @@ export function applyAgentEvent(
       return true
     }
 
+    /** Harness verification of the turn: project tests run after a code change. */
+    case 'verification': {
+      const status = str(payload, 'status')
+      if (status !== 'running' && status !== 'passed' && status !== 'failed' && status !== 'skipped') {
+        return false
+      }
+      const turn = currentTurn(conversation, event)
+      const command = str(payload, 'command') ?? ''
+      const output = str(payload, 'output')
+      // Upsert: a running -> passed/failed update replaces the open card.
+      for (let index = turn.parts.length - 1; index >= 0; index -= 1) {
+        const part = turn.parts[index]
+        if (part.kind === 'verification') {
+          part.status = status
+          if (command) part.command = command
+          if (output !== undefined) part.output = output
+          return true
+        }
+      }
+      turn.parts.push({ kind: 'verification', status, command, output })
+      return true
+    }
+
     /**
      * The harness reported the plan lifecycle (proposed → approved/declined →
      * completed). Sets the status on the session's current plan part.

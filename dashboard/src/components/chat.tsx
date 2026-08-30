@@ -1216,6 +1216,8 @@ export function Part({
       return <ConfigRow part={part} />
     case 'context':
       return <ContextChip part={part} />
+    case 'verification':
+      return <VerificationCard part={part} />
     case 'browser':
       return <BrowserStepRow part={part} />
   }
@@ -1280,6 +1282,34 @@ function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_change
       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
         {part.key} → <span className="font-mono text-ink">{part.value}</span>
       </span>
+    </div>
+  )
+}
+
+/** Harness verification card: project tests run after a code-changing turn. */
+function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verification' }> }) {
+  const running = part.status === 'running'
+  const failed = part.status === 'failed'
+  return (
+    <div className="rounded-lg border border-line/40 bg-inset px-2 py-1.5">
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            running ? 'bg-amber animate-pulse' : failed ? 'bg-red' : part.status === 'passed' ? 'bg-green' : 'bg-ink-3/60',
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+          {running ? 'Running tests…' : part.status === 'passed' ? 'Tests passed' : part.status === 'failed' ? 'Tests failed' : 'Tests skipped'}
+        </span>
+        {part.command ? <span className="shrink-0 font-mono text-[9.5px] text-ink-3">{part.command}</span> : null}
+      </div>
+      {part.output ? (
+        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-canvas/60 px-2 py-1 font-mono text-[10px] leading-snug text-ink-2">
+          {part.output}
+        </pre>
+      ) : null}
     </div>
   )
 }
