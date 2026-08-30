@@ -48,18 +48,30 @@ pub struct PathRule {
     pub action: String,
 }
 
+/// A network rule: `WebFetch`/`WebSearch` to `domain` is allowed/denied.
+/// Deny-by-default — a URL whose host matches no rule is refused, so network
+/// tools are inert until a project explicitly allows domains.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkRule {
+    pub domain: String,
+    pub action: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PolicyFile {
     #[serde(default)]
     pub rules: Vec<ToolRule>,
     #[serde(default)]
     pub paths: Vec<PathRule>,
+    #[serde(default)]
+    pub network: Vec<NetworkRule>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ToolPolicy {
     rules: Vec<ToolRule>,
     paths: Vec<PathRule>,
+    network: Vec<NetworkRule>,
 }
 
 impl ToolPolicy {
@@ -79,6 +91,7 @@ impl ToolPolicy {
         ToolPolicy {
             rules: file.rules,
             paths: file.paths,
+            network: file.network,
         }
     }
 
@@ -99,6 +112,29 @@ impl ToolPolicy {
             };
         }
         PolicyDecision::Ask
+    }
+
+    /// Decide a network access by host. **Deny-by-default**: a host matching
+    /// an explicit allow rule falls through to the normal permission flow
+    /// ([`PolicyDecision::Ask`]); anything else is denied.
+    pub fn decide_network(&self, host: &str) -> PolicyDecision {
+        let host = host.to_lowercase();
+        let host = host.strip_suffix('.').unwrap_or(&host);
+        for rule in &self.network {
+            let domain = rule.domain.to_lowercase().trim_start_matches("www.").to_string();
+            let matches = host == domain
+                || host.ends_with(&format!(".{domain}"))
+                || (domain.starts_with('.') && host.ends_with(&domain));
+            if !matches {
+                continue;
+            }
+            return match rule.action.to_lowercase().as_str() {
+                "allow" => PolicyDecision::Ask, // allowlisted → normal permission flow
+                "deny" => PolicyDecision::Deny,
+                _ => PolicyDecision::Deny,
+            };
+        }
+        PolicyDecision::Deny
     }
 
     /// Decide a filesystem access by path prefix. First matching rule wins;
@@ -136,6 +172,7 @@ mod tests {
                 })
                 .collect(),
             paths: Vec::new(),
+            network: Vec::new(),
         }
     }
 
@@ -168,11 +205,41 @@ mod tests {
                 prefix: "/home/kareem/.ssh".to_string(),
                 action: "deny".to_string(),
             }],
+            network: Vec::new(),
         };
         assert_eq!(p.decide_path("/home/kareem/.ssh/id_rsa"), PolicyDecision::Deny);
         assert_eq!(p.decide_path("/home/kareem/.ssh/config"), PolicyDecision::Deny);
         // Sibling directories are not matched.
         assert_eq!(p.decide_path("/home/kareem/Documents"), PolicyDecision::Ask);
+    }
+
+    #[test]
+    fn network_is_deny_by_default() {
+        let p = ToolPolicy { rules: Vec::new(), paths: Vec::new(), network: Vec::new() };
+        assert_eq!(p.decide_network("example.com"), PolicyDecision::Deny);
+    }
+
+    #[test]
+    fn network_allowlist_falls_through_to_permission() {
+        let p = ToolPolicy {
+            rules: Vec::new(),
+            paths: Vec::new(),
+            network: vec![NetworkRule { domain: "example.com".to_string(), action: "allow".to_string() }],
+        };
+        assert_eq!(p.decide_network("example.com"), PolicyDecision::Ask);
+        assert_eq!(p.decide_network("www.example.com"), PolicyDecision::Ask);
+        assert_eq!(p.decide_network("sub.example.com"), PolicyDecision::Ask);
+        assert_eq!(p.decide_network("evil.com"), PolicyDecision::Deny);
+    }
+
+    #[test]
+    fn network_explicit_deny_wins() {
+        let p = ToolPolicy {
+            rules: Vec::new(),
+            paths: Vec::new(),
+            network: vec![NetworkRule { domain: "internal.corp".to_string(), action: "deny".to_string() }],
+        };
+        assert_eq!(p.decide_network("internal.corp"), PolicyDecision::Deny);
     }
 
     #[test]
@@ -189,6 +256,7 @@ mod tests {
                     action: "allow".to_string(),
                 },
             ],
+            network: Vec::new(),
         };
         // First match wins: the deny prefix comes first, so it wins.
         assert_eq!(p.decide_path("/home/kareem/.ssh/authorized_keys"), PolicyDecision::Deny);

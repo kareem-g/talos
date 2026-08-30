@@ -152,6 +152,35 @@ pub async fn request_user_decision(
             .and_then(|s| s.project);
         let policy = crate::policy::ToolPolicy::load(project.as_deref());
 
+        // Network tools (WebFetch/WebSearch) are deny-by-default: only hosts
+        // the project explicitly allowlists fall through to the normal
+        // permission flow. A denied host is final, like a denied path.
+        if query.tool_name.eq_ignore_ascii_case("WebFetch")
+            || query.tool_name.eq_ignore_ascii_case("WebSearch")
+        {
+            let url = query
+                .input
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if let Some(host) = url_host(url) {
+                match policy.decide_network(&host) {
+                    crate::policy::PolicyDecision::Deny => {
+                        state.permissions.resolve(&request_id, "deny".to_string()).await;
+                        return PermissionOutcome {
+                            allowed: false,
+                            input: query.input,
+                            reason: "Denied (project network policy)".to_string(),
+                            waited_ms: 0,
+                            answer_text: None,
+                        };
+                    }
+                    crate::policy::PolicyDecision::Ask => {}
+                    crate::policy::PolicyDecision::Allow => {}
+                }
+            }
+        }
+
         // Filesystem rules key on the path the tool would touch (Write/Edit/
         // Read inputs are either a bare path string or carry a file_path).
         let input_path = match &query.input {
@@ -573,5 +602,17 @@ mod tests {
     fn leaves_normal_executable_paths_unchanged() {
         let path = PathBuf::from("/tmp/agentdeck-backend");
         assert_eq!(usable_executable_path(path.clone()), path);
+    }
+}
+
+
+/// Best-effort host extraction from a URL string ("https://sub.example.com/x" -> "sub.example.com").
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
     }
 }

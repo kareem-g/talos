@@ -113,6 +113,15 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "Show uncommitted changes (git diff). Output is capped.",
             "input_schema": { "type": "object", "properties": {} }
         }),
+        json!({
+            "name": "WebFetch",
+            "description": "Fetch a URL and return its text content (HTML stripped). Subject to the project's network policy — domains must be allowlisted in .agentdeck/policy.toml.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "url": { "type": "string", "description": "http(s) URL to fetch" } },
+                "required": ["url"]
+            }
+        }),
     ]
 }
 
@@ -234,6 +243,10 @@ pub async fn execute_api_tool(
         }
         "gitstatus" => run_git(project, &["status", "--short", "--branch"]).await,
         "gitdiff" => run_git(project, &["diff"]).await,
+        "webfetch" => {
+            let url = args.get("url").and_then(Value::as_str).unwrap_or("");
+            fetch_url(url).await
+        }
         other => Err(format!("Unknown tool: {other}")),
     };
 
@@ -465,5 +478,103 @@ async fn run_git(project: Option<&str>, args: &[&str]) -> Result<String, String>
         Ok("(clean)".to_string())
     } else {
         Ok(text.trim().to_string())
+    }
+}
+
+
+/// Fetch a URL and return its text content. The network policy gate is applied
+/// in the permission pipeline (request_user_decision); this only fetches.
+async fn fetch_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        return Err("only http(s) URLs are supported".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(trimmed).send().await.map_err(|e| format!("fetch failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let body = String::from_utf8_lossy(&bytes);
+    Ok(strip_html(&body))
+}
+
+/// Crude but sufficient HTML-to-text: drop script/style blocks and tags, decode
+/// the common entities, collapse whitespace, cap the size.
+fn strip_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len().min(16 * 1024));
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    let mut in_tag = false;
+    let mut in_script = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '<' {
+            // Detect script/style blocks to skip their bodies.
+            let lower: String = chars[i..chars.len().min(i + 14)].iter().collect::<String>().to_lowercase();
+            if lower.starts_with("<script") || lower.starts_with("<style") {
+                in_script = true;
+            }
+            in_tag = true;
+            i += 1;
+            continue;
+        }
+        if c == '>' {
+            in_tag = false;
+            if in_script {
+                // Close when we hit </script> or </style>.
+                let lower: String = chars[i..chars.len().min(i + 9)].iter().collect::<String>().to_lowercase();
+                if lower.starts_with("</script") || lower.starts_with("</style") {
+                    in_script = false;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_tag || in_script {
+            i += 1;
+            continue;
+        }
+        match c {
+            '&' => {
+                let rest: String = chars[i..chars.len().min(i + 6)].iter().collect();
+                let (entity, len) = if rest.starts_with("&amp;") { ("&", 5) }
+                    else if rest.starts_with("&lt;") { ("<", 4) }
+                    else if rest.starts_with("&gt;") { (">", 4) }
+                    else if rest.starts_with("&quot;") { ("\"", 6) }
+                    else if rest.starts_with("&#39;") { ("'", 5) }
+                    else if rest.starts_with("&nbsp;") { (" ", 6) }
+                    else { ("&", 1) };
+                out.push_str(entity);
+                i += len;
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    // Collapse runs of whitespace.
+    let mut collapsed = String::with_capacity(out.len());
+    let mut prev_space = false;
+    for c in out.chars() {
+        if c.is_whitespace() {
+            if !prev_space {
+                collapsed.push(' ');
+            }
+            prev_space = true;
+        } else {
+            collapsed.push(c);
+            prev_space = false;
+        }
+    }
+    let capped: String = collapsed.chars().take(8000).collect();
+    if collapsed.len() > capped.len() {
+        format!("{capped}\n…[truncated]")
+    } else {
+        capped
     }
 }

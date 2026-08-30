@@ -76,6 +76,14 @@ step that fails on regression.
 (deny-by-default, allowlist of domains) — otherwise it's an exfiltration
 vector. Pair with the path-policy pattern (`policy.toml` `[[network]]` rules).
 
+**Done:** `WebFetch` tool (fetch URL, HTML stripped to text, capped) with a
+deny-by-default `[[network]]` policy — hosts not explicitly allowlisted are
+refused in the permission pipeline before any fetch; an allowlisted host falls
+through to the normal permission flow. Verified live: example.com fetched and
+reported; a non-allowlisted host returned "Denied (project network policy)"
+and the model correctly declined to work around it. `WebSearch` still needs a
+search backend; defer.
+
 ## 5. Unified tool registry
 
 **Why:** every backend owns its tools (claude native, ACP native, api's 9).
