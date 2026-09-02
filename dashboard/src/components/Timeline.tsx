@@ -68,6 +68,7 @@ const Turn = memo(function Turn({
   project,
   sessionId,
   onViewPlan,
+  dim,
 }: {
   message: Message
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
@@ -75,6 +76,8 @@ const Turn = memo(function Turn({
   project?: string
   sessionId?: string
   onViewPlan?: () => void
+  /** Recency fade: older turns sit dimmer, like ink drying toward the top. */
+  dim?: number
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
@@ -83,7 +86,10 @@ const Turn = memo(function Turn({
     )
     const time = new Date(message.createdAt)
     return (
-      <div className="group flex justify-end">
+      <div
+        className="group flex justify-end transition-opacity duration-200 !hover:opacity-100"
+        style={dim !== undefined ? { opacity: dim } : undefined}
+      >
         <div className="flex max-w-[86%] flex-col items-end">
           <time
             dateTime={message.createdAt}
@@ -113,13 +119,27 @@ const Turn = memo(function Turn({
   const assistantText = message.parts
     .map((part) => (part.kind === 'text' ? part.text : ''))
     .join('')
+  // The turn's token accounting, surfaced as ↑/↓ chips on the Thought row.
+  const usage = [...message.parts]
+    .reverse()
+    .find((part): part is Extract<MessagePart, { kind: 'usage' }> => part.kind === 'usage')
 
   return (
-    <div className="group flex flex-col gap-2">
+    <div
+      className="group flex flex-col gap-2 transition-opacity duration-200 !hover:opacity-100"
+      style={dim !== undefined ? { opacity: dim } : undefined}
+    >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           {inline.map((part, index) => (
-            <Part key={index} part={part} onRespond={onRespond} sessionId={sessionId} onViewPlan={onViewPlan} />
+            <Part
+              key={index}
+              part={part}
+              onRespond={onRespond}
+              sessionId={sessionId}
+              onViewPlan={onViewPlan}
+              usage={usage}
+            />
           ))}
           {files.length > 0 ? <FileChips files={files} project={project} sessionId={sessionId} /> : null}
         </div>
@@ -135,15 +155,19 @@ const Turn = memo(function Turn({
   )
 })
 
-/** Live activity — pixel-grid loader with shimmer + elapsed */
+/** Live activity — a bare spinner row, no card: work in progress, not furniture. */
 function ActivityLine({ activity }: { activity: Activity }) {
   const hasDetail = Boolean(activity.detail)
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-line/40 bg-surface/60 px-4 py-3 shadow-card animate-up">
+    <div className="flex items-start gap-2.5 animate-up py-0.5">
+      <span
+        className="mt-0.5 size-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-ink-3 border-t-transparent"
+        aria-hidden
+      />
       <div className="min-w-0 flex-1">
         <LoadingState label={activity.label} variant="Drive" since={activity.since} />
         {hasDetail ? (
-          <span className="mt-1.5 block truncate font-mono text-[11.5px] leading-none text-ink-3">{activity.detail}</span>
+          <span className="mt-1 block truncate font-mono text-[11px] leading-none text-ink-3">{activity.detail}</span>
         ) : null}
       </div>
     </div>
@@ -304,6 +328,15 @@ export function Timeline({
     .filter((message) => message.role === 'user')
     .map((message) => ({ id: message.id, preview: turnPreview(message) }))
 
+  // Recency fade: the latest two turns are full brightness; everything older
+  // steps down, the way this design distinguishes history from "now" —
+  // brightness, not bubbles or dividers. Hover restores any turn to full ink.
+  const fadeFor = (index: number): number | undefined => {
+    if (index >= conversation.messages.length - 2) return undefined
+    const distance = conversation.messages.length - 1 - index
+    return distance <= 2 ? 0.72 : distance <= 4 ? 0.55 : 0.4
+  }
+
   return (
     <div className="relative min-h-0 flex-1">
       <TimelineNavigator turns={turns} activeId={activeTurnId} onJump={jumpToTurn} />
@@ -317,7 +350,7 @@ export function Timeline({
         }}
         className="scroll-thin h-full overflow-y-auto overscroll-contain"
       >
-        <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3.5 px-4 py-4 pl-9">
+        <div className="mx-auto flex w-full max-w-[52rem] flex-col gap-5 px-4 py-4 pl-9">
           {empty ? (
             <div className="flex flex-col items-center gap-1.5 py-14 text-center">
               <p className="text-[12.5px] font-medium text-ink-2">The transcript is empty.</p>
@@ -327,7 +360,7 @@ export function Timeline({
               </p>
             </div>
           ) : null}
-          {conversation.messages.map((message) => (
+          {conversation.messages.map((message, index) => (
             <div
               key={message.id}
               data-turn-id={message.role === 'user' ? message.id : undefined}
@@ -339,6 +372,7 @@ export function Timeline({
                 project={project}
                 sessionId={sessionId}
                 onViewPlan={onViewPlan}
+                dim={fadeFor(index)}
               />
             </div>
           ))}

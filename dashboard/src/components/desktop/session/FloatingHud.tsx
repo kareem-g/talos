@@ -56,7 +56,9 @@ export function FloatingHud({
   // Real subagents the agent spawned in THIS session (from AI events) — the
   // workspace's other sessions are not agents and are not listed here.
   const derived = deriveSubagents(conversation.messages)
-  const [collapsed, setCollapsed] = useState(false)
+  // Start collapsed to the pill: the simpler view keeps the timeline
+  // unobstructed; the pill still shows what the agent is working on.
+  const [collapsed, setCollapsed] = useState(true)
 
   const done = stats.done
   const total = stats.todos.length

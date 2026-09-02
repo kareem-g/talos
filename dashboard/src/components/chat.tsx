@@ -197,7 +197,14 @@ export const Prose = memo(function Prose({
  * hides the most interesting part of a turn. A manual toggle wins over the
  * automatic behavior for the rest of the turn.
  */
-export function Reasoning({ part }: { part: ReasoningPart }) {
+export function Reasoning({
+  part,
+  tokens,
+}: {
+  part: ReasoningPart
+  /** The turn's usage, shown as ↑/↓ chips beside the label once reported. */
+  tokens?: { inputTokens?: number; outputTokens?: number }
+}) {
   const [override, setOverride] = useState<boolean>()
   const hasText = part.text.trim().length > 0
   // Follow the stream unless the user has said otherwise.
@@ -208,6 +215,8 @@ export function Reasoning({ part }: { part: ReasoningPart }) {
     : part.durationMs !== undefined
       ? `Thought for ${formatDuration(part.durationMs)}`
       : 'Thought'
+  const inputTokens = formatTokens(tokens?.inputTokens)
+  const outputTokens = formatTokens(tokens?.outputTokens)
 
   return (
     <div>
@@ -231,6 +240,22 @@ export function Reasoning({ part }: { part: ReasoningPart }) {
           <Sparkle size={11} className="shrink-0 text-ink-3" />
         )}
         <span className={cn(part.streaming ? 'shimmer' : 'text-ink-2')}>{label}</span>
+        {inputTokens ? (
+          <span
+            title={`${tokens?.inputTokens} input tokens`}
+            className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3"
+          >
+            ↑{inputTokens}
+          </span>
+        ) : null}
+        {outputTokens ? (
+          <span
+            title={`${tokens?.outputTokens} output tokens`}
+            className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3"
+          >
+            ↓{outputTokens}
+          </span>
+        ) : null}
       </button>
 
       <Collapse open={open}>
@@ -254,9 +279,10 @@ function stepIcon(glyph: string) {
 }
 
 /**
- * One agent step: verb + the argument that matters, expanding to the raw
- * input/output. The inline chip shows a file name, a command, or a query —
- * never a JSON dump; the raw payload stays behind the chevron.
+ * One agent step, in the compact single-line idiom of the reference design:
+ * `[icon] Verb(dim) — file bright / dir dim — +N green — Failed red-dotted`.
+ * No chip backgrounds; the argument is bare monospace text. Expands to the raw
+ * input/output behind a hover chevron.
  */
 export function Step({ part }: { part: ToolPart | CommandPart }) {
   const [open, setOpen] = useState(false)
@@ -267,6 +293,36 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
   const expandable = Boolean(detail || (!isCommand && part.input))
   const failed = part.status === 'failed'
 
+  // Split "src/lib/mod.rs" into a dim directory and a bright file name, the
+  // way the reference renders tool targets. Commands stay one dim run.
+  let argName: string | undefined
+  let argDir: string | undefined
+  if (summary.arg) {
+    const cut = summary.arg.lastIndexOf('/')
+    if (cut > -1 && cut < summary.arg.length - 1) {
+      argDir = summary.arg.slice(0, cut + 1)
+      argName = summary.arg.slice(cut + 1)
+    } else {
+      argName = summary.arg
+    }
+  }
+
+  // Cheap diffstat for write-like tools: the line count of the content being
+  // written. Real diffs stay behind the file chips at the end of the turn.
+  const diffstat = (() => {
+    if (isCommand || failed) return null
+    const lower = (summary.label ?? '').toLowerCase()
+    if (!lower.includes('write') && !lower.includes('edit')) return null
+    try {
+      const args = JSON.parse(part.input ?? '{}') as { content?: string; new_string?: string }
+      const text = args.content ?? args.new_string
+      if (typeof text !== 'string' || text.length === 0) return null
+      return `+${text.split('\n').length}`
+    } catch {
+      return null
+    }
+  })()
+
   return (
     <div className="animate-up">
       <button
@@ -274,7 +330,7 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
         aria-expanded={expandable ? open : undefined}
         onClick={() => expandable && setOpen(!open)}
         className={cn(
-          'group/row -mx-[3px] flex min-h-8 w-[calc(100%+6px)] min-w-0 items-center gap-2',
+          'group/row -mx-[3px] flex min-h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2',
           'rounded-control px-[3px] text-left transition-colors duration-100',
           expandable && 'hover:bg-hover-2',
         )}
@@ -308,27 +364,34 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
           )}
         </span>
 
-        <span className="shrink-0 text-[12.5px] font-medium text-ink">{summary.label}</span>
+        <span className="shrink-0 text-[12px] text-ink-2">{summary.label}</span>
 
         {summary.arg ? (
           <span
-            className={cn(
-              'inline-flex h-5.5 min-w-0 flex-1 items-center truncate rounded-chip bg-field px-1.5',
-              'font-mono text-[11.5px] text-ink-2 shadow-hairline',
-              'transition-colors duration-100',
-              expandable && 'group-hover/row:bg-hover',
-            )}
+            className="min-w-0 flex-1 truncate font-mono text-[12px] leading-none"
             title={isCommand ? part.command : part.input}
           >
-            {summary.arg}
+            {argDir ? <span className="text-ink-3">{argDir}</span> : null}
+            <span className={cn(isCommand ? 'text-ink-2' : 'text-ink')}>{argName}</span>
           </span>
         ) : (
           <span className="flex-1" />
         )}
 
+        {diffstat ? (
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-green">{diffstat}</span>
+        ) : null}
         {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
           <span className="shrink-0 font-mono text-[11px] tabular-nums text-red">
             exit {part.exitCode}
+          </span>
+        ) : null}
+        {failed ? (
+          <span
+            title={detail ?? 'This step failed'}
+            className="shrink-0 text-[11px] text-red underline decoration-dotted decoration-from-font underline-offset-2"
+          >
+            Failed
           </span>
         ) : null}
         {part.durationMs !== undefined ? (
@@ -1175,12 +1238,15 @@ export function Part({
   onRespond,
   sessionId,
   onViewPlan,
+  usage,
 }: {
   part: MessagePart
   onRespond: (requestId: string, decision: string, meta?: { customText?: string; always?: boolean; allow?: boolean }) => void
   sessionId?: string
   /** Opens the right-rail Plan tab (timeline plan preview's "View full plan"). */
   onViewPlan?: () => void
+  /** The turn's usage, attached to the reasoning row's ↑/↓ chips. */
+  usage?: Extract<MessagePart, { kind: 'usage' }>
 }) {
   switch (part.kind) {
     case 'text':
@@ -1188,7 +1254,7 @@ export function Part({
     case 'image':
       return <Image url={sessionId ? `/api/attachments/${sessionId}/${encodeURIComponent(part.fileName)}` : ''} />
     case 'reasoning':
-      return <Reasoning part={part} />
+      return <Reasoning part={part} tokens={usage} />
     case 'tool':
     case 'command':
       return <Step part={part} />
@@ -1272,7 +1338,7 @@ function OrchestrationRow({ part }: { part: Extract<MessagePart, { kind: 'orches
             : `${part.agents.length} agents`}
         </span>
       </div>
-      {part.reply ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-ink-2">{part.reply}</p> : null}
+      {part.reply ? <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-ink">{part.reply}</p> : null}
     </div>
   )
 }

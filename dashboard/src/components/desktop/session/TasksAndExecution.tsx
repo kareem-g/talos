@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   Bot,
+  Brain,
   Check,
   ChevronDown,
   Circle,
@@ -242,6 +243,8 @@ export function ComposerControls({
   busyId,
   mode,
   onChange,
+  part = 'left',
+  subagents,
 }: {
   config?: { options: ConfigOptionLike[]; live?: boolean } | undefined
   agent?: string
@@ -250,6 +253,10 @@ export function ComposerControls({
   /** Live session mode from the agent (e.g. plan ↔ act), when reported. */
   mode?: { id: string; modes: Array<{ id: string; name?: string }> }
   onChange: (id: string, value: string) => void
+  /** Which half of the control row this instance renders. */
+  part?: 'left' | 'right'
+  /** Subagents spawned by this session — renders the popup control. */
+  subagents?: Array<{ id: string; name: string; kind: string; status: 'working' | 'completed' | 'failed' }>
 }) {
   void agent // no per-agent filtering: every advertised choice stays offered
   void modelsSource
@@ -272,20 +279,49 @@ export function ComposerControls({
     return [...models, ...thinking, ...rest]
   }, [config?.options, mode])
 
+  // Reference layout: the model/effort chips belong on the RIGHT of the
+  // control row (beside the status ring); everything else sits LEFT next to
+  // the attach button. Callers render ComposerControls twice with part=
+  // "left" / "right".
+  const isPrimary = (option: ConfigOptionLike) => isModelOption(option) || isThinkingOption(option)
+  const primary = ordered.filter(isPrimary)
+  const rest = ordered.filter((option) => !isPrimary(option))
+
+  if (part === 'right') {
+    return (
+      <>
+        {mode && mode.modes.length > 0 ? (
+          <SessionModeChip mode={mode} onChange={(value) => onChange('mode', value)} />
+        ) : null}
+        {primary.map((option) => (
+          <InlineOptionChip
+            key={option.id}
+            option={option}
+            busy={busyId === option.id}
+            onChange={(value) => onChange(option.id, value)}
+            minimal={isThinkingOption(option)}
+          />
+        ))}
+      </>
+    )
+  }
+
   return (
     <>
       <PermissionChip
         currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
         onChange={onChange}
       />
-      {mode && mode.modes.length > 0 ? (
-        <SessionModeChip mode={mode} onChange={(value) => onChange('mode', value)} />
-      ) : null}
-      {ordered.map((option) => (
+      {subagents ? <SubagentsControl subagents={subagents} /> : null}
+      {rest.map((option) => (
         <InlineOptionChip key={option.id} option={option} busy={busyId === option.id} onChange={(value) => onChange(option.id, value)} />
       ))}
     </>
   )
+}
+
+function isThinkingOption(option: ConfigOptionLike): boolean {
+  return ['effort', 'thinking', 'reasoning'].includes(option.id) || option.id.includes('effort')
 }
 
 function isModelOption(option: ConfigOptionLike): boolean {
@@ -351,6 +387,10 @@ export function PermissionChip({
   // The config_id is 'permission_mode' (AgentDeck-specific), not 'mode' (agent-native).
   const toAgentMode = (id: PermissionMode['id']): string => id
 
+  // Icon-only trigger, like the reference: the orange shield IS the
+  // permission state; the label lives in the dropdown and the tooltip.
+  const TriggerIcon = selected.icon
+
   return (
     <div ref={ref} className="relative shrink-0">
       <button
@@ -358,15 +398,15 @@ export function PermissionChip({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={`Permission: ${selected.label}`}
         title={`${selected.label} — ${selected.subtext}`}
         className={cn(
-          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
-          'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
-          open && 'bg-hover border-line-strong',
+          'inline-flex size-7 shrink-0 items-center justify-center rounded-lg',
+          'transition-colors duration-150 hover:bg-hover-2',
+          open && 'bg-hover-2',
         )}
       >
-        <span className="max-w-[120px] truncate font-medium">{selected.label}</span>
-        <ChevronDown size={11} className={cn('shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
+        <TriggerIcon size={15} className="shrink-0 text-orange" />
       </button>
 
       {open ? (
@@ -408,6 +448,94 @@ export function PermissionChip({
   )
 }
 
+/**
+ * Subagents control — appears in the composer's control row only when this
+ * session has spawned subagents. The count badge shows while at least one is
+ * running and hides when the work settles; the popup (like the context-windows
+ * popover) lists every child with its live status.
+ */
+export function SubagentsControl({
+  subagents,
+}: {
+  subagents: Array<{ id: string; name: string; kind: string; status: 'working' | 'completed' | 'failed' }>
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [open])
+
+  const running = subagents.filter((subagent) => subagent.status === 'working').length
+  if (subagents.length === 0) return null
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`Subagents: ${running} running, ${subagents.length} total`}
+        title={running > 0 ? `${running} subagent${running === 1 ? '' : 's'} running` : `${subagents.length} subagent${subagents.length === 1 ? '' : 's'}`}
+        className={cn(
+          'relative inline-flex size-7 shrink-0 items-center justify-center rounded-lg',
+          'transition-colors duration-150 hover:bg-hover-2',
+          open && 'bg-hover-2',
+        )}
+      >
+        <Bot size={15} className={cn('shrink-0', running > 0 ? 'text-green' : 'text-ink-3')} />
+        {running > 0 ? (
+          <span
+            aria-hidden
+            className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 font-mono text-[8.5px] font-semibold leading-none text-white"
+          >
+            {running}
+          </span>
+        ) : null}
+      </button>
+
+      {open ? (
+        <div
+          className={cn(
+            'absolute bottom-full left-0 z-40 mb-2 w-64 animate-up rounded-xl border border-line',
+            'bg-surface p-2 shadow-overlay',
+          )}
+          role="dialog"
+          aria-label="Subagents"
+        >
+          <p className="mb-1 px-1 text-[11px] font-medium text-ink-2">
+            Subagents · {running > 0 ? `${running} running` : `${subagents.length} total`}
+          </p>
+          <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto scroll-thin">
+            {subagents.map((subagent) => (
+              <div key={subagent.id} className="flex items-center gap-2 rounded-lg px-1.5 py-1.5">
+                {subagent.status === 'working' ? (
+                  <span className="size-2 shrink-0 animate-spin rounded-full border-[1.5px] border-green border-t-transparent" aria-hidden />
+                ) : (
+                  <Check
+                    size={11}
+                    strokeWidth={2.4}
+                    className={cn('shrink-0', subagent.status === 'failed' ? 'text-red' : 'text-green')}
+                  />
+                )}
+                <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-2">{subagent.name}</span>
+                {subagent.kind ? (
+                  <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{subagent.kind}</span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /* ── Session mode chip (plan / act) ─────────────────────────────────────── */
 
 /**
@@ -438,7 +566,7 @@ function SessionModeChip({
         aria-haspopup="listbox"
         title={`Session mode: ${label}`}
         className={cn(
-          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
+          'inline-flex min-h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
           'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
           open && 'bg-hover border-line-strong',
         )}
@@ -505,10 +633,13 @@ function InlineOptionChip({
   option,
   busy,
   onChange,
+  minimal,
 }: {
   option: ConfigOptionLike
   busy?: boolean
   onChange: (value: string) => void
+  /** Minimal chips (effort) show an icon + value only — no dimension name. */
+  minimal?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
@@ -536,12 +667,16 @@ function InlineOptionChip({
         aria-busy={busy}
         title={`${option.name}: ${currentLabel}`}
         className={cn(
-          'inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
+          'inline-flex min-h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
           'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
           'disabled:opacity-40',
         )}
       >
-        <span className="shrink-0 opacity-70">{option.name}</span>
+        {minimal ? (
+          <Brain size={13} className="shrink-0 opacity-70" />
+        ) : (
+          <span className="shrink-0 opacity-70">{option.name}</span>
+        )}
         <span className="min-w-0 max-w-44 truncate font-medium">{currentLabel}</span>
         {busy ? (
           <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" aria-hidden />

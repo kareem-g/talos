@@ -1740,12 +1740,24 @@ pub(crate) async fn spawn_session(
     // Custom API providers (OpenAI-compatible, Anthropic-compatible) — direct HTTP, no subprocess.
     {
         let cfg = state.config.read().await;
-        let is_api = cfg.settings().agents.api_providers.iter().any(|p| p.id == agent);
-        let pending_model = requested_model.clone();
+        let provider = cfg.settings().agents.api_providers.iter().find(|p| p.id == agent).cloned();
+        let is_api = provider.is_some();
         drop(cfg);
         if is_api {
-            if let Some(model) = pending_model {
+            // Persist the EFFECTIVE model, not only an explicitly requested
+            // one: the create dialog renders the provider's default but only
+            // sends `model` when the user touches the picker, and without
+            // this the chip fell back to "Not set" on every session switch.
+            let effective_model = requested_model
+                .or_else(|| provider.as_ref().and_then(|p| p.default_model.clone()))
+                .or_else(|| provider.as_ref().and_then(|p| p.models.first().cloned()));
+            if let Some(model) = effective_model {
                 let _ = state.session_manager.set_pending_config(&session.id, "model", &model).await;
+            }
+            // Same for effort: requested at creation → stored so read_config
+            // shows it after switching sessions or daemon restarts.
+            if let Some(effort) = requested_effort {
+                let _ = state.session_manager.set_pending_config(&session.id, "effort", &effort).await;
             }
             return crate::agents::api::spawn_api_session(state, session, prompt.as_deref()).await;
         }

@@ -140,8 +140,31 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
     let mut options = provider_opt.map(|p| p.config_options).unwrap_or_default();
     if let Ok(pending) = state.session_manager.pending_config(session_id).await {
         for (key, val) in pending {
+            // Internal harness flags are not user-facing configuration.
+            if key == "subagent" {
+                continue;
+            }
             if let Some(opt) = options.iter_mut().find(|o| o.id == key) {
                 opt.current_value = Some(val);
+            } else {
+                // A stored choice the provider descriptor does not know (e.g.
+                // permission_mode, or a dimension added after the session
+                // started) must still reach the UI — dropping it made the
+                // chips fall back to "Not set" on every session switch.
+                options.push(crate::providers::types::ConfigOption {
+                    id: key.clone(),
+                    name: pending_option_name(&key),
+                    category: None,
+                    option_type: crate::providers::types::ConfigOptionType::Select,
+                    current_value: Some(val.clone()),
+                    choices: vec![crate::providers::types::ConfigChoice {
+                        value: val.clone(),
+                        name: val.clone(),
+                        description: None,
+                    }],
+                    allows_custom_value: false,
+                    mutability: crate::providers::types::ConfigMutability::StartOnly,
+                });
             }
         }
     }
@@ -153,6 +176,18 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
         live: false,
         interactive_terminal,
     })
+}
+
+/// Human label for a stored config key the provider descriptor does not
+/// declare ("permission_mode" → "Permission mode").
+fn pending_option_name(key: &str) -> String {
+    let mut parts = key.split('_').map(str::to_string).collect::<Vec<_>>();
+    for part in parts.iter_mut() {
+        if let Some(first) = part.get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
+    }
+    parts.join(" ")
 }
 
 /// Apply a config change to a session.
@@ -269,7 +304,13 @@ pub async fn apply_config(
     };
 
     // Persist the intent so a later spawn honors it, but only where it can be.
-    if matches!(applied, ConfigApplied::NextRun { .. }) {
+    // A `Live` mutability on a session with no running agent cannot apply
+    // immediately — nothing is there to apply to — so the choice must be
+    // stored instead of discarded, or it silently vanished between sessions.
+    let session_live = current.live;
+    if matches!(applied, ConfigApplied::NextRun { .. })
+        || (matches!(applied, ConfigApplied::Immediate) && !session_live)
+    {
         state
             .session_manager
             .set_pending_config(session_id, config_id, value)

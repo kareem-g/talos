@@ -16,10 +16,22 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, StopIcon } from './ui'
-import { CornerUpLeft, GripVertical, Paperclip, Pencil, Trash2, X } from 'lucide-react'
+import { CornerUpLeft, GripVertical, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { skillsApi, workspaceApi, type DirListing } from '@/lib/api'
 import { cn } from '@/lib/format'
 import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
+
+/** Real token accounting for the context-window meter. */
+export interface ContextUsage {
+  /** Tokens currently in the agent's context (last reported input). */
+  usedTokens: number
+  /** The model's context window, when known. */
+  windowTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  costUsd?: number
+}
 
 const MAX_HEIGHT_PX = 168
 
@@ -131,6 +143,9 @@ export function Composer({
   onReorderQueued,
   onUploadFiles,
   draftSeed,
+  contextUsage,
+  sessionId,
+  controlsRight,
 }: {
   onSend: (text: string, attachments: AttachmentRef[]) => void
   onStop?: () => void
@@ -167,11 +182,19 @@ export function Composer({
   onUploadFiles?: (files: File[]) => Promise<AttachmentRef[]>
   /** Load a message back into the field (set when the user edits a queued one). */
   draftSeed?: { text: string; attachments: AttachmentRef[]; nonce: number } | null
+  /** Real token accounting for the context-window meter, when reported. */
+  contextUsage?: ContextUsage
+  /** Session id — serves uploaded-image previews from the daemon. */
+  sessionId?: string
+  /** Config chips for the control row's right side (model, effort, …). */
+  controlsRight?: ReactNode
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
   const [attachments, setAttachments] = useState<AttachmentRef[]>([])
   const [uploading, setUploading] = useState(false)
+  /** Local object URLs for image attachments, keyed by ref — instant thumbs. */
+  const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -418,8 +441,21 @@ export function Composer({
     if (!onUploadFiles || files.length === 0) return
     setUploading(true)
     try {
+      // Local preview URLs for image attachments — the uploaded ref's fileName
+      // is the server's stamped name, but the File in hand previews instantly.
+      const localUrls = new Map(files.map((file) => [file.name, URL.createObjectURL(file)]))
       const refs = await onUploadFiles(files)
-      if (refs.length > 0) setAttachments((current) => [...current, ...refs])
+      if (refs.length > 0) {
+        setThumbUrls((current) => {
+          const next = { ...current }
+          for (const ref of refs) {
+            const url = localUrls.get(ref.name) ?? localUrls.get(ref.fileName)
+            if (url) next[ref.ref] = url
+          }
+          return next
+        })
+        setAttachments((current) => [...current, ...refs])
+      }
     } catch (error) {
       // Surface via the parent's notice channel if it wired one; here, keep
       // the picked files out of the draft rather than sending a broken ref.
@@ -430,6 +466,11 @@ export function Composer({
   }
 
   function removeAttachment(ref: string) {
+    setThumbUrls((current) => {
+      const { [ref]: removed, ...rest } = current
+      if (removed) URL.revokeObjectURL(removed)
+      return rest
+    })
     setAttachments((current) => current.filter((a) => a.ref !== ref))
   }
 
@@ -583,7 +624,9 @@ export function Composer({
 
         <div
           className={cn(
-            'overflow-hidden rounded-2xl border bg-surface/90 shadow-raised backdrop-blur-sm',
+            // No overflow-hidden: the context-windows popover opens above the
+            // field, and clipping it would slice the top of the card.
+            'rounded-xl border bg-surface',
             'transition-colors duration-150',
             focused ? 'border-accent/30' : 'border-line/60',
           )}
@@ -604,27 +647,100 @@ export function Composer({
             }
           }}
         >
-          {/* Attachment chips — shown above the draft once files are picked. */}
+          {/* Attachment previews — images as thumbnails, files as chips. */}
           {attachments.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
-              {attachments.map((a) => (
-                <span
-                  key={a.ref}
-                  className="inline-flex max-w-[220px] items-center gap-1 rounded-lg border border-line/50 bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
-                  title={a.path}
-                >
-                  <Paperclip size={10} className="shrink-0 text-ink-3" />
-                  <span className="min-w-0 truncate">{a.fileName}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(a.ref)}
-                    aria-label={`Remove ${a.fileName}`}
-                    className="shrink-0 text-ink-3 transition-colors hover:text-red"
+              {attachments.map((a) =>
+                a.contentType?.startsWith('image/') ? (
+                  <span
+                    key={a.ref}
+                    className="group/att relative overflow-hidden rounded-lg border border-line/50"
+                    title={a.fileName}
                   >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
+                    <img
+                      src={
+                        thumbUrls[a.ref] ??
+                        (sessionId
+                          ? `/api/attachments/${sessionId}/${encodeURIComponent(a.fileName)}`
+                          : undefined)
+                      }
+                      alt={a.fileName}
+                      className="block size-14 object-cover"
+                      onError={(event) => {
+                        ;(event.currentTarget as HTMLImageElement).style.visibility = 'hidden'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.ref)}
+                      aria-label={`Remove ${a.fileName}`}
+                      className="absolute right-0.5 top-0.5 rounded bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover/att:opacity-100"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ) : (
+                  <span
+                    key={a.ref}
+                    className="inline-flex max-w-[220px] items-center gap-1 rounded-lg border border-line/50 bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
+                    title={a.path}
+                  >
+                    <Paperclip size={10} className="shrink-0 text-ink-3" />
+                    <span className="min-w-0 truncate">{a.fileName}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.ref)}
+                      aria-label={`Remove ${a.fileName}`}
+                      className="shrink-0 text-ink-3 transition-colors hover:text-red"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ),
+              )}
+            </div>
+          ) : null}
+          {/* Queued follow-up: while the agent works, the draft renders as a
+              card extending from the top of the composer — what you type IS
+              the queue, visible at a glance. */}
+          {working && (value.trim().length > 0 || attachments.some((a) => a.contentType?.startsWith('image/'))) ? (
+            <div className="rounded-t-xl border-b border-line/50 bg-inset/40 px-3.5 pb-2.5 pt-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ink-3">
+                  Queued follow-up
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setValue('')
+                    setAttachments([])
+                  }}
+                  className="shrink-0 text-ink-3 transition-colors hover:text-red"
+                  aria-label="Discard queued draft"
+                  title="Discard this queued draft"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              {attachments.some((a) => a.contentType?.startsWith('image/')) ? (
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                  {attachments
+                    .filter((a) => a.contentType?.startsWith('image/'))
+                    .map((a) => (
+                      <img
+                        key={a.ref}
+                        src={thumbUrls[a.ref]}
+                        alt={a.fileName}
+                        className="block size-12 rounded-md border border-line/50 object-cover"
+                      />
+                    ))}
+                </div>
+              ) : null}
+              {value.trim() ? (
+                <p className="line-clamp-5 whitespace-pre-wrap break-words text-[12.5px] leading-[1.6] text-ink-2">
+                  {value}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <div className="relative">
@@ -708,8 +824,8 @@ export function Composer({
             />
           </div>
 
-          <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1.5">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
               {onUploadFiles ? (
                 <>
                   <button
@@ -726,7 +842,7 @@ export function Composer({
                     {uploading ? (
                       <span className="size-3.5 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" aria-hidden />
                     ) : (
-                      <Paperclip size={14} />
+                      <Plus size={15} strokeWidth={1.8} />
                     )}
                   </button>
                   <input
@@ -751,22 +867,23 @@ export function Composer({
                   ) : null}
                 </>
               ) : null}
-              <span
-                aria-hidden
-                title="Type / for commands, @ for files"
-                className="hidden shrink-0 font-mono text-[11px] text-ink-3 sm:block"
-              >
-                / · @
-              </span>
-              <div className="scroll-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">{controls}</div>
+              {/* No overflow scrolling here: a scroll container would clip the popups
+    (subagents, permission) that open upward from these chips. Chips wrap
+    instead on narrow screens. */}
+<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{controls}</div>
             </div>
+
+            {/* One sleek control: a spinner while the agent works, a quiet ring
+                when idle — and clicking it opens the context-windows popover. */}
+            <StatusContextControl working={working} usage={contextUsage} />
+            {controlsRight}
 
             {working ? (
               <span className="flex shrink-0 items-center gap-1.5">
                 {/* While the agent works, the send button queues the draft
-                    (Enter does the same); it sits beside Stop, as in the
-                    reference design — so queueing never depends on the
-                    keyboard alone. */}
+                    (Enter does the same); it sits beside Stop — so queueing
+                    never depends on the keyboard alone. Square chips, like the
+                    reference control row. */}
                 {onQueue && canSend ? (
                   <button
                     type="button"
@@ -774,7 +891,7 @@ export function Composer({
                     aria-label="Queue follow-up"
                     title="Queue this follow-up for the next turn"
                     className={cn(
-                      'flex size-8 shrink-0 items-center justify-center rounded-full',
+                      'flex size-8 shrink-0 items-center justify-center rounded-lg',
                       'bg-accent text-white transition-[background-color,transform] duration-150',
                       'hover:brightness-110 active:scale-95',
                     )}
@@ -788,7 +905,7 @@ export function Composer({
                   aria-label="Stop the response"
                   title="Stop the running response — the session stays open for a new message"
                   className={cn(
-                    'flex size-8 items-center justify-center rounded-full',
+                    'flex size-8 items-center justify-center rounded-lg',
                     'bg-red-tint text-red transition-[background-color,transform] duration-150',
                     'hover:bg-red-tint active:scale-95',
                   )}
@@ -803,7 +920,7 @@ export function Composer({
                 disabled={!canSend}
                 aria-label="Send"
                 className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full',
+                  'flex size-8 shrink-0 items-center justify-center rounded-lg',
                   'transition-[background-color,color,transform] duration-150',
                   canSend ? 'bg-ink text-canvas active:scale-95' : 'bg-hover text-ink-3',
                 )}
@@ -814,6 +931,135 @@ export function Composer({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ── Context-window meter ────────────────────────────────────────────────── */
+
+/** Compact token formatting shared with the chat's usage chips. */
+function formatTokens(count: number | undefined): string | null {
+  if (count === undefined || count <= 0) return null
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 10_000) return `${Math.round(count / 1000)}k`
+  if (count >= 1_000) return `${(count / 1000).toFixed(1)}k`
+  return String(count)
+}
+
+/**
+ * The composer's single status/context control, in the reference design's
+ * idiom: a sleek spinner while the agent works, a quiet ring when idle — and
+ * clicking it opens the context-windows popover with the agent's REAL token
+ * accounting. No invented categories: only what the backend actually reports
+ * (context sent, new input, output, cache reads) plus the configured window.
+ */
+function StatusContextControl({ working, usage }: { working?: boolean; usage?: ContextUsage }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [open])
+
+  const used = usage && usage.usedTokens > 0 ? usage.usedTokens : (usage?.inputTokens ?? 0)
+  const pct = usage?.windowTokens && used > 0 ? Math.min(100, (used / usage.windowTokens) * 100) : undefined
+  const usedLabel = formatTokens(used) ?? null
+  const windowLabel = usage?.windowTokens ? formatTokens(usage.windowTokens) : undefined
+  const cacheRate =
+    usage?.cacheReadTokens !== undefined &&
+    usage?.inputTokens !== undefined &&
+    usage.cacheReadTokens + usage.inputTokens > 0
+      ? (usage.cacheReadTokens / (usage.cacheReadTokens + usage.inputTokens)) * 100
+      : undefined
+
+  const rows: Array<{ label: string; value: string }> = usedLabel
+    ? [
+        { label: 'Context sent', value: usedLabel },
+        ...(usage?.inputTokens !== undefined
+          ? [{ label: 'New input', value: formatTokens(usage.inputTokens) ?? '0' }]
+          : []),
+        ...(usage?.outputTokens !== undefined
+          ? [{ label: 'Last output', value: formatTokens(usage.outputTokens) ?? '0' }]
+          : []),
+        ...(usage?.cacheReadTokens !== undefined
+          ? [{ label: 'Cache reads', value: formatTokens(usage.cacheReadTokens) ?? '0' }]
+          : []),
+        ...(windowLabel ? [{ label: 'Context window', value: windowLabel }] : []),
+      ]
+    : []
+
+  return (
+    <div className="relative shrink-0 pr-0.5" ref={ref}>
+      <button
+        type="button"
+        onClick={() => (usage ? setOpen(!open) : undefined)}
+        aria-label={usage ? 'Context window usage' : undefined}
+        title={working ? 'Agent is working' : usage ? 'Context window usage' : 'Agent is idle'}
+        className={cn(
+          'flex size-5 items-center justify-center rounded-full transition-colors',
+          usage && 'hover:bg-hover',
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'size-3 rounded-full border-[1.5px]',
+            working
+              ? 'animate-spin border-ink-2 border-t-transparent'
+              : 'border-ink-3/70',
+          )}
+        />
+      </button>
+
+      {open && usage ? (
+        <div
+          className={cn(
+            'absolute bottom-full right-0 z-40 mb-2 w-64 animate-up rounded-xl border border-line',
+            'bg-surface p-3 shadow-overlay',
+          )}
+          role="dialog"
+          aria-label="Context windows"
+        >
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <span className="text-[12px] font-medium text-ink">Context windows</span>
+            <span className="font-mono text-[11px] tabular-nums text-ink-2">
+              {usedLabel}
+              {windowLabel ? ` / ${windowLabel}` : ''}
+              {pct !== undefined ? ` (${pct.toFixed(1)}%)` : ''}
+            </span>
+          </div>
+          {pct !== undefined ? (
+            <div className="mb-2.5 h-1.5 overflow-hidden rounded-full bg-field">
+              <div
+                className={cn('h-full rounded-full', pct > 85 ? 'bg-red' : pct > 60 ? 'bg-orange' : 'bg-accent')}
+                style={{ width: `${Math.max(2, pct)}%` }}
+              />
+            </div>
+          ) : null}
+          <dl className="flex flex-col gap-1">
+            {rows.map((row) => (
+              <div key={row.label} className="flex items-baseline justify-between gap-2">
+                <dt className="flex items-center gap-1.5 text-[11.5px] text-ink-2">
+                  <span aria-hidden className="size-1.5 rounded-full bg-accent/60" />
+                  {row.label}
+                </dt>
+                <dd className="font-mono text-[11px] tabular-nums text-ink">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+          {cacheRate !== undefined ? (
+            <div className="mt-2 flex items-baseline justify-between border-t border-line pt-2">
+              <span className="text-[11.5px] text-ink-3">Average cache hit rate</span>
+              <span className="font-mono text-[11px] tabular-nums text-ink">{cacheRate.toFixed(1)}%</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

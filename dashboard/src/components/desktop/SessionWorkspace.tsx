@@ -32,7 +32,6 @@ import { TopBar } from './TopBar'
 import { LeftSidebar } from './LeftSidebar'
 import { RightRail, type RightRailHandle } from './session/RightRail'
 import { FloatingHud } from './session/FloatingHud'
-import { SubagentsStrip } from './session/SubagentsStrip'
 import { getSideSessionId, setSideSessionId } from './session/RightRailViews'
 
 const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
@@ -113,12 +112,7 @@ export function SessionWorkspace({
   }
 
   // Open the right Agent Workspace pane if it is collapsed, then focus the
-  // Agents tab (used by the running-subagent strip above the composer).
   const rightRailRef = useRef<RightRailHandle>(null)
-  const openSubagent = () => {
-    if (!rightOpen) toggleRight()
-    rightRailRef.current?.openTab('agents')
-  }
 
   /* ── Side sessions (/side, /btw) + # mention context ───────────────────── */
 
@@ -393,7 +387,7 @@ export function SessionWorkspace({
                   type="button"
                   onClick={() => setEditingTitle(true)}
                   title="Rename session"
-                  className="truncate text-left text-[12.5px] font-medium tracking-[-0.01em] hover:underline"
+                  className="block w-full truncate text-left text-[12.5px] font-medium tracking-[-0.01em] hover:underline"
                 >
                   {session.name}
                 </button>
@@ -517,9 +511,6 @@ export function SessionWorkspace({
                     }}
                   />
                 </div>
-                {/* Running subagents, above the composer — click to open that
-                    subagent's session tab in the right Agent Workspace pane. */}
-                <SubagentsStrip session={session} onOpenAgentPanel={openSubagent} />
                 <StateZone
                   session={session}
                   conversation={conversation}

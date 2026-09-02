@@ -20,6 +20,7 @@
 import { useMemo, useState } from 'react'
 import { Composer } from './Composer'
 import { ComposerControls } from '@/components/desktop/session/TasksAndExecution'
+import { deriveSubagents } from '@/components/desktop/session/workspaceData'
 import { Button } from './ui'
 import LoadingState from './LoadingState'
 import { socket } from '@/lib/socket'
@@ -258,6 +259,9 @@ export function StateZone({
   // Set when the user edits a queued message: hands the draft back to the composer.
   const [draftSeed, setDraftSeed] = useState<{ text: string; attachments: AttachmentRef[]; nonce: number } | null>(null)
 
+  // Subagents this session spawned — feeds the composer's subagents popup.
+  const subagents = deriveSubagents(conversation.messages)
+
   const working = state === 'working' || state === 'starting'
 
   const resume = () => {
@@ -269,6 +273,31 @@ export function StateZone({
     setUpdating(id)
     void Promise.resolve(onSetConfig(id, value)).finally(() => setUpdating(null))
   }
+
+  // Real context-window data: the agent's most recent reported usage against
+  // the configured window. Scanned newest-first across all turns — the final
+  // message of a turn doesn't always carry the accounting.
+  const contextUsage = (() => {
+    let usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; costUsd?: number } | undefined
+    for (let index = conversation.messages.length - 1; index >= 0 && !usage; index--) {
+      const message = conversation.messages[index]
+      if (message.role !== 'assistant') continue
+      usage = message.parts.find(
+        (part): part is Extract<typeof part, { kind: 'usage' }> => part.kind === 'usage',
+      )
+    }
+    if (!usage || ((usage.inputTokens ?? 0) <= 0 && (usage.outputTokens ?? 0) <= 0)) return undefined
+    const windowOption = config?.options.find((option) => option.id === 'context_window')
+    const windowTokens = Number.parseInt(windowOption?.currentValue ?? '', 10)
+    return {
+      usedTokens: usage.inputTokens ?? 0,
+      windowTokens: Number.isFinite(windowTokens) && windowTokens > 0 ? windowTokens : undefined,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      costUsd: usage.costUsd,
+    }
+  })()
 
   const handleEditQueued = (id: string) => {
     const message = editQueued(session.id, id)
@@ -302,8 +331,23 @@ export function StateZone({
       onReorderQueued={(from, to) => reorderQueued(session.id, from, to)}
       onUploadFiles={(files) => attachmentsApi.upload(session.id, files)}
       draftSeed={draftSeed}
+      sessionId={session.id}
+      contextUsage={contextUsage}
       controls={
         <ComposerControls
+          part="left"
+          config={config}
+          agent={session.agent}
+          modelsSource={provider?.modelsSource}
+          busyId={updating}
+          mode={conversation.mode}
+          onChange={handleSetConfig}
+          subagents={subagents}
+        />
+      }
+      controlsRight={
+        <ComposerControls
+          part="right"
           config={config}
           agent={session.agent}
           modelsSource={provider?.modelsSource}
