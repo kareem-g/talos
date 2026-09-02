@@ -496,6 +496,51 @@ pub(crate) fn effort_config_option(reasoning: Option<bool>, extended: bool) -> O
     })
 }
 
+/// Build the effort config option from an API-probed list of accepted levels.
+/// `Some(levels)` shows exactly those levels; `Some(empty)` returns `None` (the
+/// API rejects the parameter entirely); `None` (probe couldn't tell) falls back
+/// to the heuristic via `effort_config_option(reasoning, extended)`.
+pub(crate) fn effort_config_option_from_levels(
+    probed: Option<&[String]>,
+    reasoning: Option<bool>,
+    extended: bool,
+) -> Option<ConfigOption> {
+    match probed {
+        Some(levels) if !levels.is_empty() => {
+            let choices: Vec<ConfigChoice> = levels
+                .iter()
+                .filter_map(|level| {
+                    let (name, description) = match level.as_str() {
+                        "low" => ("Low", "Fast, cheaper reasoning"),
+                        "medium" => ("Medium", "Balanced reasoning"),
+                        "high" => ("High", "Deep reasoning, slower"),
+                        "xhigh" => ("X-High", "Extended deep reasoning (Anthropic-style)"),
+                        "max" => ("Max", "Maximum reasoning budget"),
+                        _ => return None,
+                    };
+                    Some(ConfigChoice {
+                        value: level.clone(),
+                        name: name.to_string(),
+                        description: Some(description.to_string()),
+                    })
+                })
+                .collect();
+            Some(ConfigOption {
+                id: "effort".to_string(),
+                name: "Effort".to_string(),
+                category: Some("model".to_string()),
+                option_type: ConfigOptionType::Select,
+                current_value: None,
+                choices,
+                allows_custom_value: true,
+                mutability: ConfigMutability::Live,
+            })
+        }
+        Some(_) => None, // API rejects the parameter outright
+        None => effort_config_option(reasoning, extended), // probe couldn't tell
+    }
+}
+
 /// Output token cap per turn — the "context window" knob for the request.
 pub(crate) fn max_output_tokens_config_option() -> ConfigOption {
     ConfigOption {

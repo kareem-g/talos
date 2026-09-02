@@ -89,6 +89,10 @@ pub struct ApiProbeResult {
     pub models: Vec<Model>,
     pub capabilities: ProviderCapabilities,
     pub error: Option<String>,
+    /// Which `reasoning_effort` levels the endpoint actually accepts.
+    /// `None` = unknown; `Some(vec)` = exactly those levels accepted;
+    /// `Some(empty)` = the API rejects the parameter entirely.
+    pub effort_levels: Option<Vec<String>>,
 }
 
 /// Probe an API provider by fetching its model list.
@@ -145,6 +149,7 @@ pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
                         interrupt: Some(true),
                     },
                     error: None,
+                    effort_levels: None,
                 };
             }
             return ApiProbeResult {
@@ -173,6 +178,7 @@ pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
                     interrupt: Some(true),
                 },
                 error: None,
+                    effort_levels: None,
             };
         }
         return ApiProbeResult {
@@ -201,6 +207,7 @@ pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
                         interrupt: Some(true),
                     },
                     error: None,
+                    effort_levels: None,
                 };
             }
             return ApiProbeResult {
@@ -237,6 +244,19 @@ pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
         filtered
     };
 
+    // The API is reachable: ask it which reasoning_effort levels it actually
+    // accepts. This replaces the transport-type guess — AgentRouter is
+    // Anthropic-compatible yet rejects the parameter outright, and only a real
+    // request can tell the difference.
+    let probe_model = models
+        .first()
+        .map(|m| m.id.clone())
+        .or_else(|| provider.default_model.clone());
+    let effort_levels = match probe_model.as_deref() {
+        Some(model) => probe_effort_levels(provider, model).await,
+        None => None,
+    };
+
     ApiProbeResult {
         models,
         capabilities: ProviderCapabilities {
@@ -251,7 +271,80 @@ pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
             interrupt: Some(true),
         },
         error: None,
+        effort_levels,
     }
+}
+
+/// The candidate `reasoning_effort` levels, in display order.
+const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// Probe which `reasoning_effort` levels the endpoint actually accepts by
+/// sending one minimal completion request per level. `None` when the probe
+/// could not reach the API (network/auth — unknown), `Some(vec)` with exactly
+/// the accepted levels, `Some(empty)` when the parameter is rejected outright.
+pub async fn probe_effort_levels(
+    provider: &ApiProvider,
+    model: &str,
+) -> Option<Vec<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .ok()?;
+
+    let endpoint = match provider.transport {
+        ApiTransport::OpenAiCompatible => {
+            format!("{}/chat/completions", provider.api_url.trim_end_matches('/'))
+        }
+        ApiTransport::AnthropicCompatible => {
+            format!("{}/v1/messages", provider.api_url.trim_end_matches('/'))
+        }
+    };
+    let mut request = client.post(&endpoint);
+    if let Some(key) = provider.api_key.as_deref().filter(|k| !k.is_empty()) {
+        match provider.transport {
+            ApiTransport::AnthropicCompatible => {
+                request = request.header("x-api-key", key).header("anthropic-version", "2023-06-01");
+            }
+            ApiTransport::OpenAiCompatible => {
+                request = request.bearer_auth(key);
+            }
+        }
+    }
+    for (key, value) in &provider.extra_headers {
+        request = request.header(key.as_str(), value.as_str());
+    }
+
+    let mut accepted = Vec::new();
+    for level in EFFORT_LEVELS {
+        let body = serde_json::json!({
+            "model": model,
+            "max_tokens": 1,
+            "stream": false,
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": level,
+        });
+        let Some(request) = request.try_clone() else { return None; };
+        let resp = match request.json(&body).send().await {
+            Ok(resp) => resp,
+            Err(_) => return None, // network/auth failure — unknown
+        };
+        if resp.status().is_success() {
+            accepted.push(level.to_string());
+            continue;
+        }
+        // A rejection because the parameter is unknown — stop probing.
+        let text = resp.text().await.unwrap_or_default().to_lowercase();
+        if text.contains("reasoning_effort")
+            || text.contains("unexpected keyword")
+            || text.contains("unknown parameter")
+            || text.contains("extra fields")
+        {
+            break;
+        }
+        // Any other error (rate limit, quota) — treat as unknown overall.
+        return None;
+    }
+    Some(accepted)
 }
 
 /// Extract model ids from a JSON API response.
@@ -347,13 +440,13 @@ pub fn build_api_descriptor(
 
     let mut config_options = vec![model_config_option(&result.models)];
 
-    // Effort only exists when the model family supports reasoning — the
-    // probe's capability flag decides, so the UI never offers a knob the
-    // model cannot honor.
-    let anthropic_extended = matches!(provider.transport, ApiTransport::AnthropicCompatible);
-    if let Some(effort) = crate::providers::types::effort_config_option(
+    // Effort options: the probe determined which reasoning_effort levels the
+    // API actually accepts. This replaces the transport-type guess — the only
+    // way to know whether the endpoint supports the field is to try it.
+    if let Some(effort) = crate::providers::types::effort_config_option_from_levels(
+        result.effort_levels.as_deref(),
         result.capabilities.reasoning,
-        anthropic_extended,
+        matches!(provider.transport, ApiTransport::AnthropicCompatible),
     ) {
         config_options.push(effort);
     }
