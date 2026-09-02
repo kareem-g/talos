@@ -968,6 +968,8 @@ function StatusContextControl({ working, usage }: { working?: boolean; usage?: C
 
   const used = usage && usage.usedTokens > 0 ? usage.usedTokens : (usage?.inputTokens ?? 0)
   const pct = usage?.windowTokens && used > 0 ? Math.min(100, (used / usage.windowTokens) * 100) : undefined
+  const isNearFull = pct !== undefined && pct >= 90
+  const isOverflow = pct !== undefined && pct >= 100
   const usedLabel = formatTokens(used) ?? null
   const windowLabel = usage?.windowTokens ? formatTokens(usage.windowTokens) : undefined
   const cacheRate =
@@ -993,27 +995,72 @@ function StatusContextControl({ working, usage }: { working?: boolean; usage?: C
       ]
     : []
 
+  // Circular progress ring geometry
+  const ringRadius = 5.5
+  const ringCircumference = 2 * Math.PI * ringRadius
+  const ringOffset = pct !== undefined ? ringCircumference * (1 - pct / 100) : ringCircumference
+  const ringColor = isOverflow ? '#ef4444' : pct !== undefined && pct > 85 ? '#f97316' : pct !== undefined && pct > 60 ? '#eab308' : '#22c55e'
+
   return (
     <div className="relative shrink-0 pr-0.5" ref={ref}>
       <button
         type="button"
         onClick={() => (usage ? setOpen(!open) : undefined)}
         aria-label={usage ? 'Context window usage' : undefined}
-        title={working ? 'Agent is working' : usage ? 'Context window usage' : 'Agent is idle'}
+        title={working ? 'Agent is working' : isOverflow ? 'Context full — will auto-compress' : usage ? 'Context window usage' : 'Agent is idle'}
         className={cn(
           'flex size-5 items-center justify-center rounded-full transition-colors',
           usage && 'hover:bg-hover',
         )}
       >
-        <span
-          aria-hidden
-          className={cn(
-            'size-3 rounded-full border-[1.5px]',
-            working
-              ? 'animate-spin border-ink-2 border-t-transparent'
-              : 'border-ink-3/70',
-          )}
-        />
+        {working ? (
+          <span className="size-3 animate-spin rounded-full border-[1.5px] border-ink-2 border-t-transparent" aria-hidden />
+        ) : (
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            aria-hidden
+            className={cn(
+              isOverflow && 'animate-pulse',
+            )}
+          >
+            <circle
+              cx="7"
+              cy="7"
+              r={ringRadius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="text-ink-3/40"
+              strokeLinecap="round"
+            />
+            <circle
+              cx="7"
+              cy="7"
+              r={ringRadius}
+              fill="none"
+              stroke={ringColor}
+              strokeWidth="2"
+              strokeDasharray={ringCircumference}
+              strokeDashoffset={ringOffset}
+              strokeLinecap="round"
+              transform="rotate(-90 7 7)"
+              className="transition-all duration-300"
+            />
+            {isOverflow ? (
+              <text
+                x="7"
+                y="9"
+                textAnchor="middle"
+                className="fill-red text-[7px] font-bold"
+                fontFamily="system-ui, sans-serif"
+              >
+                !
+              </text>
+            ) : null}
+          </svg>
+        )}
       </button>
 
       {open && usage ? (
@@ -1056,6 +1103,15 @@ function StatusContextControl({ working, usage }: { working?: boolean; usage?: C
             <div className="mt-2 flex items-baseline justify-between border-t border-line pt-2">
               <span className="text-[11.5px] text-ink-3">Average cache hit rate</span>
               <span className="font-mono text-[11px] tabular-nums text-ink">{cacheRate.toFixed(1)}%</span>
+            </div>
+          ) : null}
+          {isNearFull ? (
+            <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
+              <span className="text-[11px] text-ink-3">
+                {isOverflow
+                  ? 'Context is full. Older messages will be auto-compressed to continue.'
+                  : 'Context is nearly full — auto-compression will activate soon.'}
+              </span>
             </div>
           ) : null}
         </div>

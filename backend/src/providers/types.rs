@@ -460,9 +460,14 @@ mod tests {
 }
 
 /// Reasoning effort for models that expose it (maps to the request's
-/// `reasoning_effort` / thinking budget).
-pub(crate) fn effort_config_option() -> ConfigOption {
-    ConfigOption {
+/// `reasoning_effort` / thinking budget). Returns `None` only when the model
+/// is *known* not to reason; unknown (`None`) keeps the option so users of
+/// providers that never report capabilities still get the knob.
+pub(crate) fn effort_config_option(reasoning: Option<bool>) -> Option<ConfigOption> {
+    if reasoning == Some(false) {
+        return None;
+    }
+    Some(ConfigOption {
         id: "effort".to_string(),
         name: "Effort".to_string(),
         category: Some("model".to_string()),
@@ -475,14 +480,14 @@ pub(crate) fn effort_config_option() -> ConfigOption {
         ],
         allows_custom_value: false,
         mutability: ConfigMutability::Live,
-    }
+    })
 }
 
 /// Output token cap per turn — the "context window" knob for the request.
 pub(crate) fn max_output_tokens_config_option() -> ConfigOption {
     ConfigOption {
         id: "max_tokens".to_string(),
-        name: "Context window".to_string(),
+        name: "Max tokens".to_string(),
         category: Some("model".to_string()),
         option_type: ConfigOptionType::Number,
         current_value: None,
@@ -492,6 +497,22 @@ pub(crate) fn max_output_tokens_config_option() -> ConfigOption {
     }
 }
 
+/// The total context window size for the model (input + output tokens).
+/// Unlike max_tokens (which caps output), this is the model's total
+/// context capacity — the full working memory per request.
+pub(crate) fn context_window_config_option(context_window: Option<u64>) -> ConfigOption {
+    let current_value = context_window.map(|v| v.to_string());
+    ConfigOption {
+        id: "context_window".to_string(),
+        name: "Context window".to_string(),
+        category: Some("model".to_string()),
+        option_type: ConfigOptionType::Number,
+        current_value,
+        choices: Vec::new(),
+        allows_custom_value: true,
+        mutability: ConfigMutability::Live,
+    }
+}
 /// The permission mode dimension for AgentDeck.
 ///
 /// Controls how the permission broker handles tool requests:

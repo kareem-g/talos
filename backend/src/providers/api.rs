@@ -346,7 +346,20 @@ pub fn build_api_descriptor(
     let permission_option = crate::providers::types::permission_mode_config_option();
 
     let mut config_options = vec![model_config_option(&result.models)];
-    config_options.push(crate::providers::types::effort_config_option());
+
+    // Effort only exists when the model family supports reasoning — the
+    // probe's capability flag decides, so the UI never offers a knob the
+    // model cannot honor.
+    if let Some(effort) = crate::providers::types::effort_config_option(result.capabilities.reasoning) {
+        config_options.push(effort);
+    }
+    config_options.push(crate::providers::types::context_window_config_option(
+        result
+            .models
+            .first()
+            .and_then(|m| m.capabilities.as_ref())
+            .and_then(|c| c.context_window),
+    ));
     config_options.push(crate::providers::types::max_output_tokens_config_option());
     config_options.push(permission_option);
 
