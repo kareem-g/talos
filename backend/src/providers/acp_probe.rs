@@ -176,7 +176,7 @@ async fn run_handshake(
                 // reasoning, which is the common case), the output token cap,
                 // and the total context window.
                 probe.config_options.push(permission_mode_config_option());
-                probe.config_options.push(effort_config_option(None).unwrap());
+                probe.config_options.push(effort_config_option(None, false).unwrap());
                 probe.config_options.push(context_window_config_option(
                     probe.models.first().and_then(|m| m.capabilities.as_ref()).and_then(|c| c.context_window),
                 ));

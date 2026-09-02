@@ -464,14 +464,25 @@ mod tests {
 /// is *known* not to reason; unknown (`None`) keeps the option so users of
 /// providers that never report capabilities still get the knob.
 ///
-/// The choice list is the full family of effort levels: the standard three
-/// (low/medium/high), the extended tier (xhigh) used by Anthropic-style
-/// reasoning, and the ceiling (max). `reasoning_effort` values are
-/// pass-through strings, so whichever level the model understands is simply
-/// sent verbatim.
-pub(crate) fn effort_config_option(reasoning: Option<bool>) -> Option<ConfigOption> {
+/// The choice list depends on what the provider accepts. The standard set
+/// (low/medium/high) is valid on every OpenAI-style `reasoning_effort`
+/// endpoint; the extended set (adding xhigh, max) is valid on
+/// Anthropic-compatible endpoints that honor the full reasoning budget.
+/// `reasoning_effort` values are pass-through strings, so whichever level the
+/// model understands is simply sent verbatim. `allows_custom_value` stays on
+/// so a provider-specific level that is neither set is still enterable.
+pub(crate) fn effort_config_option(reasoning: Option<bool>, extended: bool) -> Option<ConfigOption> {
     if reasoning == Some(false) {
         return None;
+    }
+    let mut choices = vec![
+        ConfigChoice { value: "low".to_string(), name: "Low".to_string(), description: Some("Fast, cheaper reasoning".to_string()) },
+        ConfigChoice { value: "medium".to_string(), name: "Medium".to_string(), description: Some("Balanced reasoning".to_string()) },
+        ConfigChoice { value: "high".to_string(), name: "High".to_string(), description: Some("Deep reasoning, slower".to_string()) },
+    ];
+    if extended {
+        choices.push(ConfigChoice { value: "xhigh".to_string(), name: "X-High".to_string(), description: Some("Extended deep reasoning (Anthropic-style)".to_string()) });
+        choices.push(ConfigChoice { value: "max".to_string(), name: "Max".to_string(), description: Some("Maximum reasoning budget".to_string()) });
     }
     Some(ConfigOption {
         id: "effort".to_string(),
@@ -479,13 +490,7 @@ pub(crate) fn effort_config_option(reasoning: Option<bool>) -> Option<ConfigOpti
         category: Some("model".to_string()),
         option_type: ConfigOptionType::Select,
         current_value: None,
-        choices: vec![
-            ConfigChoice { value: "low".to_string(), name: "Low".to_string(), description: Some("Fast, cheaper reasoning".to_string()) },
-            ConfigChoice { value: "medium".to_string(), name: "Medium".to_string(), description: Some("Balanced reasoning".to_string()) },
-            ConfigChoice { value: "high".to_string(), name: "High".to_string(), description: Some("Deep reasoning, slower".to_string()) },
-            ConfigChoice { value: "xhigh".to_string(), name: "X-High".to_string(), description: Some("Extended deep reasoning (Anthropic-style)".to_string()) },
-            ConfigChoice { value: "max".to_string(), name: "Max".to_string(), description: Some("Maximum reasoning budget".to_string()) },
-        ],
+        choices,
         allows_custom_value: true,
         mutability: ConfigMutability::Live,
     })

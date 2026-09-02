@@ -378,7 +378,7 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
     // The harness-level dimensions apply to every transport, not just custom
     // HTTP providers: effort when the model can reason, the output cap, and
     // the total context window (custom-set or the model's own default).
-    if let Some(effort) = crate::providers::types::effort_config_option(capabilities.reasoning) {
+    if let Some(effort) = crate::providers::types::effort_config_option(capabilities.reasoning, false) {
         config_options.push(effort);
     }
     config_options.push(crate::providers::types::context_window_config_option(

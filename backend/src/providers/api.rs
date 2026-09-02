@@ -350,7 +350,11 @@ pub fn build_api_descriptor(
     // Effort only exists when the model family supports reasoning — the
     // probe's capability flag decides, so the UI never offers a knob the
     // model cannot honor.
-    if let Some(effort) = crate::providers::types::effort_config_option(result.capabilities.reasoning) {
+    let anthropic_extended = matches!(provider.transport, ApiTransport::AnthropicCompatible);
+    if let Some(effort) = crate::providers::types::effort_config_option(
+        result.capabilities.reasoning,
+        anthropic_extended,
+    ) {
         config_options.push(effort);
     }
     config_options.push(crate::providers::types::context_window_config_option(
