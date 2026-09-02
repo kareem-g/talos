@@ -238,8 +238,22 @@ pub async fn execute_api_tool(
             }
         }
         "getconfig" => {
+            let agent_id = state
+                .session_manager
+                .get_session(session_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.agent)
+                .unwrap_or_default();
             let cfg = state.config.read().await;
-            let provider = cfg.settings().agents.api_providers.iter().find(|p| p.id == name || true).cloned();
+            let provider = cfg
+                .settings()
+                .agents
+                .api_providers
+                .iter()
+                .find(|p| p.id == agent_id)
+                .cloned();
             drop(cfg);
             let pending = state
                 .session_manager

@@ -578,11 +578,11 @@ async fn call_anthropic_stream(
             None => format!("{identity}\n\n{config_block}"),
         };
         body["system"] = Value::String(full_system);
-        // Reasoning effort rides as `reasoning_effort` when the user picked one
-        // (routers and compatible endpoints pass it through).
-        if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
-            body["reasoning_effort"] = Value::String(effort.clone());
-        }
+        // Anthropic-style endpoints do NOT accept OpenAI's `reasoning_effort`
+        // field — sending it makes Messages.create() reject the whole request
+        // (verified against the AgentRouter proxy: "unexpected keyword
+        // argument 'reasoning_effort'"). The effort preference is still
+        // visible to the agent via the config block and the GetConfig tool.
 
         let resp = req
             .try_clone()
