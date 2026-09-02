@@ -463,6 +463,12 @@ mod tests {
 /// `reasoning_effort` / thinking budget). Returns `None` only when the model
 /// is *known* not to reason; unknown (`None`) keeps the option so users of
 /// providers that never report capabilities still get the knob.
+///
+/// The choice list is the full family of effort levels: the standard three
+/// (low/medium/high), the extended tier (xhigh) used by Anthropic-style
+/// reasoning, and the ceiling (max). `reasoning_effort` values are
+/// pass-through strings, so whichever level the model understands is simply
+/// sent verbatim.
 pub(crate) fn effort_config_option(reasoning: Option<bool>) -> Option<ConfigOption> {
     if reasoning == Some(false) {
         return None;
@@ -477,8 +483,10 @@ pub(crate) fn effort_config_option(reasoning: Option<bool>) -> Option<ConfigOpti
             ConfigChoice { value: "low".to_string(), name: "Low".to_string(), description: Some("Fast, cheaper reasoning".to_string()) },
             ConfigChoice { value: "medium".to_string(), name: "Medium".to_string(), description: Some("Balanced reasoning".to_string()) },
             ConfigChoice { value: "high".to_string(), name: "High".to_string(), description: Some("Deep reasoning, slower".to_string()) },
+            ConfigChoice { value: "xhigh".to_string(), name: "X-High".to_string(), description: Some("Extended deep reasoning (Anthropic-style)".to_string()) },
+            ConfigChoice { value: "max".to_string(), name: "Max".to_string(), description: Some("Maximum reasoning budget".to_string()) },
         ],
-        allows_custom_value: false,
+        allows_custom_value: true,
         mutability: ConfigMutability::Live,
     })
 }

@@ -307,9 +307,12 @@ pub async fn apply_config(
     // A `Live` mutability on a session with no running agent cannot apply
     // immediately — nothing is there to apply to — so the choice must be
     // stored instead of discarded, or it silently vanished between sessions.
+    // For API transports, the pending config is read on every turn, so
+    // persisting is always correct regardless of liveness.
     let session_live = current.live;
+    let transport_is_api = matches!(current.transport, Transport::Api);
     if matches!(applied, ConfigApplied::NextRun { .. })
-        || (matches!(applied, ConfigApplied::Immediate) && !session_live)
+        || (matches!(applied, ConfigApplied::Immediate) && (!session_live || transport_is_api))
     {
         state
             .session_manager
