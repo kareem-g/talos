@@ -227,3 +227,45 @@ pub async fn save_session_summary(
     save_memory(session.project.as_deref(), entry).ok()?;
     Some(id)
 }
+
+
+/// Per-workspace memory config: whether memory is enabled for this project.
+/// Stored in `<project>/.agentdeck/memory.toml` as `[memory] enabled = true`.
+/// Defaults to `true` when the file is missing.
+pub fn workspace_memory_enabled(project: Option<&str>) -> bool {
+    let Some(project) = project else {
+        return true; // Inbox sessions: no workspace config → enabled
+    };
+    let path = Path::new(project).join(".agentdeck/memory.toml");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return true;
+    };
+    #[derive(Deserialize)]
+    struct MemoryConfig {
+        #[serde(default)]
+        enabled: Option<bool>,
+    }
+    #[derive(Deserialize)]
+    struct ConfigFile {
+        #[serde(default)]
+        memory: Option<MemoryConfig>,
+    }
+    toml::from_str::<ConfigFile>(&content)
+        .ok()
+        .and_then(|c| c.memory)
+        .and_then(|m| m.enabled)
+        .unwrap_or(true)
+}
+
+/// Set the workspace-level memory enabled flag.
+pub fn set_workspace_memory_enabled(project: Option<&str>, enabled: bool) -> std::io::Result<()> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+    let dir = Path::new(project).join(".agentdeck");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("memory.toml");
+    std::fs::write(&path, format!("[memory]
+enabled = {}
+", if enabled { "true" } else { "false" }))
+}

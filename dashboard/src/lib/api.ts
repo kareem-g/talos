@@ -339,6 +339,17 @@ export const workspaceApi = {
     request<{ path: string; contents: string; error?: string }>(
       `/api/workspace/file?project=${encodeURIComponent(project)}&path=${encodeURIComponent(path)}`,
     ),
+  /** Per-workspace memory setting: whether memory is enabled for this project. */
+  memoryConfig: (project: string) =>
+    request<{ enabled: boolean }>(
+      `/api/memory/config?project=${encodeURIComponent(project)}`,
+    ),
+  /** Turn workspace memory on/off. */
+  setMemoryConfig: (project: string, enabled: boolean) =>
+    request<{ ok: boolean; enabled: boolean }>('/api/memory/config', {
+      method: 'PUT',
+      body: JSON.stringify({ project, enabled }),
+    }),
 }
 
 /** Skills management: the backend owns `.agentdeck/skills/` per project.

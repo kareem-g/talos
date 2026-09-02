@@ -162,6 +162,8 @@ pub async fn execute_api_tool(
             let content = args.get("content").and_then(Value::as_str).unwrap_or("");
             if content.trim().is_empty() {
                 Err("content is required".to_string())
+            } else if !crate::memory::workspace_memory_enabled(project) {
+                Err("workspace memory is disabled (toggle it on in the workspace settings to save notes)".to_string())
             } else {
             let title = args.get("title").and_then(Value::as_str).unwrap_or("Memory");
             let kind = args.get("kind").and_then(Value::as_str).unwrap_or("memory");

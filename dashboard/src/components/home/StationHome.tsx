@@ -23,10 +23,12 @@
  * for projects/ids/metrics. One motion: the live dot breathes.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Settings } from 'lucide-react'
 import { NewSessionLayer } from '../SessionList'
 import { SyncLayer } from '../SyncSessions'
-import { Button, ChevronDown, Dot, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
+import { Button, ChevronDown, Dot, Dots, DropdownList, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
+import { workspaceApi } from '@/lib/api'
 import LoadingState, { LoadingStateMini } from '../LoadingState'
 import { getConversation, useStore } from '@/store'
 import { basename, cn, relativeTime } from '@/lib/format'
@@ -463,6 +465,7 @@ export function StationHome({
                         <p className="truncate font-mono text-[11px] text-ink-3">{ws.project ?? 'No folder — inbox'}</p>
                       </div>
                       <span className="hidden shrink-0 items-center gap-2 sm:flex">
+                        <WorkspaceMenuButton project={ws.project} />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -599,6 +602,125 @@ export function StationHome({
 
       <NewSessionLayer open={creating} onClose={() => { setCreating(false); setCreateProject(undefined) }} onCreated={onOpenSession} initialProject={createProject} />
       <SyncLayer open={syncing} onClose={() => setSyncing(false)} />
+    </div>
+  )
+}
+
+/** Workspace menu: a gear button opening the workspace-level settings,
+ *  currently the Workspace Memory toggle. Positioned on the workspace card
+ *  header next to "+ New session". */
+function WorkspaceMenuButton({ project }: { project: string | null }) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-label="Workspace settings"
+        title="Workspace settings"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+      >
+        <Settings size={13} />
+      </button>
+      {open ? (
+        <DropdownList anchorRef={anchorRef} onClose={() => setOpen(false)} width={280}>
+          <div className="flex flex-col gap-3 p-3">
+            <div>
+              <p className="text-[12.5px] font-semibold text-ink">Workspace Memory</p>
+              <p className="mt-0.5 text-[11px] leading-[1.6] text-ink-3">
+                Save and reuse long-term context in workspaces. Applies to new
+                sessions and may increase model requests and token costs.
+              </p>
+            </div>
+            {project ? (
+              <WorkspaceMemoryToggle project={project} />
+            ) : (
+              <p className="text-[11px] text-ink-3">
+                Memory is available once the workspace has a project folder.
+              </p>
+            )}
+          </div>
+        </DropdownList>
+      ) : null}
+    </>
+  )
+}
+
+/** The Workspace Memory on/off switch. Reads and writes the per-project
+ *  `.agentdeck/memory.toml` setting through the daemon. */
+function WorkspaceMemoryToggle({ project }: { project: string }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    let cancelled = false
+    workspaceApi
+      .memoryConfig(project)
+      .then((config) => {
+        if (!cancelled) setEnabled(config.enabled)
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project])
+
+  const toggle = async (next: boolean) => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await workspaceApi.setMemoryConfig(project, next)
+      setEnabled(next)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (enabled === null) {
+    return <Dots />
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label="Workspace memory"
+        disabled={busy}
+        onClick={() => void toggle(!enabled)}
+        className="flex items-center justify-between gap-3 rounded-lg border border-line bg-canvas px-2.5 py-2 text-left transition-colors hover:bg-hover/40 disabled:opacity-60"
+      >
+        <span className="text-[12px] font-medium text-ink">
+          {enabled ? 'On — context is remembered' : 'Off — no cross-session recall'}
+        </span>
+        <span
+          aria-hidden
+          className={cn(
+            'relative h-4 w-7 shrink-0 rounded-full transition-colors duration-150',
+            enabled ? 'bg-accent' : 'bg-line-strong',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 size-3 rounded-full bg-white transition-all duration-150',
+              enabled ? 'left-3.5' : 'left-0.5',
+            )}
+          />
+        </span>
+      </button>
+      {error ? <p className="text-[10.5px] text-red">{error}</p> : null}
     </div>
   )
 }

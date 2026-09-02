@@ -139,8 +139,14 @@ pub async fn assemble(
     }
 
     // Project conventions (kind = "convention") are standing rules injected
-    // into every turn, not keyword-ranked like memories.
-    let conventions = crate::memory::list_conventions(session.project.as_deref());
+    // into every turn, not keyword-ranked like memories. Both conventions and
+    // memory recall are gated by the workspace's memory toggle.
+    let workspace_memory = crate::memory::workspace_memory_enabled(session.project.as_deref());
+    let conventions = if workspace_memory {
+        crate::memory::list_conventions(session.project.as_deref())
+    } else {
+        Vec::new()
+    };
     if !conventions.is_empty() {
         let mut conv_sections: Vec<String> = Vec::new();
         for convention in &conventions {
@@ -193,7 +199,7 @@ pub async fn assemble(
 
     // Project memory: saved sessions relevant to this prompt, injected as
     // first-person recap. Same Jaccard ranking as trajectories.
-    if context_assembly.memory_enabled {
+    if context_assembly.memory_enabled && workspace_memory {
         let memories = crate::memory::find_relevant(
             session.project.as_deref(),
             prompt,

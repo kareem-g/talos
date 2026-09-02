@@ -45,6 +45,11 @@ pub async fn start(
         .route("/api/sessions/{id}/subagents", post(crate::api::routes::spawn_subagent))
         .route("/api/sessions/{id}/orchestrate", post(crate::api::routes::orchestrate_session))
         .route("/api/sessions/{id}/memory", post(crate::api::routes::save_session_memory))
+        .route(
+            "/api/memory/config",
+            get(crate::api::routes::get_workspace_memory)
+                .put(crate::api::routes::set_workspace_memory),
+        )
         .route("/api/memory", get(crate::api::routes::list_memory).delete(crate::api::routes::delete_memory))
         .route("/api/sessions/{id}/attach", post(crate::api::routes::attach_session))
         .route("/api/sessions/{id}/kill", post(crate::api::routes::kill_session))

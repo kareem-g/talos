@@ -164,6 +164,10 @@ pub fn spawn(state: &AppState) {
                             .flatten()
                             .and_then(|s| s.project);
                         verify_and_broadcast(&broadcast, &event.session_id, project.as_deref()).await;
+                        // Skip auto-save when the workspace's memory toggle is off.
+                        if !crate::memory::workspace_memory_enabled(project.as_deref()) {
+                            continue;
+                        }
                         // Auto-save memory for substantial turns (deduped per
                         // source session) so cross-session recall works
                         // without the user clicking save.

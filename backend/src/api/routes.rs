@@ -324,6 +324,31 @@ pub async fn delete_memory(
     Json(json!({ "deleted": removed, "id": id }))
 }
 
+/// Get the workspace memory setting (`enabled`) for a project. The toggle is
+/// per-workspace: turning it off stops memory injection, auto-save, and the
+/// Remember tool for that project, so sessions in different workspaces never
+/// mix context.
+pub async fn get_workspace_memory(
+    Query(query): Query<MemoryQuery>,
+) -> impl IntoResponse {
+    Json(json!({
+        "enabled": crate::memory::workspace_memory_enabled(query.project.as_deref()),
+    }))
+}
+
+/// Set the workspace memory setting for a project.
+/// Body: `{ "project": string, "enabled": bool }`.
+pub async fn set_workspace_memory(
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let project = body.get("project").and_then(|v| v.as_str());
+    let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    match crate::memory::set_workspace_memory_enabled(project, enabled) {
+        Ok(()) => Json(json!({ "ok": true, "enabled": enabled })),
+        Err(error) => Json(json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
 /// Spawn a harness-owned subagent: a child session that runs one prompt on
 /// behalf of the parent session. The parent's chat shows a `subagent_started`
 /// card, the child runs through the exact same harness path (spawn → turn →
