@@ -25,6 +25,7 @@
 
 use super::types::{
     ConfigChoice, ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model,
+    context_window_config_option, effort_config_option, max_output_tokens_config_option,
     permission_mode_config_option,
 };
 use serde_json::{json, Value};
@@ -170,8 +171,16 @@ async fn run_handshake(
             Ok(session) => {
                 probe.config_options = parse_config_options(&session);
                 probe.models = models_from_options(&probe.config_options);
-                // Inject our backend-only permission mode dimension.
+                // Inject the harness-level dimensions that every transport
+                // should offer: permission mode, effort (ACP agents assume
+                // reasoning, which is the common case), the output token cap,
+                // and the total context window.
                 probe.config_options.push(permission_mode_config_option());
+                probe.config_options.push(effort_config_option(None).unwrap());
+                probe.config_options.push(context_window_config_option(
+                    probe.models.first().and_then(|m| m.capabilities.as_ref()).and_then(|c| c.context_window),
+                ));
+                probe.config_options.push(max_output_tokens_config_option());
             }
             Err(reason) => probe.session_error = reason,
         }
