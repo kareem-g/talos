@@ -259,6 +259,13 @@ pub fn registry() -> &'static [ToolSpec] {
                     "required": ["task", "agents"]
                 }),
             ),
+            spec(
+                "GetConfig",
+                "Read this session's current harness configuration: model, reasoning effort, max output tokens, context window, and permission mode. Use it to answer questions about your own settings — what effort you are running at, what model you are, etc.",
+                ToolCategory::Other,
+                Risk::Low,
+                json!({ "type": "object", "properties": {} }),
+            ),
         ]
     })
 }

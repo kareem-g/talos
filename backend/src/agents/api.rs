@@ -560,9 +560,22 @@ async fn call_anthropic_stream(
              - When asked who made you or which company created you, answer with your own maker — never \"AgentDeck\" or \"AgentDeck team\".",
             provider.name
         );
+        // The session's live harness configuration, so the model can answer
+        // questions about its own settings ("what effort are you running at?")
+        // from context instead of guessing or claiming it cannot know.
+        let mut config_lines: Vec<String> = vec![format!("- model: {model}")];
+        for key in ["effort", "max_tokens", "context_window", "permission_mode"] {
+            if let Some((_, value)) = pending.iter().find(|(k, _)| k == key) {
+                config_lines.push(format!("- {key}: {value}"));
+            }
+        }
+        let config_block = format!(
+            "YOUR CURRENT CONFIGURATION (this is your own session's actual settings — quote them when asked):\n{}",
+            config_lines.join("\n")
+        );
         let full_system = match system {
-            Some(s) => format!("{identity}\n\n{s}"),
-            None => identity,
+            Some(s) => format!("{identity}\n\n{config_block}\n\n{s}"),
+            None => format!("{identity}\n\n{config_block}"),
         };
         body["system"] = Value::String(full_system);
         // Reasoning effort rides as `reasoning_effort` when the user picked one

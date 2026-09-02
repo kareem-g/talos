@@ -110,6 +110,34 @@ pub async fn assemble(
     }
     sections.push(instructions);
 
+    // The session's harness configuration (model, effort, max tokens, context
+    // window, permission mode) — so ANY agent, CLI or API, can answer
+    // questions about its own settings ("what effort are you running at?")
+    // from its prompt instead of claiming it cannot know.
+    {
+        let pending = state
+            .session_manager
+            .pending_config(&session.id)
+            .await
+            .unwrap_or_default();
+        let mut lines: Vec<String> = Vec::new();
+        for (key, value) in &pending {
+            if key == "subagent" {
+                continue;
+            }
+            lines.push(format!("- {key}: {value}"));
+        }
+        if !lines.is_empty() {
+            sections.push(format!(
+                "<harness_configuration>\n{}\n</harness_configuration>\n\
+                 The values above are YOUR OWN session's actual harness settings \
+                 (model, reasoning effort, token limits, permission mode). Quote \
+                 them when asked about your configuration.",
+                lines.join("\n")
+            ));
+        }
+    }
+
     // Project conventions (kind = "convention") are standing rules injected
     // into every turn, not keyword-ranked like memories.
     let conventions = crate::memory::list_conventions(session.project.as_deref());

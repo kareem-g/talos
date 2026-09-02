@@ -237,6 +237,23 @@ pub async fn execute_api_tool(
                 }
             }
         }
+        "getconfig" => {
+            let cfg = state.config.read().await;
+            let provider = cfg.settings().agents.api_providers.iter().find(|p| p.id == name || true).cloned();
+            drop(cfg);
+            let pending = state
+                .session_manager
+                .pending_config(session_id)
+                .await
+                .unwrap_or_default();
+            let mut info = serde_json::Map::new();
+            for (k, v) in &pending {
+                info.insert(k.clone(), json!(v));
+            }
+            // Add provider-level info for context
+            info.insert("provider".to_string(), json!(provider.as_ref().map(|p| p.name.clone())));
+            Ok(serde_json::to_string_pretty(&info).unwrap_or_else(|_| "{}".to_string()))
+        }
         other => Err(format!("Unknown tool: {other}")),
     };
 
