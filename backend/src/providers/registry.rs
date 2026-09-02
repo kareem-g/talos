@@ -370,10 +370,21 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
     }
 
     let permission_option = permission_mode_config_option();
-    let config_options = vec![
+    let capabilities = catalog::baseline_capabilities(candidate.transport);
+    let mut config_options = vec![
         model_config_option(&models, candidate.transport, &candidate.id),
         permission_option,
     ];
+    // The harness-level dimensions apply to every transport, not just custom
+    // HTTP providers: effort when the model can reason, the output cap, and
+    // the total context window (custom-set or the model's own default).
+    if let Some(effort) = crate::providers::types::effort_config_option(capabilities.reasoning) {
+        config_options.push(effort);
+    }
+    config_options.push(crate::providers::types::context_window_config_option(
+        models.first().and_then(|m| m.capabilities.as_ref()).and_then(|c| c.context_window),
+    ));
+    config_options.push(crate::providers::types::max_output_tokens_config_option());
 
     ProviderDescriptor {
         id: candidate.id.clone(),

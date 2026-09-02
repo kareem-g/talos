@@ -347,23 +347,17 @@ export const PERMISSION_MODES: PermissionMode[] = [
 const PERMISSION_KEY = 'agentdeck-permission-mode'
 
 export function usePermissionMode() {
-  const [mode, setMode] = useState<PermissionMode['id']>(() => {
-    try {
-      const saved = localStorage.getItem(PERMISSION_KEY) as PermissionMode['id'] | null
-      return saved && PERMISSION_MODES.some((m) => m.id === saved) ? saved : 'ask'
-    } catch {
-      return 'ask'
-    }
-  })
+  // No local state: the session's backend config (pending_config
+  // "permission_mode") is authoritative. `select` only remembers the last
+  // choice as a hint for brand-new sessions that have never set a mode.
   const select = (id: PermissionMode['id']) => {
-    setMode(id)
     try {
       localStorage.setItem(PERMISSION_KEY, id)
     } catch {
       /* storage may be unavailable */
     }
   }
-  return { mode, select }
+  return { select }
 }
 
 export function PermissionChip({
@@ -375,12 +369,12 @@ export function PermissionChip({
   /** Persist a permission choice (config id + value). */
   onChange?: (id: string, value: string) => void
 }) {
-  const { mode, select } = usePermissionMode()
+  const { select } = usePermissionMode()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   // When the agent reports a live permission mode, reflect it back into the UI.
-  const effective = currentMode ?? mode
+  const effective = currentMode ?? 'ask'
   const selected = PERMISSION_MODES.find((m) => m.id === effective) ?? PERMISSION_MODES[0]
 
   // All four modes send distinct, functional values to the backend.
