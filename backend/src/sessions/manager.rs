@@ -12,6 +12,12 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    /// Shared SQLite pool — small persistent stores (rooms) reuse it rather
+    /// than opening their own connection.
+    pub fn pool(&self) -> sqlx::SqlitePool {
+        self.pool.clone()
+    }
+
     pub async fn new(pool: SqlitePool) -> Result<Self> {
         Ok(Self {
             pool,
@@ -51,6 +57,7 @@ impl SessionManager {
             external_id: None,
             source: "agentdeck".to_string(),
             parent_id: None,
+            hidden: false,
         };
 
         sqlx::query(
@@ -109,6 +116,7 @@ impl SessionManager {
             external_id: Some(external_id.to_string()),
             source: agent.to_string(),
             parent_id: None,
+            hidden: false,
         };
 
         sqlx::query(
@@ -215,6 +223,36 @@ impl SessionManager {
         Ok(rows.into_iter().map(Session::from).collect())
     }
 
+    /// The model recorded for `session_id` (create-time request or a later
+    /// config change), so spawned workers can pin the same configuration.
+    pub async fn current_model(&self, session_id: &str) -> Option<String> {
+        let value: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM session_config WHERE session_id = ?1 AND config_id = 'model'")
+                .bind(session_id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+        value.map(|(model,)| model)
+    }
+
+    /// Mark a session as hidden from the default session lists. Harness-created
+    /// rows (orchestration children, room channels) use this; the flag is
+    /// purely presentational and by-id access is unaffected. Updates the
+    /// in-memory cache too — `get_session` serves it, and a stale cache would
+    /// broadcast `hidden: false` in the spawn-time `SessionUpdate`.
+    pub async fn set_hidden(&self, id: &str, hidden: bool) -> Result<()> {
+        sqlx::query("UPDATE sessions SET hidden = ?1 WHERE id = ?2")
+            .bind(hidden)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        if let Some(session) = self.active_sessions.write().await.get_mut(id) {
+            session.hidden = hidden;
+        }
+        Ok(())
+    }
+
     /// Mark sessions left `running`/`starting` by a previous daemon run as
     /// resumable, returning how many were changed.
     ///
@@ -237,11 +275,14 @@ impl SessionManager {
         self.list_sessions_with_archived(false).await
     }
 
+    /// The default workspace list: archived rows excluded, and harness-created
+    /// rows (orchestration children, room channels) hidden — those surface in
+    /// the room/agent views, not as user tasks.
     pub async fn list_sessions_with_archived(&self, include_archived: bool) -> Result<Vec<Session>> {
         let query = if include_archived {
-            "SELECT * FROM sessions ORDER BY updated_at DESC"
+            "SELECT * FROM sessions WHERE hidden = 0 ORDER BY updated_at DESC"
         } else {
-            "SELECT * FROM sessions WHERE status != 'archived' ORDER BY updated_at DESC"
+            "SELECT * FROM sessions WHERE status != 'archived' AND hidden = 0 ORDER BY updated_at DESC"
         };
         let rows = sqlx::query_as::<_, SessionRow>(query)
             .fetch_all(&self.pool)
@@ -936,6 +977,7 @@ struct SessionRow {
     external_id: Option<String>,
     source: Option<String>,
     parent_id: Option<String>,
+    hidden: Option<i64>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -968,6 +1010,7 @@ impl From<SessionRow> for Session {
             external_id: row.external_id,
             source: row.source.unwrap_or_else(|| "agentdeck".to_string()),
             parent_id: row.parent_id,
+            hidden: row.hidden.unwrap_or(0) != 0,
         }
     }
 }

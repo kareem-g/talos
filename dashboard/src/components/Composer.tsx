@@ -18,8 +18,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { ArrowUp, StopIcon } from './ui'
 import { CornerUpLeft, GripVertical, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { skillsApi, workspaceApi, type DirListing } from '@/lib/api'
+import { isInternalSession } from '@/lib/sessionState'
 import { cn } from '@/lib/format'
 import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
+import { WorkerAvatar } from './desktop/RoomAvatars'
 
 /** Real token accounting for the context-window meter. */
 export interface ContextUsage {
@@ -47,7 +49,7 @@ const BUILTIN_COMMANDS: Record<string, string[]> = {
   codex: ['init', 'compact', 'review'],
 }
 
-type MenuKind = 'slash' | 'at' | 'skill' | 'mention'
+type MenuKind = 'slash' | 'at' | 'skill' | 'mention' | 'worker'
 
 interface MenuItem {
   /** Text inserted when chosen (without the leading trigger char). */
@@ -103,7 +105,7 @@ function parseSegments(
   return segments
 }
 
-const TRIGGERS: Record<MenuKind, string> = { slash: '/', at: '@', skill: '$', mention: '#' }
+const TRIGGERS: Record<MenuKind, string> = { slash: '/', at: '@', skill: '$', mention: '#', worker: '@' }
 
 /** The token (trigger + partial query) ending at the caret, if any. */
 function activeToken(text: string, caret: number): { kind: MenuKind; query: string; start: number } | null {
@@ -146,8 +148,14 @@ export function Composer({
   contextUsage,
   sessionId,
   controlsRight,
+  workers,
+  rooms,
 }: {
-  onSend: (text: string, attachments: AttachmentRef[]) => void
+  /**
+   * Send the draft. Returns `false` to reject it (an incomplete command) and
+   * keep the text in the field; anything else clears the draft.
+   */
+  onSend: (text: string, attachments: AttachmentRef[]) => boolean | void
   onStop?: () => void
   /** True while the agent is running: Enter queues instead of sending. */
   working?: boolean
@@ -169,7 +177,7 @@ export function Composer({
   /** Follow-up messages waiting above the field (while the agent works). */
   queue?: QueuedMessage[]
   /** Queue the current draft instead of sending (Enter while working). */
-  onQueue?: (text: string, attachments: AttachmentRef[]) => void
+  onQueue?: (text: string, attachments: AttachmentRef[]) => boolean | void
   /** Send a queued message immediately. */
   onSteer?: (id: string) => void
   /** Pull a queued message back into the composer. */
@@ -188,6 +196,14 @@ export function Composer({
   sessionId?: string
   /** Config chips for the control row's right side (model, effort, …). */
   controlsRight?: ReactNode
+  /**
+   * Room workers addressable with @. When provided, @ opens the worker menu
+   * (instead of the filesystem browser) and sent text keeps `@worker` tokens
+   * for the room to route on.
+   */
+  workers?: string[]
+  /** Room names addressable with # (routes the message to that room). */
+  rooms?: string[]
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
@@ -215,7 +231,7 @@ export function Composer({
   }, [draftSeed?.nonce])
 
   // Slash menu items: agent-announced first, then curated built-ins, then
-  // AgentDeck's own commands (/side, /btw).
+  // Plumb's own commands (/side, /btw).
   const slashItems = useMemo<MenuItem[]>(() => {
     const announced = (commands ?? []).map((name) => ({
       insert: name.replace(/^\//, ''),
@@ -228,6 +244,7 @@ export function Composer({
       hint: 'built-in',
     }))
     const custom: MenuItem[] = [
+      { insert: 'orchestrator', label: 'orchestrator', hint: 'fan the task out to a room of agents' },
       { insert: 'side', label: 'side', hint: 'open side session' },
       { insert: 'btw', label: 'btw', hint: 'note to side session' },
     ]
@@ -263,7 +280,7 @@ export function Composer({
       .then((all) =>
         setMentions(
           all
-            .filter((s) => s.status !== 'archived')
+            .filter((s) => s.status !== 'archived' && !isInternalSession(s))
             .slice(0, 30)
             .map((s) => ({ id: s.id, name: s.name })),
         ),
@@ -288,13 +305,29 @@ export function Composer({
         }))
     }
     if (menu.kind === 'mention') {
-      return mentions
+      const sessionItems = mentions
         .filter((session) => session.name.toLowerCase().includes(query))
         .slice(0, 8)
         .map((session) => ({
           insert: `${session.name} (${session.id})`,
           label: session.name,
           hint: 'conversation',
+        }))
+      // Rooms are mentionable too — "#Room <task>" routes the work there.
+      const roomItems = (rooms ?? [])
+        .filter((name) => name.toLowerCase().includes(query))
+        .slice(0, 8)
+        .map((name) => ({ insert: name, label: name, hint: 'room' }))
+      return [...roomItems, ...sessionItems].slice(0, 8)
+    }
+    if (menu.kind === 'worker') {
+      return (workers ?? [])
+        .filter((worker) => worker.toLowerCase().includes(query))
+        .slice(0, 8)
+        .map((worker) => ({
+          insert: worker,
+          label: worker,
+          hint: 'worker',
         }))
     }
     const entries = atListing?.entries ?? []
@@ -314,7 +347,7 @@ export function Composer({
         hint: entry.dir ? 'folder' : undefined,
       })),
     ]
-  }, [menu, slashItems, atListing, skills, mentions, atPath])
+  }, [menu, slashItems, atListing, skills, mentions, atPath, workers, rooms])
 
   function loadAt(path?: string) {
     const resolved = path ?? atPath ?? ''
@@ -341,6 +374,13 @@ export function Composer({
     const caret = textareaRef.current?.selectionStart ?? next.length
     const token = activeToken(next, caret)
     if (token && !disabled) {
+      // In a room composer (workers provided), @ mentions a worker instead of
+      // browsing the filesystem.
+      if (token.kind === 'at' && workers) {
+        setMenu({ kind: 'worker', query: token.query, start: token.start })
+        setMenuIndex(0)
+        return
+      }
       if (token.kind === 'at') {
         // A freshly-started @ token resets navigation to the project root.
         if (menu?.kind !== 'at') setAtPath('')
@@ -398,14 +438,14 @@ export function Composer({
     const text = value.trim()
     if ((!text && attachments.length === 0) || disabled) return
     const files = attachments
+    // A sender that returns `false` rejects the draft (incomplete command,
+    // e.g. `/orchestrator` with no task) — keep what was typed instead of
+    // swallowing the keystrokes.
+    const accepted = working && onQueue ? onQueue(text, files) : onSend(text, files)
+    if (accepted === false) return
     setValue('')
     setAttachments([])
     setMenu(null)
-    if (working && onQueue) {
-      onQueue(text, files)
-    } else {
-      onSend(text, files)
-    }
   }
 
   function send() {
@@ -599,18 +639,22 @@ export function Composer({
                     : 'hover:bg-white/[0.06]',
                 )}
               >
-                <span className={cn(
-                  'flex size-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-semibold',
-                  menu.kind === 'slash'
-                    ? 'bg-accent/[0.12] text-accent-ink'
-                    : menu.kind === 'skill'
-                      ? 'bg-purple-400/[0.12] text-purple-300'
-                      : menu.kind === 'mention'
-                        ? 'bg-sky-400/[0.12] text-sky-300'
-                        : 'bg-green/[0.10] text-green',
-                )}>
-                  {TRIGGERS[menu.kind]}
-                </span>
+                {item.hint === 'worker' ? (
+                  <WorkerAvatar name={item.label} size={20} />
+                ) : (
+                  <span className={cn(
+                    'flex size-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-semibold',
+                    menu.kind === 'slash'
+                      ? 'bg-accent/[0.12] text-accent-ink'
+                      : menu.kind === 'skill'
+                        ? 'bg-purple-400/[0.12] text-purple-300'
+                        : menu.kind === 'mention'
+                          ? 'bg-sky-400/[0.12] text-sky-300'
+                          : 'bg-green/[0.10] text-green',
+                  )}>
+                    {TRIGGERS[menu.kind]}
+                  </span>
+                )}
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{item.label}</span>
                 {item.hint ? (
                   <span className="shrink-0 rounded-md bg-inset px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.06em] text-ink-3">{item.hint}</span>

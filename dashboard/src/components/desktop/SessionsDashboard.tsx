@@ -3,6 +3,7 @@ import { Button, Chip, Dots, IconButton, Search, TextField } from '../ui'
 import { useStore, getConversation } from '@/store'
 import { relativeTime, cn } from '@/lib/format'
 import { isActive, isBlocked, type Session } from '@/types/session'
+import { isInternalSession } from '@/lib/sessionState'
 import { basename } from '@/lib/format'
 import { StatusDot, statusLabel } from '../SessionList'
 import { useRoute } from '@/lib/route'
@@ -84,7 +85,7 @@ export function SessionsDashboard() {
   const starredSet = useMemo(() => new Set(starred), [starred])
 
   const filtered = useMemo(() => {
-    let list = [...sessions]
+    let list = sessions.filter((s) => !isInternalSession(s))
     if (filter === 'archived') list = list.filter((s) => s.status === 'archived')
     else if (filter === 'starred') list = list.filter((s) => starredSet.has(s.id) && s.status !== 'archived')
     else if (filter === 'recent') {

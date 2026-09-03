@@ -698,12 +698,16 @@ export const useStore = create<StoreState>((set, get) => ({
         // Resynchronize with backend truth after interruption — replay covers events but
         // Session rows may have changed (status, new sessions) while we were away.
         void get().loadSessions()
+        void import('@/lib/rooms').then(({ syncRooms }) => syncRooms())
       }
     })
     socket.onFrame((frame) => handleFrame(frame, set, get))
     socket.connect()
     void get().loadProviders()
     void get().loadSessions()
+    // Adopt the daemon's room roster (and push up any local-only rooms) once
+    // the socket is connecting; WS RoomUpsert/RoomDeleted keep it live.
+    void import('@/lib/rooms').then(({ syncRooms }) => syncRooms())
   },
 }))
 
@@ -836,6 +840,22 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
       set((state) => ({
         sessions: state.sessions.filter((session) => session.id !== frame.payload.session_id),
       }))
+      return
+    }
+
+    // Room rosters sync through the daemon: another client (or this one)
+    // created/edited/deleted a room. Dynamic import — rooms.ts depends on the
+    // store, so a static cycle is avoided.
+    case 'RoomUpsert': {
+      void import('@/lib/rooms').then(({ applyRoomUpsert }) =>
+        applyRoomUpsert(frame.payload.room),
+      )
+      return
+    }
+    case 'RoomDeleted': {
+      void import('@/lib/rooms').then(({ applyRoomDeleted }) =>
+        applyRoomDeleted(frame.payload.room_id),
+      )
       return
     }
 

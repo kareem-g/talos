@@ -27,6 +27,9 @@ import {
 } from 'lucide-react'
 import { useStore, getConversation, useConversation } from '@/store'
 import { cn } from '@/lib/format'
+import { mentionedWorkers, useActiveRoomId, useRooms, runRoomTask } from '@/lib/rooms'
+import { getSideSessionId } from '@/lib/sideSession'
+import { RoomAvatarStack, WorkerAvatar } from '../RoomAvatars'
 import type { Session } from '@/types/session'
 import { GitWorkspaceView } from './GitWorkspaceView'
 import { Timeline } from '@/components/Timeline'
@@ -739,24 +742,6 @@ export function SubSessionsView({
 
 /* ── 7. Side session ───────────────────────────────────────────────────────── */
 
-const SIDE_KEY = (project?: string | null) => `agentdeck-side-session-${project ?? 'default'}`
-
-export function getSideSessionId(project?: string | null): string | null {
-  try {
-    return localStorage.getItem(SIDE_KEY(project))
-  } catch {
-    return null
-  }
-}
-
-export function setSideSessionId(project: string | null | undefined, id: string) {
-  try {
-    localStorage.setItem(SIDE_KEY(project), id)
-  } catch {
-    /* storage may be unavailable */
-  }
-}
-
 /**
  * A mini chat bound to a "side" session — a parallel conversation the user
  * opened with `/side <prompt>` (and pings with `/btw <message>`) without
@@ -840,5 +825,170 @@ function RailButton({ children, onClick, label }: { children: React.ReactNode; o
     <button type="button" onClick={onClick} aria-label={label} title={label} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-ink-3 transition hover:bg-hover-2 hover:text-ink">
       {children}
     </button>
+  )
+}
+
+/* ── 8. Rooms ─────────────────────────────────────────────────────────────── */
+
+/**
+ * The active room's channel transcript — a hidden session whose timeline
+ * carries the seeded tasks, the per-worker orchestration cards, and the
+ * merged reply. Messages go to the channel session, so asking a follow-up
+ * re-runs the room the same way /orchestrator does.
+ */
+export function RoomChannelView({ session }: { session: Session }) {
+  const roomId = useActiveRoomId()
+  const room = useRooms().find((candidate) => candidate.id === roomId) ?? null
+  const channelId = room?.sessionId
+  const connection = useStore((s) => s.connection)
+  const channel = useStore((s) => (channelId ? s.sessions.find((x) => x.id === channelId) : undefined))
+  const conv = useConversation(channelId ?? session.id)
+
+  useEffect(() => {
+    if (channelId) void useStore.getState().openSession(channelId)
+  }, [channelId])
+
+  if (!room) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ViewHeader eyebrow="Rooms" right={<span className="font-mono text-[10px] text-ink-3">off</span>} />
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+          <span className="flex size-11 items-center justify-center rounded-2xl border border-line/50 bg-surface text-ink-3">
+            <MessagesSquare size={20} />
+          </span>
+          <p className="mt-1 text-[13px] font-medium text-ink">No active room</p>
+          <p className="max-w-[240px] text-[11.5px] leading-[1.6] text-ink-3">
+            Pick a room in the sidebar (or create one), then dispatch with the ⚡ button or{' '}
+            <code className="text-ink-2">/orchestrator &lt;task&gt;</code>. Workers always run on this session's agent
+            and model.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ViewHeader
+        eyebrow="Rooms"
+        right={
+          <span className="flex items-center gap-1.5">
+            {room.workers.length > 0 ? <RoomAvatarStack names={room.workers.map((w) => w.name)} size={18} max={3} /> : null}
+            {room.chief ? (
+              <span className="font-mono text-[10px] text-amber-300/90" title="Chief of Staff">
+                {room.chief} leads
+              </span>
+            ) : null}
+            <span className="max-w-[110px] truncate font-mono text-[10px] text-ink-3" title={room.name}>
+              {room.name}
+            </span>
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                room.panels.some((panel) => panel.status === 'working') || channel?.status === 'running'
+                  ? 'bg-green breathe'
+                  : 'bg-ink-3/60',
+              )}
+              aria-hidden
+            />
+          </span>
+        }
+      />
+      {channelId ? (
+        <>
+          <div className="scroll-thin flex max-h-[96px] shrink-0 flex-wrap gap-1 overflow-y-auto border-b border-line/30 px-2 py-1.5">
+            {room.workers.length === 0 ? (
+              <p className="px-1 py-0.5 text-[10px] text-ink-3">
+                No workers yet — edit this room in the sidebar to add some.
+              </p>
+            ) : (
+              room.workers.map((worker) => {
+                const panel = room.panels.find((p) => p.name === worker.name)
+                return (
+                  <span
+                    key={worker.name}
+                    className="flex items-center gap-1.5 rounded-lg border border-line/40 bg-inset px-1.5 py-0.5"
+                  >
+                    <WorkerAvatar
+                      name={worker.name}
+                      size={16}
+                      status={panel?.status}
+                      ring
+                    />
+                    <span className={cn('max-w-[90px] truncate text-[10px]', room.chief === worker.name ? 'font-medium text-amber-200' : 'text-ink-2')}>
+                      {worker.name}
+                    </span>
+                  </span>
+                )
+              })
+            )}
+          </div>
+          <Timeline
+            conversation={conv}
+            onRespond={(id, d, m) => useStore.getState().respondToApproval(channelId, id, d, m)}
+            project={session.project ?? undefined}
+            sessionId={channelId}
+          />
+          <Composer
+            wide
+            workers={room.workers.map((worker) => worker.name)}
+            onSend={(text) => {
+              const trimmed = text.trim()
+              // /orchestrator inside the room fans out on the channel's own
+              // timeline (same-config workers) instead of prompting the lead.
+              const orchestratorMatch = /^\/orchestrator\s+([\s\S]+)$/.exec(trimmed)
+              if (orchestratorMatch) {
+                void runRoomTask(session.id, room, orchestratorMatch[1])
+                return
+              }
+              // @worker mentions narrow a dispatch to just those workers;
+              // plain messages keep going to the room's lead agent.
+              const mentioned = mentionedWorkers(
+                trimmed,
+                room.workers.map((worker) => worker.name),
+              )
+              if (mentioned.length > 0) {
+                void runRoomTask(session.id, room, trimmed, mentioned)
+                return
+              }
+              useStore.getState().sendPrompt(channelId, text)
+            }}
+            onQueue={(text) => {
+              // While a run is in flight the same rules apply: dispatch
+              // commands / @-worker mentions fire now, plain follow-ups wait
+              // in the channel's queue instead of double-dispatching.
+              const trimmed = text.trim()
+              const orchestratorMatch = /^\/orchestrator\s+([\s\S]+)$/.exec(trimmed)
+              if (orchestratorMatch) {
+                void runRoomTask(session.id, room, orchestratorMatch[1])
+                return
+              }
+              const mentioned = mentionedWorkers(
+                trimmed,
+                room.workers.map((worker) => worker.name),
+              )
+              if (mentioned.length > 0) {
+                void runRoomTask(session.id, room, trimmed, mentioned)
+                return
+              }
+              useStore.getState().queueMessage(channelId, trimmed)
+            }}
+            onStop={() => void useStore.getState().interruptSession(channelId)}
+            working={channel?.status === 'running'}
+            disabled={connection !== 'connected'}
+            placeholder={`Message ${room.name}… (@ to mention a worker)`}
+          />
+        </>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+          <p className="text-[12px] text-ink-2">{room.name}</p>
+          <p className="max-w-[240px] text-[11px] leading-[1.6] text-ink-3">
+            {room.workers.length > 0
+              ? 'Dispatch a task with the ⚡ button in the sidebar, or /orchestrator — the channel opens here.'
+              : 'This room has no workers yet — edit it in the sidebar to add some.'}
+          </p>
+        </div>
+      )}
+    </div>
   )
 }

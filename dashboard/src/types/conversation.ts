@@ -180,6 +180,8 @@ export interface OrchestrationPart {
   id: string
   /** The agents the task was fanned out to, in request order. */
   agents: string[]
+  /** Worker/child display names when the run named its children (a room run). */
+  names?: string[]
   /** Whether a merge step synthesizes the answers into one reply. */
   merge: boolean
   /** `running` (children working) → `merging` → terminal. */

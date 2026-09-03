@@ -42,6 +42,10 @@ export interface Session {
   external_id?: string | null
   /** `agentdeck` for locally created, or the provider id it was imported from. */
   source?: string
+  /** The session that spawned this one as a subagent / orchestration child. */
+  parent_id?: string | null
+  /** Harness-created rows (orchestration children, room channels) hidden from the default lists. */
+  hidden?: boolean
 }
 
 /**
@@ -109,4 +113,6 @@ export interface CreateSessionRequest {
    */
   model?: string
   effort?: string
+  /** Hide from the default session lists (room channels / harness workers). */
+  hidden?: boolean
 }

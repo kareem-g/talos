@@ -206,7 +206,7 @@ function NotificationsCard() {
       </header>
       <div className="flex flex-col gap-2 p-3.5">
         <p className="text-[11.5px] leading-[1.6] text-ink-2">
-          Get a system alert when an agent needs approval or finishes while AgentDeck is in the
+          Get a system alert when an agent needs approval or finishes while Plumb is in the
           background. Alerts are local to this browser — nothing leaves your machine.
         </p>
         {state !== 'granted' && state !== 'unsupported' ? (

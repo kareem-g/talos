@@ -87,6 +87,8 @@ export type ServerFrame =
   | { type: 'DeviceRevoked'; payload: { device_id: string } }
   | { type: 'SessionUpdate'; payload: { session: Session } }
   | { type: 'SessionDeleted'; payload: { session_id: string } }
+  | { type: 'RoomUpsert'; payload: { room: Record<string, unknown> } }
+  | { type: 'RoomDeleted'; payload: { room_id: string } }
   | { type: 'TerminalOutput'; payload: { session_id: string; data: string } }
   | { type: 'TerminalResized'; payload: { session_id: string; cols: number; rows: number } }
   | { type: 'Message'; payload: { message: AgentMessage } }

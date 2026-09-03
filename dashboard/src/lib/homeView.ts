@@ -13,7 +13,7 @@
  * The module is provider-agnostic: it never mentions "model" or "effort".
  */
 
-import { sessionUIState, uiStateRank, type UIState } from './sessionState'
+import { sessionUIState, uiStateRank, isInternalSession, type UIState } from './sessionState'
 import { describeApproval } from './approvals'
 import type { Conversation } from '@/types/conversation'
 import type { Session } from '@/types/session'
@@ -130,7 +130,7 @@ export function deriveHomeView(params: {
   const { sessions, connection, search, filter, starredSet, getConversation, providerNameFor, notices, now } = params
 
   const withStates = sessions
-    .filter((s) => s.status !== 'archived')
+    .filter((s) => s.status !== 'archived' && !isInternalSession(s))
     .map((session) => ({
       session,
       uiState: sessionUIState(session, getConversation(session.id), connection) as UIState,

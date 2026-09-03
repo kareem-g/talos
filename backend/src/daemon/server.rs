@@ -40,6 +40,15 @@ pub async fn start(
         // read-only; `sync` adopts them and is idempotent.
         .route("/api/sessions/discover", get(crate::api::sync::discover_sessions))
         .route("/api/sessions/sync", post(crate::api::sync::sync_sessions))
+        // Rooms — rosters synced across every client; writes broadcast live.
+        .route(
+            "/api/rooms",
+            get(crate::api::rooms::list_rooms).post(crate::api::rooms::create_room),
+        )
+        .route(
+            "/api/rooms/{id}",
+            axum::routing::patch(crate::api::rooms::update_room).delete(crate::api::rooms::delete_room),
+        )
         .route("/api/sessions/{id}", get(crate::api::routes::get_session).delete(crate::api::routes::delete_session))
         .route("/api/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
         .route("/api/sessions/{id}/subagents", post(crate::api::routes::spawn_subagent))

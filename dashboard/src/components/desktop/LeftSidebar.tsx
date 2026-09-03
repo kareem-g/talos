@@ -13,12 +13,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, Folder, GitBranch as GitBranchIcon, Plus, RefreshCw, Search } from 'lucide-react'
+import { Check, ChevronDown, Folder, GitBranch as GitBranchIcon, MessagesSquare, Plus, RefreshCw, Search } from 'lucide-react'
 import { gitApi, type GitBranch } from '@/lib/api'
 import { getConversation, useStore } from '@/store'
 import { cn, relativeTime } from '@/lib/format'
-import { sessionUIState } from '@/lib/sessionState'
+import { sessionUIState, isInternalSession } from '@/lib/sessionState'
 import { NewSessionLayer } from '@/components/SessionList'
+import { RoomsSection } from './RoomsSection'
 import type { Session } from '@/types/session'
 
 interface BranchStats {
@@ -92,7 +93,7 @@ export function LeftSidebar({
   const workspaces = useMemo(() => {
     const grouped = new Map<string, Session[]>()
     for (const s of sessions) {
-      if (s.status === 'archived') continue
+      if (s.status === 'archived' || isInternalSession(s)) continue
       const key = s.project ?? '__inbox__'
       grouped.set(key, [...(grouped.get(key) ?? []), s])
     }
@@ -116,7 +117,7 @@ export function LeftSidebar({
   const visibleSessions = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return sessions
-      .filter((s) => s.status !== 'archived' && (s.project ?? '__inbox__') === activeWorkspace)
+      .filter((s) => s.status !== 'archived' && !isInternalSession(s) && (s.project ?? '__inbox__') === activeWorkspace)
       .filter(
         (s) =>
           !needle ||
@@ -175,14 +176,38 @@ export function LeftSidebar({
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r border-line/60 bg-[#0a0a0c] text-zinc-100">
+      {/* 0. Plumb wordmark — the rail's identity header */}
+      <div className="flex items-center gap-2.5 border-b border-white/[0.05] px-3 pb-2.5 pt-2.5">
+        <span
+          aria-hidden
+          className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] ring-1 ring-inset ring-white/[0.1]"
+        >
+          <svg width="11" height="15" viewBox="0 0 11 15" fill="none" aria-hidden>
+            <line x1="5.5" y1="1" x2="5.5" y2="8.5" stroke="#7dd3fc" strokeWidth="1.6" strokeLinecap="round" />
+            <circle cx="5.5" cy="11.5" r="2.7" fill="#34d399" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] text-zinc-100">
+          Plumb
+        </span>
+        <span
+          aria-hidden
+          title={connection === 'connected' ? 'Connected' : connection}
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            connection === 'connected' ? 'bg-emerald-400' : 'animate-pulse bg-orange-400',
+          )}
+        />
+      </div>
+
       {/* 1. Project selector */}
-      <div className="relative px-3 pb-2 pt-3">
+      <div className="relative px-3 pb-2 pt-2.5">
         <button
           type="button"
           onClick={() => setDropdownOpen((v) => !v)}
           aria-expanded={dropdownOpen}
           aria-haspopup="listbox"
-          className="flex w-full items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-left transition hover:bg-white/[0.07]"
+          className="flex w-full items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07]"
         >
           <Folder size={13} className="shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-zinc-200">
@@ -220,7 +245,7 @@ export function LeftSidebar({
 
       {/* 2. Search (pinned above sessions) */}
       <div className="px-3 py-2">
-        <div className="flex h-7 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/40 px-2">
+        <div className="flex h-7 items-center gap-1.5 rounded-xl border border-white/[0.07] bg-black/40 px-2 transition-colors focus-within:border-white/[0.18]">
           <Search size={12} className="shrink-0 text-zinc-600" />
           <input
             ref={searchRef}
@@ -234,9 +259,15 @@ export function LeftSidebar({
         </div>
       </div>
 
-      {/* 3. Sessions header + new task */}
+      {/* 3. Rooms — channels of workers the orchestrator fans tasks out to.
+          Pinned above the session list (channel-first order). Clicking a room
+          opens its channel as a native chat in the center. */}
+      <RoomsSection session={{ id: session.id }} onSelect={onSelect} />
+
+      {/* 4. Sessions header + new task */}
       <div className="flex items-center justify-between px-3 pb-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+        <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+          <MessagesSquare size={11} className="text-zinc-500" />
           Sessions{visibleSessions.length ? ` · ${visibleSessions.length}` : ''}
         </p>
         <button
@@ -261,15 +292,17 @@ export function LeftSidebar({
             const attention = uiState === 'approval' || uiState === 'failed' || uiState === 'input'
             return (
               <div key={s.id} className="group relative mb-0.5 flex items-center">
-                <button
-                  type="button"
-                  onClick={() => onSelect(s.id)}
-                  aria-current={active ? 'true' : undefined}
-                  className={cn(
-                    'flex min-w-0 flex-1 items-center gap-2 rounded-lg py-2 pl-2 pr-7 text-left transition',
-                    active ? 'bg-white/[0.09] text-white' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100',
-                  )}
-                >
+                  <button
+                    type="button"
+                    onClick={() => onSelect(s.id)}
+                    aria-current={active ? 'true' : undefined}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-xl py-2 pl-2 pr-7 text-left transition',
+                      active
+                        ? 'bg-white/[0.1] text-white ring-1 ring-inset ring-white/[0.08]'
+                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100',
+                    )}
+                  >
                   <span
                     className={cn(
                       'size-1.5 shrink-0 rounded-full',

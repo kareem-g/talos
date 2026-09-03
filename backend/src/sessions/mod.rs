@@ -34,6 +34,11 @@ pub struct Session {
     /// Opaque session id; drives cancellation cascades and spawned-row UI.
     #[serde(default)]
     pub parent_id: Option<String>,
+    /// Harness-created sessions (orchestration children, room channels) that
+    /// stay out of the default session lists — they surface in the room /
+    /// agent views instead. By-id access (transcript, resume) is unaffected.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 fn default_source() -> String {
@@ -72,6 +77,7 @@ impl Default for Session {
             external_id: None,
             source: default_source(),
             parent_id: None,
+            hidden: false,
         }
     }
 }

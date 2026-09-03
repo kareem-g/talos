@@ -101,7 +101,7 @@ export function SettingsScreen() {
         <div>
           <h1 className="text-[16px] font-semibold tracking-[-0.01em] text-ink">Settings</h1>
           <p className="mt-0.5 text-[12px] leading-[1.6] text-ink-3">
-            AgentDeck runs coding agents on this machine and lets you drive them from anywhere.
+            Plumb runs coding agents on this machine and lets you drive them from anywhere.
           </p>
         </div>
 
@@ -110,7 +110,7 @@ export function SettingsScreen() {
           <ol className="flex flex-col gap-2 text-[12px] leading-[1.6] text-ink-2">
             <li className="flex gap-2">
               <span className="font-mono text-[11px] text-accent-ink">01</span>
-              Install an agent CLI (Claude Code, Codex, OpenCode, Grok Build…) — AgentDeck detects
+              Install an agent CLI (Claude Code, Codex, OpenCode, Grok Build…) — Plumb detects
               it automatically.
             </li>
             <li className="flex gap-2">

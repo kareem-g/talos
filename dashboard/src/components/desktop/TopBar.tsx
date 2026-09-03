@@ -61,7 +61,7 @@ export function TopBar({
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent/15">
           <span className="font-mono text-[11px] font-bold text-accent-ink">A</span>
         </span>
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">AgentDeck</span>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
       </span>
 
       <Button variant="ghost" onClick={onNewSession} className="min-h-7 gap-1.5 px-2.5 text-[11.5px]">

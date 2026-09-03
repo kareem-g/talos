@@ -25,6 +25,7 @@ import {
   GitFilesView,
   GoalView,
   PlanView,
+  RoomChannelView,
   SideSessionView,
   SubSessionsView,
 } from './RightRailViews'
@@ -87,6 +88,9 @@ function loadTabs(sessionId: string): RightTabType[] {
     if (!raw) return DEFAULT_OPEN_TABS
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return DEFAULT_OPEN_TABS
+    // Only ids the current registry knows about survive; anything else
+    // (removed tab type, older build's stale entry) is dropped here so the
+    // strip never renders a tab it cannot describe.
     const valid = parsed.filter(isRightTab) as RightTabType[]
     return valid.length > 0 ? valid : DEFAULT_OPEN_TABS
   } catch {
@@ -230,6 +234,8 @@ export const RightRail = forwardRef<RightRailHandle, {
         return <SubSessionsView session={session} onOpenSession={onOpenSession} />
       case 'side':
         return <SideSessionView session={session} />
+      case 'rooms':
+        return <RoomChannelView session={session} />
       default:
         return null
     }

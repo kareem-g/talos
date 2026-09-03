@@ -137,6 +137,98 @@ fn tokenize(text: &str) -> HashSet<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Room memory — per-room recall, separate from the workspace store.
+//
+// A room's runs are distilled into entries scoped to that room only
+// (`.agentdeck/rooms/<room_id>.memory.json`), so a channel remembers its own
+// tasks and outcomes without leaking into the workspace's memory or other
+// rooms. Reads/writes are still gated by the workspace memory toggle at the
+// call sites, so turning memory off for a workspace silences its rooms too.
+// ---------------------------------------------------------------------------
+
+fn room_memory_path(project: &str, room_id: &str) -> PathBuf {
+    // room_id is harness-generated (`room-<ts>-<rand>`) but sanitize anyway —
+    // it becomes a filename.
+    let safe: String = room_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    Path::new(project).join(format!(".agentdeck/rooms/{safe}.memory.json"))
+}
+
+/// All memory entries for one room, oldest first. Missing/corrupt → empty.
+pub fn list_room_memories(project: Option<&str>, room_id: &str) -> Vec<MemoryEntry> {
+    let Some(project) = project else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(room_memory_path(project, room_id)) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<MemoryEntry>>(&content).unwrap_or_default()
+}
+
+/// Append a memory entry to a room's store.
+pub fn save_room_memory(
+    project: Option<&str>,
+    room_id: &str,
+    entry: MemoryEntry,
+) -> std::io::Result<()> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+    let path = room_memory_path(project, room_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut entries = list_room_memories(Some(project), room_id);
+    entries.retain(|e| e.id != entry.id);
+    entries.push(entry);
+    // Keep a room's recall bounded: the newest 30 runs are its living memory.
+    if entries.len() > 30 {
+        let drop_count = entries.len() - 30;
+        entries.drain(0..drop_count);
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&entries)?)
+}
+
+/// The `max` room memories most relevant to `prompt`, formatted as one
+/// injection block (`<room_memory>` entries) — empty string when the room has
+/// nothing relevant or workspace memory is disabled.
+pub fn room_memory_block(
+    project: Option<&str>,
+    room_id: &str,
+    prompt: &str,
+    max: usize,
+) -> String {
+    if max == 0 || !workspace_memory_enabled(project) {
+        return String::new();
+    }
+    let prompt_words = tokenize(prompt);
+    if prompt_words.is_empty() {
+        return String::new();
+    }
+    let mut ranked: Vec<(f64, MemoryEntry)> = list_room_memories(project, room_id)
+        .into_iter()
+        .filter_map(|entry| {
+            let memory_words = tokenize(&entry.text);
+            let overlap = prompt_words.intersection(&memory_words).count();
+            let score = overlap as f64 / prompt_words.len() as f64;
+            (score >= 0.08).then_some((score, entry))
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.truncate(max);
+    if ranked.is_empty() {
+        return String::new();
+    }
+    let sections: Vec<String> = ranked
+        .into_iter()
+        .map(|(_, entry)| format!("<room_memory title=\"{}\">\n{}\n</room_memory>", entry.title, entry.text))
+        .collect();
+    format!("<room_memories>\n{}\n</room_memories>", sections.join("\n\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,4 +360,82 @@ pub fn set_workspace_memory_enabled(project: Option<&str>, enabled: bool) -> std
     std::fs::write(&path, format!("[memory]
 enabled = {}
 ", if enabled { "true" } else { "false" }))
+}
+
+#[cfg(test)]
+mod room_tests {
+    use super::*;
+
+    fn room_entry(id: &str, text: &str) -> MemoryEntry {
+        MemoryEntry {
+            id: id.to_string(),
+            title: id.to_string(),
+            created_at: String::new(),
+            source_session: String::new(),
+            text: text.to_string(),
+            kind: "memory".to_string(),
+        }
+    }
+
+    #[test]
+    fn room_memories_are_scoped_per_room() {
+        let dir = std::env::temp_dir().join(format!("room-mem-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project = dir.to_str().unwrap();
+
+        save_room_memory(Some(project), "room-a", room_entry("m1", "deploy auth service")).unwrap();
+        save_room_memory(Some(project), "room-b", room_entry("m2", "write rust tests")).unwrap();
+
+        assert_eq!(list_room_memories(Some(project), "room-a").len(), 1);
+        assert_eq!(list_room_memories(Some(project), "room-a")[0].id, "m1");
+        assert_eq!(list_room_memories(Some(project), "room-b")[0].id, "m2");
+        // Workspace store untouched by room saves.
+        assert!(list_memories(Some(project)).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn room_memory_block_recalls_relevant_runs_only() {
+        let dir = std::env::temp_dir().join(format!("room-mem-block-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project = dir.to_str().unwrap();
+
+        save_room_memory(
+            Some(project),
+            "room-a",
+            room_entry("r1", "migrated the auth module to oauth sessions"),
+        )
+        .unwrap();
+        save_room_memory(
+            Some(project),
+            "room-a",
+            room_entry("r2", "flaky payment checkout test isolated"),
+        )
+        .unwrap();
+
+        let block = room_memory_block(Some(project), "room-a", "migrate the auth module again", 2);
+        assert!(block.contains("<room_memories>"));
+        assert!(block.contains("r1"));
+
+        let empty = room_memory_block(Some(project), "room-a", "unrelated quantum recipe", 2);
+        assert!(empty.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn room_memory_block_respects_workspace_toggle() {
+        let dir = std::env::temp_dir().join(format!("room-mem-toggle-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project = dir.to_str().unwrap();
+
+        save_room_memory(Some(project), "room-a", room_entry("m1", "auth deploy run")).unwrap();
+        set_workspace_memory_enabled(Some(project), false).unwrap();
+        assert!(room_memory_block(Some(project), "room-a", "auth deploy", 2).is_empty());
+        set_workspace_memory_enabled(Some(project), true).unwrap();
+        assert!(!room_memory_block(Some(project), "room-a", "auth deploy", 2).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

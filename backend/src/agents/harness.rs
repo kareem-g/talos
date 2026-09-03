@@ -109,6 +109,23 @@ pub fn classify(agent: &str, is_api: bool, acp_live: bool, claude_live: bool) ->
     }
 }
 
+/// The model a session currently runs at: its live config (the agent's own
+/// report wins) falling back to the recorded create-time/config-time request.
+/// Orchestration children pin this so a fan-out keeps one configuration.
+pub async fn session_model(state: &AppState, session_id: &str) -> Option<String> {
+    if let Ok(config) = crate::sessions::config::read_config(state, session_id).await {
+        let live = config
+            .options
+            .iter()
+            .find(|option| option.id == "model" || option.category.as_deref() == Some("model"))
+            .and_then(|option| option.current_value.clone());
+        if live.is_some() {
+            return live;
+        }
+    }
+    state.session_manager.current_model(session_id).await
+}
+
 /// Resolve the backend that owns a session, or `None` if it's not a
 /// structured-stream backend (PTY path or unknown).
 pub async fn resolve_turn(state: &AppState, session: &Session) -> Option<Box<dyn AgentTurn>> {

@@ -1,0 +1,50 @@
+# AgentDeck project policy — applied before the permission card, on every
+# backend. Network tools are deny-by-default: only allowlisted hosts pass
+# through to the normal permission flow, everything else is refused.
+#
+# Read-only, dev-oriented domains this project's agents routinely need
+# (weather lookups via wttr.in, source hosting, package registries, docs).
+
+[[network]]
+domain = "wttr.in"
+action = "allow"
+
+[[network]]
+domain = "github.com"
+action = "allow"
+
+[[network]]
+domain = "api.github.com"
+action = "allow"
+
+[[network]]
+domain = "raw.githubusercontent.com"
+action = "allow"
+
+[[network]]
+domain = "crates.io"
+action = "allow"
+
+[[network]]
+domain = "docs.rs"
+action = "allow"
+
+[[network]]
+domain = "registry.npmjs.org"
+action = "allow"
+
+[[network]]
+domain = "npmjs.com"
+action = "allow"
+
+[[network]]
+domain = "pypi.org"
+action = "allow"
+
+[[network]]
+domain = "stackoverflow.com"
+action = "allow"
+
+[[network]]
+domain = "developer.mozilla.org"
+action = "allow"

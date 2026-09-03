@@ -7,7 +7,7 @@
  */
 
 import type { LucideIcon } from 'lucide-react'
-import { Bot, FileDiff, Files, Flag, Globe2, Map as MapIcon, MessagesSquare, Users } from 'lucide-react'
+import { Bot, FileDiff, Files, Flag, Globe2, Map as MapIcon, MessagesSquare, Users, Waypoints } from 'lucide-react'
 
 export type RightTabType =
   | 'browser'
@@ -18,6 +18,7 @@ export type RightTabType =
   | 'goal'
   | 'subsessions'
   | 'side'
+  | 'rooms'
 
 export interface RightTabMeta {
   id: RightTabType
@@ -36,6 +37,7 @@ export const RIGHT_TABS: RightTabMeta[] = [
   { id: 'browser', label: 'Browser', description: 'Inline webview for a URL.', defaultOpen: false, icon: Globe2 },
   { id: 'subsessions', label: 'Sub-sessions', description: 'Other sessions in this workspace — switch here.', defaultOpen: false, icon: Users },
   { id: 'side', label: 'Side', description: 'A side session you chat with in parallel (/side, /btw).', defaultOpen: false, icon: MessagesSquare },
+  { id: 'rooms', label: 'Rooms', description: 'Rooms of same-config workers you can fan tasks out to (/orchestrator).', defaultOpen: false, icon: Waypoints },
 ]
 
 export const RIGHT_TAB_BY_ID: Record<RightTabType, RightTabMeta> = Object.fromEntries(

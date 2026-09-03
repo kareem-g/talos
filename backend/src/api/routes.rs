@@ -387,8 +387,13 @@ pub async fn spawn_subagent(
 
     // The shared orchestration runner owns the whole lifecycle: spawn with the
     // subagent instruction set, parent link, budget, timeout, and
-    // parent-kill cancellation.
+    // parent-kill cancellation. Children inherit the parent's model unless the
+    // caller pins another one, and are hidden from the workspace lists.
     let name = format!("subagent-{agent}");
+    let model = match body.get("model").and_then(|v| v.as_str()) {
+        Some(m) => Some(m.to_string()),
+        None => crate::agents::harness::session_model(&state, &parent_id).await,
+    };
     let outcome = crate::agents::orchestrate::run_child(
         &state,
         &parent_id,
@@ -397,6 +402,8 @@ pub async fn spawn_subagent(
         &prompt,
         max_cost_usd,
         std::time::Duration::from_secs(timeout_secs),
+        model.as_deref(),
+        None,
     )
     .await;
 
@@ -1700,6 +1707,23 @@ pub(crate) async fn spawn_session(
     // flag and drop the Dispatch tool from their advertised set.
     if body.get("subagent").and_then(|v| v.as_bool()).unwrap_or(false) {
         let _ = state.session_manager.set_pending_config(&session.id, "subagent", "true").await;
+    }
+
+    // Room channels (and any caller that asks) opt out of the default session
+    // lists; the room/agent views surface them instead. By-id access —
+    // transcript, resume, kill — is unaffected.
+    if body.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let _ = state.session_manager.set_hidden(&session.id, true).await;
+    }
+
+    // Callers can pin harness configuration at spawn time — orchestration
+    // children inherit their parent's permission mode this way, so a room
+    // fan-out never strands hidden workers behind approval cards.
+    if let Some(mode) = body.get("permission_mode").and_then(|v| v.as_str()) {
+        let _ = state
+            .session_manager
+            .set_pending_config(&session.id, "permission_mode", mode)
+            .await;
     }
 
     // The chat shows the RAW prompt the user sent — the enriched prompt

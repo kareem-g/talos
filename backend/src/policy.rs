@@ -132,8 +132,7 @@ impl ToolPolicy {
     }
 
     /// Decide a network access by host. **Deny-by-default**: a host matching
-    /// an explicit allow rule falls through to the normal permission flow
-    /// ([`PolicyDecision::Ask`]); anything else is denied.
+    /// an explicit allow rule is auto-approved; anything else is denied.
     pub fn decide_network(&self, host: &str) -> PolicyDecision {
         let host = host.to_lowercase();
         let host = host.strip_suffix('.').unwrap_or(&host);
@@ -146,7 +145,7 @@ impl ToolPolicy {
                 continue;
             }
             return match rule.action.to_lowercase().as_str() {
-                "allow" => PolicyDecision::Ask, // allowlisted → normal permission flow
+                "allow" => PolicyDecision::Allow, // allowlisted → auto-approved
                 "deny" => PolicyDecision::Deny,
                 _ => PolicyDecision::Deny,
             };
@@ -190,10 +189,16 @@ impl ToolPolicy {
     pub fn decide_input(&self, tool_name: &str, input: &Value) -> InputDecision {
         if crate::tools::classify(tool_name).0 == crate::tools::ToolCategory::Network {
             let url = input.get("url").and_then(Value::as_str).unwrap_or("");
-            if let Some(host) = url_host(url)
-                && self.decide_network(&host) == PolicyDecision::Deny
-            {
-                return InputDecision::Deny("Denied (project network policy)");
+            if let Some(host) = url_host(url) {
+                match self.decide_network(&host) {
+                    PolicyDecision::Deny => {
+                        return InputDecision::Deny("Denied (project network policy)");
+                    }
+                    PolicyDecision::Allow => {
+                        return InputDecision::Allow("Auto-approved (project network policy)");
+                    }
+                    PolicyDecision::Ask => {}
+                }
             }
         }
 
@@ -287,15 +292,15 @@ mod tests {
     }
 
     #[test]
-    fn network_allowlist_falls_through_to_permission() {
+    fn network_allowlist_auto_approves() {
         let p = ToolPolicy {
             rules: Vec::new(),
             paths: Vec::new(),
             network: vec![NetworkRule { domain: "example.com".to_string(), action: "allow".to_string() }],
         };
-        assert_eq!(p.decide_network("example.com"), PolicyDecision::Ask);
-        assert_eq!(p.decide_network("www.example.com"), PolicyDecision::Ask);
-        assert_eq!(p.decide_network("sub.example.com"), PolicyDecision::Ask);
+        assert_eq!(p.decide_network("example.com"), PolicyDecision::Allow);
+        assert_eq!(p.decide_network("www.example.com"), PolicyDecision::Allow);
+        assert_eq!(p.decide_network("sub.example.com"), PolicyDecision::Allow);
         assert_eq!(p.decide_network("evil.com"), PolicyDecision::Deny);
     }
 
@@ -349,10 +354,11 @@ mod tests {
             p.decide_input("WebFetch", &json!({ "url": "https://evil.com/x" })),
             InputDecision::Deny("Denied (project network policy)")
         );
-        // Allowlisted host + no path hit → falls to the tool rule (allow).
+        // Allowlisted host + no path hit → the network rule auto-approves
+        // before the tool rules are consulted.
         assert_eq!(
             p.decide_input("WebFetch", &json!({ "url": "https://example.com/x" })),
-            InputDecision::Allow("Auto-approved (project policy)")
+            InputDecision::Allow("Auto-approved (project network policy)")
         );
         // Path rule for the input's path.
         assert_eq!(

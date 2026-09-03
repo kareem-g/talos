@@ -234,15 +234,27 @@ export function StateZone({
   config,
   provider,
   onSend,
+  onQueue,
   onSetConfig,
+  rooms,
+  workers,
 }: {
   session: Session
   conversation: Conversation
   connection: ConnectionState
   config?: SessionConfig
   provider?: Provider
-  onSend: (text: string, attachments: AttachmentRef[]) => void
+  onSend: (text: string, attachments: AttachmentRef[]) => boolean | void
+  /**
+   * Queue path. When provided it routes dispatch commands (which are
+   * independent of the busy agent) immediately; plain text still queues.
+   */
+  onQueue?: (text: string, attachments: AttachmentRef[]) => boolean | void
   onSetConfig: (id: string, value: string) => void
+  /** Room names for the #-menu so the user can mention a room. */
+  rooms?: string[]
+  /** Room worker names for the @-menu (when this session is a room channel). */
+  workers?: string[]
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -324,7 +336,12 @@ export function StateZone({
       agentId={session.agent}
       projectPath={session.project ?? undefined}
       queue={queue}
-      onQueue={(text, attachments) => queueMessage(session.id, text, attachments)}
+      onQueue={(text, attachments) => {
+        // The caller's queue handler routes dispatch commands immediately;
+        // fall back to a plain queue when the workspace didn't wire one.
+        if (onQueue) return onQueue(text, attachments)
+        queueMessage(session.id, text, attachments)
+      }}
       onSteer={(id) => steerQueued(session.id, id)}
       onEditQueued={handleEditQueued}
       onRemoveQueued={(id) => removeQueued(session.id, id)}
@@ -333,6 +350,8 @@ export function StateZone({
       draftSeed={draftSeed}
       sessionId={session.id}
       contextUsage={contextUsage}
+      rooms={rooms}
+      workers={workers}
       controls={
         <ComposerControls
           part="left"

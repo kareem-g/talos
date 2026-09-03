@@ -33,6 +33,7 @@ import { cn, formatDuration } from '@/lib/format'
 import { gitApi } from '@/lib/api'
 import { decisionLabel, describeApproval } from '@/lib/approvals'
 import { describeTool } from '@/lib/tools'
+import { WorkerAvatar } from './desktop/RoomAvatars'
 import type {
   ApprovalPart,
   CommandPart,
@@ -1296,15 +1297,21 @@ export function Part({
 function SubagentRow({ part }: { part: Extract<MessagePart, { kind: 'subagent' }> }) {
   const running = part.status === 'running'
   const cancelled = part.status === 'cancelled'
+  const failed = part.status === 'failed'
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
-      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : cancelled ? 'bg-ink-3' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+      <WorkerAvatar
+        name={part.name}
+        size={18}
+        ring
+        status={running ? 'working' : failed ? 'failed' : cancelled ? 'idle' : 'done'}
+      />
       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
         {running
           ? 'Subagent running'
           : cancelled
             ? 'Subagent cancelled'
-            : part.status === 'failed'
+            : failed
               ? 'Subagent failed'
               : 'Subagent done'}{' '}
         · {part.name}
@@ -1325,20 +1332,57 @@ function OrchestrationRow({ part }: { part: Extract<MessagePart, { kind: 'orches
           ? 'Fan-out failed'
           : 'Fan-out done'
   const children = part.children ?? []
+  // Worker/agent labels: a room run names its workers (Scout, Maven…), a
+  // plain fan-out falls back to the agent ids. Names make the roster visible.
+  const workers = part.names && part.names.length > 0 ? part.names : part.agents
+  const display = workers.length > 0 ? workers : children.map((child) => child.agent)
+  const childStatus = new Map(children.map((child) => [child.agent, child.status]))
+  const showStatuses = display.length === children.length
   return (
     <div className="rounded-lg border border-line/40 bg-inset px-2 py-1.5">
       <div className="flex items-center gap-2">
-        <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+        <span className="flex shrink-0 items-center" aria-hidden>
+          {display.slice(0, 4).map((name, index) => (
+            <span
+              key={`${name}-${index}`}
+              className="rounded-full ring-2 ring-inset ring-[#0c0c0f]"
+              style={{ marginLeft: index === 0 ? 0 : -5, zIndex: display.length - index }}
+            >
+              <WorkerAvatar
+                name={name}
+                size={16}
+                ring
+                status={
+                  showStatuses
+                    ? childStatus.get(name) === 'completed'
+                      ? 'done'
+                      : childStatus.get(name) === 'failed' || childStatus.get(name) === 'timeout' || childStatus.get(name) === 'cancelled'
+                        ? 'failed'
+                        : childStatus.has(name)
+                          ? 'working'
+                          : 'idle'
+                    : running
+                      ? 'working'
+                      : 'done'
+                }
+              />
+            </span>
+          ))}
+        </span>
         <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
-          {label} · {part.agents.length > 0 ? part.agents.join(' + ') : children.map((child) => child.agent).join(' + ')}
+          {label} · {display.join(' + ')}
         </span>
         <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">
           {children.length > 0
             ? `${children.filter((child) => child.status === 'completed').length}/${children.length} ok`
-            : `${part.agents.length} agents`}
+            : `${workers.length} agents`}
         </span>
       </div>
-      {part.reply ? <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-ink">{part.reply}</p> : null}
+      {part.reply && !running ? (
+        <div className="mt-1.5 border-t border-line/30 pt-1.5">
+          <Prose text={part.reply} streaming={false} />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1420,7 +1464,7 @@ function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verifi
 }
 
 /**
- * The harness-context chip: what the AgentDeck harness injected into the user's
+ * The harness-context chip: what the Plumb harness injected into the user's
  * prompt before it reached the agent (environment, project skills, similar past
  * runs). Rendered under the user message so the enrichment is visible.
  */
@@ -1435,7 +1479,7 @@ export function ContextChip({ part }: { part: Extract<MessagePart, { kind: 'cont
   return (
     <div
       className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-ink-3"
-      title="Injected by the AgentDeck harness before this prompt reached the agent"
+      title="Injected by the Plumb harness before this prompt reached the agent"
     >
       <span aria-hidden>🧠</span>
       <span className="truncate">Context: {bits.join(' · ')}</span>

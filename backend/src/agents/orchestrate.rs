@@ -28,6 +28,21 @@ use std::time::Duration;
 /// Wall-clock budget for one child before the harness gives up on it.
 pub const DEFAULT_CHILD_TIMEOUT_SECS: u64 = 300;
 
+/// Room identity threaded through a fan-out run. When present, every worker
+/// is prompted as a member of this Room (peers + Chief of Staff) and the
+/// run's outcome is distilled into the room's own memory store, separate from
+/// workspace memory.
+#[derive(Debug, Clone, Default)]
+pub struct RoomContext {
+    pub id: String,
+    pub name: String,
+    /// The worker designated Chief of Staff: it leads the merge step and is
+    /// introduced as the team's lead in every worker's prompt.
+    pub chief: Option<String>,
+    /// The full worker roster for this run, in request order.
+    pub workers: Vec<String>,
+}
+
 /// How one fan-out child ended.
 #[derive(Debug, Clone)]
 pub struct ChildOutcome {
@@ -109,6 +124,61 @@ pub async fn run_child(
     prompt: &str,
     budget_usd: Option<f64>,
     timeout: Duration,
+    model: Option<&str>,
+    room: Option<&RoomContext>,
+) -> ChildOutcome {
+    // Bounded workers: subagent instructions (plus Room awareness when the
+    // run belongs to a Room — who the worker is, its peers, its chief), the
+    // parent link (cancellation cascade), and the subagent flag that removes
+    // Dispatch from the child's own tool set so fan-out cannot recurse.
+    // `model` pins the child to the parent's model so a run keeps one
+    // configuration; `hidden` keeps it out of the workspace session lists.
+    let instructions = match room {
+        Some(room) => {
+            let peers: Vec<String> = room
+                .workers
+                .iter()
+                .filter(|worker| worker.as_str() != name)
+                .cloned()
+                .collect();
+            format!(
+                "{}\n\n{}",
+                crate::prompts::subagent_prompt(),
+                crate::prompts::room_worker_section(
+                    &room.name,
+                    name,
+                    &peers,
+                    room.chief.as_deref(),
+                )
+            )
+        }
+        None => crate::prompts::subagent_prompt(),
+    };
+    let mut child_body = json!({
+        "instructions": instructions,
+        "parent_id": parent_id,
+        "subagent": true,
+        "hidden": true,
+    });
+    if let Some(model) = model {
+        child_body["model"] = Value::String(model.to_string());
+    }
+    spawn_and_await_child(state, parent_id, name, agent, prompt, budget_usd, timeout, child_body).await
+}
+
+/// Spawn one child with a fully pre-built create body and run it to a
+/// terminal state (completion, failure, budget, timeout, or parent death).
+/// The room-aware [`run_child`] and the Chief-of-Staff merge step both come
+/// through here; only the body differs.
+async fn spawn_and_await_child(
+    state: &AppState,
+    parent_id: &str,
+    name: &str,
+    agent: &str,
+    prompt: &str,
+    budget_usd: Option<f64>,
+    timeout: Duration,
+    child_body: Value,
 ) -> ChildOutcome {
     let mut outcome = ChildOutcome {
         agent: agent.to_string(),
@@ -130,14 +200,16 @@ pub async fn run_child(
     // Subscribe before spawning so no child event is missed.
     let mut rx = state.broadcast.subscribe();
 
-    // Bounded workers: subagent instructions, parent link (cancellation
-    // cascade), and the subagent flag that removes Dispatch from the child's
-    // own tool set so fan-out cannot recurse.
-    let child_body = json!({
-        "instructions": crate::prompts::subagent_prompt(),
-        "parent_id": parent_id,
-        "subagent": true,
-    });
+    // Workers run under their parent's permission mode. Without this a child
+    // defaults to "ask" and strands hidden room workers behind approval cards
+    // nobody can see — "same configuration as the session" includes this.
+    let mut child_body = child_body;
+    if child_body.get("permission_mode").is_none()
+        && let Ok(pending) = state.session_manager.pending_config(parent_id).await
+        && let Some((_, mode)) = pending.iter().find(|(k, _)| k == "permission_mode")
+    {
+        child_body["permission_mode"] = Value::String(mode.clone());
+    }
 
     // Boxed: this call closes an async cycle (spawn → turn → tool →
     // orchestrate → spawn), and a recursive async fn needs indirection to
@@ -245,8 +317,7 @@ pub async fn run_child(
 }
 
 /// Best-effort stop of a child session through whichever transport runs it.
-async fn stop_child(state: &AppState, child: &crate::sessions::Session) {
-    if let Some(turn) = crate::agents::harness::resolve_turn(state, child).await {
+async fn stop_child(state: &AppState, child: &crate::sessions::Session) {    if let Some(turn) = crate::agents::harness::resolve_turn(state, child).await {
         let _ = turn.stop(state, &child.id).await;
     }
     let _ = state.pty_manager.kill_session(&child.id).await;
@@ -259,22 +330,58 @@ async fn stop_child(state: &AppState, child: &crate::sessions::Session) {
 }
 
 /// Fan one prompt out to several agents concurrently. Returns one outcome per
-/// requested agent, in request order.
+/// requested agent, in request order. `names` optionally labels each child's
+/// session row (same length as `agents`); missing entries fall back to
+/// `orchestrate-{agent}`, de-duplicated when one agent id repeats.
 pub async fn fan_out(
     state: &AppState,
     parent_id: &str,
     prompt: &str,
     agents: &[String],
+    names: &[String],
     budget_usd: Option<f64>,
     timeout: Duration,
+    model: Option<&str>,
+    room: Option<&RoomContext>,
 ) -> Vec<ChildOutcome> {
     // Children are I/O-bound (streaming from their agent), so join_all drives
     // them concurrently on this task without owning state — no Arc clones,
     // and a panicking child would surface here instead of vanishing.
-    let futures = agents.iter().map(|agent| {
-        let name = format!("orchestrate-{agent}");
+    let mut used = std::collections::HashSet::new();
+    let child_names: Vec<String> = agents
+        .iter()
+        .enumerate()
+        .map(|(index, agent)| {
+            names
+                .get(index)
+                .map(|n| n.trim())
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    let mut name = format!("orchestrate-{agent}");
+                    while !used.insert(name.clone()) {
+                        name.push_str("-2");
+                    }
+                    name
+                })
+        })
+        .collect();
+    let futures = agents.iter().zip(child_names).map(|(agent, name)| {
         let agent = agent.clone();
-        async move { run_child(state, parent_id, &name, &agent, prompt, budget_usd, timeout).await }
+        async move {
+            run_child(
+                state,
+                parent_id,
+                &name,
+                &agent,
+                prompt,
+                budget_usd,
+                timeout,
+                model,
+                room,
+            )
+            .await
+        }
     });
     futures_util::future::join_all(futures).await
 }
@@ -282,9 +389,22 @@ pub async fn fan_out(
 /// The full orchestration flow behind `POST /api/sessions/{id}/orchestrate`
 /// and the `Dispatch` tool.
 ///
-/// Body: `{ prompt: string, agents: string[], merge?: bool (default true),
+/// Body: `{ prompt: string, agents?: string[], merge?: bool (default true),
 /// merge_agent?: string (default: the parent's agent), max_cost_usd?: number,
-/// timeout_secs?: number }`.
+/// timeout_secs?: number, names?: string[],
+/// room?: { id, name, chief? } }`.
+///
+/// When `agents` is omitted the run fans out to one child **per worker named
+/// in the parent's own roster** — the child always inherits the parent's agent
+/// id and model, so a room is a set of workers over one configuration rather
+/// than a mix of CLIs. Created sessions are hidden from the workspace session
+/// list (still fully visible in the room/session views).
+///
+/// With `room` present the run is Room-aware: each worker is prompted as a
+/// member of the Room (peers + Chief of Staff), the merge step is led by the
+/// chief when one is designated, prior room memories relevant to the task are
+/// recalled into the workers' context, and the run's outcome is distilled
+/// into the room's own memory store (gated by the workspace memory toggle).
 ///
 /// Emits `orchestration_started` → per-child subagent cards →
 /// `orchestration_finished` on the parent timeline and returns the run as
@@ -294,6 +414,21 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
     else {
         return json!({ "error": "prompt is required", "status": "error" });
     };
+    let parent = state
+        .session_manager
+        .get_session(parent_id)
+        .await
+        .ok()
+        .flatten();
+    let parent_agent = parent
+        .as_ref()
+        .map(|s| s.agent.clone())
+        .unwrap_or_default();
+
+    // Roster-driven default: with no explicit `agents`, the run spawns ONE
+    // child per this session's own configuration, named after it — "dispatch
+    // this work in a worker like me". The Dispatch tool's decomposition path
+    // passes `agents` and wins over this default.
     let agents: Vec<String> = body
         .get("agents")
         .and_then(|v| v.as_array())
@@ -304,7 +439,8 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
                 .filter(|a| !a.trim().is_empty())
                 .collect()
         })
-        .unwrap_or_default();
+        .filter(|list: &Vec<String>| !list.is_empty())
+        .unwrap_or_else(|| vec![parent_agent.clone()]);
     if agents.is_empty() {
         return json!({ "error": "agents must be a non-empty list of agent ids", "status": "error" });
     }
@@ -317,51 +453,152 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
             .unwrap_or(DEFAULT_CHILD_TIMEOUT_SECS),
     );
 
-    let parent_agent = state
-        .session_manager
-        .get_session(parent_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|s| s.agent)
-        .unwrap_or_else(|| agents[0].clone());
     let merge_agent = body
         .get("merge_agent")
         .and_then(|v| v.as_str())
-        .unwrap_or(&parent_agent)
-        .to_string();
+        .map(str::to_string)
+        .unwrap_or(parent_agent);
+
+    // Children inherit the parent's model so the whole run keeps the current
+    // session's configuration instead of mixing CLI defaults. A caller that
+    // pins `model` explicitly (e.g. room dispatch from another session's
+    // config) wins over the parent's own.
+    let model = match body.get("model").and_then(|v| v.as_str()) {
+        Some(m) => Some(m.to_string()),
+        None => crate::agents::harness::session_model(state, parent_id).await,
+    };
+
+    let requested = body.get("names").and_then(|v| v.as_array());
+    let child_names: Vec<String> = agents
+        .iter()
+        .enumerate()
+        .map(|(index, agent)| {
+            requested
+                .and_then(|list| list.get(index))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{agent}-{}", index + 1))
+        })
+        .collect();
+
+    // Room awareness: when the caller declares a room, thread its identity
+    // (and the chief designation) through every worker, and recall the
+    // room's own memory relevant to this task so the team "remembers" its
+    // prior runs.
+    let room: Option<RoomContext> = body.get("room").and_then(|v| v.as_object()).map(|obj| {
+        let workers = child_names.clone();
+        let chief = obj
+            .get("chief")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .filter(|chief| workers.iter().any(|worker| worker == chief));
+        RoomContext {
+            id: obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            name: obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Room")
+                .to_string(),
+            chief,
+            workers,
+        }
+    });
+    let room_memory = room
+        .as_ref()
+        .filter(|room| !room.id.is_empty())
+        .map(|room| {
+            crate::memory::room_memory_block(
+                parent.as_ref().and_then(|s| s.project.as_deref()),
+                &room.id,
+                prompt,
+                3,
+            )
+        })
+        .unwrap_or_default();
+    // Room memory rides on the prompt (the workers' instruction set is fixed
+    // at spawn; the task text is where per-run context belongs).
+    let worker_prompt = if room_memory.is_empty() {
+        prompt.to_string()
+    } else {
+        format!("{room_memory}\n\n{prompt}")
+    };
 
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         parent_id,
         "orchestration_started",
         json!({
             "agents": agents,
+            "names": child_names,
             "merge": merge,
             "merge_agent": if merge { Some(merge_agent.clone()) } else { None },
+            "room": room.as_ref().map(|room| json!({
+                "id": room.id,
+                "name": room.name,
+                "chief": room.chief,
+            })),
         }),
     ));
 
-    let outcomes = fan_out(state, parent_id, prompt, &agents, budget_usd, timeout).await;
+    let outcomes = fan_out(
+        state,
+        parent_id,
+        &worker_prompt,
+        &agents,
+        &child_names,
+        budget_usd,
+        timeout,
+        model.as_deref(),
+        room.as_ref(),
+    )
+    .await;
 
     // Merge step: one more bounded child, fed every answer, whose reply is the
-    // run's synthesized result. Skipped when the caller asked for raw results
-    // or when nothing succeeded — there is nothing to synthesize.
+    // run's synthesized result. In a Room the chief of staff leads this step —
+    // it is the designated worker that handles all other agents — and gets
+    // the Chief of Staff instruction set instead of the plain subagent one.
+    // Skipped when the caller asked for raw results or when nothing
+    // succeeded — there is nothing to synthesize.
     let any_completed = outcomes.iter().any(|o| o.status == "completed");
+    let chief_name = room.as_ref().and_then(|room| room.chief.clone());
     let merge_outcome = if merge && any_completed {
+        let merge_display = chief_name.clone().unwrap_or_else(|| merge_agent.clone());
+        let merge_name = format!("chief-{merge_display}");
+        let merge_instructions = match (&room, &chief_name) {
+            (Some(room), Some(chief)) => format!(
+                "{}\n\n{}",
+                crate::prompts::subagent_prompt(),
+                crate::prompts::chief_of_staff_section(&room.name, chief, &room.workers)
+            ),
+            _ => crate::prompts::subagent_prompt(),
+        };
+        let mut merge_body = json!({
+            "instructions": merge_instructions,
+            "parent_id": parent_id,
+            "subagent": true,
+            "hidden": true,
+        });
+        if let Some(model) = &model {
+            merge_body["model"] = Value::String(model.clone());
+        }
         state.broadcast.broadcast_agent_event(AgentEvent::new(
             parent_id,
             "merge_started",
-            json!({ "agent": merge_agent }),
+            json!({ "agent": merge_agent, "chief": chief_name }),
         ));
         Some(
-            run_child(
+            spawn_and_await_child(
                 state,
                 parent_id,
-                &format!("merge-{merge_agent}"),
+                &merge_name,
                 &merge_agent,
                 &merge_prompt(prompt, &outcomes),
                 budget_usd,
                 timeout,
+                merge_body,
             )
             .await,
         )
@@ -375,13 +612,52 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         .unwrap_or_default();
     let children_json: Vec<Value> = outcomes.iter().map(|o| o.to_json()).collect();
 
+    // Distill the run into the room's own memory: task, per-worker outcome,
+    // and the synthesized reply — the channel's recall for future dispatches.
+    // Gated by the workspace memory toggle, same as convention injection.
+    if let Some(room) = room.as_ref().filter(|room| !room.id.is_empty()) {
+        let project = parent.as_ref().and_then(|s| s.project.as_deref());
+        if crate::memory::workspace_memory_enabled(project) {
+            let mut report = format!("Task: {}\n", prompt.trim());
+            for outcome in &outcomes {
+                report.push_str(&format!(
+                    "- Worker {} ({}): {}\n",
+                    outcome.agent,
+                    outcome.status,
+                    outcome.reply.trim().chars().take(300).collect::<String>()
+                ));
+            }
+            if !merged_reply.trim().is_empty() {
+                report.push_str(&format!(
+                    "\nChief synthesis: {}",
+                    merged_reply.trim().chars().take(1500).collect::<String>()
+                ));
+            }
+            let entry = crate::memory::MemoryEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                title: format!(
+                    "Room {} — {}",
+                    room.name,
+                    prompt.trim().chars().take(60).collect::<String>()
+                ),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                source_session: parent_id.to_string(),
+                text: report,
+                kind: "memory".to_string(),
+            };
+            let _ = crate::memory::save_room_memory(project, &room.id, entry);
+        }
+    }
+
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         parent_id,
         "orchestration_finished",
         json!({
             "agents": agents,
+            "names": child_names,
             "merged": merge_outcome.is_some(),
             "merge_status": merge_outcome.as_ref().map(|o| o.status.clone()),
+            "chief": chief_name,
             "reply": merged_reply,
             "children": children_json,
         }),

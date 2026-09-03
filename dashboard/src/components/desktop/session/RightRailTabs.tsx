@@ -34,6 +34,10 @@ export function RightRailTabs({
       <div className="scroll-thin flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
         {tabs.map((id) => {
           const meta = RIGHT_TAB_BY_ID[id]
+          // Persisted tab lists can reference ids the current registry no
+          // longer has (older build, HMR race) — skip them instead of
+          // crashing the whole workspace on startup.
+          if (!meta) return null
           const Icon = meta.icon
           const isActive = id === active
           return (

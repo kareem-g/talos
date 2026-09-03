@@ -267,6 +267,88 @@ export const sessionsApi = {
     }),
 }
 
+/**
+ * Rooms — rosters synced through the daemon, so a room created in one browser
+ * appears in all of them. The backend stores the room JSON opaquely and
+ * broadcasts `RoomUpsert` / `RoomDeleted` over the websocket on every write.
+ */
+export const roomsApi = {
+  list: () => request<{ rooms: RoomRecord[] }>('/api/rooms').then((body) => body.rooms),
+  upsert: (room: RoomRecord) =>
+    request<RoomRecord>(`/api/rooms/${encodeURIComponent(room.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(room),
+    }),
+  create: (room: RoomRecord) =>
+    request<RoomRecord>('/api/rooms', { method: 'POST', body: JSON.stringify(room) }),
+  remove: (roomId: string) =>
+    request<{ deleted: boolean }>(`/api/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' }),
+}
+
+/** The roster as persisted server-side (no volatile run panels). */
+export interface RoomRecord {
+  id: string
+  name: string
+  workers: Array<{ name: string; sessionId?: string }>
+  chief?: string | null
+  sessionId?: string | null
+  createdAt?: string
+}
+
+/** One fan-out child's outcome, as returned by the orchestrate endpoint. */
+export interface OrchestrateChild {
+  agent: string
+  session_id: string
+  reply: string
+  status: string
+  error?: string | null
+  cost_usd?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  duration_ms?: number | null
+}
+
+export interface OrchestrateResponse {
+  prompt: string
+  children: OrchestrateChild[]
+  merged: boolean
+  merged_reply: string
+  merge?: OrchestrateChild
+}
+
+/**
+ * Multi-agent fan-out: run one prompt on several agents concurrently, then
+ * merge their answers. Long-running — the promise resolves when the whole run
+ * (children + merge) finishes; progress streams as orchestration WS events on
+ * the parent session's timeline.
+ */
+export const orchestrationApi = {
+  run: (
+    sessionId: string,
+    body: {
+      prompt: string
+      agents: string[]
+      /** Per-child display names, same length as `agents`. */
+      names?: string[]
+      merge?: boolean
+      merge_agent?: string
+      /** Pin every child to this model instead of the parent's own. */
+      model?: string
+      /**
+       * Room identity: workers are prompted as team members, the chief of
+       * staff (when set) leads the merge, and the run is distilled into the
+       * room's own memory store.
+       */
+      room?: { id: string; name: string; chief?: string | null }
+      timeout_secs?: number
+    },
+  ) =>
+    request<OrchestrateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/orchestrate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+}
+
 export interface DirListing {
   path: string
   exists: boolean

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ExternalLink, FolderGit2, GitBranch, Globe2, LoaderCircle, Play, Plus, RefreshCw, RotateCcw, Search, TerminalSquare, Trash2, X } from 'lucide-react'
 import { Button, Chip, Dots, EmptyState, IconButton, StatusPill, TextField } from '../ui'
 import { getConversation, useStore } from '@/store'
-import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
+import { sessionUIState, uiStateDisplay, isInternalSession } from '@/lib/sessionState'
 import { relativeTime, cn } from '@/lib/format'
 import { sessionWorkspaceApi, workspaceApi, type WorkspaceOverview } from '@/lib/api'
 import type { Provider } from '@/types/provider'
@@ -159,7 +159,7 @@ function TerminalRow({ session, onOpen }: { session: Session; onOpen: () => void
 }
 
 function TerminalsPanel({ actions }: { actions: PanelActions }) {
-  const sessions = useStore((state) => state.sessions).filter((session) => session.status !== 'archived')
+  const sessions = useStore((state) => state.sessions).filter((session) => session.status !== 'archived' && !isInternalSession(session))
   const terminalSessions = useMemo(() => sessions.filter((session) => Boolean(getConversation(session.id).terminal.trim()) || session.status === 'running'), [sessions])
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -280,7 +280,7 @@ function BrowserPanel() {
 }
 
 function TasksPanel({ actions }: { actions: PanelActions }) {
-  const sessions = useStore((state) => state.sessions).filter((session) => session.status !== 'archived')
+  const sessions = useStore((state) => state.sessions).filter((session) => session.status !== 'archived' && !isInternalSession(session))
   const connection = useStore((state) => state.connection)
   const resumeSession = useStore((state) => state.resumeSession)
   const archive = useStore((state) => state.deleteSession)
@@ -335,7 +335,7 @@ function TasksPanel({ actions }: { actions: PanelActions }) {
 }
 
 function GitPanel() {
-  const sessions = useStore((state) => state.sessions).filter((session) => session.project && session.status !== 'archived')
+  const sessions = useStore((state) => state.sessions).filter((session) => session.project && session.status !== 'archived' && !isInternalSession(session))
   const projects = useMemo(() => [...new Set(sessions.map((session) => session.project).filter((project): project is string => Boolean(project)))], [sessions])
   const [project, setProject] = useState(projects[0] ?? '')
   const [overview, setOverview] = useState<WorkspaceOverview>()

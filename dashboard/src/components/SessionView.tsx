@@ -37,6 +37,8 @@ import { agentDisplayFor } from '@/lib/remote'
 import type { Session } from '@/types/session'
 import { useRoute } from '@/lib/route'
 import { cn } from '@/lib/format'
+import { useRooms } from '@/lib/rooms'
+import { createSessionSendHandlers } from '@/lib/sessionCommands'
 
 type Tab = 'chat' | 'terminal'
 
@@ -77,7 +79,6 @@ export function SessionView({
   const sessions = useStore((state) => state.sessions)
 
   const openSession = useStore((state) => state.openSession)
-  const sendPrompt = useStore((state) => state.sendPrompt)
   const setConfig = useStore((state) => state.setConfig)
   const respondToApproval = useStore((state) => state.respondToApproval)
   const dismissNotice = useStore((state) => state.dismissNotice)
@@ -126,6 +127,21 @@ export function SessionView({
     () => config?.options.find((o) => o.id === 'model' || o.category === 'model'),
     [config],
   )
+
+  /* ── Command dispatch — same shared handlers as the desktop workspace ─────
+     /orchestrator, #RoomName, @worker, /side and /btw behave identically
+     here. A dispatch that opens another session (a room channel or the side
+     thread) navigates to it — the mobile analog of the desktop's rails. */
+  const rooms = useRooms()
+  const roomOfSession = rooms.find((room) => room.sessionId === session.id) ?? null
+  const dispatch = createSessionSendHandlers(session, {
+    openSessionView: (id) => {
+      if (id !== session.id) navigate({ name: 'session', sessionId: id })
+    },
+    revealSideSession: (sideId) => {
+      if (sideId && sideId !== session.id) navigate({ name: 'session', sessionId: sideId })
+    },
+  })
 
   const connectionTone =
     connection === 'connected' ? 'green' : connection === 'connecting' || connection === 'reconnecting' ? 'orange' : 'red'
@@ -218,8 +234,11 @@ export function SessionView({
             connection={connection}
             config={config}
             provider={provider}
-            onSend={(t, attachments) => sendPrompt(session.id, t, attachments)}
+            onSend={(t, attachments) => dispatch.send(t, attachments)}
+            onQueue={(t, attachments) => dispatch.queue(t, attachments)}
             onSetConfig={(id, v) => void setConfig(session.id, id, v)}
+            rooms={rooms.map((r) => r.name)}
+            workers={roomOfSession?.workers.map((w) => w.name)}
           />
         </>
       ) : (

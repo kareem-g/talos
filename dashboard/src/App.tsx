@@ -26,6 +26,7 @@ import LoadingState from './components/LoadingState'
 import { useRoute } from './lib/route'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
+import { ensureSessionLoaded } from './lib/rooms'
 import { cn } from './lib/format'
 import { notifyOnBackground } from './lib/notify'
 import { socket } from './lib/socket'
@@ -62,7 +63,7 @@ function BrandMark({ compact }: { compact?: boolean }) {
         <span className="font-mono text-[12px] font-bold text-accent-ink">A</span>
       </span>
       {compact ? null : (
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">AgentDeck</span>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
       )}
     </span>
   )
@@ -210,13 +211,28 @@ export default function App() {
   const selectedId = route.name === 'session' ? route.sessionId : undefined
   // Look the session up live so updates re-render with fresh data.
   const selected = sessions.find((session) => session.id === selectedId)
+  // True while we try to resolve a route naming a session the list doesn't
+  // know (room channels and workers are `hidden`, so a deep link or reload
+  // needs a one-off fetch before it can open — never bounce straight home).
+  const [resolvingHidden, setResolvingHidden] = useState(false)
 
-  // A URL naming a missing session must not blank-screen; wait for first load.
+  // A URL naming a missing session must not blank-screen or bounce to home:
+  // first try loading it directly (it may be a hidden room/worker session),
+  // and only redirect when the id genuinely no longer exists.
   useEffect(() => {
-    if (selectedId && !selected && !sessionsLoading && sessions.length > 0) {
-      replace({ name: 'list' })
+    if (!selectedId || selected) return
+    if (sessionsLoading) return
+    let cancelled = false
+    setResolvingHidden(true)
+    void ensureSessionLoaded(selectedId).then((loaded) => {
+      if (cancelled) return
+      setResolvingHidden(false)
+      if (!loaded) replace({ name: 'list' })
+    })
+    return () => {
+      cancelled = true
     }
-  }, [selectedId, selected, sessionsLoading, sessions.length, replace])
+  }, [selectedId, selected, sessionsLoading, replace])
 
   /* ── Pairing takeover ──────────────────────────────────────────────────── */
   if (route.name === 'pair') {
@@ -263,6 +279,13 @@ export default function App() {
       </div>
     )
     // A stale id falls through to the shell while the effect redirects.
+  }
+  if (route.name === 'session' && resolvingHidden && !selected) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-canvas">
+        <LoadingState label="Opening session" variant="Drive" />
+      </div>
+    )
   }
 
   /* ── Screens shell ─────────────────────────────────────────────────────── */

@@ -684,10 +684,14 @@ export function applyAgentEvent(
       const agents = Array.isArray(payload.agents)
         ? (payload.agents as unknown[]).filter((a): a is string => typeof a === 'string')
         : []
+      const names = Array.isArray(payload.names)
+        ? (payload.names as unknown[]).filter((a): a is string => typeof a === 'string')
+        : undefined
       turn.parts.push({
         kind: 'orchestration',
         id: `${event.event_id}`,
         agents,
+        names: names && names.length > 0 ? names : undefined,
         merge: payload.merge !== false,
         status: 'running',
         startedAt: event.timestamp,

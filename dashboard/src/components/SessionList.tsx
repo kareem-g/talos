@@ -28,6 +28,7 @@ import { useStore } from '@/store'
 import { basename, cn, relativeTime } from '@/lib/format'
 import { providerExplanation, type ConfigOption, type Provider } from '@/types/provider'
 import { isActive, isBlocked, type Session, type SessionStatus } from '@/types/session'
+import { isInternalSession } from '@/lib/sessionState'
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   starting: 'Starting',
@@ -443,7 +444,7 @@ export function SessionList({
   const [filter, setFilter] = useState('')
 
   const visible = useMemo(() => {
-    const listed = sessions.filter((session) => session.status !== 'archived')
+    const listed = sessions.filter((session) => session.status !== 'archived' && !isInternalSession(session))
     const needle = filter.trim().toLowerCase()
     if (!needle) return listed
     return listed.filter(

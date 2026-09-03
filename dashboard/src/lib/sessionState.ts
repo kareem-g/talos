@@ -181,3 +181,13 @@ export function uiStateRank(state: UIState): number {
 export function isLiveState(state: UIState): boolean {
   return state === 'working' || state === 'starting'
 }
+
+/**
+ * Harness-created sessions that stay out of the user-facing lists: room
+ * channels and orchestration/dispatch children. They have real transcripts
+ * (the room and agents views render them) but are not user tasks. `parent_id`
+ * is checked too so rows from an older daemon (no `hidden` flag) still filter.
+ */
+export function isInternalSession(session: Pick<Session, 'hidden' | 'parent_id'>): boolean {
+  return session.hidden === true || Boolean(session.parent_id)
+}

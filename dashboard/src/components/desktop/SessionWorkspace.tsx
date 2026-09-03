@@ -23,7 +23,6 @@ import { useConversation, useStore } from '@/store'
 import { socket } from '@/lib/socket'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
-import type { AttachmentRef } from '@/types/conversation'
 import { sessionUIState } from '@/lib/sessionState'
 import { Timeline } from '../Timeline'
 import { StateZone } from '../StateZone'
@@ -32,7 +31,9 @@ import { TopBar } from './TopBar'
 import { LeftSidebar } from './LeftSidebar'
 import { RightRail, type RightRailHandle } from './session/RightRail'
 import { FloatingHud } from './session/FloatingHud'
-import { getSideSessionId, setSideSessionId } from './session/RightRailViews'
+import { RoomAvatarStack } from './RoomAvatars'
+import { useRooms } from '@/lib/rooms'
+import { createSessionSendHandlers } from '@/lib/sessionCommands'
 
 const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
 
@@ -75,19 +76,22 @@ export function SessionWorkspace({
   /** Switch to another session without leaving the workspace. */
   onOpenSession?: (sessionId: string) => void
 }) {
+  const rooms = useRooms()
   const conversation = useConversation(session.id)
   const config = useStore((s) => s.configs[session.id])
   const notice = useStore((s) => s.notices[session.id])
   const connection = useStore((s) => s.connection)
   const providers = useStore((s) => s.providers)
   const openSession = useStore((s) => s.openSession)
-  const sendPrompt = useStore((s) => s.sendPrompt)
   const setConfig = useStore((s) => s.setConfig)
   const dismissNotice = useStore((s) => s.dismissNotice)
   const deleteSession = useStore((s) => s.deleteSession)
   const toggleStar = useStore((s) => s.toggleStar)
   const starred = useStore((s) => s.isStarred(session.id))
   const [tab, setTab] = useState<'chat' | 'terminal'>('chat')
+  // When this session is itself a room's hidden channel, the center chat IS
+  // the room: workers are @-addressable and /orchestrator re-runs the room.
+  const roomOfSession = rooms.find((room) => room.sessionId === session.id) ?? null
 
   /* ── Sidebar toggles ───────────────────────────────────────────────────── */
   const [leftOpen, setLeftOpen] = useState(() => {
@@ -114,95 +118,18 @@ export function SessionWorkspace({
   // Open the right Agent Workspace pane if it is collapsed, then focus the
   const rightRailRef = useRef<RightRailHandle>(null)
 
-  /* ── Side sessions (/side, /btw) + # mention context ───────────────────── */
+  /* ── Command dispatch (shared verbatim with mobile) ────────────────────── */
 
-  /**
-   * A side session's agent exits after finishing a turn (status `idle`), and
-   * the backend rejects prompts to a session with no live process ("not
-   * running"). Resume it first so `/side` and `/btw` keep working on a side
-   * session that finished its last turn.
-   */
-  const ensureSideRunning = async (sideId: string): Promise<boolean> => {
-    const s = useStore.getState().sessions.find((s) => s.id === sideId)
-    if (!s) return false
-    if (s.status === 'running' || s.status === 'starting' || s.status === 'resuming') return true
-    return useStore.getState().resumeSession(sideId)
-  }
-
-  const startSideSession = async (prompt: string) => {
-    if (!rightOpen) toggleRight()
-    let sideId = getSideSessionId(session.project)
-    if (!sideId) {
-      const created = await useStore.getState().createSession({
-        agent: session.agent,
-        project: session.project ?? undefined,
-        prompt,
-      })
-      sideId = created.id
-      setSideSessionId(session.project, sideId)
-    } else if (await ensureSideRunning(sideId)) {
-      useStore.getState().sendPrompt(sideId, prompt)
-    }
-    rightRailRef.current?.openTab('side')
-  }
-
-  const sendSideNote = async (text: string) => {
-    if (!rightOpen) toggleRight()
-    let sideId = getSideSessionId(session.project)
-    if (!sideId) {
-      const created = await useStore.getState().createSession({
-        agent: session.agent,
-        project: session.project ?? undefined,
-        prompt: text,
-      })
-      sideId = created.id
-      setSideSessionId(session.project, sideId)
-    } else if (await ensureSideRunning(sideId)) {
-      useStore.getState().sendPrompt(sideId, text)
-    }
-    rightRailRef.current?.openTab('side')
-  }
-
-  /** Expand `# Name (id)` mentions into the referenced sessions' context. */
-  const expandMentionContext = async (text: string): Promise<string> => {
-    const ids = Array.from(text.matchAll(/#[^#\n]*\(([0-9a-f-]{8,})\)/g))
-      .map((match) => match[1])
-      .filter((id) => id !== session.id)
-    if (ids.length === 0) return text
-    const blocks: string[] = []
-    for (const id of ids) {
-      try {
-        const { sessionsApi } = await import('@/lib/api')
-        const history = await sessionsApi.history(id)
-        const lines = history.messages
-          .map((m) => `${m.role === 'user' ? 'You' : 'Agent'}: ${(m.content ?? '').slice(0, 400)}`)
-          .filter((line) => line.length > 3)
-        if (lines.length) blocks.push(`[Context from session ${id}:\n${lines.slice(-10).join('\n')}\n]`)
-      } catch {
-        /* skip unreachable sessions */
-      }
-    }
-    return blocks.length ? `${blocks.join('\n\n')}\n\n${text}` : text
-  }
-
-  // Intercept custom slash commands; otherwise send (attaching # mention context
-  // and any uploaded files, whose paths ride in the prompt for the agent to read).
-  const handleSend = (text: string, attachments: AttachmentRef[] = []) => {
-    const trimmed = text.trim()
-    const sideMatch = /^\/side\s+([\s\S]+)$/.exec(trimmed)
-    const btwMatch = /^\/btw\s+([\s\S]+)$/.exec(trimmed)
-    if (sideMatch) {
-      void startSideSession(sideMatch[1].trim() || 'I opened a side session.')
-      return
-    }
-    if (btwMatch) {
-      void sendSideNote(btwMatch[1].trim())
-      return
-    }
-    void expandMentionContext(text).then((augmented) =>
-      sendPrompt(session.id, augmented, attachments),
-    )
-  }
+  // /orchestrator, #RoomName, @worker mentions, /side and /btw all run through
+  // the same lib/sessionCommands handlers on every shell. Here, revealing a
+  // side session opens the right-rail side tab; mobile navigates to the thread.
+  const { send: handleSend, queue: handleQueue } = createSessionSendHandlers(session, {
+    openSessionView: (id) => onOpenSession?.(id),
+    revealSideSession: () => {
+      if (!rightOpen) toggleRight()
+      rightRailRef.current?.openTab('side')
+    },
+  })
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(session.name)
@@ -340,11 +267,7 @@ export function SessionWorkspace({
       <div className="flex min-h-0 flex-1">
         {/* Left sidebar (~280px) — collapsible */}
         {leftOpen ? (
-          <LeftSidebar
-            session={session}
-            onSelect={(id) => onOpenSession?.(id)}
-            searchRef={searchRef}
-          />
+          <LeftSidebar session={session} onSelect={(id) => onOpenSession?.(id)} searchRef={searchRef} />
         ) : null}
 
         {/* Center — fluid */}
@@ -396,6 +319,21 @@ export function SessionWorkspace({
 
             {/* Star + overflow menu */}
             <div className="flex items-center gap-0.5">
+              {roomOfSession ? (
+                <span
+                  title={`${roomOfSession.name} — ${roomOfSession.workers.length} worker${roomOfSession.workers.length === 1 ? '' : 's'}, channel chat`}
+                  className="mr-1 flex shrink-0 items-center gap-1.5 rounded-full border border-line/50 bg-surface py-0.5 pl-0.5 pr-2"
+                >
+                  <RoomAvatarStack
+                    names={roomOfSession.workers.map((w) => w.name)}
+                    size={16}
+                    max={3}
+                  />
+                  <span className="font-mono text-[9px] uppercase tracking-wide text-ink-2">
+                    {roomOfSession.name}
+                  </span>
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={() => toggleStar(session.id)}
@@ -518,7 +456,10 @@ export function SessionWorkspace({
                   config={config}
                   provider={provider}
                   onSend={handleSend}
+                  onQueue={handleQueue}
                   onSetConfig={(id, v) => void setConfig(session.id, id, v)}
+                  rooms={rooms.map((r) => r.name)}
+                  workers={roomOfSession?.workers.map((w) => w.name)}
                 />
               </>
             ) : (

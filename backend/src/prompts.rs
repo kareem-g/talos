@@ -446,9 +446,108 @@ pub fn compose(sections: &[&str]) -> String {
         .join("\n\n")
 }
 
+/// Room awareness for a fan-out worker: who it is, who it works beside, and
+/// who leads the room. Appended after the subagent instruction set so the
+/// worker knows it is one of several agents helping on the same task in a
+/// Room, not a lone subagent.
+pub fn room_worker_section(
+    room_name: &str,
+    self_name: &str,
+    peers: &[String],
+    chief: Option<&str>,
+) -> String {
+    let peers_line = if peers.is_empty() {
+        "You are the only worker dispatched right now.".to_string()
+    } else {
+        format!(
+            "You are working alongside: {}. Each worker answers the same task \
+             independently — do not wait for them, do not duplicate their exact \
+             angle; stay in your own lane and do your part well.",
+            peers.join(", ")
+        )
+    };
+    let chief_line = match chief {
+        Some(chief) => format!(
+            "The room's CHIEF OF STAFF is {chief}. They will read every worker's \
+             answer and synthesize the final result for the user. Write your \
+             answer so it can be merged: state your findings, decisions, and \
+             any disagreement with the task framing explicitly."
+        ),
+        None => "A merge step will read every worker's answer and synthesize \
+                 the final result. Write your answer so it can be merged: \
+                 state your findings and any disagreement explicitly."
+            .to_string(),
+    };
+    format!(
+        "## Role: room worker — {room_name}\n\
+         You are \"{self_name}\", a worker in the AgentDeck Room \"{room_name}\" — \
+         a standing team of agents sharing this workspace.\n\
+         {peers_line}\n\
+         {chief_line}\n\
+         Helping the team beats looking busy: if you hit a dead end, say so \
+         plainly instead of padding; if you noticed something another worker \
+         will likely trip on, note it for the chief."
+    )
+}
+
+/// Chief of Staff framing for a room's merge/coordination step. The chief is
+/// the worker designated to handle all other agents: their pass reads every
+/// worker's answer and produces the room's single authoritative result.
+pub fn chief_of_staff_section(room_name: &str, chief_name: &str, workers: &[String]) -> String {
+    let roster = if workers.is_empty() {
+        "The roster is empty — you are on your own this run.".to_string()
+    } else {
+        format!("Roster: {}.", workers.join(", "))
+    };
+    format!(
+        "## Role: Chief of Staff — {room_name}\n\
+         You are \"{chief_name}\", the Chief of Staff of the AgentDeck Room \
+         \"{room_name}\". You are the designated lead: every other worker in \
+         this room answers to your synthesis.\n\
+         {roster}\n\
+         You are about to receive each worker's answer to one task. Treat them \
+         as your team's reports: combine the strongest parts, resolve \
+         contradictions in favor of whatever is backed by evidence or tool \
+         output, call out (by worker name) anyone who failed, went silent, or \
+         disagreed, and deliver ONE directive answer the user can act on — as \
+         if your room were a single competent team, which it is."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn room_worker_section_names_self_peers_and_chief() {
+        let section = room_worker_section(
+            "Build Team",
+            "Scout",
+            &["Maven".to_string(), "Sage".to_string()],
+            Some("Maven"),
+        );
+        assert!(section.contains("## Role: room worker — Build Team"));
+        assert!(section.contains("\"Scout\""));
+        assert!(section.contains("Maven, Sage"));
+        assert!(section.contains("CHIEF OF STAFF is Maven"));
+
+        let leaderless = room_worker_section("Build Team", "Scout", &[], None);
+        assert!(leaderless.contains("merge step will read"));
+        assert!(leaderless.contains("only worker"));
+    }
+
+    #[test]
+    fn chief_of_staff_section_frames_the_lead_role() {
+        let section = chief_of_staff_section(
+            "Build Team",
+            "Maven",
+            &["Scout".to_string(), "Maven".to_string()],
+        );
+        assert!(section.contains("## Role: Chief of Staff — Build Team"));
+        assert!(section.contains("\"Maven\""));
+        assert!(section.contains("Roster: Scout, Maven."));
+        assert!(section.contains("ONE directive answer"));
+    }
 
     #[test]
     fn every_section_is_substantive_and_original() {

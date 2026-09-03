@@ -17,7 +17,7 @@ export function ManagementSidebar({
         <span className="flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-accent-tint">
           <span className="font-mono text-[12px] font-medium text-accent-ink">A</span>
         </span>
-        <span className="text-[13px] font-medium tracking-[-0.01em] text-ink">AgentDeck</span>
+        <span className="text-[13px] font-medium tracking-[-0.01em] text-ink">Plumb</span>
         <span className="ml-auto rounded-full border border-line bg-inset px-1.5 py-0.5 text-[10px] font-medium text-ink-3">v0.1</span>
       </div>
 

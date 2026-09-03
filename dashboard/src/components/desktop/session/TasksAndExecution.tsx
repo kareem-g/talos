@@ -378,7 +378,7 @@ export function PermissionChip({
   const selected = PERMISSION_MODES.find((m) => m.id === effective) ?? PERMISSION_MODES[0]
 
   // All four modes send distinct, functional values to the backend.
-  // The config_id is 'permission_mode' (AgentDeck-specific), not 'mode' (agent-native).
+  // The config_id is 'permission_mode' (Plumb-specific), not 'mode' (agent-native).
   const toAgentMode = (id: PermissionMode['id']): string => id
 
   // Icon-only trigger, like the reference: the orange shield IS the

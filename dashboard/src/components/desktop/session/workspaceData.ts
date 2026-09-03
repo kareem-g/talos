@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getConversation, useStore } from '@/store'
+import { isInternalSession } from '@/lib/sessionState'
 import { gitApi } from '@/lib/api'
 import type { Conversation, FileChangePart, Message, ToolPart } from '@/types/conversation'
 import type { Session } from '@/types/session'
@@ -136,7 +137,7 @@ export interface DerivedSubagent {
  * the conversation. Claude's `Agent` tool and opencode's task tools both carry a
  * `description` + `prompt` in their input, so we detect either: a tool literally
  * named `Agent`, or any tool whose input has a `prompt` plus a description. This
- * is a transcript-derived view — AgentDeck has no first-class subagent feed.
+ * is a transcript-derived view — Plumb has no first-class subagent feed.
  */
 export function deriveSubagents(messages: Message[]): DerivedSubagent[] {
   const out: DerivedSubagent[] = []
@@ -453,7 +454,7 @@ function agentStatusFor(status: string, hasActivity: boolean): AgentStatus {
 
 /**
  * The primary agent plus every session in the same workspace (the honest
- * "subagents" signal — AgentDeck has no subagent event stream, so the roster
+ * "subagents" signal — Plumb has no subagent event stream, so the roster
  * is other sessions the agent or the user spawned in this project).
  */
 export function useAgentSummaries(session: Session): {
@@ -470,6 +471,7 @@ export function useAgentSummaries(session: Session): {
       sessions.filter(
         (s) =>
           s.status !== 'archived' &&
+          !isInternalSession(s) &&
           (s.project ?? null) === (session.project ?? null) &&
           !(s.status === 'exited' && s.id !== session.id),
       ),

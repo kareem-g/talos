@@ -104,12 +104,23 @@ pub fn usable_executable_path(path: PathBuf) -> PathBuf {
 /// `full` auto-allows everything, `ask` prompts every time.
 pub async fn request_user_decision(
     state: &crate::config::AppState,
-    query: PermissionQuery,
+    mut query: PermissionQuery,
 ) -> PermissionOutcome {
     use crate::websocket::WsMessage;
 
     let started = std::time::Instant::now();
     let request_id = uuid::Uuid::new_v4().to_string();
+
+    // Hidden sessions (room workers, orchestration children) must not raise
+    // approval cards nobody can see — the run would stall to its timeout.
+    // Bubble the card onto the parent room channel instead, so whoever is
+    // watching the room decides; the resolution routes back by request id.
+    if let Ok(Some(session)) = state.session_manager.get_session(&query.session_id).await
+        && session.hidden
+        && let Some(parent_id) = session.parent_id
+    {
+        query.session_id = parent_id;
+    }
 
     // Check if the session has a permission_mode override.
     let permission_mode = match state.session_manager.pending_config(&query.session_id).await {

@@ -24,6 +24,8 @@ pub enum WsMessage {
     DeviceRevoked { device_id: String },
     SessionUpdate { session: crate::sessions::Session },
     SessionDeleted { session_id: String },
+    RoomUpsert { room: serde_json::Value },
+    RoomDeleted { room_id: String },
     TerminalOutput { session_id: String, data: String },
     TerminalResized { session_id: String, cols: u16, rows: u16 },
     Message { message: crate::agent_events::AgentMessage },
