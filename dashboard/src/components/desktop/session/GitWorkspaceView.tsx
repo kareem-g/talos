@@ -107,7 +107,7 @@ function CommitModal({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0a0a0c] shadow-overlay">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-white/10 bg-[#191613] shadow-overlay">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
           <h2 className="flex items-center gap-2 text-[13px] font-semibold text-zinc-100">
             <GitBranchIcon size={13} className="text-zinc-500" />
@@ -217,7 +217,7 @@ function GitGraphModal({ project, onClose }: { project: string; onClose: () => v
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0a0a0c] shadow-overlay">
+      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-white/10 bg-[#191613] shadow-overlay">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
           <h2 className="flex items-center gap-2 text-[13px] font-semibold text-zinc-100">
             <GitGraph size={14} /> Git Graph
@@ -240,7 +240,7 @@ function GitGraphModal({ project, onClose }: { project: string; onClose: () => v
             <p className="p-4 text-[11.5px] text-zinc-500">No commits yet.</p>
           ) : (
             <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 z-10 bg-[#0a0a0c]">
+              <thead className="sticky top-0 z-10 bg-[#191613]">
                 <tr className="border-b border-white/[0.07] font-mono text-[9.5px] uppercase tracking-[0.1em] text-zinc-600">
                   <th className="w-8 px-3 py-2" aria-label="Graph" />
                   <th className="px-2 py-2 font-normal">Commit</th>
@@ -254,7 +254,7 @@ function GitGraphModal({ project, onClose }: { project: string; onClose: () => v
                   <tr key={commit.hash} className="group border-b border-white/[0.04] align-top hover:bg-white/[0.03]">
                     <td className="relative px-3 py-2.5">
                       <span className="absolute left-[19px] top-0 h-full w-px bg-white/[0.09]" aria-hidden />
-                      <span className="absolute left-[15.5px] top-1/2 size-2 -translate-y-1/2 rounded-full border-2 border-emerald-400/80 bg-[#0a0a0c]" aria-hidden />
+                      <span className="absolute left-[15.5px] top-1/2 size-2 -translate-y-1/2 rounded-full border-2 border-emerald-400/80 bg-[#191613]" aria-hidden />
                     </td>
                     <td className="min-w-[220px] px-2 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -472,7 +472,7 @@ export function GitWorkspaceView({
                 </button>
 
                 {branchMenuOpen ? (
-                  <div role="listbox" className="absolute left-1 right-1 top-full z-40 mt-1 overflow-hidden rounded-xl border border-white/10 bg-[#141417] shadow-overlay">
+                  <div role="listbox" className="absolute left-1 right-1 top-full z-40 mt-1 overflow-hidden rounded-xl border border-white/10 bg-[#2a241e] shadow-overlay">
                     <div className="border-b border-white/[0.07] p-1.5">
                       <div className="flex items-center gap-1.5 rounded-md bg-black/40 px-2">
                         <Search size={11} className="shrink-0 text-zinc-600" />

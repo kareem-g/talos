@@ -936,7 +936,7 @@ export function Composer({
                     title="Queue this follow-up for the next turn"
                     className={cn(
                       'flex size-8 shrink-0 items-center justify-center rounded-lg',
-                      'bg-accent text-white transition-[background-color,transform] duration-150',
+                      'bg-accent text-accent-ink transition-[background-color,transform] duration-150',
                       'hover:brightness-110 active:scale-95',
                     )}
                   >
@@ -1043,7 +1043,7 @@ function StatusContextControl({ working, usage }: { working?: boolean; usage?: C
   const ringRadius = 5.5
   const ringCircumference = 2 * Math.PI * ringRadius
   const ringOffset = pct !== undefined ? ringCircumference * (1 - pct / 100) : ringCircumference
-  const ringColor = isOverflow ? '#ef4444' : pct !== undefined && pct > 85 ? '#f97316' : pct !== undefined && pct > 60 ? '#eab308' : '#22c55e'
+  const ringColor = isOverflow ? '#d96c5f' : pct !== undefined && pct > 85 ? '#c97855' : pct !== undefined && pct > 60 ? '#e3a15d' : '#c7a56a'
 
   return (
     <div className="relative shrink-0 pr-0.5" ref={ref}>

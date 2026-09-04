@@ -22,6 +22,7 @@
 use crate::agent_events::AgentEvent;
 use crate::config::AppState;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +42,10 @@ pub struct RoomContext {
     pub chief: Option<String>,
     /// The full worker roster for this run, in request order.
     pub workers: Vec<String>,
+    /// When true the run skips permission prompts: children spawn with
+    /// `permission_mode=full` and the tool-policy gate is bypassed, so a
+    /// room team runs without approval cards.
+    pub skip_permissions: bool,
 }
 
 /// How one fan-out child ended.
@@ -126,6 +131,7 @@ pub async fn run_child(
     timeout: Duration,
     model: Option<&str>,
     room: Option<&RoomContext>,
+    skills: &[String],
 ) -> ChildOutcome {
     // Bounded workers: subagent instructions (plus Room awareness when the
     // run belongs to a Room — who the worker is, its peers, its chief), the
@@ -141,16 +147,7 @@ pub async fn run_child(
                 .filter(|worker| worker.as_str() != name)
                 .cloned()
                 .collect();
-            format!(
-                "{}\n\n{}",
-                crate::prompts::subagent_prompt(),
-                crate::prompts::room_worker_section(
-                    &room.name,
-                    name,
-                    &peers,
-                    room.chief.as_deref(),
-                )
-            )
+            build_worker_instructions(&room.name, name, &peers, room.chief.as_deref(), skills)
         }
         None => crate::prompts::subagent_prompt(),
     };
@@ -162,6 +159,19 @@ pub async fn run_child(
     });
     if let Some(model) = model {
         child_body["model"] = Value::String(model.to_string());
+    }
+    // Room runs that skip permissions: children auto-approve everything
+    // (`permission_mode=full`) and bypass the tool-policy gate
+    // (`skip_policy`), so the team runs without approval cards.
+    // `room_child` marks the session for the Dispatch filter, so room
+    // workers can dispatch to each other while pure subagents still cannot
+    // recurse (their grandchildren carry no room mark).
+    if let Some(room) = room {
+        child_body["room_child"] = Value::String(room.id.clone());
+        if room.skip_permissions {
+            child_body["permission_mode"] = Value::String("full".to_string());
+            child_body["skip_policy"] = Value::String("true".to_string());
+        }
     }
     spawn_and_await_child(state, parent_id, name, agent, prompt, budget_usd, timeout, child_body).await
 }
@@ -232,10 +242,13 @@ async fn spawn_and_await_child(
     };
     outcome.session_id = child.id.clone();
 
+    // The display name (worker name when dispatched from a room), not the
+    // provider id — the timeline, roster dots, and avatar lookups all key on
+    // what the user calls this child.
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         parent_id,
         "subagent_started",
-        json!({ "id": child.id, "name": agent, "status": "running" }),
+        json!({ "id": child.id, "name": name, "agent": agent, "status": "running" }),
     ));
 
     let deadline = tokio::time::Instant::now() + timeout;
@@ -311,7 +324,7 @@ async fn spawn_and_await_child(
     state.broadcast.broadcast_agent_event(AgentEvent::new(
         parent_id,
         "subagent_finished",
-        json!({ "id": child.id, "name": agent, "status": outcome.status }),
+        json!({ "id": child.id, "name": name, "agent": agent, "status": outcome.status }),
     ));
     outcome
 }
@@ -343,6 +356,7 @@ pub async fn fan_out(
     timeout: Duration,
     model: Option<&str>,
     room: Option<&RoomContext>,
+    worker_skills: &std::collections::HashMap<String, Vec<String>>,
 ) -> Vec<ChildOutcome> {
     // Children are I/O-bound (streaming from their agent), so join_all drives
     // them concurrently on this task without owning state — no Arc clones,
@@ -368,6 +382,7 @@ pub async fn fan_out(
         .collect();
     let futures = agents.iter().zip(child_names).map(|(agent, name)| {
         let agent = agent.clone();
+        let skills = worker_skills.get(&name).cloned().unwrap_or_default();
         async move {
             run_child(
                 state,
@@ -379,6 +394,7 @@ pub async fn fan_out(
                 timeout,
                 model,
                 room,
+                &skills,
             )
             .await
         }
@@ -457,7 +473,7 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         .get("merge_agent")
         .and_then(|v| v.as_str())
         .map(str::to_string)
-        .unwrap_or(parent_agent);
+        .unwrap_or_else(|| parent_agent.clone());
 
     // Children inherit the parent's model so the whole run keeps the current
     // session's configuration instead of mixing CLI defaults. A caller that
@@ -468,45 +484,96 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         None => crate::agents::harness::session_model(state, parent_id).await,
     };
 
-    let requested = body.get("names").and_then(|v| v.as_array());
-    let child_names: Vec<String> = agents
-        .iter()
-        .enumerate()
-        .map(|(index, agent)| {
-            requested
-                .and_then(|list| list.get(index))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("{agent}-{}", index + 1))
-        })
-        .collect();
+    let requested_names = body.get("names").and_then(|v| v.as_array());
 
     // Room awareness: when the caller declares a room, thread its identity
     // (and the chief designation) through every worker, and recall the
     // room's own memory relevant to this task so the team "remembers" its
-    // prior runs.
-    let room: Option<RoomContext> = body.get("room").and_then(|v| v.as_object()).map(|obj| {
-        let workers = child_names.clone();
-        let chief = obj
-            .get("chief")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .filter(|chief| workers.iter().any(|worker| worker == chief));
-        RoomContext {
-            id: obj
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            name: obj
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Room")
-                .to_string(),
-            chief,
-            workers,
+    // prior runs. When no room is declared but the parent IS a room channel
+    // (a model-driven Dispatch from the channel agent, which only knows
+    // worker names — not provider ids), adopt that room: otherwise every
+    // worker-named target fails with "not configured" and the children never
+    // learn who they are.
+    let declared_room = body.get("room").and_then(|v| v.as_object());
+    let stored_room: Option<crate::api::rooms::RoomInfo> =
+        match declared_room.and_then(|obj| obj.get("id")).and_then(|v| v.as_str()) {
+            Some(id) if !id.is_empty() => crate::api::rooms::find_room_by_id(state, id).await,
+            _ => None,
+        };
+    let channel_room: Option<crate::api::rooms::RoomInfo> = if declared_room.is_some() {
+        None
+    } else if let Some(info) = crate::api::rooms::find_room_by_channel(state, parent_id).await {
+        Some(info)
+    } else {
+        // Worker-to-worker dispatch: the parent is itself a room child, so
+        // walk one level up — the grandparent channel owns the room.
+        match parent.as_ref().and_then(|s| s.parent_id.as_deref()) {
+            Some(grandparent) => crate::api::rooms::find_room_by_channel(state, grandparent).await,
+            None => None,
         }
-    });
+    };
+    // Full identity for this run. A stored room (declared by id, or adopted
+    // from the parent channel) contributes its id, name, roster, chief, and
+    // permission-skip flag; a declared-but-unknown room keeps its declared
+    // name/chief/skip with no roster.
+    let (room_id, room_name, roster, declared_chief, skip_permissions): (
+        String,
+        String,
+        Vec<(String, Vec<String>)>,
+        Option<String>,
+        bool,
+    ) = match (stored_room, channel_room, declared_room) {
+        (Some(info), _, _) | (None, Some(info), _) => {
+            (info.id, info.name, info.roster, info.chief, info.skip_permissions)
+        }
+        (None, None, Some(obj)) => (
+            obj.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            obj.get("name").and_then(|v| v.as_str()).unwrap_or("Room").to_string(),
+            Vec::new(),
+            obj.get("chief").and_then(|v| v.as_str()).map(str::to_string),
+            obj.get("skipPermissions")
+                .or_else(|| obj.get("skip_permissions"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        ),
+        (None, None, None) => (String::new(), String::new(), Vec::new(), None, false),
+    };
+
+    // Resolve each requested target. A roster worker name (case-insensitive)
+    // runs on the parent's agent with the worker's display name, roster
+    // skills, and any per-run body skills — this is what makes model-driven
+    // Dispatch ("agents": ["Scout"]) work from a channel that only knows
+    // worker names. Anything else passes through as a provider id with the
+    // caller's display name, exactly as before (unknown ids still fail
+    // per-child at spawn).
+    let body_skills = parse_worker_skills(body);
+    let resolved = resolve_targets(&agents, requested_names, &parent_agent, &roster, &body_skills);
+    let mut providers: Vec<String> = Vec::with_capacity(resolved.len());
+    let mut displays: Vec<String> = Vec::with_capacity(resolved.len());
+    let mut resolved_skills: HashMap<String, Vec<String>> = HashMap::new();
+    for target in resolved {
+        if !target.skills.is_empty() {
+            resolved_skills.insert(target.display.clone(), target.skills.clone());
+        }
+        providers.push(target.provider);
+        displays.push(target.display);
+    }
+
+    // The chief designation only counts when they actually run.
+    let chief = declared_chief.filter(|chief| displays.iter().any(|display| display == chief));
+    let room: Option<RoomContext> = if declared_room.is_some() || !room_id.is_empty() {
+        Some(RoomContext {
+            id: room_id.clone(),
+            name: room_name.clone(),
+            chief,
+            workers: displays.clone(),
+            skip_permissions,
+        })
+    } else {
+        None
+    };
+    let worker_skills = resolved_skills;
+
     let room_memory = room
         .as_ref()
         .filter(|room| !room.id.is_empty())
@@ -531,8 +598,8 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         parent_id,
         "orchestration_started",
         json!({
-            "agents": agents,
-            "names": child_names,
+            "agents": providers,
+            "names": displays,
             "merge": merge,
             "merge_agent": if merge { Some(merge_agent.clone()) } else { None },
             "room": room.as_ref().map(|room| json!({
@@ -547,12 +614,13 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         state,
         parent_id,
         &worker_prompt,
-        &agents,
-        &child_names,
+        &providers,
+        &displays,
         budget_usd,
         timeout,
         model.as_deref(),
         room.as_ref(),
+        &worker_skills,
     )
     .await;
 
@@ -583,6 +651,15 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         });
         if let Some(model) = &model {
             merge_body["model"] = Value::String(model.clone());
+        }
+        // The merge step is part of the run: same permission treatment as
+        // the workers, and the same room mark.
+        if let Some(room) = room.as_ref() {
+            merge_body["room_child"] = Value::String(room.id.clone());
+            if room.skip_permissions {
+                merge_body["permission_mode"] = Value::String("full".to_string());
+                merge_body["skip_policy"] = Value::String("true".to_string());
+            }
         }
         state.broadcast.broadcast_agent_event(AgentEvent::new(
             parent_id,
@@ -653,8 +730,8 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         parent_id,
         "orchestration_finished",
         json!({
-            "agents": agents,
-            "names": child_names,
+            "agents": providers,
+            "names": displays,
             "merged": merge_outcome.is_some(),
             "merge_status": merge_outcome.as_ref().map(|o| o.status.clone()),
             "chief": chief_name,
@@ -673,6 +750,123 @@ pub async fn orchestrate(state: &AppState, parent_id: &str, body: &Value) -> Val
         result["merge"] = outcome.to_json();
     }
     result
+}
+
+/// The full instruction set for one room worker: identity FIRST (name and
+/// room open the set, ahead of the charter-heavy subagent prompt — small
+/// models answer "who are you" from the first identity they read; burying it
+/// is how workers lost track of themselves), then peers/chief, then
+/// specialty skills, then the subagent working set.
+fn build_worker_instructions(
+    room_name: &str,
+    name: &str,
+    peers: &[String],
+    chief: Option<&str>,
+    skills: &[String],
+) -> String {
+    let mut instructions = format!(
+        "{}\n\n{}\n\n{}",
+        crate::prompts::worker_identity_block(room_name, name),
+        crate::prompts::room_worker_section(room_name, name, peers, chief),
+        crate::prompts::subagent_prompt(),
+    );
+    // Specialty skills assigned on the roster: resolve registry metadata and
+    // append a skills section so the worker answers in its specialty. Unknown
+    // ids are skipped (the roster may predate a registry change).
+    if !skills.is_empty() {
+        let mut lines = vec![
+            "## Your specialty skills".to_string(),
+            "You were given these skills for this team — apply them to the task \
+             where relevant and say which you used:"
+                .to_string(),
+        ];
+        for skill in skills {
+            match crate::skills::find_registry_skill(skill) {
+                Some(meta) => lines.push(format!("- {}: {}", meta.name, meta.description)),
+                None => lines.push(format!("- {skill}")),
+            }
+        }
+        instructions = format!("{instructions}\n\n{}", lines.join("\n"));
+    }
+    instructions
+}
+
+/// One resolved fan-out target: which provider to spawn, what to call the
+/// child, and which specialty skills it carries.
+struct ResolvedTarget {
+    provider: String,
+    display: String,
+    skills: Vec<String>,
+}
+
+/// Resolve requested dispatch targets against the room roster. Worker names
+/// match case-insensitively and run on the parent's agent; everything else
+/// passes through as a provider id. Pure so the mapping is unit-testable.
+fn resolve_targets(
+    requested: &[String],
+    names_override: Option<&Vec<Value>>,
+    parent_agent: &str,
+    roster: &[(String, Vec<String>)],
+    body_skills: &HashMap<String, Vec<String>>,
+) -> Vec<ResolvedTarget> {
+    let mut targets = Vec::with_capacity(requested.len());
+    for (index, req) in requested.iter().enumerate() {
+        if let Some((worker, wskills)) = roster.iter().find(|(name, _)| name.eq_ignore_ascii_case(req)) {
+            let mut skills = wskills.clone();
+            for extra in body_skills.get(worker).or_else(|| body_skills.get(req)).into_iter().flatten() {
+                if !skills.contains(extra) {
+                    skills.push(extra.clone());
+                }
+            }
+            targets.push(ResolvedTarget {
+                provider: parent_agent.to_string(),
+                display: worker.clone(),
+                skills,
+            });
+        } else {
+            let display = names_override
+                .and_then(|list| list.get(index))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{req}-{}", index + 1));
+            let skills = body_skills
+                .get(req)
+                .or_else(|| body_skills.get(&display))
+                .cloned()
+                .unwrap_or_default();
+            targets.push(ResolvedTarget {
+                provider: req.clone(),
+                display,
+                skills,
+            });
+        }
+    }
+    targets
+}
+
+/// Per-worker skill ids from an orchestrate body
+/// (`worker_skills: { name: [skill_id] }`). Malformed entries degrade to
+/// empty lists rather than failing the run; absent means no specialties.
+fn parse_worker_skills(body: &Value) -> std::collections::HashMap<String, Vec<String>> {
+    body.get("worker_skills")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(name, ids)| {
+                    let list = ids
+                        .as_array()
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (name.clone(), list)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Cancel every unfinished child of `parent_id` — the cascade half of
@@ -746,6 +940,99 @@ mod tests {
         assert!(prompt.contains("status: failed"));
         assert!(prompt.contains("401 unauthorized"));
         assert!(prompt.contains("the answer"));
+    }
+
+    #[test]
+    fn worker_instructions_lead_with_identity() {
+        const CHARTER_MARK: &str = "AgentDeck";
+        let text = build_worker_instructions(
+            "Code Crew",
+            "Scout",
+            &["Maven".to_string()],
+            Some("Maven"),
+            &["tdd".to_string()],
+        );
+        assert!(text.starts_with("# You are Scout"), "identity must open the set, got: {}", &text[..120.min(text.len())]);
+        let identity_at = text.find("# You are Scout").unwrap();
+        let charter_at = text.find(CHARTER_MARK).unwrap_or(usize::MAX);
+        assert!(identity_at < charter_at, "identity must precede the charter");
+        assert!(text.contains("\"Code Crew\""));
+        assert!(text.contains("Maven"));
+        assert!(text.contains("Test-Driven Development"));
+    }
+
+    #[test]
+    fn worker_instructions_without_room_context_stay_plain() {
+        let text = build_worker_instructions("Code Crew", "Scout", &[], None, &[]);
+        assert!(text.starts_with("# You are Scout"));
+        assert!(!text.contains("Your specialty skills"));
+    }
+
+    #[test]
+    fn resolve_targets_maps_worker_names_to_parent_agent() {
+        let roster = vec![
+            ("Scout".to_string(), vec!["tdd".to_string()]),
+            ("Maven".to_string(), vec![]),
+        ];
+        let body_skills: std::collections::HashMap<String, Vec<String>> =
+            [("Maven".to_string(), vec!["code-review".to_string()])]
+                .into_iter()
+                .collect();
+        let targets = resolve_targets(
+            &["scout".to_string(), "claude".to_string()],
+            None,
+            "OmniRoute",
+            &roster,
+            &body_skills,
+        );
+        assert_eq!(targets.len(), 2);
+        // Case-insensitive roster hit: parent provider, roster display name,
+        // roster skills carried over.
+        assert_eq!(targets[0].provider, "OmniRoute");
+        assert_eq!(targets[0].display, "Scout");
+        assert_eq!(targets[0].skills, vec!["tdd"]);
+        // Provider id passes through with a default display name.
+        assert_eq!(targets[1].provider, "claude");
+        assert_eq!(targets[1].display, "claude-2");
+        assert!(targets[1].skills.is_empty());
+    }
+
+    #[test]
+    fn resolve_targets_merges_body_skills_and_honors_overrides() {
+        let roster = vec![("Maven".to_string(), vec!["tdd".to_string()])];
+        let body_skills: std::collections::HashMap<String, Vec<String>> =
+            [("Maven".to_string(), vec!["code-review".to_string(), "tdd".to_string()])]
+                .into_iter()
+                .collect();
+        let names = vec![serde_json::json!("Custom")];
+        let targets = resolve_targets(
+            &["MAVEN".to_string(), "opencode".to_string()],
+            Some(&names),
+            "OmniRoute",
+            &roster,
+            &body_skills,
+        );
+        // Roster hit wins over the names override; skills merge without dupes.
+        assert_eq!(targets[0].display, "Maven");
+        assert_eq!(targets[0].skills, vec!["tdd", "code-review"]);
+        // Positional overrides apply per request index (index 1 has none).
+        assert_eq!(targets[1].display, "opencode-2");
+    }
+
+    #[test]
+    fn worker_skills_parse_name_to_id_lists() {
+        let body = serde_json::json!({
+            "worker_skills": {
+                "Scout": ["tdd", "diagnosing-bugs"],
+                "Maven": "not-a-list",
+                "Sage": [],
+            }
+        });
+        let parsed = parse_worker_skills(&body);
+        assert_eq!(parsed["Scout"], vec!["tdd", "diagnosing-bugs"]);
+        assert!(parsed["Maven"].is_empty());
+        assert!(parsed["Sage"].is_empty());
+        assert!(parse_worker_skills(&serde_json::json!({})).is_empty());
     }
 
     #[test]

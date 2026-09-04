@@ -146,6 +146,19 @@ interface StoreState {
   /** Restart the agent so a stopped or imported session can continue. */
   resumeSession: (sessionId: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<void>
+  /**
+   * Archive a session: stops it first (the backend refuses live sessions),
+   * then marks it archived. Only drops the local row on server confirm.
+   */
+  archiveSession: (sessionId: string) => Promise<void>
+  /** Restore an archived session back to the workspace lists. */
+  restoreSession: (sessionId: string) => Promise<void>
+  /**
+   * Register a session row the list never carried (hidden room channels and
+   * workers): fetches it by id and upserts so approval cards and statuses
+   * have a session to attach to. No-op when already known. Never throws.
+   */
+  ensureSessionRow: (sessionId: string) => Promise<void>
   setConfig: (sessionId: string, configId: string, value: string) => Promise<ConfigApplied>
   respondToApproval: (sessionId: string, requestId: string, decision: string, meta?: ApprovalMeta) => void
   dismissNotice: (sessionId: string) => void
@@ -605,11 +618,72 @@ export const useStore = create<StoreState>((set, get) => ({
 
 
   async deleteSession(sessionId) {
-    await sessionsApi.delete(sessionId)
+    // Delete is stop-then-remove: a session blocked on approval must end
+    // first, otherwise the backend refuses (live PTY/ACP) or the orphaned
+    // turn resurrects the row. Only drop the local copy once the server
+    // confirms — removing it optimistically is what made "deleted" sessions
+    // reappear on the next reload with no way to kill them.
+    try {
+      await get().stopSession(sessionId)
+    } catch {
+      /* best effort — delete still attempts the server-side teardown */
+    }
+    try {
+      await sessionsApi.delete(sessionId)
+    } catch (error) {
+      setNotice(set, sessionId, error instanceof Error ? error.message : 'Could not delete this session')
+      throw error
+    }
     conversations.delete(sessionId)
     set((state) => ({
       sessions: state.sessions.filter((session) => session.id !== sessionId),
     }))
+  },
+
+  async archiveSession(sessionId) {
+    try {
+      await get().stopSession(sessionId)
+    } catch {
+      /* best effort — archive still attempts the server-side move */
+    }
+    try {
+      await sessionsApi.archive(sessionId)
+    } catch (error) {
+      setNotice(set, sessionId, error instanceof Error ? error.message : 'Could not archive this session')
+      throw error
+    }
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, status: 'archived' as SessionStatus } : session,
+      ),
+    }))
+  },
+
+  async restoreSession(sessionId) {
+    try {
+      await sessionsApi.restore(sessionId)
+    } catch (error) {
+      setNotice(set, sessionId, error instanceof Error ? error.message : 'Could not restore this session')
+      throw error
+    }
+    // The backend returns the row to needs_resume/idle — reload it so the
+    // local copy (and every list) reflects the live status, not `archived`.
+    try {
+      const session = await sessionsApi.get(sessionId)
+      set((state) => ({ sessions: upsertSession(state.sessions, session) }))
+    } catch {
+      /* row stays archived locally until the next refresh */
+    }
+  },
+
+  async ensureSessionRow(sessionId) {
+    if (get().sessions.some((session) => session.id === sessionId)) return
+    try {
+      const session = await sessionsApi.get(sessionId)
+      set((state) => ({ sessions: upsertSession(state.sessions, session) }))
+    } catch {
+      /* unreachable session — the card still renders from events alone */
+    }
   },
 
   /**
@@ -735,6 +809,16 @@ function handleFrame(frame: IncomingFrame, set: SetState, get: () => StoreState)
   switch (frame.type) {
     case 'AgentEvent': {
       const event = frame.payload.event
+      // An approval for a session the list never carried (hidden room
+      // channel/worker): register the row so the card is navigable — hidden
+      // rows stay out of the workspace lists, but rooms and the pager find
+      // them through the roster.
+      if (
+        event.kind === 'permission_required' &&
+        !get().sessions.some((session) => session.id === event.session_id)
+      ) {
+        void get().ensureSessionRow(event.session_id)
+      }
       const conversation = getConversation(event.session_id)
       // `session_config_changed` carries the authoritative option set after a
       // change made anywhere — including on another device. This is what keeps a

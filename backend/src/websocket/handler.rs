@@ -396,6 +396,18 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
         return;
     }
 
+    // Room channels on PTY agents get no assembled context (this path types
+    // raw text into a TUI) — so the lead would never learn its roster.
+    // Prefix the channel's FIRST message with one compact lead line. Later
+    // turns ride the TUI's own history; every turn would just spam it.
+    let (clean_data, pty_data) = match first_channel_message_lead(state, &session).await {
+        Some(lead) => (
+            format!("{lead}\n{clean_data}"),
+            format!("{lead}\n{}", data.trim_end_matches(['\r', '\n'])),
+        ),
+        None => (clean_data, data.trim_end_matches(['\r', '\n']).to_string()),
+    };
+
     // The chat runtime must enter its generation state as soon as the user
     // submits, not only after a provider hook happens to fire (simple Claude
     // replies often have no tool hook at all). It also arms Claude PTY text
@@ -404,7 +416,6 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
 
     // Type the text first, then press Enter as a separate keystroke so the
     // TUI treats it as a submit rather than part of the pasted draft.
-    let pty_data = data.trim_end_matches(['\r', '\n']).to_string();
     if let Err(error) = state.pty_manager.send_input(session_id, &pty_data).await {
         tracing::error!("[AgentDeck][PTY] Failed to write input: {}", error);
         state.broadcast.broadcast(crate::websocket::WsMessage::SessionError {
@@ -422,6 +433,31 @@ async fn handle_input(state: &Arc<AppState>, session_id: &str, data: &str) {
             tracing::error!("[AgentDeck][PTY] Failed to submit input: {}", error);
         }
     });
+}
+
+/// Compact room-lead framing for a PTY room channel's first user message.
+/// Structured transports get the full lead section through context assembly;
+/// the PTY path types raw text, so this one-liner is the whole channel
+/// identity there. Returns None for non-channels or channels with history.
+async fn first_channel_message_lead(
+    state: &Arc<AppState>,
+    session: &crate::sessions::Session,
+) -> Option<String> {
+    let info = crate::api::rooms::find_room_by_channel(state, &session.id).await?;
+    let history = state.session_manager.get_messages(&session.id).await.unwrap_or_default();
+    if history.iter().any(|m| m.role == "user") {
+        return None;
+    }
+    let mut roster: Vec<String> = info.roster.iter().map(|(name, _)| name.clone()).collect();
+    if roster.is_empty() {
+        roster.push("no workers yet".to_string());
+    }
+    let chief = info.chief.map(|c| format!(" (chief: {c})")).unwrap_or_default();
+    Some(format!(
+        "[Room \"{}\" — you lead {}.{chief} Answer as the lead.]",
+        info.name,
+        roster.join(", ")
+    ))
 }
 
 async fn handle_command(state: &Arc<AppState>, action: &str, params: Value) {

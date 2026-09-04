@@ -1,18 +1,19 @@
 /**
- * TopBar — the single 40px status row across the top of the workspace.
+ * TopBar — the 44px command row across the top of the workspace.
  *
- * Left:  identity (brand + project + branch) and the primary action (New Session).
- * Right: the live read-out — status pill, runtime timer, connection — and the
- *        settings affordance. Everything the user needs to orient themselves and
- *        see, at a glance, whether the agent is working.
+ * Left:   back + breadcrumb (project › session › open file) — where you are.
+ * Right:  primary action (New Session), live read-out (status + runtime +
+ *         connection), and the panel toggles grouped as one segmented
+ *         control. Everything orients at a glance: place, state, controls.
  *
  * The runtime timer ticks only while the session is live (see `useNowTick`),
- * matching the per-session activity indicator — a stopped session does not keep
- * counting.
+ * matching the per-session activity indicator — a stopped session does not
+ * keep counting.
  */
 
-import { PanelLeft, PanelRight, Settings } from 'lucide-react'
-import { Button, IconButton, StatusPill } from '../ui'
+import { FileCode2, Folder, PanelLeft, PanelRight, Plus, Settings } from 'lucide-react'
+import { IconButton, StatusPill } from '../ui'
+import { useOpenFile } from '@/lib/fileViewer'
 import { cn } from '@/lib/format'
 import type { UIState, UIStateDisplay } from '@/lib/sessionState'
 import type { ConnectionState } from '@/types/protocol'
@@ -45,88 +46,130 @@ export function TopBar({
   onToggleRight?: () => void
 }) {
   const display: UIStateDisplay = uiStateDisplay(uiState)
+  const openFile = useOpenFile()
 
   const project = session.project
   const projectName = project ? (project.split('/').pop() ?? project) : null
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line/60 bg-canvas px-3">
-      {/* ── Left: identity + primary action ─────────────────────────────── */}
+    <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 bg-inset/60 px-2.5 backdrop-blur">
+      {/* ── Left: back + breadcrumb ─────────────────────────────────────── */}
       <IconButton label="Back to Mission Control" onClick={onBack} className="-ml-1 size-8">
         <ChevronLeft />
       </IconButton>
-      <span className="h-5 w-px bg-line" aria-hidden />
 
-      <span className="flex items-center gap-2">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent/15">
-          <span className="font-mono text-[11px] font-bold text-accent-ink">A</span>
+      <nav aria-label="Where you are" className="flex min-w-0 flex-1 items-center gap-1.5">
+        {projectName ? (
+          <span
+            className="flex min-w-0 shrink-0 items-center gap-1.5 text-[12px] font-medium text-ink-2"
+            title={project ?? undefined}
+          >
+            <Folder size={12} className="shrink-0 text-ink-3" />
+            <span className="max-w-[140px] truncate">{projectName}</span>
+          </span>
+        ) : (
+          <span className="shrink-0 text-[12px] font-medium text-ink-3">Inbox</span>
+        )}
+        <span aria-hidden className="shrink-0 text-[11px] text-ink-3/60">›</span>
+        <span className="min-w-0 max-w-[220px] truncate text-[12.5px] font-semibold tracking-[-0.01em] text-ink" title={session.name}>
+          {session.name}
         </span>
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
+        {session.branch ? (
+          <span className="hidden shrink-0 items-center gap-1 rounded-full border border-line/50 bg-surface/60 px-1.5 py-px font-mono text-[10px] text-ink-2 md:inline-flex" title={`Branch ${session.branch}`}>
+            <BranchIcon size={9} className="text-ink-3" />
+            <span className="max-w-[120px] truncate">{session.branch}</span>
+          </span>
+        ) : null}
+        {openFile ? (
+          <>
+            <span aria-hidden className="hidden shrink-0 text-[11px] text-ink-3/60 sm:inline">›</span>
+            <span
+              className="hidden min-w-0 max-w-[200px] items-center gap-1 truncate font-mono text-[11px] text-accent-ink sm:flex"
+              title={openFile.path}
+            >
+              <FileCode2 size={11} className="shrink-0" />
+              <span className="truncate">{openFile.name}</span>
+            </span>
+          </>
+        ) : null}
+      </nav>
+
+      {/* ── Right: action + live read-out + panels ──────────────────────── */}
+      <button
+        type="button"
+        onClick={onNewSession}
+        className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 text-[11.5px] font-semibold text-accent-ink transition hover:bg-accent-hover active:scale-[0.98]"
+      >
+        <Plus size={13} strokeWidth={2.4} />
+        <span className="hidden sm:inline">New Session</span>
+        <span className="sm:hidden">New</span>
+      </button>
+
+      <span className="h-5 w-px shrink-0 bg-line/70" aria-hidden />
+
+      <span className="flex shrink-0 items-center gap-2">
+        <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} />
+        <span className="hidden font-mono text-[10px] tabular-nums text-ink-3 lg:inline">{runtime}</span>
+        <span
+          role="status"
+          title={connection === 'connected' ? 'Connected' : connection}
+          className={cn(
+            'size-2 shrink-0 rounded-full',
+            connection === 'connected'
+              ? 'bg-green'
+              : connection === 'reconnecting' || connection === 'connecting'
+                ? 'bg-orange breathe'
+                : 'bg-red',
+          )}
+          aria-hidden
+        />
       </span>
 
-      <Button variant="ghost" onClick={onNewSession} className="min-h-7 gap-1.5 px-2.5 text-[11.5px]">
-        <PlusIcon /> New Session
-      </Button>
-
-      {projectName ? (
+      {onToggleLeft || onToggleRight ? (
         <>
-          <span className="h-4 w-px bg-line" aria-hidden />
-          <span className="max-w-[200px] truncate font-mono text-[11.5px] text-ink-2" title={project ?? undefined}>
-            {projectName}
+          <span className="h-5 w-px shrink-0 bg-line/70" aria-hidden />
+          <span
+            role="group"
+            aria-label="Side panels"
+            className="flex shrink-0 items-center gap-px rounded-lg border border-line/60 bg-surface/50 p-0.5"
+          >
+            {onToggleLeft ? (
+              <button
+                type="button"
+                onClick={onToggleLeft}
+                title={leftOpen ? 'Hide left sidebar' : 'Show left sidebar'}
+                aria-label={leftOpen ? 'Hide left sidebar' : 'Show left sidebar'}
+                aria-pressed={leftOpen}
+                className={cn(
+                  'flex size-6 items-center justify-center rounded-md transition-colors',
+                  leftOpen ? 'bg-white/[0.09] text-ink' : 'text-ink-3 hover:bg-hover-2 hover:text-ink-2',
+                )}
+              >
+                <PanelLeft size={13} strokeWidth={1.8} />
+              </button>
+            ) : null}
+            {onToggleRight ? (
+              <button
+                type="button"
+                onClick={onToggleRight}
+                title={rightOpen ? 'Hide right panel' : 'Show right panel'}
+                aria-label={rightOpen ? 'Hide right panel' : 'Show right panel'}
+                aria-pressed={rightOpen}
+                className={cn(
+                  'flex size-6 items-center justify-center rounded-md transition-colors',
+                  rightOpen ? 'bg-white/[0.09] text-ink' : 'text-ink-3 hover:bg-hover-2 hover:text-ink-2',
+                )}
+              >
+                <PanelRight size={13} strokeWidth={1.8} />
+              </button>
+            ) : null}
           </span>
         </>
       ) : null}
 
-      {session.branch ? (
-        <span className="hidden items-center gap-1 rounded-chip bg-field px-1.5 font-mono text-[10.5px] text-ink-2 sm:inline-flex">
-          <BranchIcon size={10} className="text-ink-3" />
-          {session.branch}
-        </span>
-      ) : null}
-
-      {/* Spacer pushes the rest to the right. */}
-      <span className="min-w-0 flex-1" />
-
-      {/* ── Right: sidebar toggles + live read-out ───────────────────────── */}
-      {onToggleLeft ? (
-        <IconButton
-          label={leftOpen ? 'Hide left sidebar' : 'Show left sidebar'}
-          onClick={onToggleLeft}
-          className={cn('size-8', !leftOpen && 'text-ink-3')}
-        >
-          <PanelLeft size={15} strokeWidth={1.8} />
-        </IconButton>
-      ) : null}
-      {onToggleRight ? (
-        <IconButton
-          label={rightOpen ? 'Hide right sidebar' : 'Show right sidebar'}
-          onClick={onToggleRight}
-          className={cn('size-8', !rightOpen && 'text-ink-3')}
-        >
-          <PanelRight size={15} strokeWidth={1.8} />
-        </IconButton>
-      ) : null}
-
-      <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} />
-      <span className="hidden shrink-0 font-mono text-[10px] tabular-nums text-ink-3 sm:inline">{runtime}</span>
-
-      <span
-        role="status"
-        title={connection === 'connected' ? 'Connected' : connection}
-        className={cn(
-          'size-2 shrink-0 rounded-full',
-          connection === 'connected'
-            ? 'bg-green'
-            : connection === 'reconnecting' || connection === 'connecting'
-              ? 'bg-orange breathe'
-              : 'bg-red',
-        )}
-        aria-hidden
-      />
-
       {onOpenSettings ? (
-        <IconButton label="Settings" onClick={onOpenSettings} className="size-8">
-          <Settings size={15} strokeWidth={1.8} />
+        <IconButton label="Settings" onClick={onOpenSettings} className="size-7">
+          <Settings size={14} strokeWidth={1.8} />
         </IconButton>
       ) : null}
     </header>
@@ -167,14 +210,6 @@ function ChevronLeft() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M15 18l-6-6 6-6" />
-    </svg>
-  )
-}
-
-function PlusIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 5v14M5 12h14" />
     </svg>
   )
 }

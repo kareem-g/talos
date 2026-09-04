@@ -19,6 +19,7 @@ import {
   getActiveRoom,
   getRooms,
   mentionedWorkers,
+  roomInWorkspace,
   runOrchestrator,
   runRoomTask,
 } from '@/lib/rooms'
@@ -113,9 +114,17 @@ function roomOfSession(sessionId: string) {
   return getRooms().find((room) => room.sessionId === sessionId)
 }
 
-/** The room a dispatch targets: the room whose channel you are in wins. */
+/** The room a dispatch targets: the room whose channel you are in wins, else
+ * the active room when it belongs to this workspace. */
 function dispatchTarget(sessionId: string) {
-  return roomOfSession(sessionId) ?? getActiveRoom()
+  const channelRoom = roomOfSession(sessionId)
+  if (channelRoom) return channelRoom
+  const session = useStore.getState().sessions.find((s) => s.id === sessionId)
+  const active = getActiveRoom()
+  if (active && active.workers.length > 0 && roomInWorkspace(active, session?.project ?? null)) {
+    return active
+  }
+  return undefined
 }
 
 /**
@@ -179,7 +188,7 @@ export function createSessionSendHandlers(
       return true
     }
     // #RoomName <task> passes the work to that room and opens its channel.
-    const roomMention = findRoomMention(trimmed)
+    const roomMention = findRoomMention(trimmed, session.project ?? null)
     if (roomMention) {
       seedNotice(
         session.id,
@@ -207,7 +216,7 @@ export function createSessionSendHandlers(
   const queue = (text: string, attachments: AttachmentRef[] = []): boolean => {
     const trimmed = text.trim()
     const dispatchesRoom =
-      /^\/orchestrator(?:\s|$)/.test(trimmed) || findRoomMention(trimmed) !== null
+      /^\/orchestrator(?:\s|$)/.test(trimmed) || findRoomMention(trimmed, session.project ?? null) !== null
     if (dispatchesRoom || /^\/side\s+/.test(trimmed) || /^\/btw\s+/.test(trimmed)) {
       return send(text, attachments)
     }

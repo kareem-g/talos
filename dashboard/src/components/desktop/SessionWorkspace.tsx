@@ -1,8 +1,8 @@
 /**
  * SessionWorkspace — the OpenCode-style 4-zone agentic IDE layout.
  *
- *   TopBar (40px)  — identity, project, status, timer, connection.
- *   LeftSidebar    — project selector, branch+stats, session navigator (~280px).
+ *   TopBar (44px)  — breadcrumb, primary action, status, timer, connection.
+ *   LeftSidebar    — workspace, sessions, file explorer, rooms (~304px).
  *   Center         — Chat|Terminal tabs, the conversation, a floating Progress
  *                    contexture menu, the subagent strip, and the composer.
  *   RightRail      — browser-like Agent Workspace (~380px): browser session
@@ -33,9 +33,10 @@ import { RightRail, type RightRailHandle } from './session/RightRail'
 import { FloatingHud } from './session/FloatingHud'
 import { RoomAvatarStack } from './RoomAvatars'
 import { useRooms } from '@/lib/rooms'
+import { openFile } from '@/lib/fileViewer'
 import { createSessionSendHandlers } from '@/lib/sessionCommands'
 
-const AGENT_HUES = ['#3fae6e', '#8057c8', '#377fe6', '#e78531', '#d9b515', '#d84f8b']
+const AGENT_HUES = ['#c7a56a', '#8057c8', '#8eadbf', '#e78531', '#d9b515', '#d84f8b']
 
 function hueFor(id: string): string {
   let hash = 0
@@ -181,27 +182,7 @@ export function SessionWorkspace({
     return formatRuntime(Math.max(0, end - start))
   }, [session.created_at, session.updated_at, live, now])
 
-  // Outline: one entry per message.
-  const outline = conversation.messages.map((m, idx) => {
-    const preview =
-      m.parts
-        .filter((p) => p.kind === 'text')
-        .map((p) => (p as { text: string }).text)
-        .join(' ')
-        .slice(0, 48) || m.role
-    return { idx, role: m.role, preview: preview || `Section ${idx + 1}` }
-  })
-
   const centerRef = useRef<HTMLDivElement>(null)
-  const scrollToSection = (idx: number) => {
-    const host = centerRef.current
-    if (!host) return
-    const scroller = host.querySelector('.scroll-thin') as HTMLElement | null
-    const target = scroller ?? host
-    const max = target.scrollHeight - target.clientHeight
-    const ratio = conversation.messages.length > 1 ? idx / (conversation.messages.length - 1) : 0
-    target.scrollTo({ top: ratio * Math.max(0, max), behavior: 'smooth' })
-  }
 
   // Keyboard: Cmd/Ctrl+` focuses the terminal tab.
   useEffect(() => {
@@ -265,9 +246,18 @@ export function SessionWorkspace({
 
       {/* ── 4-zone body ───────────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
-        {/* Left sidebar (~280px) — collapsible */}
+        {/* Left sidebar (304px) — workspace, sessions, explorer, rooms */}
         {leftOpen ? (
-          <LeftSidebar session={session} onSelect={(id) => onOpenSession?.(id)} searchRef={searchRef} />
+          <LeftSidebar
+            session={session}
+            onSelect={(id) => onOpenSession?.(id)}
+            onOpenFile={(project, path) => {
+              openFile(project, path)
+              if (!rightOpen) toggleRight()
+              rightRailRef.current?.openTab('file')
+            }}
+            searchRef={searchRef}
+          />
         ) : null}
 
         {/* Center — fluid */}
@@ -380,8 +370,12 @@ export function SessionWorkspace({
                       onClick={async () => {
                         setMenuOpen(false)
                         if (confirm(`Delete "${session.name}"?`)) {
-                          await deleteSession(session.id)
-                          onBack()
+                          try {
+                            await deleteSession(session.id)
+                            onBack()
+                          } catch {
+                            /* notice already set by the store — stay put */
+                          }
                         }
                       }}
                     />
@@ -391,7 +385,7 @@ export function SessionWorkspace({
             </div>
           </div>
 
-          {/* Tab switcher + jump-to */}
+          {/* Tab switcher */}
           <div className="flex shrink-0 items-center gap-2 border-b border-line/40 bg-inset px-3 py-1.5">
             <Segmented
               value={tab}
@@ -401,27 +395,6 @@ export function SessionWorkspace({
                 { value: 'terminal', label: 'Terminal' },
               ]}
             />
-            {tab === 'chat' && outline.length > 0 ? (
-              <select
-                aria-label="Jump to section"
-                value=""
-                onChange={(e) => {
-                  const idx = Number(e.target.value)
-                  if (!Number.isNaN(idx)) scrollToSection(idx)
-                }}
-                className="scroll-thin ml-auto max-w-[220px] cursor-pointer rounded-control border border-line bg-field px-2 py-1 text-[11px] text-ink-2 outline-none hover:text-ink"
-              >
-                <option value="" disabled>
-                  Jump to… ({outline.length})
-                </option>
-                {outline.map((s) => (
-                  <option key={s.idx} value={s.idx}>
-                    {s.role === 'user' ? 'You: ' : 'Agent: '}
-                    {s.preview}
-                  </option>
-                ))}
-              </select>
-            ) : null}
           </div>
 
           {/* Chat / terminal surface */}

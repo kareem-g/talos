@@ -22,11 +22,34 @@ import type { Session } from '@/types/session'
 
 export type PanelStatus = 'working' | 'done' | 'failed' | 'blocked'
 
+/** A worker's picked identity tile: gradient ground + optional emoji glyph. */
+export interface WorkerAvatarSpec {
+  /** Index into the shared gradient set (see RoomAvatars). */
+  gradient: number
+  /** Emoji glyph shown instead of the name initial, when set. */
+  emoji?: string
+}
+
 /** A standing member of a room: a named worker backed by a hidden session. */
 export interface RoomWorker {
   name: string
   /** The hidden worker session created for this workspace, when spawned. */
   sessionId?: string
+  /** Picked identity tile; absent for workers created before avatars existed. */
+  avatar?: WorkerAvatarSpec
+  /**
+   * Skill ids assigned at creation (registry ids, e.g. "tdd"). Sent with
+   * every room dispatch as `worker_skills` so the harness can prompt the
+   * worker in its specialty.
+   */
+  skills?: string[]
+}
+
+/** Details collected by the worker creation modal. */
+export interface NewWorkerDetails {
+  name: string
+  avatar?: WorkerAvatarSpec
+  skills?: string[]
 }
 
 /** One worker of a room's latest run, tracked by its real child-session id. */
@@ -47,6 +70,23 @@ export interface Room {
   sessionId?: string
   /** Workers of the latest run, in request order. Empty until the first run. */
   panels: RoomPanel[]
+  /**
+   * When true, runs skip permission prompts: children spawn auto-approved
+   * and the tool-policy gate is bypassed, so the team runs unattended.
+   */
+  skipPermissions?: boolean
+  /**
+   * Workspace (project path) this room belongs to. Rooms only surface in
+   * their workspace's sidebar. Absent for legacy rooms whose workspace could
+   * not be determined — those stay visible everywhere.
+   */
+  project?: string | null
+}
+
+/** Whether a room belongs in the given workspace's sidebar. */
+export function roomInWorkspace(room: Room, project: string | null | undefined): boolean {
+  if (!room.project) return true
+  return room.project === (project ?? null)
 }
 
 const ROOMS_KEY = 'agentdeck-rooms'
@@ -73,10 +113,11 @@ function loadLocalSeed(): Room[] {
       .map((room) => ({
         ...room,
         // Migration: pre-worker rooms stored provider ids in `agents`; earlier
-        // worker rooms stored plain name strings. Both become RoomWorker.
+        // worker rooms stored plain name strings. Both become RoomWorker;
+        // unknown fields (avatar, skills) on worker objects pass through.
         workers: Array.isArray(room.workers)
           ? room.workers.map((worker) =>
-              typeof worker === 'string' ? { name: worker } : worker,
+              typeof worker === 'string' ? { name: worker } : normalizeWorker(worker),
             )
           : (room.agents ?? []).map((name) => ({ name })),
         panels: Array.isArray(room.panels) ? room.panels : [],
@@ -125,7 +166,25 @@ function toRecord(room: Room): RoomRecord {
     workers: room.workers,
     chief: room.chief ?? null,
     sessionId: room.sessionId ?? null,
+    skipPermissions: room.skipPermissions ?? false,
+    project: room.project ?? null,
   }
+}
+
+/** Coerce a stored worker into shape, keeping avatar/skills when present. */
+export function normalizeWorker(worker: RoomWorker): RoomWorker {
+  const clean: RoomWorker = { name: worker.name }
+  if (worker.sessionId) clean.sessionId = worker.sessionId
+  if (worker.avatar && Number.isInteger(worker.avatar.gradient)) {
+    clean.avatar =
+      typeof worker.avatar.emoji === 'string' && worker.avatar.emoji
+        ? { gradient: worker.avatar.gradient, emoji: worker.avatar.emoji }
+        : { gradient: worker.avatar.gradient }
+  }
+  if (Array.isArray(worker.skills) && worker.skills.length > 0) {
+    clean.skills = worker.skills.filter((s): s is string => typeof s === 'string')
+  }
+  return clean
 }
 
 function fromRecord(record: RoomRecord): Room {
@@ -135,11 +194,13 @@ function fromRecord(record: RoomRecord): Room {
     name: record.name,
     workers: Array.isArray(record.workers)
       ? record.workers.map((worker) =>
-          typeof worker === 'string' ? { name: worker } : worker,
+          typeof worker === 'string' ? { name: worker } : normalizeWorker(worker),
         )
       : [],
     chief: record.chief ?? undefined,
     sessionId: record.sessionId ?? undefined,
+    skipPermissions: record.skipPermissions ?? false,
+    project: record.project ?? null,
     // Keep this client's live run panels for its own renders.
     panels: existing?.panels ?? [],
   }
@@ -227,12 +288,13 @@ export function useActiveRoomId(): string | null {
   return useSyncExternalStore(subscribeRooms, () => activeRoomId)
 }
 
-export function createRoom(name: string, workerNames: string[]): Room {
+export function createRoom(name: string, workerNames: string[], project?: string | null): Room {
   const room: Room = {
     id: `room-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: name.trim() || `Room ${rooms.length + 1}`,
     workers: workerNames.map((name) => ({ name })),
     panels: [],
+    project: project ?? null,
   }
   setRooms([...rooms, room])
   if (!activeRoomId) activeRoomId = room.id
@@ -244,16 +306,17 @@ export function createRoom(name: string, workerNames: string[]): Room {
  * Create a standing worker for the room: a hidden session in the workspace
  * (same agent + project as the context session) named after the worker.
  * Workers are real team members — individually openable, status-tracked —
- * and every room dispatch fans out one child per worker.
+ * and every room dispatch fans out one child per worker. Avatar and skills
+ * come from the creation modal and persist on the roster for the harness.
  */
 export async function addWorkerToRoom(
   contextSessionId: string,
   roomId: string,
-  workerName: string,
+  details: NewWorkerDetails,
 ): Promise<RoomWorker> {
   const room = rooms.find((candidate) => candidate.id === roomId)
   if (!room) throw new Error('Room not found')
-  const trimmed = workerName.trim()
+  const trimmed = details.name.trim()
   const existing = room.workers.find((worker) => worker.name === trimmed)
   if (existing?.sessionId) return existing
   if (!trimmed) throw new Error('Worker name is empty')
@@ -265,7 +328,12 @@ export async function addWorkerToRoom(
     name: `${room.name}/${trimmed}`,
     hidden: true,
   })
-  const worker: RoomWorker = { name: trimmed, sessionId: created.id }
+  const worker: RoomWorker = normalizeWorker({
+    name: trimmed,
+    sessionId: created.id,
+    ...(details.avatar ? { avatar: details.avatar } : {}),
+    ...(details.skills && details.skills.length > 0 ? { skills: details.skills } : {}),
+  })
   const current = rooms.find((candidate) => candidate.id === roomId)
   if (!current) throw new Error('Room not found')
   updateRoom(roomId, {
@@ -278,11 +346,17 @@ export async function addWorkerToRoom(
 
 export function updateRoom(
   roomId: string,
-  patch: Partial<Pick<Room, 'name' | 'workers' | 'chief' | 'sessionId' | 'panels'>>,
+  patch: Partial<Pick<Room, 'name' | 'workers' | 'chief' | 'sessionId' | 'panels' | 'skipPermissions' | 'project'>>,
 ): void {
   const next = rooms.map((room) => (room.id === roomId ? { ...room, ...patch } : room))
   // Panel-only updates stay local (volatile run state); anything else syncs.
-  const structural = 'name' in patch || 'workers' in patch || 'chief' in patch || 'sessionId' in patch
+  const structural =
+    'name' in patch ||
+    'workers' in patch ||
+    'chief' in patch ||
+    'sessionId' in patch ||
+    'skipPermissions' in patch ||
+    'project' in patch
   if (structural) {
     const room = next.find((candidate) => candidate.id === roomId)
     if (room) {
@@ -292,6 +366,37 @@ export function updateRoom(
     }
   }
   setRooms(next)
+}
+
+/**
+ * Adopt workspaces for legacy rooms that predate scoping: a room with no
+ * project takes its channel's (else its first known worker's) workspace.
+ * Rooms with no reachable session stay global so they never vanish.
+ */
+export function backfillRoomProjects(): void {
+  const sessions = useStore.getState().sessions
+  let changed = false
+  const next = rooms.map((room) => {
+    if (room.project) return room
+    const channel = room.sessionId
+      ? sessions.find((s) => s.id === room.sessionId)
+      : undefined
+    const workerSession = !channel
+      ? room.workers
+          .map((worker) => (worker.sessionId ? sessions.find((s) => s.id === worker.sessionId) : undefined))
+          .find((s): s is Session => Boolean(s))
+      : undefined
+    const project = channel?.project ?? workerSession?.project ?? null
+    if (!project) return room
+    changed = true
+    return { ...room, project }
+  })
+  if (!changed) return
+  setRooms(next)
+  for (const room of next) {
+    const before = rooms.find((r) => r.id === room.id)
+    if (room.project && !before?.project) void persistRoom(room)
+  }
 }
 
 export function deleteRoom(roomId: string): void {
@@ -394,40 +499,52 @@ function seedTask(sessionId: string, task: string): void {
   }))
 }
 
+/** Skill ids per worker name, for the harness (`worker_skills` payload). */
+function workerSkillsMap(workers: RoomWorker[]): Record<string, string[]> | undefined {
+  const map: Record<string, string[]> = {}
+  for (const worker of workers) {
+    if (worker.skills && worker.skills.length > 0) map[worker.name] = worker.skills
+  }
+  return Object.keys(map).length > 0 ? map : undefined
+}
+
 async function orchestrate(
   parentSessionId: string,
   task: string,
   agent: string,
-  workers: string[],
-  options: { roomId?: string; roomName?: string; chief?: string; model?: string } = {},
+  workers: RoomWorker[],
+  options: { roomId?: string; roomName?: string; chief?: string; model?: string; merge?: boolean } = {},
 ): Promise<void> {
+  const names = workers.map((worker) => worker.name)
   try {
     const result = await orchestrationApi.run(parentSessionId, {
       prompt: task,
       agents: workers.map(() => agent),
-      names: workers,
+      names,
       merge_agent: agent,
       model: options.model,
+      merge: options.merge ?? true,
       // Room identity: workers are prompted as team members, the chief (when
       // set) leads the merge, and the run is distilled into room memory.
       room:
         options.roomId && options.roomName
           ? { id: options.roomId, name: options.roomName, chief: options.chief }
           : undefined,
+      worker_skills: workerSkillsMap(workers),
     })
     if (options.roomId) {
       setRoomPanels(
         options.roomId,
         result.children.map((child, index) => ({
           id: child.session_id,
-          name: workers[index] ?? child.agent,
+          name: names[index] ?? child.agent,
           status: panelStatusFromChild(child.status),
         })),
       )
     }
   } catch (error) {
     if (options.roomId) {
-      const failed = workers.map((name) => ({ id: '', name, status: 'failed' as const }))
+      const failed = names.map((name) => ({ id: '', name, status: 'failed' as const }))
       setRoomPanels(options.roomId, failed)
     }
     useStore.setState((state) => ({
@@ -453,6 +570,7 @@ export async function runRoomTask(
   room: Room,
   task: string,
   only?: string[],
+  opts?: { merge?: boolean },
 ): Promise<string | null> {
   const trimmed = task.trim()
   const targets = only && only.length > 0
@@ -481,24 +599,57 @@ export async function runRoomTask(
     room.id,
     workerNames.map((name) => ({ id: '', name, status: 'working' as const })),
   )
-  void orchestrate(channelId, trimmed, agent, workerNames, {
+  void orchestrate(channelId, trimmed, agent, targets, {
     roomId: room.id,
     roomName: room.name,
     chief: room.chief,
     model: currentModelId(contextSessionId),
+    merge: opts?.merge ?? true,
   })
   return channelId
 }
 
 /**
- * `#RoomName <task>` — first # token matching a known room (with workers)
- * routes the rest of the message to that room as a dispatch.
+ * The room's currently open approval, if any: scans the channel conversation
+ * first (broker cards bubble there), then each worker's own conversation
+ * (native protocol approvals stay on the worker session). Returns the session
+ * holding the card so callers can open it directly — hidden sessions never
+ * appear in the workspace lists, so without this the card is unreachable.
  */
-export function findRoomMention(text: string): { room: Room; task: string } | null {
+export function roomOpenApproval(room: Room): { sessionId: string; requestId: string } | null {
+  const candidates: string[] = [
+    ...(room.sessionId ? [room.sessionId] : []),
+    ...room.workers.map((worker) => worker.sessionId).filter((id): id is string => Boolean(id)),
+  ]
+  for (const sessionId of candidates) {
+    const conversation = getConversation(sessionId)
+    for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+      for (const part of conversation.messages[index].parts) {
+        if (part.kind === 'approval' && part.decision === undefined) {
+          return { sessionId, requestId: part.requestId }
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * `#RoomName <task>` — first # token matching a known room (with workers)
+ * routes the rest of the message to that room as a dispatch. Prefers a room
+ * in the given workspace; falls back to any workspace for explicit mentions.
+ */
+export function findRoomMention(
+  text: string,
+  project?: string | null,
+): { room: Room; task: string } | null {
   const match = /^#(\S+)\s+([\s\S]+)$/.exec(text)
   if (!match) return null
   const needle = match[1].toLowerCase()
-  const room = rooms.find((candidate) => candidate.name.toLowerCase() === needle)
+  const matches = rooms.filter((candidate) => candidate.name.toLowerCase() === needle)
+  const room =
+    matches.find((candidate) => roomInWorkspace(candidate, project) && candidate.project) ??
+    matches[0]
   if (!room || room.workers.length === 0) return null
   return { room, task: match[2].trim() }
 }
@@ -528,9 +679,10 @@ export function runOrchestrator(sessionId: string, task: string): string | null 
   if (!trimmed) return 'Give /orchestrator a task — e.g. "/orchestrator refactor the auth module".'
   const session = useStore.getState().sessions.find((s) => s.id === sessionId)
   const agent = session?.agent ?? 'claude'
-  const room = getActiveRoom()
-  const workerNames = room && room.workers.length > 0 ? room.workers.map((worker) => worker.name) : []
-  const names = workerNames.length > 0 ? workerNames : undefined
+  const active = getActiveRoom()
+  const room = active && roomInWorkspace(active, session?.project ?? null) ? active : null
+  const roster = room && room.workers.length > 0 ? room.workers : []
+  const workerNames = roster.map((worker) => worker.name)
   const width = workerNames.length > 0 ? workerNames.length : FALLBACK_WORKERS
   seedTask(sessionId, trimmed)
   if (room && workerNames.length > 0) {
@@ -539,7 +691,10 @@ export function runOrchestrator(sessionId: string, task: string): string | null 
       workerNames.map((name) => ({ id: '', name, status: 'working' as const })),
     )
   }
-  void orchestrate(sessionId, trimmed, agent, names ?? Array.from({ length: width }, (_, i) => `${agent}-${i + 1}`), {
+  const targets: RoomWorker[] = roster.length > 0
+    ? roster
+    : Array.from({ length: width }, (_, i) => ({ name: `${agent}-${i + 1}` }))
+  void orchestrate(sessionId, trimmed, agent, targets, {
     roomId: room && workerNames.length > 0 ? room.id : undefined,
     roomName: room && workerNames.length > 0 ? room.name : undefined,
     chief: room?.chief,

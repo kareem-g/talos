@@ -60,7 +60,7 @@ export function ProgressWidget({ session }: { session: Session }) {
   if (tasks.length === 0) return null
 
   return (
-    <section className="m-2 rounded-xl border border-white/[0.07] bg-[#0a0a0c] p-3">
+    <section className="m-2 rounded-xl border border-white/[0.07] bg-[#191613] p-3">
       <header className="mb-2 flex items-center justify-between">
         <h2 className="text-[12px] font-semibold text-zinc-100">Progress</h2>
         <span className="font-mono text-[10px] text-zinc-500">
@@ -176,7 +176,7 @@ export function AutomationsPanel({ session }: { session: Session }) {
   }
 
   return (
-    <section className="m-2 rounded-xl border border-white/[0.07] bg-[#0a0a0c] p-3">
+    <section className="m-2 rounded-xl border border-white/[0.07] bg-[#191613] p-3">
       <header className="mb-2">
         <h2 className="text-[12px] font-semibold text-zinc-100">Tasks / Automations</h2>
       </header>
@@ -486,7 +486,7 @@ export function SubagentsControl({
         {running > 0 ? (
           <span
             aria-hidden
-            className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 font-mono text-[8.5px] font-semibold leading-none text-white"
+            className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 font-mono text-[8.5px] font-semibold leading-none text-accent-ink"
           >
             {running}
           </span>

@@ -241,7 +241,7 @@ export function FloatingHud({
                 <HudRow
                   key={agent.id}
                   icon={
-                    <span className={cn('size-1.5 shrink-0 rounded-full', agent.status === 'working' ? 'bg-green breathe' : agent.status === 'failed' ? 'bg-red' : 'bg-ink-3/60')} aria-hidden />
+                    <span className={cn('size-1.5 shrink-0 rounded-full', agent.status === 'working' ? 'bg-accent breathe' : agent.status === 'failed' ? 'bg-red' : 'bg-ink-3/60')} aria-hidden />
                   }
                   label={agent.name}
                   onClick={() => onSelectTab('agents')}

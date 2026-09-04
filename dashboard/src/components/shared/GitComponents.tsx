@@ -40,7 +40,7 @@ export function DiffLayer({ path, diff, onClose }: { path: string; diff: string;
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-[88dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#19191b] shadow-2xl">
+      <div className="flex max-h-[88dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#211d19] shadow-2xl">
         <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-200">{path}</span>
           <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-white">

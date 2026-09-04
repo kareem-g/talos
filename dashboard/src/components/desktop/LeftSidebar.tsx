@@ -1,92 +1,72 @@
 /**
- * LeftSidebar — the session navigator, ~280px fixed.
+ * LeftSidebar — the session navigator, 304px fixed.
  *
- * Top-to-bottom information hierarchy (the OpenCode layout order):
- *   1. Project selector dropdown — which workspace's sessions + branches show.
- *   2. Active branch + change stats (+added −removed) + uncommitted count.
- *   3. Sessions in this workspace — "+ New task" button, then a scrollable
- *      list of session rows (name + relative time + status dot).
- *   4. Search bar — filters the session list, pinned above it.
+ * Four zones, top to bottom:
+ *   1. Workspace — project selector, new-task shortcut, search (pinned).
+ *   2. Rooms     — worker channels first; the team above the threads.
+ *   3. Sessions  — "Needs you" pinned first, then the recency-sorted list
+ *      for the active workspace (the only growing scroll region).
+ *   4. Explorer  — the active workspace's file tree (fixed max height, own
+ *      scroll). Clicking a file previews it in the right pane.
  *
- * Branch data comes from /api/git/branches; session data from the store. Both
- * are real daemon-backed sources, never hardcoded.
+ * Git branch management lives in the right rail's Git tab, not here: the
+ * sidebar switches sessions and browses files; version control has its own
+ * surface with diffs.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, Folder, GitBranch as GitBranchIcon, MessagesSquare, Plus, RefreshCw, Search } from 'lucide-react'
-import { gitApi, type GitBranch } from '@/lib/api'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Files,
+  Folder,
+  MessagesSquare,
+  Plus,
+  RefreshCw,
+  Search,
+  X,
+} from 'lucide-react'
 import { getConversation, useStore } from '@/store'
+import { useOpenFile } from '@/lib/fileViewer'
 import { cn, relativeTime } from '@/lib/format'
 import { sessionUIState, isInternalSession } from '@/lib/sessionState'
 import { NewSessionLayer } from '@/components/SessionList'
+import { FileExplorer } from './FileExplorer'
 import { RoomsSection } from './RoomsSection'
 import type { Session } from '@/types/session'
 
-interface BranchStats {
-  current?: string
-  changed: number
-  added: number
-  removed: number
-}
+const ATTENTION = new Set(['approval', 'input', 'failed', 'paused'])
+const LIVE = new Set(['working', 'starting', 'resuming'])
 
-/** A branch as rendered in the sidebar, with refs normalized and deduped. */
-interface BranchEntry {
-  /** Clean display name (no refs/heads/, refs/remotes/ or stray ref/ prefixes). */
-  name: string
-  /** Original name from the API — what checkout actually needs. */
-  raw: string
-  current: boolean
-  origin: boolean
-}
-
-/**
- * Normalize a ref name for display, stripping each known prefix exactly once.
- * Guards against the ref/ref/… double-prefix bug: if the daemon ever hands back
- * a full ref ("refs/heads/x") or a half-stripped one ("ref/refs/heads/x"),
- * the display stays clean.
- */
-function normalizeBranchName(raw: string): string {
-  let name = raw.trim()
-  name = name.replace(/^refs\/(heads|remotes|tags)\//, '')
-  name = name.replace(/^refs\//, '')
-  name = name.replace(/^ref\//, '')
-  return name
-}
-
-/** Collapse local + remote-tracking views of the same branch into one row. */
-function dedupeBranches(branches: GitBranch[]): BranchEntry[] {
-  const byName = new Map<string, BranchEntry>()
-  for (const branch of branches) {
-    const name = normalizeBranchName(branch.name)
-    const origin =
-      /^refs\/remotes\//.test(branch.name) || branch.name.startsWith('origin/')
-    const existing = byName.get(name)
-    // Prefer the current branch, then local over remote, then first-seen.
-    if (existing && (existing.current || (!origin && existing.origin))) continue
-    byName.set(name, { name, raw: branch.name, current: branch.current ?? false, origin })
-  }
-  return [...byName.values()].sort((a, b) => {
-    if (a.current) return -1
-    if (b.current) return 1
-    return a.name.localeCompare(b.name)
-  })
+function dotFor(uiState: string): string {
+  if (uiState === 'failed') return 'bg-red-400'
+  if (LIVE.has(uiState)) return 'bg-emerald-400'
+  if (ATTENTION.has(uiState)) return 'bg-orange-400'
+  return 'bg-zinc-600'
 }
 
 export function LeftSidebar({
   session,
   onSelect,
+  onOpenFile,
   searchRef,
 }: {
   session: Session
   onSelect: (id: string) => void
+  /** Preview a workspace file in the right pane. */
+  onOpenFile: (project: string, path: string) => void
   /** Ref for the search input, so the right-panel Search icon can focus it. */
   searchRef?: React.RefObject<HTMLInputElement | null>
 }) {
   const sessions = useStore((s) => s.sessions)
   const connection = useStore((s) => s.connection)
   const deleteSession = useStore((s) => s.deleteSession)
+  const archiveSession = useStore((s) => s.archiveSession)
+  const openFile = useOpenFile()
 
-  /* ── Project (workspace) selector ─────────────────────────────────────── */
+  /* ── Workspace selector ─────────────────────────────────────────────── */
   const [activeWorkspace, setActiveWorkspace] = useState<string>(session.project ?? '__inbox__')
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
@@ -97,24 +77,46 @@ export function LeftSidebar({
       const key = s.project ?? '__inbox__'
       grouped.set(key, [...(grouped.get(key) ?? []), s])
     }
-    return [...grouped.entries()].map(([key, items]) => ({
-      key,
-      name: key === '__inbox__' ? 'Inbox' : (key.split('/').pop() ?? key),
-      count: items.length,
-    }))
+    return [...grouped.entries()]
+      .map(([key, items]) => ({
+        key,
+        name: key === '__inbox__' ? 'Inbox' : (key.split('/').pop() ?? key),
+        full: key === '__inbox__' ? 'No folder' : key,
+        count: items.length,
+        latest: items.reduce((a, b) => (a > b.updated_at ? a : b.updated_at), ''),
+      }))
+      .sort((a, b) => b.latest.localeCompare(a.latest))
   }, [sessions])
 
   useEffect(() => {
     setActiveWorkspace(session.project ?? '__inbox__')
   }, [session.project])
 
-  const activeMeta = workspaces.find((w) => w.key === activeWorkspace)
-  const projectPath = activeWorkspace === '__inbox__' ? '' : activeWorkspace
+  // Close the workspace menu on outside click / Escape.
+  useEffect(() => {
+    if (!dropdownOpen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setDropdownOpen(false)
+    }
+    function onPointer(e: PointerEvent) {
+      const el = (e.target as HTMLElement).closest('[data-workspace-menu]')
+      if (!el) setDropdownOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+    }
+  }, [dropdownOpen])
 
-  /* ── Search ──────────────────────────────────────────────────────────── */
+  const activeMeta = workspaces.find((w) => w.key === activeWorkspace)
+  const explorerRoot = activeWorkspace === '__inbox__' ? '' : activeWorkspace
+
+  /* ── Search + session rows ──────────────────────────────────────────── */
   const [query, setQuery] = useState('')
 
-  const visibleSessions = useMemo(() => {
+  const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return sessions
       .filter((s) => s.status !== 'archived' && !isInternalSession(s) && (s.project ?? '__inbox__') === activeWorkspace)
@@ -127,125 +129,138 @@ export function LeftSidebar({
       .sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
   }, [sessions, connection, activeWorkspace, query])
 
-  /* ── Branch state for this workspace ──────────────────────────────────── */
-  const [branchStats, setBranchStats] = useState<BranchStats | null>(null)
-  const [branches, setBranches] = useState<BranchEntry[]>([])
-  const [gitBusy, setGitBusy] = useState(false)
+  const attention = useMemo(() => rows.filter((r) => ATTENTION.has(r.uiState)), [rows])
+  const rest = useMemo(() => rows.filter((r) => !ATTENTION.has(r.uiState)), [rows])
 
-  const refreshBranch = useCallback(async () => {
-    if (!projectPath) {
-      setBranchStats(null)
-      setBranches([])
-      return
-    }
-    setGitBusy(true)
-    try {
-      const data = await gitApi.branches(projectPath)
-      setBranchStats({ current: data.current, changed: data.changed_count, added: data.added, removed: data.removed })
-      setBranches(dedupeBranches(data.branches ?? []))
-    } catch {
-      setBranchStats(null)
-      setBranches([])
-    } finally {
-      setGitBusy(false)
-    }
-  }, [projectPath])
+  /* ── Explorer collapse ──────────────────────────────────────────────── */
+  const [explorerOpen, setExplorerOpen] = useState(true)
+  const [treeTick, setTreeTick] = useState(0)
 
-  useEffect(() => {
-    void refreshBranch()
-  }, [refreshBranch])
-
-  const checkoutBranch = useCallback(
-    async (branch: BranchEntry) => {
-      if (!projectPath || branch.current || gitBusy) return
-      setGitBusy(true)
-      try {
-        await gitApi.checkout(projectPath, branch.raw)
-        await refreshBranch()
-      } catch {
-        /* best effort — the branch simply stays where it is */
-      } finally {
-        setGitBusy(false)
-      }
-    },
-    [projectPath, gitBusy, refreshBranch],
-  )
-
-  /* ── New session ─────────────────────────────────────────────────────── */
+  /* ── New session ────────────────────────────────────────────────────── */
   const [creating, setCreating] = useState(false)
 
-  return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-line/60 bg-[#0a0a0c] text-zinc-100">
-      {/* 0. Plumb wordmark — the rail's identity header */}
-      <div className="flex items-center gap-2.5 border-b border-white/[0.05] px-3 pb-2.5 pt-2.5">
-        <span
-          aria-hidden
-          className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] ring-1 ring-inset ring-white/[0.1]"
-        >
-          <svg width="11" height="15" viewBox="0 0 11 15" fill="none" aria-hidden>
-            <line x1="5.5" y1="1" x2="5.5" y2="8.5" stroke="#7dd3fc" strokeWidth="1.6" strokeLinecap="round" />
-            <circle cx="5.5" cy="11.5" r="2.7" fill="#34d399" />
-          </svg>
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] text-zinc-100">
-          Plumb
-        </span>
-        <span
-          aria-hidden
-          title={connection === 'connected' ? 'Connected' : connection}
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            connection === 'connected' ? 'bg-emerald-400' : 'animate-pulse bg-orange-400',
-          )}
-        />
-      </div>
-
-      {/* 1. Project selector */}
-      <div className="relative px-3 pb-2 pt-2.5">
+  function renderRow({ session: s, uiState }: { session: Session; uiState: string }) {
+    const active = s.id === session.id
+    const needsYou = ATTENTION.has(uiState)
+    return (
+      <div key={s.id} className="group relative mb-px flex items-center">
         <button
           type="button"
-          onClick={() => setDropdownOpen((v) => !v)}
-          aria-expanded={dropdownOpen}
-          aria-haspopup="listbox"
-          className="flex w-full items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07]"
+          onClick={() => onSelect(s.id)}
+          aria-current={active ? 'true' : undefined}
+          title={s.name}
+          className={cn(
+            'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2 pr-14 text-left transition-colors duration-100',
+            active
+              ? 'bg-white/[0.09] text-white ring-1 ring-inset ring-white/[0.08]'
+              : needsYou
+                ? 'text-zinc-200 hover:bg-white/[0.05]'
+                : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100',
+          )}
         >
-          <Folder size={13} className="shrink-0 text-zinc-500" />
-          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-zinc-200">
-            {activeMeta?.name ?? 'Inbox'}
+          <span className={cn('size-1.5 shrink-0 rounded-full', dotFor(uiState), LIVE.has(uiState) && 'animate-pulse')} aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-[12px] leading-none">{s.name}</span>
+          <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-zinc-600">
+            {relativeTime(s.updated_at).replace(' ago', '')}
           </span>
-          <ChevronDown size={13} className={cn('shrink-0 text-zinc-500 transition-transform', dropdownOpen && 'rotate-180')} />
         </button>
-        {dropdownOpen ? (
-          <div role="listbox" aria-label="Workspaces" className="absolute left-3 right-3 top-full z-30 mt-1 overflow-hidden rounded-xl border border-white/[0.1] bg-[#141417] shadow-2xl">
-            {workspaces.map((workspace) => (
-              <button
-                key={workspace.key}
-                type="button"
-                role="option"
-                aria-selected={workspace.key === activeWorkspace}
-                onClick={() => {
-                  setActiveWorkspace(workspace.key)
-                  setDropdownOpen(false)
-                  setQuery('')
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 px-2.5 py-2 text-left transition',
-                  workspace.key === activeWorkspace ? 'bg-white/[0.08] text-white' : 'text-zinc-400 hover:bg-white/[0.05]',
-                )}
-              >
-                <Folder size={12} className="shrink-0 text-zinc-600" />
-                <span className="min-w-0 flex-1 truncate text-[11.5px]">{workspace.name}</span>
-                <span className="font-mono text-[10px] text-zinc-600">{workspace.count}</span>
-                {workspace.key === activeWorkspace ? <Check size={12} className="shrink-0 text-emerald-400" /> : null}
-              </button>
-            ))}
-          </div>
+        {needsYou && !active ? (
+          <span className="pointer-events-none absolute right-2 size-1.5 animate-pulse rounded-full bg-orange-400 group-hover:opacity-0" aria-hidden />
+        ) : null}
+        {!active ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void archiveSession(s.id).catch(() => {})}
+              title={`Archive ${s.name}`}
+              aria-label={`Archive ${s.name}`}
+              className="absolute right-7 hidden rounded p-1 text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-200 group-hover:block"
+            >
+              <Archive size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void deleteSession(s.id).catch(() => {})}
+              title={`Stop ${s.name}`}
+              aria-label={`Stop ${s.name}`}
+              className="absolute right-1 hidden rounded p-1 text-zinc-600 hover:bg-white/[0.06] hover:text-red-400 group-hover:block"
+            >
+              <X size={12} />
+            </button>
+          </>
         ) : null}
       </div>
+    )
+  }
 
-      {/* 2. Search (pinned above sessions) */}
-      <div className="px-3 py-2">
-        <div className="flex h-7 items-center gap-1.5 rounded-xl border border-white/[0.07] bg-black/40 px-2 transition-colors focus-within:border-white/[0.18]">
+  return (
+    <aside className="flex w-[304px] shrink-0 flex-col border-r border-line/60 bg-[#191613] text-zinc-100">
+      {/* ── 1. Workspace ─────────────────────────────────────────────── */}
+      <div className="shrink-0 px-2.5 pb-1.5 pt-2.5" data-workspace-menu>
+        <div className="flex items-center gap-1.5">
+          <div className="relative min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setDropdownOpen((v) => !v)}
+              aria-expanded={dropdownOpen}
+              aria-haspopup="listbox"
+              title={activeWorkspace === '__inbox__' ? 'Inbox' : activeWorkspace}
+              className="flex h-9 w-full items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07]"
+            >
+              <Folder size={13} className="shrink-0 text-zinc-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] font-medium leading-tight text-zinc-200">
+                  {activeMeta?.name ?? 'Inbox'}
+                </span>
+                <span className="block truncate font-mono text-[9.5px] leading-tight text-zinc-600">
+                  {activeMeta ? `${activeMeta.count} session${activeMeta.count === 1 ? '' : 's'}` : ''}
+                </span>
+              </span>
+              <ChevronDown size={13} className={cn('shrink-0 text-zinc-500 transition-transform', dropdownOpen && 'rotate-180')} />
+            </button>
+            {dropdownOpen ? (
+              <div role="listbox" aria-label="Workspaces" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto scroll-thin rounded-xl border border-white/[0.1] bg-[#2a241e] p-1 shadow-2xl animate-up">
+                {workspaces.map((workspace) => (
+                  <button
+                    key={workspace.key}
+                    type="button"
+                    role="option"
+                    aria-selected={workspace.key === activeWorkspace}
+                    title={workspace.full}
+                    onClick={() => {
+                      setActiveWorkspace(workspace.key)
+                      setDropdownOpen(false)
+                      setQuery('')
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition',
+                      workspace.key === activeWorkspace ? 'bg-white/[0.08] text-white' : 'text-zinc-400 hover:bg-white/[0.05]',
+                    )}
+                  >
+                    <Folder size={12} className="shrink-0 text-zinc-600" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11.5px]">{workspace.name}</span>
+                      <span className="block truncate font-mono text-[9px] text-zinc-600">{workspace.full}</span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-zinc-600">{workspace.count}</span>
+                    {workspace.key === activeWorkspace ? <Check size={12} className="shrink-0 text-emerald-400" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            title="New session in this workspace"
+            aria-label="New session"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-ink transition hover:bg-accent-hover active:scale-95"
+          >
+            <Plus size={15} />
+          </button>
+        </div>
+
+        <div className="mt-1.5 flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/40 px-2 transition-colors focus-within:border-white/[0.18]">
           <Search size={12} className="shrink-0 text-zinc-600" />
           <input
             ref={searchRef}
@@ -254,162 +269,106 @@ export function LeftSidebar({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search sessions…"
             aria-label="Search sessions"
-            className="min-w-0 flex-1 bg-transparent text-[11.5px] text-zinc-200 outline-none placeholder:text-zinc-600"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600"
           />
+          {query ? (
+            <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="rounded p-0.5 text-zinc-600 hover:text-zinc-200">
+              <X size={11} />
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {/* 3. Rooms — channels of workers the orchestrator fans tasks out to.
-          Pinned above the session list (channel-first order). Clicking a room
-          opens its channel as a native chat in the center. */}
-      <RoomsSection session={{ id: session.id }} onSelect={onSelect} />
+      {/* ── 2. Rooms (channels first — the team above the threads) ─────── */}
+      <RoomsSection session={{ id: session.id, project: session.project ?? null }} onSelect={onSelect} />
 
-      {/* 4. Sessions header + new task */}
-      <div className="flex items-center justify-between px-3 pb-1">
-        <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
-          <MessagesSquare size={11} className="text-zinc-500" />
-          Sessions{visibleSessions.length ? ` · ${visibleSessions.length}` : ''}
-        </p>
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100"
-          title="New task"
-        >
-          <Plus size={12} /> New task
-        </button>
-      </div>
-
-      {/* 4. Session list */}
+      {/* ── 3. Sessions (the growing scroll region) ────────────────────── */}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {visibleSessions.length === 0 ? (
-          <p className="px-2 py-4 text-[11px] leading-relaxed text-zinc-500">
-            {query ? 'No sessions match.' : 'No sessions yet.'}
+        {attention.length > 0 ? (
+          <section aria-label="Needs your attention" className="mt-1">
+            <div className="px-2 pb-1">
+              <p className="font-mono text-[9.5px] font-medium uppercase tracking-[0.12em] text-orange-300/80">
+                Needs you · {attention.length}
+              </p>
+            </div>
+            <div className="rounded-lg border border-orange-400/15 bg-orange-400/[0.04] p-1">
+              {attention.map(renderRow)}
+            </div>
+          </section>
+        ) : null}
+
+        <div className="mt-2 flex items-center justify-between px-2 pb-1">
+          <p className="flex items-center gap-1.5 font-mono text-[9.5px] font-medium uppercase tracking-[0.12em] text-zinc-600">
+            <MessagesSquare size={10} className="text-zinc-500" />
+            Sessions{rows.length ? ` · ${rows.length}` : ''}
           </p>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-white/[0.08] px-3 py-5 text-center">
+            <p className="text-[11.5px] font-medium text-zinc-400">{query ? 'No matches' : 'No sessions here yet'}</p>
+            <p className="mt-0.5 text-[10.5px] leading-relaxed text-zinc-600">
+              {query ? 'Try another search.' : 'Start one with + above.'}
+            </p>
+          </div>
+        ) : attention.length > 0 && rest.length === 0 ? (
+          <p className="px-2 py-2 text-[10.5px] text-zinc-600">Everything else is clear.</p>
         ) : (
-          visibleSessions.map(({ session: s, uiState }) => {
-            const active = s.id === session.id
-            const attention = uiState === 'approval' || uiState === 'failed' || uiState === 'input'
-            return (
-              <div key={s.id} className="group relative mb-0.5 flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(s.id)}
-                    aria-current={active ? 'true' : undefined}
-                    className={cn(
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-xl py-2 pl-2 pr-7 text-left transition',
-                      active
-                        ? 'bg-white/[0.1] text-white ring-1 ring-inset ring-white/[0.08]'
-                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100',
-                    )}
-                  >
-                  <span
-                    className={cn(
-                      'size-1.5 shrink-0 rounded-full',
-                      uiState === 'failed'
-                        ? 'bg-red-400'
-                        : ['working', 'starting', 'resuming'].includes(uiState)
-                          ? 'bg-emerald-400'
-                          : attention
-                            ? 'bg-orange-400'
-                            : 'bg-zinc-600',
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[11px]">{s.name}</span>
-                  <span className="shrink-0 font-mono text-[9px] text-zinc-600">
-                    {relativeTime(s.updated_at).replace(' ago', '')}
-                  </span>
-                </button>
-                {attention && !active ? (
-                  <span className="absolute right-1 size-1.5 animate-pulse rounded-full bg-orange-400" aria-hidden />
-                ) : null}
-                {!active ? (
-                  <button
-                    type="button"
-                    onClick={() => void deleteSession(s.id)}
-                    title="Stop session"
-                    aria-label={`Stop ${s.name}`}
-                    className="absolute right-1 hidden rounded p-1 text-zinc-600 hover:text-red-400 group-hover:block"
-                  >
-                    <X size={12} />
-                  </button>
-                ) : null}
-              </div>
-            )
-          })
+          rest.map(renderRow)
         )}
       </div>
 
-      {/* 5. Git branch list — deduped, current branch with live diffstat */}
-      {projectPath ? (
-        <div className="shrink-0 border-t border-white/[0.07]">
-          <div className="flex items-center justify-between px-3 pb-1 pt-2">
-            <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">
-              <GitBranchIcon size={11} className="text-zinc-500" />
-              Git branch
-            </p>
+      {/* ── 4. Explorer ──────────────────────────────────────────────── */}
+      <div className="shrink-0 border-t border-white/[0.07]">
+        <div className="flex w-full items-center gap-1.5 px-3 pb-1 pt-2">
+          <button
+            type="button"
+            onClick={() => setExplorerOpen((v) => !v)}
+            aria-expanded={explorerOpen}
+            aria-label={explorerOpen ? 'Collapse explorer' : 'Expand explorer'}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          >
+            <ChevronRight size={12} className={cn('shrink-0 text-zinc-600 transition-transform', explorerOpen && 'rotate-90')} />
+            <Files size={11} className="shrink-0 text-zinc-500" />
+            <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] font-medium uppercase tracking-[0.12em] text-zinc-600">
+              Explorer{activeMeta && explorerRoot ? ` · ${activeMeta.name}` : ''}
+            </span>
+          </button>
+          {explorerOpen && explorerRoot ? (
             <button
               type="button"
-              onClick={() => void refreshBranch()}
-              disabled={gitBusy}
-              title="Refresh branches"
-              aria-label="Refresh branches"
-              className="rounded-md p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+              onClick={() => setTreeTick((t) => t + 1)}
+              aria-label="Refresh files"
+              title="Refresh files"
+              className="rounded p-0.5 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-200"
             >
-              <RefreshCw size={11} className={cn(gitBusy && 'animate-spin')} />
+              <RefreshCw size={10} />
             </button>
-          </div>
-          <div className="scroll-thin max-h-[34%] min-h-0 overflow-y-auto px-2 pb-2">
-            {branches.length === 0 ? (
-              <p className="px-2 py-2 text-[10px] text-zinc-600">
-                {branchStats ? 'No branches yet.' : 'Loading…'}
-              </p>
-            ) : (
-              branches.map((branch) => {
-                const active = branch.current
-                return (
-                  <button
-                    key={branch.raw}
-                    type="button"
-                    onClick={() => void checkoutBranch(branch)}
-                    disabled={active || gitBusy}
-                    title={active ? 'Current branch' : `Check out ${branch.name}`}
-                    aria-current={active ? 'true' : undefined}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition',
-                      active
-                        ? 'bg-white/[0.07] text-zinc-100'
-                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100 disabled:opacity-50',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'size-1.5 shrink-0 rounded-full',
-                        active ? 'bg-emerald-400' : branch.origin ? 'bg-zinc-600' : 'bg-zinc-700',
-                      )}
-                      aria-hidden
-                    />
-                    <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', !active && 'text-zinc-400')}>
-                      {branch.name}
-                    </span>
-                    {active && branchStats ? (
-                      <span className="shrink-0 font-mono text-[9.5px] tabular-nums">
-                        <span className="text-emerald-400">+{branchStats.added.toLocaleString()}</span>{' '}
-                        <span className="text-red-400">−{branchStats.removed.toLocaleString()}</span>
-                      </span>
-                    ) : null}
-                  </button>
-                )
-              })
-            )}
-            {branchStats && branchStats.changed > 0 ? (
-              <p className="px-2 pb-1 pt-1.5 text-[10px] text-zinc-500">
-                {branchStats.changed} uncommitted change{branchStats.changed === 1 ? '' : 's'}
-              </p>
-            ) : null}
-          </div>
+          ) : null}
         </div>
-      ) : null}
+        {explorerOpen ? (
+          <div className="scroll-thin max-h-64 min-h-0 overflow-y-auto px-2 pb-2">
+            <FileExplorer
+              key={`${explorerRoot}:${treeTick}`}
+              root={explorerRoot}
+              selectedPath={openFile?.path}
+              onOpenFile={(path) => explorerRoot && onOpenFile(explorerRoot, path)}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── Status footer ────────────────────────────────────────────── */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-white/[0.07] px-3 py-2">
+        <span
+          className={cn('size-1.5 shrink-0 rounded-full', connection === 'connected' ? 'bg-emerald-400' : 'bg-orange-400 animate-pulse')}
+          title={connection}
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-zinc-600">
+          {rows.length} in {activeMeta?.name ?? 'Inbox'} · {connection}
+        </span>
+      </div>
 
       {/* New session layer */}
       {creating ? (
@@ -426,13 +385,5 @@ export function LeftSidebar({
         />
       ) : null}
     </aside>
-  )
-}
-
-function X({ size }: { size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6L6 18M6 6l12 12" />
-    </svg>
   )
 }

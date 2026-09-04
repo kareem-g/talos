@@ -404,6 +404,7 @@ pub async fn spawn_subagent(
         std::time::Duration::from_secs(timeout_secs),
         model.as_deref(),
         None,
+        &[],
     )
     .await;
 
@@ -472,6 +473,15 @@ pub async fn kill_session(
     let pty_killed = state.pty_manager.kill_session(&id).await.is_ok();
     let acp_killed = state.acp_manager.kill_session(&id).await.is_ok();
     let claude_killed = state.claude_stream.kill_session(&id).await.is_ok();
+    // API-provider turns have no process to kill, but the task (provider
+    // stream or parked approval) must still end: abort it, deny any pending
+    // approval waiters, and mark the session exited with live broadcasts.
+    // Otherwise a session blocked on approval survives kill and flips back.
+    state.api_manager.stop_turn(&state, &id).await;
+    let _ = state.session_manager.cancel_pending_approvals(&id).await;
+    // The per-session CDP engine dies with the session — otherwise dead
+    // records pile up and later calls proxy into refused ports.
+    let _ = state.browser_manager.stop(&id).await;
 
     // Update session status in DB
     let status_updated = state
@@ -582,6 +592,12 @@ pub async fn delete_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    // End any API-provider turn first: abort the task and deny parked
+    // approval waiters. Otherwise the orphaned task keeps running after the
+    // row is gone and its completion bookkeeping resurrects the session.
+    state.api_manager.stop_turn(&state, &id).await;
+    let _ = state.session_manager.cancel_pending_approvals(&id).await;
+    let _ = state.browser_manager.stop(&id).await;
     // Both agent kinds count as "running": deleting a row while an ACP
     // subprocess is alive orphans the process with nothing left to stop it.
     if state.pty_manager.has_active_session(&id).await
@@ -1610,6 +1626,11 @@ pub async fn mobile_kill_session(
     let pty_killed = state.pty_manager.kill_session(&id).await.is_ok();
     let acp_killed = state.acp_manager.kill_session(&id).await.is_ok();
     let claude_killed = state.claude_stream.kill_session(&id).await.is_ok();
+    // Same API-turn teardown as `kill_session`: abort the task and deny any
+    // parked approval waiters so the session cannot resurrect itself.
+    state.api_manager.stop_turn(&state, &id).await;
+    let _ = state.session_manager.cancel_pending_approvals(&id).await;
+    let _ = state.browser_manager.stop(&id).await;
     let status_updated = state
         .session_manager
         .update_status(&id, SessionStatus::Exited)
@@ -1723,6 +1744,20 @@ pub(crate) async fn spawn_session(
         let _ = state
             .session_manager
             .set_pending_config(&session.id, "permission_mode", mode)
+            .await;
+    }
+    // Room runs that skip permissions (`skip_policy`) and the room-child
+    // mark (`room_child`, for the Dispatch filter) ride the same path.
+    if body.get("skip_policy").and_then(|v| v.as_str()) == Some("true") {
+        let _ = state
+            .session_manager
+            .set_pending_config(&session.id, "skip_policy", "true")
+            .await;
+    }
+    if let Some(room_id) = body.get("room_child").and_then(|v| v.as_str()) {
+        let _ = state
+            .session_manager
+            .set_pending_config(&session.id, "room_child", room_id)
             .await;
     }
 
@@ -3643,6 +3678,48 @@ pub async fn workspace_file(
         Ok(contents) => Json(json!({ "path": path, "contents": contents })).into_response(),
         Err(error) => Json(json!({ "error": error })).into_response(),
     }
+}
+
+/// GET /api/workspace/serve?project=… — is this workspace's app running?
+pub async fn workspace_serve_status(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let Some(project) = params.get("project").filter(|p| !p.is_empty()) else {
+        return Json(json!({ "error": "project required" }));
+    };
+    match state.app_servers.status(project).await {
+        Some((port, command)) => Json(json!({ "running": true, "port": port, "command": command })),
+        None => Json(json!({ "running": false })),
+    }
+}
+
+/// POST /api/workspace/serve/start {project, command?} — serve the project
+/// directory (static by default) and report the port. Restarts any server
+/// already running for the project.
+pub async fn workspace_serve_start(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let Some(project) = body.get("project").and_then(|v| v.as_str()).filter(|p| !p.is_empty()) else {
+        return Json(json!({ "ok": false, "error": "project required" }));
+    };
+    let command = body.get("command").and_then(|v| v.as_str()).filter(|c| !c.trim().is_empty());
+    match state.app_servers.start(project, command).await {
+        Ok((port, pid)) => Json(json!({ "ok": true, "port": port, "pid": pid })),
+        Err(error) => Json(json!({ "ok": false, "error": error })),
+    }
+}
+
+/// POST /api/workspace/serve/stop {project} — stop the project's server.
+pub async fn workspace_serve_stop(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if let Some(project) = body.get("project").and_then(|v| v.as_str()) {
+        state.app_servers.stop(project).await;
+    }
+    Json(json!({ "ok": true }))
 }
 
 /// Legacy alias: real worktree list for a project.

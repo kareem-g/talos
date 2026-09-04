@@ -28,6 +28,86 @@ pub async fn list_rooms(State(state): State<Arc<AppState>>) -> impl IntoResponse
     Json(json!({ "rooms": list_rooms_inner(&state).await }))
 }
 
+/// A room's dispatch-relevant identity: id, name, roster of (worker, skill
+/// ids), chief, and whether runs skip permission/policy gates. Shared by the
+/// channel lookup and the id lookup below.
+pub struct RoomInfo {
+    pub id: String,
+    pub name: String,
+    pub roster: Vec<(String, Vec<String>)>,
+    pub chief: Option<String>,
+    pub skip_permissions: bool,
+}
+
+fn room_identity(room: &Value) -> RoomInfo {
+    let name = room
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Room")
+        .to_string();
+    let chief = room
+        .get("chief")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut roster = Vec::new();
+    if let Some(workers) = room.get("workers").and_then(|v| v.as_array()) {
+        for worker in workers {
+            let worker_name = worker
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string();
+            let skills = worker
+                .get("skills")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            roster.push((worker_name, skills));
+        }
+    }
+    RoomInfo {
+        id: room.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        name,
+        roster,
+        chief,
+        skip_permissions: room
+            .get("skipPermissions")
+            .or_else(|| room.get("skip_permissions"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    }
+}
+
+/// The room stored under `room_id`, if any (see [`find_room_by_channel`]).
+pub async fn find_room_by_id(state: &AppState, room_id: &str) -> Option<RoomInfo> {
+    let (data,): (String,) = sqlx::query_as("SELECT data FROM rooms WHERE id = ?1")
+        .bind(room_id)
+        .fetch_optional(&state.session_manager.pool())
+        .await
+        .ok()
+        .flatten()?;
+    serde_json::from_str(&data).ok().map(|room| room_identity(&room))
+}
+
+/// The room whose channel session is `session_id`, if any. Used by context
+/// assembly to give the channel agent its room-lead identity — plain talk in
+/// a room goes to this agent, which is otherwise spawned bare and knows no
+/// roster.
+pub async fn find_room_by_channel(state: &AppState, session_id: &str) -> Option<RoomInfo> {
+    for room in list_rooms_inner(state).await {
+        if room.get("sessionId").and_then(|v| v.as_str()) != Some(session_id) {
+            continue;
+        }
+        return Some(room_identity(&room));
+    }
+    None
+}
+
 /// POST /api/rooms or PATCH /api/rooms/{id} — store the room and broadcast it.
 async fn upsert_room_inner(state: &AppState, room_id: &str, mut body: Value) -> Value {
     if let Some(object) = body.as_object_mut() {

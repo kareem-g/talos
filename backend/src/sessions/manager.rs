@@ -253,22 +253,92 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Mark sessions left `running`/`starting` by a previous daemon run as
+    /// Mark sessions left in live states by a previous daemon run as
     /// resumable, returning how many were changed.
     ///
     /// Agent processes die with the daemon but their rows persist, so on startup
     /// every such row is stale. Leaving them alone showed sessions as "Working"
     /// indefinitely with no way to continue them — the status has to reflect that
     /// nothing is running.
+    ///
+    /// `waiting_for_approval` / `waiting_for_input` are covered too: the
+    /// permission broker's waiters are in-memory, so after a restart no one can
+    /// ever answer those cards (answering falls through to an error). Their
+    /// cards are expired by `expire_orphaned_approvals` — call it alongside.
     pub async fn mark_orphaned_sessions_resumable(&self) -> Result<u64> {
         let result = sqlx::query(
             "UPDATE sessions SET status = 'needs_resume', updated_at = ?1 \
-             WHERE status IN ('running', 'starting')",
+             WHERE status IN ('running', 'starting', 'waiting_for_approval', 'waiting_for_input')",
         )
         .bind(chrono::Utc::now())
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    /// Close approval cards orphaned by a restart: every `permission_required`
+    /// agent event with no later `permission_resolved` for the same id gets an
+    /// `expired` resolution, so replay renders an outcome instead of buttons
+    /// that can never work (the broker waiter is gone with the old process).
+    /// Returns how many cards were expired.
+    pub async fn expire_orphaned_approvals(&self) -> Result<u64> {
+        let required: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT session_id, payload, timestamp FROM agent_events WHERE kind = 'permission_required'",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if required.is_empty() {
+            return Ok(0);
+        }
+        let resolved: Vec<(String,)> =
+            sqlx::query_as("SELECT payload FROM agent_events WHERE kind = 'permission_resolved'")
+                .fetch_all(&self.pool)
+                .await?;
+        let mut resolved_ids = std::collections::HashSet::new();
+        for (payload,) in resolved {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&payload) {
+                if let Some(id) = value.get("request_id").and_then(|v| v.as_str()) {
+                    resolved_ids.insert(id.to_string());
+                }
+            }
+        }
+        let mut expired = 0u64;
+        for (session_id, payload, _) in required {
+            let request_id = serde_json::from_str::<serde_json::Value>(&payload)
+                .ok()
+                .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(str::to_string));
+            let Some(request_id) = request_id else { continue };
+            if resolved_ids.contains(&request_id) {
+                continue;
+            }
+            // Claim it so a second pass (or a concurrent boot) cannot expire twice.
+            if !resolved_ids.insert(request_id.clone()) {
+                continue;
+            }
+            let sequence: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_events WHERE session_id = ?1",
+            )
+            .bind(&session_id)
+            .fetch_one(&self.pool)
+            .await?;
+            let event = crate::agent_events::AgentEvent {
+                event_id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.clone(),
+                sequence: sequence as u64,
+                timestamp: chrono::Utc::now(),
+                kind: "permission_resolved".to_string(),
+                payload: serde_json::json!({
+                    "request_id": request_id,
+                    "decision": "expired",
+                    "reason": "Daemon restarted before this approval was answered; the wait no longer exists.",
+                }),
+                duration_ms: None,
+            };
+            if self.insert_agent_event(&event).await.is_ok() {
+                expired += 1;
+            }
+        }
+        Ok(expired)
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {

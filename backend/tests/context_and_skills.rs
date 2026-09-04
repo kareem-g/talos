@@ -404,6 +404,7 @@ async fn trajectory_similarity_finds_and_formats_past_runs() {
         ),
         pi_stream: std::sync::Arc::new(agentdeck_backend::agents::pi_stream::PiStreamManager::new()),
         api_manager: std::sync::Arc::new(agentdeck_backend::agents::api::ApiManager::new()),
+        app_servers: std::sync::Arc::new(agentdeck_backend::workspace_serve::WorkspaceServers::default()),
         broadcast: BroadcastHub::new(),
         transcript_tails: None,
         browser_manager: std::sync::Arc::new(

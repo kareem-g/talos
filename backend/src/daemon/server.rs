@@ -140,6 +140,9 @@ pub async fn start(
         .route("/api/workspace/overview", get(crate::api::routes::workspace_overview))
         .route("/api/workspace/file", get(crate::api::routes::workspace_file))
         .route("/api/workspace/dirs", get(crate::api::routes::workspace_dirs))
+        .route("/api/workspace/serve", get(crate::api::routes::workspace_serve_status))
+        .route("/api/workspace/serve/start", post(crate::api::routes::workspace_serve_start))
+        .route("/api/workspace/serve/stop", post(crate::api::routes::workspace_serve_stop))
         .route("/api/skills", get(crate::api::routes::list_skills))
         // Skills management. Static paths must precede the dynamic `{name}`
         // so `available`/`installed`/`install` aren't captured as a name.

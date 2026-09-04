@@ -71,6 +71,7 @@ impl Daemon {
             permissions: Arc::new(crate::permissions::PermissionBroker::default()),
             pi_stream: Arc::new(crate::agents::pi_stream::PiStreamManager::new()),
             api_manager: Arc::new(crate::agents::api::ApiManager::new()),
+            app_servers: Arc::new(crate::workspace_serve::WorkspaceServers::default()),
             broadcast,
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
             browser_manager: Arc::new(crate::browser::manager::BrowserManager::new()),
@@ -92,6 +93,21 @@ impl Daemon {
             ),
             Err(error) => tracing::error!(
                 "[AgentDeck][Session] Could not reconcile sessions from a previous run: {}",
+                error
+            ),
+        }
+        // Expire approval cards orphaned by the restart: their broker waiters
+        // died with the old process, so the cards could never be answered —
+        // answering now falls through to an error and Stop cannot reach them.
+        // An `expired` resolution renders an outcome instead of dead buttons.
+        match session_manager.expire_orphaned_approvals().await {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(
+                "[AgentDeck][Session] Expired {} orphaned approval card(s) from a previous run",
+                count
+            ),
+            Err(error) => tracing::error!(
+                "[AgentDeck][Session] Could not expire orphaned approvals: {}",
                 error
             ),
         }

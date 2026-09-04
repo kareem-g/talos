@@ -161,7 +161,7 @@ export function SkillsScreen() {
   )
 
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-[#0f0f10]">
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-[#141210]">
       <div className="mx-auto w-full max-w-5xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
         <header className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -450,7 +450,7 @@ function InstallDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1b1b1d] shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl">
         <div className="flex items-center gap-2 border-b border-white/10 px-5 py-4">
           <div className="flex-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Skill library</p>
@@ -663,7 +663,7 @@ function EditDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#1b1b1d] shadow-2xl">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl">
         <div className="flex items-center gap-2 border-b border-white/10 px-5 py-4">
           <div className="flex-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Edit skill</p>

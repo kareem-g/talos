@@ -24,7 +24,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Settings } from 'lucide-react'
+import { Archive, RotateCcw, Settings } from 'lucide-react'
 import { NewSessionLayer } from '../SessionList'
 import { SyncLayer } from '../SyncSessions'
 import { Button, ChevronDown, Dot, Dots, DropdownList, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
@@ -38,7 +38,7 @@ import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
 import type { Session } from '@/types/session'
 import type { Provider } from '@/types/provider'
 
-const AGENT_HUES = ['#60a5fa', '#a78bfa', '#34d399', '#fb923c', '#facc15', '#f472b6']
+const AGENT_HUES = ['#8eadbf', '#a78bfa', '#c7a56a', '#e3a15d', '#d9b554', '#f472b6']
 function hueFor(id: string): string {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
@@ -98,6 +98,8 @@ export function StationHome({
   const respondToApproval = useStore((s) => s.respondToApproval)
   const resumeSession = useStore((s) => s.resumeSession)
   const toggleStar = useStore((s) => s.toggleStar)
+  const archiveSession = useStore((s) => s.archiveSession)
+  const restoreSession = useStore((s) => s.restoreSession)
 
   const [filter, setFilter] = useState<HomeFilter>('all')
   const [internalSearch, setInternalSearch] = useState('')
@@ -178,12 +180,13 @@ export function StationHome({
     { id: 'active', label: view.counts.running ? `Active · ${view.counts.running}` : 'Active' },
     { id: 'attention', label: view.counts.attention ? `Attention · ${view.counts.attention}` : 'Attention' },
     { id: 'starred', label: 'Starred' },
+    { id: 'archived', label: view.counts.archived ? `Archived · ${view.counts.archived}` : 'Archived' },
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin bg-[#0a0a0c]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin bg-[#191613]">
       {/* Distinctive top bar — control deck header, not a hero */}
-      <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#0a0a0c]/90 backdrop-blur-xl">
+      <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#191613]/90 backdrop-blur-xl">
         <div className="relative overflow-hidden">
           {/* Subtle grid signature — faint, not decorative */}
           <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`, backgroundSize: '24px 24px' }} aria-hidden />
@@ -314,7 +317,7 @@ export function StationHome({
                                   setBusyMap((m) => ({ ...m, [session.id]: true }))
                                   void resumeSession(session.id).finally(() => setBusyMap((m) => ({ ...m, [session.id]: false })))
                                 }}
-                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-4 text-[11px] font-semibold text-white hover:bg-accent-ink disabled:opacity-40"
+                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-4 text-[11px] font-semibold text-accent-ink hover:bg-accent-hover disabled:opacity-40"
                               >
                                 {isBusy ? 'Resuming…' : 'Resume'}
                               </button>
@@ -322,7 +325,7 @@ export function StationHome({
                               <button
                                 type="button"
                                 onClick={() => respondToApproval(session.id, approval.requestId, allow.value)}
-                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-3 text-[11px] font-semibold text-white hover:bg-accent-ink"
+                                className="inline-flex h-8 items-center justify-center rounded-full bg-accent px-3 text-[11px] font-semibold text-accent-ink hover:bg-accent-hover"
                               >
                                 {allow.label}
                               </button>
@@ -460,7 +463,7 @@ export function StationHome({
                           <span className="truncate text-[13px] font-semibold text-ink">{ws.name}</span>
                           <span className="hidden rounded-full bg-surface px-1.5 py-0.5 font-mono text-[10px] text-ink-3 ring-1 ring-line sm:inline">{ws.counts.total} sessions</span>
                           {ws.counts.attention > 0 ? <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-600">{ws.counts.attention} need you</span> : null}
-                          {ws.counts.running > 0 ? <span className="hidden items-center gap-1 rounded-full bg-green/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-green sm:inline-flex"><span className="size-1 rounded-full bg-green animate-pulse" /> {ws.counts.running} running</span> : null}
+                          {ws.counts.running > 0 ? <span className="hidden items-center gap-1 rounded-full bg-green/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-green sm:inline-flex"><span className="size-1 rounded-full bg-accent animate-pulse" /> {ws.counts.running} running</span> : null}
                         </div>
                         <p className="truncate font-mono text-[11px] text-ink-3">{ws.project ?? 'No folder — inbox'}</p>
                       </div>
@@ -526,6 +529,33 @@ export function StationHome({
                                     >
                                       ★
                                     </button>
+                                    {filter === 'archived' ? (
+                                      <button
+                                        type="button"
+                                        aria-label={`Restore ${session.name}`}
+                                        title="Restore from archive"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          void restoreSession(session.id).catch(() => {})
+                                        }}
+                                        className="rounded p-1 text-ink-3 opacity-30 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
+                                      >
+                                        <RotateCcw size={12} />
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        aria-label={`Archive ${session.name}`}
+                                        title="Archive session"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          void archiveSession(session.id).catch(() => {})
+                                        }}
+                                        className="rounded p-1 text-ink-3 opacity-30 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
+                                      >
+                                        <Archive size={12} />
+                                      </button>
+                                    )}
                                   </span>
                                   <span className="block truncate font-mono text-[11px] text-ink-3">{preview ?? uiStateDisplay(uiState).label}</span>
                                 </span>
@@ -584,7 +614,7 @@ export function StationHome({
                         <span className="block text-[13px] font-semibold text-ink">{p.name}</span>
                         <span className="block truncate font-mono text-[11px] text-ink-3">{p.id} · {p.version ?? 'ready'}</span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white">Launch</span>
+                      <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-accent-ink">Launch</span>
                     </button>
                   ))}
                 </div>

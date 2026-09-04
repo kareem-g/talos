@@ -19,13 +19,14 @@ import type { Conversation } from '@/types/conversation'
 import type { Session } from '@/types/session'
 import type { ConnectionState } from '@/types/protocol'
 
-export type HomeFilter = 'all' | 'active' | 'attention' | 'starred'
+export type HomeFilter = 'all' | 'active' | 'attention' | 'starred' | 'archived'
 
 export interface HomeCounts {
   running: number
   attention: number
   paused: number
   total: number
+  archived: number
 }
 
 export interface AttentionEntry {
@@ -136,6 +137,11 @@ export function deriveHomeView(params: {
       uiState: sessionUIState(session, getConversation(session.id), connection) as UIState,
     }))
 
+  const archivedEntries = sessions
+    .filter((s) => s.status === 'archived' && !isInternalSession(s))
+    .map((session) => ({ session, uiState: 'archived' as UIState }))
+    .sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
+
   let running = 0
   let attention = 0
   let paused = 0
@@ -193,7 +199,11 @@ export function deriveHomeView(params: {
     filtered = filtered.filter(({ uiState: u }) => u === 'working' || u === 'starting' || u === 'resuming' || u === 'approval' || u === 'input' || u === 'paused')
   } else if (filter === 'attention') {
     filtered = filtered.filter(({ uiState: u }) => u === 'approval' || u === 'failed' || u === 'input' || u === 'paused')
-  } else if (filter === 'starred') filtered = filtered.filter(({ session }) => starredSet.has(session.id))
+  } else if (filter === 'starred') {
+    filtered = filtered.filter(({ session }) => starredSet.has(session.id))
+  } else if (filter === 'archived') {
+    filtered = [...archivedEntries]
+  }
 
   const needle = search.trim().toLowerCase()
   if (needle) {
@@ -244,7 +254,7 @@ export function deriveHomeView(params: {
     })
 
   return {
-    counts: { running, attention, paused, total: withStates.length },
+    counts: { running, attention, paused, total: withStates.length, archived: archivedEntries.length },
     attention: attentionEntries,
     active: activeEntries,
     filtered,

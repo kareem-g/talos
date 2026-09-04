@@ -47,8 +47,10 @@ export default {
         'line-strong': tone('line-strong'),
 
         accent: tone('accent'),
+        'accent-hover': tone('accent-hover'),
         'accent-ink': tone('accent-ink'),
         'accent-tint': tone('accent-tint'),
+        'accent-2': tone('accent-2'),
 
         green: tone('green'),
         'green-tint': tone('green-tint'),
@@ -62,6 +64,88 @@ export default {
 
         'term-bg': tone('term-bg'),
         'term-fg': tone('term-fg'),
+
+        /*
+         * Default palette overrides for the warm system. `emerald` is NOT a
+         * green anymore: the app's emerald literals are running/active marks,
+         * so the whole ramp is remapped to warm amber. `red`/`orange` warm to
+         * terracotta/copper; `zinc` becomes the warm neutral ramp so rails and
+         * home screens that use literal zinc classes inherit the theme.
+         */
+        zinc: {
+          50: '#fbf7f0',
+          100: '#f3e9dc',
+          200: '#e7dac8',
+          300: '#d8c7b1',
+          400: '#b5a596',
+          500: '#9a8a7a',
+          600: '#817366',
+          700: '#5f5345',
+          800: '#4a3e32',
+          900: '#332a22',
+          950: '#241f1a',
+        },
+        emerald: {
+          50: '#fdf4e6',
+          100: '#fae7cc',
+          200: '#f5d2a3',
+          300: '#f0bd7f',
+          400: '#e3a15d',
+          500: '#d08a47',
+          600: '#b26f38',
+          700: '#8f5730',
+          800: '#6b3f24',
+          900: '#4a2b18',
+        },
+        amber: {
+          50: '#fdf3e2',
+          100: '#fbead3',
+          200: '#f6d7ab',
+          300: '#efc184',
+          400: '#e3a15d',
+          500: '#ce8742',
+          600: '#b06c33',
+          700: '#8d5427',
+          800: '#6a3d1f',
+          900: '#492915',
+        },
+        orange: {
+          50: '#fdf0e8',
+          100: '#fae4d5',
+          200: '#f5cdb6',
+          300: '#e0a883',
+          400: '#d08b64',
+          500: '#c97855',
+          600: '#b16243',
+          700: '#914f36',
+          800: '#6f3b28',
+          900: '#4d2919',
+        },
+        red: {
+          50: '#fdf0ee',
+          100: '#f9e1dd',
+          200: '#f2c0ba',
+          300: '#ea9d94',
+          400: '#e0867b',
+          500: '#d96c5f',
+          600: '#c05548',
+          700: '#9c4238',
+          800: '#7a322b',
+          900: '#54221d',
+        },
+        /* Informational blue (rare metadata, link hover) — muted, warm-adjacent. */
+        sky: {
+          50: '#eef3f5',
+          100: '#dbe6eb',
+          200: '#c2d3db',
+          300: '#a7bec9',
+          400: '#8eadbf',
+          500: '#7598ab',
+          600: '#5f7d8f',
+          700: '#4c6474',
+          800: '#3b4d59',
+          900: '#2b3942',
+        },
       },
       borderRadius: {
         card: '16px',

@@ -20,22 +20,25 @@ use tokio::process::Command;
 /// Served from the unified registry so both API transports and
 /// `GET /api/tools` describe the same tool set.
 ///
-/// `subagent` sessions (bounded workers spawned by subagent/orchestration
-/// paths) do not get `Dispatch`: a worker fanning out its own children would
-/// recurse, and every orchestration needs exactly one dispatcher.
-pub fn tool_definitions(subagent: bool) -> Vec<Value> {
-    filter_dispatch(crate::tools::anthropic_definitions(), subagent)
+/// Pure `subagent` sessions (one-shot bounded workers outside any room) do
+/// not get `Dispatch`: a worker fanning out its own children would recurse,
+/// and every orchestration needs exactly one dispatcher. Room workers keep
+/// it — addressing fellow workers by name is how a team delegates — while
+/// their own children (spawned without a room mark) lose it again, so the
+/// delegation depth is bounded at one extra level.
+pub fn tool_definitions(subagent: bool, in_room: bool) -> Vec<Value> {
+    filter_dispatch(crate::tools::anthropic_definitions(), subagent, in_room)
 }
 
 /// The same tools in OpenAI function-calling format (for `/chat/completions`).
-pub fn openai_tool_definitions(subagent: bool) -> Vec<Value> {
-    filter_dispatch(crate::tools::openai_definitions(), subagent)
+pub fn openai_tool_definitions(subagent: bool, in_room: bool) -> Vec<Value> {
+    filter_dispatch(crate::tools::openai_definitions(), subagent, in_room)
 }
 
-/// Drop the Dispatch tool for subagent sessions. Works on either wire format
-/// by keying on the tool's name field.
-fn filter_dispatch(mut definitions: Vec<Value>, subagent: bool) -> Vec<Value> {
-    if !subagent {
+/// Drop the Dispatch tool for subagent sessions outside rooms. Works on
+/// either wire format by keying on the tool's name field.
+fn filter_dispatch(mut definitions: Vec<Value>, subagent: bool, in_room: bool) -> Vec<Value> {
+    if !subagent || in_room {
         return definitions;
     }
     definitions.retain(|tool| {
@@ -239,6 +242,16 @@ pub async fn execute_api_tool(
                 }
             }
         }
+        "preview_app" => {
+            let project = state
+                .session_manager
+                .get_session(session_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|s| s.project);
+            preview_app(state, session_id, project.as_deref(), args).await
+        }
         "getconfig" => {
             let agent_id = state
                 .session_manager
@@ -287,6 +300,83 @@ pub async fn execute_api_tool(
     }
 }
 
+/// Serve the session's workspace and open it in the session browser.
+/// The same `preview_app` tool the model calls: static files by default, a
+/// custom `{port}` command when given, then the agent's own CDP engine
+/// navigates there (the run lands in the timeline like any browser step, and
+/// the dashboard mirror shows the app).
+async fn preview_app(
+    state: &AppState,
+    session_id: &str,
+    project: Option<&str>,
+    args: &Value,
+) -> Result<String, String> {
+    let Some(project) = project else {
+        return Err("this session has no workspace folder to serve".to_string());
+    };
+    let command = args
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    let open = args.get("open_browser").and_then(Value::as_bool).unwrap_or(true);
+    // Idempotent: an already-serving project is reused, not restarted — a
+    // restart on every call churned ports and fed retry loops.
+    let (port, fresh) = match state.app_servers.status(project).await {
+        Some((port, _)) => (port, false),
+        None => state.app_servers.start(project, command).await.map(|(port, _)| (port, true))?,
+    };
+    let url = format!("http://127.0.0.1:{port}");
+    if !open {
+        return Ok(format!("App serving at {url}."));
+    }
+    {
+        let cfg = state.config.read().await;
+        let daemon_url = format!("http://{}:{}", cfg.settings().server.host, cfg.settings().server.port);
+        let token = state
+            .hook_tokens
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+        drop(cfg);
+        state
+            .browser_manager
+            .ensure(session_id, &daemon_url, &token)
+            .await
+            .map_err(|e| format!("server is up at {url} but the browser engine failed to start: {e}"))?;
+    }
+    // The engine needs selecting once, then a fresh tab opened straight on
+    // the URL — goto alone fails on a fresh engine with "no browser tab".
+    // tab_new navigates on creation, so no separate goto is needed.
+    let mut navigated = json!({});
+    for tool in [
+        json!({ "name": "browser_select", "arguments": { "backend": "cdp" } }),
+        json!({ "name": "browser_tab_new", "arguments": { "url": url } }),
+    ] {
+        navigated = state
+            .browser_manager
+            .proxy_post(session_id, "/tool", tool)
+            .await
+            .map_err(|e| format!("server is up at {url} but the browser could not open it: {e}"))?;
+    }
+    if navigated.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        // Decisive wording matters: repeats must read as done, not as an
+        // invitation to verify again with more tools.
+        if fresh {
+            Ok(format!("App serving at {url} and opened in the session browser. Done — no further verification needed."))
+        } else {
+            Ok(format!("App was already serving at {url}; it is open in the session browser. Done — no further verification needed."))
+        }
+    } else {
+        Err(format!(
+            "server is up at {url} but the browser reported: {}",
+            navigated.get("error").and_then(Value::as_str).unwrap_or("unknown error")
+        ))
+    }
+}
+
 fn broadcast_tool_finished(
     state: &AppState,
     session_id: &str,
@@ -311,7 +401,14 @@ async fn run_bash(project: Option<&str>, command: &str) -> Result<String, String
     if let Some(project) = project {
         cmd.current_dir(project);
     }
-    let output = cmd.output().await.map_err(|e| e.to_string())?;
+    // Bound the wait: without a timeout a hung command (a server, a pager, a
+    // network stall) parks the whole turn forever — Stop is the only way out,
+    // and it used to be a no-op for API sessions. 120s matches the provider
+    // HTTP timeout; the model gets the partial story as result text.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output())
+        .await
+        .map_err(|_| "command timed out after 120s".to_string())?
+        .map_err(|e| e.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let status = output.status.code().unwrap_or(-1);

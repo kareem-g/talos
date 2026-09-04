@@ -50,7 +50,7 @@ export function WorkspacePanel({ tab, actions }: { tab: WorkspaceTab; actions: P
 }
 
 function ProviderBadge({ provider }: { provider: Provider }) {
-  const hue = provider.id === 'claude' ? '#fb923c' : provider.id === 'codex' ? '#34d399' : '#60a5fa'
+  const hue = provider.id === 'claude' ? '#e3a15d' : provider.id === 'codex' ? '#c7a56a' : '#8eadbf'
   return (
     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] ring-1 ring-white/10">
       <span className="size-2.5 rounded-full" style={{ backgroundColor: hue }} />
@@ -302,7 +302,13 @@ function TasksPanel({ actions }: { actions: PanelActions }) {
   async function remove(sessionId: string) {
     if (!window.confirm('Delete this session?')) return
     setBusy(sessionId)
-    try { await archive(sessionId) } finally { setBusy(undefined) }
+    try {
+      await archive(sessionId)
+    } catch {
+      /* notice already set by the store */
+    } finally {
+      setBusy(undefined)
+    }
   }
 
   return (
@@ -319,7 +325,7 @@ function TasksPanel({ actions }: { actions: PanelActions }) {
           const canResume = session.status === 'needs_resume' || session.status === 'exited' || session.status === 'error' || session.status === 'idle'
           return <div key={session.id} className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-2.5">
             <button type="button" onClick={() => actions.onOpenSession(session.id)} className="flex w-full items-start gap-2 text-left">
-              <span className="mt-1 size-2 shrink-0 rounded-full" style={{ backgroundColor: display.tone === 'green' ? '#34d399' : display.tone === 'orange' ? '#fb923c' : display.tone === 'red' ? '#f87171' : '#71717a' }} />
+              <span className="mt-1 size-2 shrink-0 rounded-full" style={{ backgroundColor: display.tone === 'green' ? '#c7a56a' : display.tone === 'orange' ? '#e3a15d' : display.tone === 'red' ? '#d96c5f' : '#817366' }} />
               <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium text-zinc-100">{session.name}</span><span className="block truncate font-mono text-[10px] text-zinc-500">{session.project ?? 'Inbox'} · {relativeTime(session.updated_at)}</span></span>
               <StatusPill label={display.label} tone={display.tone} pulse={display.pulse} className="h-5 px-1.5 text-[10px]" />
             </button>

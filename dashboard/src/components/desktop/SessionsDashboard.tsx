@@ -295,7 +295,13 @@ export function SessionsDashboard() {
                 onToggleStar={() => toggleStar(s.id)}
                 onOpen={() => navigate({ name: 'session', sessionId: s.id })}
                 onDelete={async () => {
-                  if (confirm(`Delete "${s.name}"?`)) await deleteSession(s.id)
+                  if (confirm(`Delete "${s.name}"?`)) {
+                    try {
+                      await deleteSession(s.id)
+                    } catch {
+                      /* notice already set by the store */
+                    }
+                  }
                 }}
               />
             ))}

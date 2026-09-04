@@ -143,14 +143,14 @@ export const Chips = memo(function Chips({ text }: { text: string }) {
 /** Code block: header with language and copy, mono body. */
 export function Code({ text, lang }: { text: string; lang?: string }) {
   return (
-    <div className="overflow-hidden rounded-card border border-line bg-inset shadow-card">
-      <div className="flex items-center justify-between border-b border-line px-2.5 py-1">
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-3">
+    <div className="overflow-hidden rounded-lg border border-line/60 bg-inset">
+      <div className="flex h-7 items-center justify-between border-b border-line/50 bg-surface/40 px-2.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
           {lang ?? 'code'}
         </span>
         <CopyButton value={text} />
       </div>
-      <pre className="scroll-thin overflow-x-auto px-2.5 py-2">
+      <pre className="scroll-thin overflow-x-auto px-3 py-2.5">
         <code className="font-mono text-[11.5px] leading-[1.65] text-ink-2">{text}</code>
       </pre>
     </div>
@@ -166,15 +166,20 @@ export const Prose = memo(function Prose({
 }) {
   const segments = splitFences(text)
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-2.5">
       {segments.map((segment, index) => {
-        if (segment.code) return <Code key={index} text={segment.text} lang={segment.lang} />
+        if (segment.code)
+          return (
+            <div key={index} className="mt-0.5">
+              <Code text={segment.text} lang={segment.lang} />
+            </div>
+          )
         const isLast = index === segments.length - 1
         return (
           <p
             key={index}
             className={cn(
-              'whitespace-pre-wrap break-words text-[13px] leading-[1.65] text-ink',
+              'whitespace-pre-wrap break-words text-[13px] leading-[1.7] text-ink',
               streaming && isLast && 'caret',
             )}
           >
@@ -220,31 +225,32 @@ export function Reasoning({
   const outputTokens = formatTokens(tokens?.outputTokens)
 
   return (
-    <div>
+    <div className="min-w-0">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOverride(!open)}
         disabled={!hasText}
         className={cn(
-          '-mx-1.5 flex min-h-7 w-fit items-center gap-1.5 rounded-control px-1.5',
-          'text-[12.5px] transition-colors duration-100',
+          'flex h-6 w-fit max-w-full items-center gap-1.5 rounded-md px-1.5 -ml-1.5',
+          'text-[12px] transition-colors duration-100',
           hasText && 'hover:bg-hover-2',
         )}
       >
         {hasText ? (
           <ChevronDown
+            size={12}
             className="shrink-0 text-ink-3 transition-transform duration-200"
             style={{ transform: open ? undefined : 'rotate(-90deg)' }}
           />
         ) : (
           <Sparkle size={11} className="shrink-0 text-ink-3" />
         )}
-        <span className={cn(part.streaming ? 'shimmer' : 'text-ink-2')}>{label}</span>
+        <span className={cn('truncate', part.streaming ? 'shimmer' : 'text-ink-2')}>{label}</span>
         {inputTokens ? (
           <span
             title={`${tokens?.inputTokens} input tokens`}
-            className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3"
+            className="shrink-0 font-mono text-[10px] tabular-nums text-ink-3"
           >
             ↑{inputTokens}
           </span>
@@ -252,7 +258,7 @@ export function Reasoning({
         {outputTokens ? (
           <span
             title={`${tokens?.outputTokens} output tokens`}
-            className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3"
+            className="shrink-0 font-mono text-[10px] tabular-nums text-ink-3"
           >
             ↓{outputTokens}
           </span>
@@ -260,7 +266,7 @@ export function Reasoning({
       </button>
 
       <Collapse open={open}>
-        <p className="ml-2 mt-1 whitespace-pre-wrap break-words border-l border-line py-0.5 pl-3.5 text-[11.5px] leading-[1.7] text-ink-2">
+        <p className="ml-[7px] mt-1 whitespace-pre-wrap break-words border-l border-line/60 py-0.5 pl-3 text-[12px] leading-[1.65] text-ink-2">
           {part.text}
         </p>
       </Collapse>
@@ -280,10 +286,11 @@ function stepIcon(glyph: string) {
 }
 
 /**
- * One agent step, in the compact single-line idiom of the reference design:
+ * One agent step — a compact 24px row designed to live inside a ToolGroup.
  * `[icon] Verb(dim) — file bright / dir dim — +N green — Failed red-dotted`.
  * No chip backgrounds; the argument is bare monospace text. Expands to the raw
- * input/output behind a hover chevron.
+ * input/output behind a hover chevron. When rendered standalone (single tool
+ * outside a group) the caller wraps it; this row itself has no outer margin.
  */
 export function Step({ part }: { part: ToolPart | CommandPart }) {
   const [open, setOpen] = useState(false)
@@ -325,34 +332,34 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
   })()
 
   return (
-    <div className="animate-up">
+    <div className="min-w-0">
       <button
         type="button"
         aria-expanded={expandable ? open : undefined}
         onClick={() => expandable && setOpen(!open)}
         className={cn(
-          'group/row -mx-[3px] flex min-h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2',
-          'rounded-control px-[3px] text-left transition-colors duration-100',
-          expandable && 'hover:bg-hover-2',
+          'group/row flex h-6 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left transition-colors duration-100',
+          expandable ? 'hover:bg-hover-2' : 'cursor-default',
         )}
       >
         <span className="relative flex size-4 shrink-0 items-center justify-center">
           {part.status === 'running' ? (
-            <span className="size-[9px] rounded-full border border-accent border-t-transparent breathe" />
+            <span className="size-2.5 rounded-full border-[1.5px] border-accent border-t-transparent animate-spin" aria-hidden />
           ) : (
             <>
               <span
                 className={cn(
-                  'transition-opacity duration-100',
+                  'flex items-center transition-opacity duration-100',
                   failed ? 'text-red' : 'text-ink-3',
                   expandable && 'group-hover/row:opacity-0',
                   open && 'opacity-0',
                 )}
               >
-                {failed ? <AlertIcon size={13} /> : stepIcon(summary.glyph)}
+                {failed ? <AlertIcon size={12} /> : stepIcon(summary.glyph)}
               </span>
               {expandable ? (
                 <ChevronDown
+                  size={12}
                   className={cn(
                     'absolute text-ink-3 transition-[opacity,transform] duration-150',
                     'opacity-0 group-hover/row:opacity-100',
@@ -365,11 +372,11 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
           )}
         </span>
 
-        <span className="shrink-0 text-[12px] text-ink-2">{summary.label}</span>
+        <span className="shrink-0 text-[12px] leading-none text-ink-2">{summary.label}</span>
 
         {summary.arg ? (
           <span
-            className="min-w-0 flex-1 truncate font-mono text-[12px] leading-none"
+            className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-none"
             title={isCommand ? part.command : part.input}
           >
             {argDir ? <span className="text-ink-3">{argDir}</span> : null}
@@ -380,37 +387,37 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
         )}
 
         {diffstat ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-green">{diffstat}</span>
+          <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-green">{diffstat}</span>
         ) : null}
         {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-red">
+          <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-red">
             exit {part.exitCode}
           </span>
         ) : null}
         {failed ? (
           <span
             title={detail ?? 'This step failed'}
-            className="shrink-0 text-[11px] text-red underline decoration-dotted decoration-from-font underline-offset-2"
+            className="shrink-0 text-[10.5px] font-medium text-red underline decoration-dotted decoration-from-font underline-offset-2"
           >
             Failed
           </span>
         ) : null}
         {part.durationMs !== undefined ? (
-          <span className="shrink-0 text-[11px] tabular-nums text-ink-3">
+          <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3">
             {formatDuration(part.durationMs)}
           </span>
         ) : null}
       </button>
 
       <Collapse open={open}>
-        <div className="ml-2 mb-1 mt-0.5 flex flex-col gap-1 border-l border-line py-0.5 pl-3.5">
+        <div className="mb-1 ml-[13px] mt-0.5 flex flex-col gap-1 border-l border-line/60 py-1 pl-3">
           {!isCommand && part.input ? (
-            <span className="whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.6] text-ink-3">
+            <span className="whitespace-pre-wrap break-words font-mono text-[10.5px] leading-[1.6] text-ink-3">
               {part.input}
             </span>
           ) : null}
           {detail ? (
-            <pre className="scroll-thin max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.6] text-ink-2">
+            <pre className="scroll-thin max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-inset/60 px-2 py-1.5 font-mono text-[11px] leading-[1.6] text-ink-2">
               <code>{detail}</code>
             </pre>
           ) : null}
@@ -448,7 +455,7 @@ function DiffView({ diff }: { diff: string }) {
   )
 }
 
-/** The collection's file-diff chips: a pill per file with add/delete counts. */
+/** Grouped file changes at the end of a turn — one compact card, not loose rows. */
 export function FileChips({
   files,
   project,
@@ -460,16 +467,23 @@ export function FileChips({
   sessionId?: string
 }) {
   return (
-    <div className="flex max-w-full flex-col gap-1.5 border-t border-line pt-2.5">
-      {files.map((file, index) => (
-        <FileChip
-          key={`${file.path}-${index}`}
-          file={file}
-          project={project}
-          sessionId={sessionId}
-          style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${index * 70}ms both` }}
-        />
-      ))}
+    <div className="overflow-hidden rounded-lg border border-line/50 bg-surface/30">
+      <div className="flex items-center gap-1.5 border-b border-line/40 bg-surface/40 px-2.5 py-1">
+        <FileIcon size={11} className="shrink-0 text-ink-3" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+          {files.length === 1 ? '1 file changed' : `${files.length} files changed`}
+        </span>
+      </div>
+      <div className="flex max-w-full flex-col gap-0.5 p-1">
+        {files.map((file, index) => (
+          <FileChip
+            key={`${file.path}-${index}`}
+            file={file}
+            project={project}
+            sessionId={sessionId}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -478,12 +492,10 @@ function FileChip({
   file,
   project,
   sessionId,
-  style,
 }: {
   file: FileChangePart
   project?: string
   sessionId?: string
-  style?: React.CSSProperties
 }) {
   const [open, setOpen] = useState(false)
   const [diff, setDiff] = useState<string>()
@@ -513,17 +525,16 @@ function FileChip({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-chip bg-surface shadow-btn transition-colors duration-100',
-        open && 'bg-surface/80',
+        'overflow-hidden rounded-md transition-colors duration-100',
+        open ? 'bg-surface/60' : 'hover:bg-hover/60',
       )}
-      style={style}
     >
       <button
         type="button"
         onClick={toggle}
         className={cn(
-          'group/chip flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-left',
-          'transition-colors duration-100 hover:bg-hover',
+          'group/chip flex h-6 w-full items-center gap-1.5 rounded-md px-2 text-left',
+          'transition-colors duration-100',
         )}
       >
         {file.ok ? (
@@ -531,9 +542,9 @@ function FileChip({
         ) : (
           <AlertIcon size={11} className="shrink-0 text-red" />
         )}
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink">{file.path}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{file.path}</span>
         {project ? (
-          <span className="shrink-0 font-mono text-[10px] text-ink-3 opacity-0 transition-opacity group-hover/chip:opacity-100">
+          <span className="shrink-0 font-mono text-[9.5px] text-ink-3 opacity-0 transition-opacity group-hover/chip:opacity-100">
             {open ? 'hide' : 'diff'}
           </span>
         ) : null}
@@ -587,7 +598,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
     : body.split('\n').slice(body.split('\n').findIndex((l) => l.trim()) + 1).join('\n').trim()
 
   return (
-    <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#0a0a0c] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
+    <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#191613] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
       {/* Header — document icon + "Plan" + copy */}
       <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
         <FileIcon size={13} className="shrink-0 text-zinc-500" />
@@ -679,26 +690,10 @@ export function UsageMeter({ part }: { part: UsagePart }) {
   if (input === null && output === null) return null
 
   return (
-    <div className="animate-up mt-0.5 flex flex-wrap items-center gap-1.5">
-      {input !== null ? (
-        <span
-          title={`${part.inputTokens} input tokens`}
-          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-field px-1.5 text-[11px] tabular-nums text-ink-3 shadow-hairline"
-        >
-          <span aria-hidden>↑</span>
-          {input}
-        </span>
-      ) : null}
-      {output !== null ? (
-        <span
-          title={`${part.outputTokens} output tokens`}
-          className="inline-flex h-5.5 items-center gap-1 rounded-chip bg-field px-1.5 text-[11px] tabular-nums text-ink-3 shadow-hairline"
-        >
-          <span aria-hidden>↓</span>
-          {output}
-        </span>
-      ) : null}
-    </div>
+    <span className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums text-ink-3">
+      {input !== null ? <span title={`${part.inputTokens} input tokens`}>↑{input}</span> : null}
+      {output !== null ? <span title={`${part.outputTokens} output tokens`}>↓{output}</span> : null}
+    </span>
   )
 }
 
@@ -716,7 +711,7 @@ const STOP_REASONS: Record<string, string> = {
   refusal: 'Refused',
 }
 
-/** End-of-turn card: why the turn stopped, how long it ran, and token counts. */
+/** End-of-turn footer: why the turn stopped, how long it ran, token counts. */
 export function TurnSummary({ part }: { part: TurnSummaryPart }) {
   const reason = part.stopReason ? STOP_REASONS[part.stopReason] ?? part.stopReason : undefined
   const input = formatTokens(part.inputTokens)
@@ -731,13 +726,13 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
   const failed = /error|refus|max_tokens|max_turns/i.test(part.stopReason ?? '')
 
   return (
-    <div className="animate-up flex items-center gap-1.5 pt-0.5 text-[11px] text-ink-3">
+    <div className="flex items-center gap-1.5 font-mono text-[10px] text-ink-3">
       {failed ? (
-        <AlertIcon size={11} className="shrink-0 text-orange" />
+        <AlertIcon size={10} className="shrink-0 text-orange" />
       ) : (
-        <Check size={11} className="shrink-0 text-green" />
+        <Check size={10} className="shrink-0 text-green" />
       )}
-      <span>{reason ?? 'Turn complete'}</span>
+      <span className="font-sans text-[10.5px]">{reason ?? 'Turn complete'}</span>
       {stats.length > 0 ? (
         <>
           <span aria-hidden className="text-ink-3/50">·</span>
@@ -847,7 +842,7 @@ function PlanApproval({
   return (
     <div
       data-approval-id={part.requestId}
-      className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#0a0a0c] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
+      className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#191613] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
       role="alert"
       aria-label="Plan approval required"
     >
@@ -1036,7 +1031,7 @@ export function Approval({
     return (
       <div
         data-approval-id={part.requestId}
-        className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-[#111113]/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
+        className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-[#211d19]/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
       >
         {part.decision && /deny|reject|no\b/i.test(part.decision) ? (
           <AlertIcon size={12} className="shrink-0 text-amber-500" />
@@ -1055,7 +1050,7 @@ export function Approval({
       data-approval-id={part.requestId}
       className={cn(
         'animate-up overflow-hidden rounded-2xl border shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)]',
-        'bg-[#0a0a0c] backdrop-blur-xl',
+        'bg-[#191613] backdrop-blur-xl',
         risky ? 'border-red-900/30' : 'border-zinc-800',
       )}
       role="alert"
@@ -1345,7 +1340,7 @@ function OrchestrationRow({ part }: { part: Extract<MessagePart, { kind: 'orches
           {display.slice(0, 4).map((name, index) => (
             <span
               key={`${name}-${index}`}
-              className="rounded-full ring-2 ring-inset ring-[#0c0c0f]"
+              className="rounded-full ring-2 ring-inset ring-[#191613]"
               style={{ marginLeft: index === 0 ? 0 : -5, zIndex: display.length - index }}
             >
               <WorkerAvatar
@@ -1516,7 +1511,7 @@ function BrowserStepRow({ part }: { part: Extract<MessagePart, { kind: 'browser'
         <span className="font-mono uppercase text-[9px] text-ink-3">{part.action}</span>
         {detail ? <span className="text-ink-2"> · {detail}</span> : null}
       </span>
-      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-green breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
+      <span className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-accent breathe' : part.status === 'failed' ? 'bg-red' : 'bg-green')} aria-hidden />
       <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{part.status}</span>
     </div>
   )

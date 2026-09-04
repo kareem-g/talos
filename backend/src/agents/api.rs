@@ -16,13 +16,29 @@ use crate::agent_events::AgentEvent;
 use crate::config::AppState;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::{oneshot, Mutex};
 
-pub struct ApiManager;
+pub struct ApiManager {
+    /// Cancel signals of live API turns by session id: (generation, sender).
+    /// API sessions have no resident process, so without this registry
+    /// stop/interrupt had nothing to act on: the turn task kept running
+    /// (blocked on the provider HTTP stream or a permission decision) while
+    /// the UI insisted it was stopped. Firing the signal drops the turn
+    /// future inside `spawn_api_turn` (cancelling the in-flight HTTP request
+    /// or tool call); the generation lets a stale finish stay quiet so a
+    /// stop racing a natural finish cannot double-render the turn's end.
+    turns: Mutex<HashMap<String, (u64, oneshot::Sender<()>)>>,
+    next_generation: Mutex<u64>,
+}
 
 impl ApiManager {
     pub fn new() -> Self {
-        Self
+        Self {
+            turns: Mutex::new(HashMap::new()),
+            next_generation: Mutex::new(1),
+        }
     }
 
     pub fn is_api_provider_sync(api_providers: &[crate::providers::api::ApiProvider], agent: &str) -> bool {
@@ -45,6 +61,87 @@ impl ApiManager {
 
     pub async fn kill_session(&self, _session_id: &str) -> Result<(), crate::AgentDeckError> {
         Ok(())
+    }
+
+    /// Take the live turn's cancel signal, if any. Whoever takes it owns the
+    /// turn's end: the task's finish branch stays quiet when its generation
+    /// no longer matches, so only one side publishes completion.
+    async fn take_turn(&self, session_id: &str) -> Option<(u64, oneshot::Sender<()>)> {
+        self.turns.lock().await.remove(session_id)
+    }
+
+    /// Fire the live turn's cancel signal, if any. Returns true when a live
+    /// turn was owned. Dropping the turn future cancels the in-flight
+    /// provider HTTP request (reqwest) or tool subprocess (tokio kills on
+    /// drop); a turn parked in `request_user_decision` is unblocked by the
+    /// broker cancel in `finish_turn` (its receiver is gone, so the deny
+    /// just clears the entry instead of leaking it).
+    async fn cancel_live_turn(&self, session_id: &str) -> bool {
+        if let Some((_, tx)) = self.take_turn(session_id).await {
+            let _ = tx.send(());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// End an API turn from the outside (Stop button, kill, delete).
+    /// Aborts the task, denies any pending approval waiters so nothing stays
+    /// parked, and publishes the turn's end + final status. When no task is
+    /// live (stale `running` row, e.g. after an unclean shutdown) it still
+    /// resets the status so the session unsticks.
+    async fn finish_turn(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        status: crate::sessions::SessionStatus,
+        reason: &str,
+    ) {
+        use crate::websocket::WsMessage;
+        let had_task = self.cancel_live_turn(session_id).await;
+        state.permissions.cancel_session(session_id).await;
+        // A normal finish racing this call owns its own broadcasts (it took
+        // the handle first); only publish when we owned the turn or when the
+        // row is still stuck in a live state with nothing behind it.
+        let stuck = matches!(
+            state.session_manager.get_session(session_id).await.ok().flatten().map(|s| s.status),
+            Some(crate::sessions::SessionStatus::Running)
+                | Some(crate::sessions::SessionStatus::Starting)
+                | Some(crate::sessions::SessionStatus::WaitingForApproval)
+                | Some(crate::sessions::SessionStatus::WaitingForInput)
+        );
+        if had_task || stuck {
+            if had_task {
+                state.broadcast.broadcast_agent_event(AgentEvent::new(
+                    session_id,
+                    "agent_stopped",
+                    json!({ "reason": reason, "source": "api" }),
+                ));
+            }
+            let _ = state.session_manager.update_status(session_id, status.clone()).await;
+            let state_name = match status {
+                crate::sessions::SessionStatus::Idle => "idle",
+                crate::sessions::SessionStatus::Exited => "exited",
+                _ => "idle",
+            };
+            state.broadcast.broadcast(WsMessage::StateChange {
+                session_id: session_id.to_string(),
+                state: state_name.to_string(),
+            });
+            if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
+                state.broadcast.broadcast(WsMessage::SessionUpdate { session: current });
+            }
+        }
+    }
+
+    /// Stop-the-response: the turn ends but the session stays open.
+    pub async fn interrupt_turn(&self, state: &AppState, session_id: &str) {
+        self.finish_turn(state, session_id, crate::sessions::SessionStatus::Idle, "interrupted").await;
+    }
+
+    /// Stop-and-close: the turn ends and the session is marked exited.
+    pub async fn stop_turn(&self, state: &AppState, session_id: &str) {
+        self.finish_turn(state, session_id, crate::sessions::SessionStatus::Exited, "cancelled").await;
     }
 }
 
@@ -79,13 +176,51 @@ pub async fn spawn_api_session(
 }
 
 /// One API turn: fetch history, call the provider, broadcast the response.
+/// Cancellable: interrupt/stop/kill/delete fire this turn's registered signal
+/// (see `ApiManager`), which drops the in-flight future below — cancelling a
+/// parked provider stream or tool call — while the canceller publishes the
+/// turn's end. A naturally finishing turn unregisters first, so the two sides
+/// never both publish completion.
+pub async fn spawn_api_turn(
+    state: &AppState,
+    session: &crate::sessions::Session,
+    prompt: &str,
+) -> Result<(), String> {
+    let generation = {
+        let mut next = state.api_manager.next_generation.lock().await;
+        let generation = *next;
+        *next += 1;
+        generation
+    };
+    let (tx, rx) = oneshot::channel();
+    state.api_manager.turns.lock().await.insert(session.id.clone(), (generation, tx));
+    let session_id = session.id.clone();
+    tokio::select! {
+        result = run_api_turn(state, session, prompt) => {
+            // Still ours? If a stop took the entry first, it owns the ending.
+            let ours = state.api_manager.turns.lock().await.remove(&session_id).is_some_and(|(g, _)| g == generation);
+            if ours {
+                result
+            } else {
+                Ok(())
+            }
+        }
+        _ = rx => {
+            // Cancelled from the outside; the canceller already published the
+            // turn's end (and denied any parked approval waiters).
+            Ok(())
+        }
+    }
+}
+
+/// The turn body: fetch history, call the provider, broadcast the response.
 ///
 /// User message is broadcast once; persistence is handled by the
 /// `daemon::persistence` task that listens for `WsMessage::Message`.
 /// Assistant output is streamed as `assistant_text` deltas followed by
 /// `agent_completed` — no separate `Message` insert, so the timeline does not
 /// duplicate the bubble.
-pub async fn spawn_api_turn(
+async fn run_api_turn(
     state: &AppState,
     session: &crate::sessions::Session,
     prompt: &str,
@@ -234,9 +369,26 @@ async fn call_openai_stream(
         .flatten()
         .and_then(|s| s.project);
 
+    // System identity, mirroring the anthropic path: without it the
+    // provider's built-in persona ("I am X, made by Y") answers every
+    // who-are-you unopposed, and room workers/leads lose their names to it.
+    // Stays at index 0 while tool results append behind it.
+    let mut conversation: Vec<Value> = messages.to_vec();
+    if !conversation
+        .first()
+        .and_then(|m| m.get("role"))
+        .and_then(|r| r.as_str())
+        .is_some_and(|r| r == "system")
+    {
+        let pending = state
+            .session_manager
+            .pending_config(session_id)
+            .await
+            .unwrap_or_default();
+        conversation.insert(0, json!({ "role": "system", "content": openai_system_prompt(provider, model, &pending) }));
+    }
     // Same tool loop as the anthropic path: the conversation grows as tool
     // results are appended and we re-request until the model stops calling.
-    let mut conversation: Vec<Value> = messages.to_vec();
     for _iteration in 0..MAX_API_TOOL_ITERATIONS {
         let pending = state
             .session_manager
@@ -244,8 +396,11 @@ async fn call_openai_stream(
             .await
             .unwrap_or_default();
         // Bounded workers (subagent children) must not see Dispatch — a
-        // worker fanning out its own children would recurse.
+        // worker fanning out its own children would recurse. Room workers
+        // keep it so a team can delegate to each other by name; their own
+        // children carry no room mark and lose it again.
         let is_subagent = pending.iter().any(|(k, v)| k == "subagent" && v == "true");
+        let in_room = pending.iter().any(|(k, _)| k == "room_child");
         let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
         if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
             && let Ok(parsed) = value.parse::<usize>()
@@ -259,7 +414,7 @@ async fn call_openai_stream(
             "max_tokens": max_tokens,
             "stream": true,
             "stream_options": { "include_usage": true },
-            "tools": crate::agents::api_tools::openai_tool_definitions(is_subagent),
+            "tools": crate::agents::api_tools::openai_tool_definitions(is_subagent, in_room),
         });
         if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
             body["reasoning_effort"] = Value::String(effort.clone());
@@ -532,8 +687,11 @@ async fn call_anthropic_stream(
             .await
             .unwrap_or_default();
         // Bounded workers (subagent children) must not see Dispatch — a
-        // worker fanning out its own children would recurse.
+        // worker fanning out its own children would recurse. Room workers
+        // keep it so a team can delegate to each other by name; their own
+        // children carry no room mark and lose it again.
         let is_subagent = pending.iter().any(|(k, v)| k == "subagent" && v == "true");
+        let in_room = pending.iter().any(|(k, _)| k == "room_child");
         let mut max_tokens = provider.max_output_tokens.unwrap_or(8192);
         if let Some((_, value)) = pending.iter().find(|(k, _)| k == "max_tokens")
             && let Ok(parsed) = value.parse::<usize>()
@@ -546,36 +704,15 @@ async fn call_anthropic_stream(
             "messages": filtered,
             "max_tokens": max_tokens,
             "stream": true,
-            "tools": crate::agents::api_tools::tool_definitions(is_subagent),
+            "tools": crate::agents::api_tools::tool_definitions(is_subagent, in_room),
         });
-        // Identity: the model is served under the configured provider/model.
-        // Without a firm statement, models latch onto the most repeated name
-        // in the prompt (AgentDeck) when asked who made them. This block is
-        // terse and placed FIRST in the system message so it beats the
-        // charter's many "AgentDeck" mentions. The model names its own maker.
-        let identity = format!(
-            "IDENTITY (follow strictly):\n\
-             - Your model id is \"{model}\", served through the provider \"{}\".\n\
-             - AgentDeck is only the software hosting you; AgentDeck is NOT your creator and did NOT train you.\n\
-             - When asked who made you or which company created you, answer with your own maker — never \"AgentDeck\" or \"AgentDeck team\".",
-            provider.name
-        );
-        // The session's live harness configuration, so the model can answer
-        // questions about its own settings ("what effort are you running at?")
-        // from context instead of guessing or claiming it cannot know.
-        let mut config_lines: Vec<String> = vec![format!("- model: {model}")];
-        for key in ["effort", "max_tokens", "context_window", "permission_mode"] {
-            if let Some((_, value)) = pending.iter().find(|(k, _)| k == key) {
-                config_lines.push(format!("- {key}: {value}"));
-            }
-        }
-        let config_block = format!(
-            "YOUR CURRENT CONFIGURATION (this is your own session's actual settings — quote them when asked):\n{}",
-            config_lines.join("\n")
-        );
+        // Shared identity block (see prompts::model_identity_section):
+        // identical wording on every transport with a system channel.
+        let identity_block =
+            crate::prompts::model_identity_section(&provider.name, model, &pending);
         let full_system = match system {
-            Some(s) => format!("{identity}\n\n{config_block}\n\n{s}"),
-            None => format!("{identity}\n\n{config_block}"),
+            Some(s) => format!("{identity_block}\n\n{s}"),
+            None => identity_block,
         };
         body["system"] = Value::String(full_system);
         // Anthropic-style endpoints do NOT accept OpenAI's `reasoning_effort`
@@ -834,6 +971,17 @@ async fn call_anthropic_stream(
 }
 
 
+
+/// System prompt for OpenAI-compatible endpoints: the shared identity block
+/// (same wording as every other transport — see
+/// prompts::model_identity_section).
+fn openai_system_prompt(
+    provider: &crate::providers::api::ApiProvider,
+    model: &str,
+    pending: &[(String, String)],
+) -> String {
+    crate::prompts::model_identity_section(&provider.name, model, pending)
+}
 
 const MAX_API_TOOL_ITERATIONS: usize = 12;
 

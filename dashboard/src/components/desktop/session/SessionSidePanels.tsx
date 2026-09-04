@@ -411,7 +411,7 @@ export function SubagentsPanel({
             <span
               className={cn(
                 'size-1.5 shrink-0 rounded-full',
-                s.status === 'running' ? 'bg-green breathe' : ['failed', 'error'].includes(s.status) ? 'bg-red' : 'bg-ink-3/60',
+                s.status === 'running' ? 'bg-accent breathe' : ['failed', 'error'].includes(s.status) ? 'bg-red' : 'bg-ink-3/60',
               )}
               aria-hidden
             />

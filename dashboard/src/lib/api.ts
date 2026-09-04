@@ -248,6 +248,11 @@ export const sessionsApi = {
       method: 'POST',
     }),
 
+  restore: (id: string) =>
+    request<{ restored: boolean }>(`/api/sessions/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+    }),
+
   /**
    * Sessions that exist in each CLI's own history but not here yet. Read-only,
    * so it is safe to call whenever the sync UI opens.
@@ -289,9 +294,16 @@ export const roomsApi = {
 export interface RoomRecord {
   id: string
   name: string
-  workers: Array<{ name: string; sessionId?: string }>
+  workers: Array<{
+    name: string
+    sessionId?: string
+    avatar?: { gradient: number; emoji?: string }
+    skills?: string[]
+  }>
   chief?: string | null
   sessionId?: string | null
+  skipPermissions?: boolean | null
+  project?: string | null
   createdAt?: string
 }
 
@@ -340,6 +352,11 @@ export const orchestrationApi = {
        * room's own memory store.
        */
       room?: { id: string; name: string; chief?: string | null }
+      /**
+       * Per-worker skill ids (registry ids), keyed by worker name. The
+       * harness prompts each worker in its specialty.
+       */
+      worker_skills?: Record<string, string[]>
       timeout_secs?: number
     },
   ) =>
@@ -626,6 +643,33 @@ export const browserApi = {
 
   screenshotUrl: (sessionId: string, tabId: string) =>
     `/api/browser/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(tabId)}`,
+}
+
+/* ── Workspace app server ("run this app" for the right-pane browser) ─────── */
+
+export interface AppServeStatus {
+  running: boolean
+  port?: number
+  command?: string
+  error?: string
+}
+
+export const serveApi = {
+  status: (project: string) =>
+    request<AppServeStatus>(`/api/workspace/serve?project=${encodeURIComponent(project)}`),
+  start: (project: string, command?: string) =>
+    request<{ ok: boolean; port?: number; pid?: number; error?: string }>(
+      '/api/workspace/serve/start',
+      {
+        method: 'POST',
+        body: JSON.stringify({ project, ...(command?.trim() ? { command } : {}) }),
+      },
+    ),
+  stop: (project: string) =>
+    request<{ ok: boolean }>('/api/workspace/serve/stop', {
+      method: 'POST',
+      body: JSON.stringify({ project }),
+    }),
 }
 
 /* ── Attachments ─────────────────────────────────────────────────────────── */

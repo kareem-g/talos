@@ -33,26 +33,62 @@ type Waiter = oneshot::Sender<String>;
 
 #[derive(Default)]
 pub struct PermissionBroker {
-    pending: Mutex<HashMap<String, Waiter>>,
+    /// request_id -> (owning session_id, waiter). The session link is what
+    /// makes stop/kill/delete able to unblock a turn stuck on approval:
+    /// without it the only way out was answering the card or the 5-minute
+    /// timeout, and after a daemon restart the waiter is gone entirely while
+    /// the session row still says `waiting_for_approval`.
+    pending: Mutex<HashMap<String, (String, Waiter)>>,
 }
 
 impl PermissionBroker {
-    /// Register a wait for `request_id`; resolve it later with a raw decision
-    /// string ("allow…" / anything else means deny).
-    pub async fn register(&self, request_id: String) -> oneshot::Receiver<String> {
+    /// Register a wait for `request_id` owned by `session_id`; resolve it
+    /// later with a raw decision string ("allow…" / anything else means deny).
+    pub async fn register(&self, request_id: String, session_id: String) -> oneshot::Receiver<String> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(request_id, tx);
+        self.pending.lock().await.insert(request_id, (session_id, tx));
         rx
     }
 
     /// Resolve a pending decision. Returns the owning session when one matched.
     pub async fn resolve(&self, request_id: &str, decision: String) -> bool {
-        if let Some(tx) = self.pending.lock().await.remove(request_id) {
+        if let Some((_, tx)) = self.pending.lock().await.remove(request_id) {
             let _ = tx.send(decision);
             true
         } else {
             false
         }
+    }
+
+    /// Resolve every waiter owned by `session_id` (stop/kill/delete path).
+    /// A denied tool result lets the awaiting turn finish its bookkeeping
+    /// instead of hanging to the timeout; returns how many were unblocked.
+    /// A dropped receiver (aborted turn task) still gets its entry removed so
+    /// nothing leaks.
+    pub async fn cancel_session(&self, session_id: &str) -> usize {
+        let waiters: Vec<Waiter> = {
+            let mut pending = self.pending.lock().await;
+            let ids: Vec<String> = pending
+                .iter()
+                .filter_map(|(id, (owner, _))| (owner == session_id).then(|| id.clone()))
+                .collect();
+            ids.into_iter().filter_map(|id| pending.remove(&id).map(|(_, tx)| tx)).collect()
+        };
+        let count = waiters.len();
+        for tx in waiters {
+            let _ = tx.send("deny".to_string());
+        }
+        count
+    }
+
+    /// Request ids still waiting on `session_id` (diagnostics / force paths).
+    pub async fn pending_for(&self, session_id: &str) -> Vec<String> {
+        self.pending
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(id, (owner, _))| (owner == session_id).then(|| id.clone()))
+            .collect()
     }
 }
 
@@ -115,6 +151,11 @@ pub async fn request_user_decision(
     // approval cards nobody can see — the run would stall to its timeout.
     // Bubble the card onto the parent room channel instead, so whoever is
     // watching the room decides; the resolution routes back by request id.
+    //
+    // The owning session keeps its own `permission_mode` / `skip_policy`:
+    // room children pinned at spawn (`full` + `skip_policy`) must NOT inherit
+    // the channel's `ask` — that hole is what made skip-rooms still prompt.
+    let owner_session_id = query.session_id.clone();
     if let Ok(Some(session)) = state.session_manager.get_session(&query.session_id).await
         && session.hidden
         && let Some(parent_id) = session.parent_id
@@ -123,7 +164,7 @@ pub async fn request_user_decision(
     }
 
     // Check if the session has a permission_mode override.
-    let permission_mode = match state.session_manager.pending_config(&query.session_id).await {
+    let permission_mode = match state.session_manager.pending_config(&owner_session_id).await {
         Ok(pending) => pending
             .iter()
             .find(|(k, _)| k == "permission_mode")
@@ -149,12 +190,21 @@ pub async fn request_user_decision(
     // no default answer to synthesize.
     let is_question = query.tool_name.eq_ignore_ascii_case("AskUserQuestion");
 
-    // Project tool policy overrides the mode defaults: a rule that denies a
-    // tool is honored even in `full` mode, and an allow rule skips the card.
-    // Questions are never auto-decided by policy. The rule order (network →
-    // path → tool) lives in `policy::ToolPolicy::decide_input`, shared with
-    // the ACP permission path so every backend honors the same policy.
-    if !is_question {
+    // Room runs that skip permissions bypass the project tool policy
+    // entirely (`skip_policy` is pinned at spawn for the run's children).
+    // Otherwise the project tool policy overrides the mode defaults: a rule
+    // that denies a tool is honored even in `full` mode, and an allow rule
+    // skips the card. Questions are never auto-decided by policy. The rule
+    // order (network → path → tool) lives in
+    // `policy::ToolPolicy::decide_input`, shared with the ACP permission path
+    // so every backend honors the same policy.
+    let skip_policy = state
+        .session_manager
+        .pending_config(&owner_session_id)
+        .await
+        .map(|pending| pending.iter().any(|(k, v)| k == "skip_policy" && v == "true"))
+        .unwrap_or(false);
+    if !is_question && !skip_policy {
         let project = state
             .session_manager
             .get_session(&query.session_id)
@@ -258,7 +308,7 @@ pub async fn request_user_decision(
     let prompt = format!("{} {}", query.tool_name, truncate(&input_preview, prompt_limit));
     let risk = risk_for(&query.tool_name);
 
-    let rx = state.permissions.register(request_id.clone()).await;
+    let rx = state.permissions.register(request_id.clone(), query.session_id.clone()).await;
 
     // Structured options: prefer what the agent supplied, else the default
     // allow/deny pair. The card renders whatever is here verbatim, so richer
@@ -537,7 +587,7 @@ fn mcp_error(message: String) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::usable_executable_path;
+    use super::{usable_executable_path, PermissionBroker};
     use std::path::PathBuf;
 
     #[test]
@@ -550,5 +600,26 @@ mod tests {
     fn leaves_normal_executable_paths_unchanged() {
         let path = usable_executable_path(PathBuf::from("/tmp/agentdeck-backend"));
         assert_eq!(path, PathBuf::from("/tmp/agentdeck-backend"));
+    }
+
+    /// Stop/kill/delete must unblock turns parked on approval: every waiter
+    /// owned by the session resolves (as deny) and unrelated sessions keep
+    /// waiting. A dropped receiver (aborted task) still clears its entry.
+    #[tokio::test]
+    async fn cancel_session_unblocks_only_that_sessions_waiters() {
+        let broker = PermissionBroker::default();
+        let rx_a1 = broker.register("req-a1".to_string(), "sess-a".to_string()).await;
+        let rx_a2 = broker.register("req-a2".to_string(), "sess-a".to_string()).await;
+        let rx_b = broker.register("req-b".to_string(), "sess-b".to_string()).await;
+        // Simulate an aborted turn task: its receiver is gone before cancel.
+        drop(rx_a2);
+
+        assert_eq!(broker.cancel_session("sess-a").await, 2);
+        assert_eq!(rx_a1.await.unwrap(), "deny");
+        //sess-b untouched and still resolvable normally.
+        assert!(broker.pending_for("sess-b").await.contains(&"req-b".to_string()));
+        assert!(broker.pending_for("sess-a").await.is_empty());
+        assert!(broker.resolve("req-b", "allow".to_string()).await);
+        assert_eq!(rx_b.await.unwrap(), "allow");
     }
 }

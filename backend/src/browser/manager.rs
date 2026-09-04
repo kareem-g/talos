@@ -20,6 +20,11 @@ pub struct BrowserInstance {
 /// Manages browser MCP server processes per session.
 pub struct BrowserManager {
     instances: RwLock<HashMap<String, BrowserInstance>>,
+    /// Held-open stdin pipes, one per child. The MCP server exits on stdin
+    /// EOF by design — dropping this handle (or spawning with null stdin, as
+    /// before) kills the engine the moment it starts. Removing the entry
+    /// closes the pipe for a graceful shutdown alongside SIGTERM.
+    stdin_holders: Mutex<HashMap<String, tokio::process::ChildStdin>>,
     /// One-shot channels to signal the reader task to stop.
     stop_signals: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
@@ -28,6 +33,7 @@ impl BrowserManager {
     pub fn new() -> Self {
         Self {
             instances: RwLock::new(HashMap::new()),
+            stdin_holders: Mutex::new(HashMap::new()),
             stop_signals: Mutex::new(HashMap::new()),
         }
     }
@@ -58,19 +64,27 @@ impl BrowserManager {
         cmd.env("AGENTDECK_BROWSER_DIR", browser_dir.to_string_lossy().as_ref());
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::null());
-        cmd.stdin(std::process::Stdio::null());
+        cmd.stdin(std::process::Stdio::piped());
 
-        let child = cmd.spawn().map_err(|e| {
+        let mut child = cmd.spawn().map_err(|e| {
             crate::AgentDeckError::Unknown(format!("Failed to launch browser MCP: {e}"))
         })?;
         let pid = child.id().ok_or_else(|| {
             crate::AgentDeckError::Unknown("Browser MCP process exited immediately".into())
         })?;
-        // Don't hold the child handle — the process runs detached.
-        let _ = child;
+        // Hold stdin open for the child's lifetime: it exits on stdin EOF,
+        // so a null stdin (or a dropped pipe) kills the engine on arrival.
+        // The process itself runs detached otherwise.
+        if let Some(stdin) = child.stdin.take() {
+            self.stdin_holders.lock().await.insert(session_id.to_string(), stdin);
+        }
 
-        // Wait for the HTTP port file.
+        // Remove any stale port file first: a previous run's port would
+        // otherwise be read back instantly and every proxy would hit a dead
+        // port while the new engine listens elsewhere.
         let port_file = std::env::temp_dir().join(format!("agentdeck-browser-http.{session_id}.port"));
+        let _ = std::fs::remove_file(&port_file);
+        // Wait for the HTTP port file.
         let http_port = wait_for_port_file(&port_file).await?;
 
         let instance = BrowserInstance {
@@ -84,7 +98,13 @@ impl BrowserManager {
 
     /// Stop the browser MCP server for a session.
     pub async fn stop(&self, session_id: &str) -> crate::Result<()> {
+        let _ = std::fs::remove_file(
+            std::env::temp_dir().join(format!("agentdeck-browser-http.{session_id}.port")),
+        );
         if let Some(inst) = self.instances.write().await.remove(session_id) {
+            // Closing the pipe asks for a graceful exit (stdin EOF); SIGTERM
+            // follows for engines that never read stdin.
+            self.stdin_holders.lock().await.remove(session_id);
             let _ = tokio::process::Command::new("kill")
                 .args(["-TERM", &inst.pid.to_string()])
                 .output()
@@ -97,8 +117,36 @@ impl BrowserManager {
         self.instances.read().await.get(session_id).cloned()
     }
 
+    /// Whether the engine is actually reachable. A record alone means
+    /// nothing — a dead MCP process left its port file behind, and treating
+    /// that as live sent every later proxy into a refused connection while
+    /// the agent retried forever. Dead records are reaped here.
     pub async fn has_active(&self, session_id: &str) -> bool {
-        self.instances.read().await.contains_key(session_id)
+        let port = match self.instances.read().await.get(session_id) {
+            Some(inst) => inst.http_port,
+            None => return false,
+        };
+        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+            return true;
+        }
+        self.instances.write().await.remove(session_id);
+        self.stdin_holders.lock().await.remove(session_id);
+        false
+    }
+
+    /// Ensure a live engine, starting one when missing or dead. Returns true
+    /// when the engine was already up (callers use it to word results).
+    pub async fn ensure(
+        &self,
+        session_id: &str,
+        daemon_url: &str,
+        daemon_token: &str,
+    ) -> crate::Result<(BrowserInstance, bool)> {
+        if self.has_active(session_id).await {
+            let inst = self.get(session_id).await.expect("checked above");
+            return Ok((inst, true));
+        }
+        self.start(session_id, daemon_url, daemon_token).await.map(|inst| (inst, false))
     }
 
     pub async fn list(&self) -> Vec<BrowserInstance> {
@@ -118,18 +166,22 @@ impl BrowserManager {
 
     /// Proxy a POST (JSON body) to the browser MCP server's HTTP endpoint —
     /// used by the dashboard to drive the engine manually (`/tool`).
+    /// A refused connection reaps the record so the next call restarts fresh
+    /// instead of proxying into a dead port forever.
     pub async fn proxy_post(&self, session_id: &str, path: &str, body: Value) -> Result<Value, String> {
         let port = self
             .resolve_http_port(session_id)
             .await
             .ok_or_else(|| "Browser not running".to_string())?;
         let url = format!("http://127.0.0.1:{port}{path}");
-        let resp = reqwest::Client::new()
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("proxy: {e}"))?;
+        let resp = reqwest::Client::new().post(&url).json(&body).send().await;
+        let resp = match resp {
+            Ok(resp) => resp,
+            Err(e) => {
+                self.instances.write().await.remove(session_id);
+                return Err(format!("proxy: {e}"));
+            }
+        };
         resp.json::<Value>().await.map_err(|e| format!("proxy json: {e}"))
     }
 

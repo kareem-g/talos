@@ -77,6 +77,7 @@ async fn test_state() -> AppState {
         permissions: Arc::new(agentdeck_backend::permissions::PermissionBroker::default()),
         pi_stream: Arc::new(agentdeck_backend::agents::pi_stream::PiStreamManager::new()),
         api_manager: Arc::new(agentdeck_backend::agents::api::ApiManager::new()),
+        app_servers: Arc::new(agentdeck_backend::workspace_serve::WorkspaceServers::default()),
         broadcast: BroadcastHub::new(),
         transcript_tails: None,
         browser_manager: Arc::new(agentdeck_backend::browser::manager::BrowserManager::new()),
@@ -292,6 +293,59 @@ async fn api_turn_failure_broadcasts_full_error_lifecycle() {
         status,
         agentdeck_backend::sessions::SessionStatus::Error
     ));
+}
+
+/// Worker identity is transport-agnostic: context assembly (the single
+/// funnel feeding API, ACP, Claude-stream, pi, and PTY-spawn turns) keeps
+/// custom instruction sets first, so a worker's name always opens its prompt
+/// no matter which backend runs it.
+#[tokio::test]
+async fn worker_instructions_open_with_identity() {
+    let state = test_state().await;
+    let session = create_session(&state, "s-worker", "fakeapi").await;
+    let instructions = format!(
+        "{}\n\n{}",
+        agentdeck_backend::prompts::worker_identity_block("Room X", "Nova"),
+        agentdeck_backend::prompts::subagent_prompt(),
+    );
+    let (ctx, _) =
+        agentdeck_backend::context_assembler::assemble(&state, &session, "do the thing", Some(&instructions))
+            .await
+            .unwrap();
+    let full = ctx.enriched_prompt();
+    assert!(
+        full.starts_with("# You are Nova"),
+        "identity must open the assembled prompt, got: {}",
+        &full[..120.min(full.len())]
+    );
+}
+
+/// Room channels get lead identity through the same assembly funnel —
+/// again independent of transport.
+#[tokio::test]
+async fn room_channel_turns_carry_lead_identity() {
+    let state = test_state().await;
+    let session = create_session(&state, "s-channel", "fakeapi").await;
+    sqlx::query("INSERT INTO rooms (id, data) VALUES (?1, ?2)")
+        .bind("room-t1")
+        .bind(serde_json::json!({
+            "id": "room-t1",
+            "name": "Team T",
+            "workers": [{"name": "Nova", "skills": ["tdd"]}],
+            "chief": "Nova",
+            "sessionId": session.id,
+        }).to_string())
+        .execute(&state.session_manager.pool())
+        .await
+        .unwrap();
+    let (ctx, _) =
+        agentdeck_backend::context_assembler::assemble(&state, &session, "hello team", None)
+            .await
+            .unwrap();
+    let full = ctx.enriched_prompt();
+    assert!(full.contains("You lead the AgentDeck Room"), "missing lead framing");
+    assert!(full.contains("Nova"), "missing roster worker");
+    assert!(full.contains("tdd"), "missing worker skills");
 }
 
 #[tokio::test]

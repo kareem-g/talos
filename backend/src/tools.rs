@@ -243,7 +243,7 @@ pub fn registry() -> &'static [ToolSpec] {
             ),
             spec(
                 "Dispatch",
-                "Fan a task out to other agents in parallel and get back one merged answer. Use it when a task has independent parts different agents could do, or when you want independent opinions to compare. Each agent runs the SAME self-contained task; a merge step synthesizes their answers into one. agent ids come from the environment (e.g. claude, opencode, or a custom provider id). Children run to completion, so this can take minutes.",
+                "Fan a task out to other agents in parallel and get back one merged answer. Use it when a task has independent parts different agents could do, or when you want independent opinions to compare. Each agent runs the SAME self-contained task; a merge step synthesizes their answers into one. agents takes provider agent ids (e.g. claude, opencode, or a custom provider id) — and inside a room channel you can also name room workers (e.g. [\"Scout\"]): they run on the room's agent with their own name, roster identity, and skills. Children run to completion, so this can take minutes.",
                 ToolCategory::Communication,
                 Risk::Medium,
                 json!({
@@ -257,6 +257,19 @@ pub fn registry() -> &'static [ToolSpec] {
                         }
                     },
                     "required": ["task", "agents"]
+                }),
+            ),
+            spec(
+                "preview_app",
+                "Serve this workspace's app and open it in the session browser so the user can see it running. Use AUTOMATICALLY after creating or changing a web app (HTML/JS/app) — do not wait to be asked, and do not finish the turn without previewing when the project has a runnable entry point (index.html, package.json dev script). Empty command serves the folder statically. For other stacks give a start command that MUST serve exactly the assigned port: include the {port} placeholder (e.g. \"npm run dev -- --port {port} --host 127.0.0.1\") or read $PORT. NEVER hardcode a port (no 8080/3000/9000) and NEVER background the server yourself with & or lsof/ss/netstat sleuthing — this tool manages the server. Works with any stack (static, Vite, Next.js, npm scripts, python http.server) as long as it listens on {port}. Set open_browser false to only start the server and report the URL.",
+                ToolCategory::Other,
+                Risk::Low,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "Custom start command with a {port} placeholder. Empty serves files statically." },
+                        "open_browser": { "type": "boolean", "description": "Open the URL in the session browser (default true)." }
+                    }
                 }),
             ),
             spec(
@@ -437,6 +450,7 @@ mod tests {
         assert_eq!(classify("Bash"), (ToolCategory::Shell, Risk::High));
         assert_eq!(classify("WebFetch"), (ToolCategory::Network, Risk::Medium));
         assert_eq!(classify("Read"), (ToolCategory::Filesystem, Risk::Low));
+        assert_eq!(classify("preview_app"), (ToolCategory::Other, Risk::Low));
     }
 
     #[test]

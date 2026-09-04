@@ -450,6 +450,96 @@ pub fn compose(sections: &[&str]) -> String {
 /// who leads the room. Appended after the subagent instruction set so the
 /// worker knows it is one of several agents helping on the same task in a
 /// Room, not a lone subagent.
+/// Shared model-identity block for every transport with a system channel
+/// (OpenAI- and Anthropic-compatible HTTP today; CLI/ACP agents receive the
+/// same facts through their assembled message text). Without a firm
+/// statement, models latch onto the most repeated name in the prompt
+/// (AgentDeck) when asked who made them — so this stays FIRST in any system
+/// message and identical everywhere: one wording, no transport drift.
+pub fn model_identity_section(
+    provider_name: &str,
+    model_id: &str,
+    config: &[(String, String)],
+) -> String {
+    let identity = format!(
+        "IDENTITY (follow strictly):\n\
+         - Your model id is \"{model_id}\", served through the provider \"{provider_name}\".\n\
+         - AgentDeck is only the software hosting you; AgentDeck is NOT your creator and did NOT train you.\n\
+         - When asked who made you or which company created you, answer with your own maker — never \"AgentDeck\" or \"AgentDeck team\"."
+    );
+    let mut config_lines: Vec<String> = vec![format!("- model: {model_id}")];
+    for key in ["effort", "max_tokens", "context_window", "permission_mode"] {
+        if let Some((_, value)) = config.iter().find(|(k, _)| k == key) {
+            config_lines.push(format!("- {key}: {value}"));
+        }
+    }
+    format!(
+        "{identity}\n\nYOUR CURRENT CONFIGURATION (this is your own session's actual settings — quote them when asked):\n{}",
+        config_lines.join("\n")
+    )
+}
+
+/// Identity-first worker framing. This MUST open a worker's instruction set:
+/// small models latch onto the first identity statement and never reach one
+/// buried after the charter — which is how dispatched workers ended up not
+/// knowing who they are. Short, plain, repeated: name, room, and the exact
+/// answer to give when asked.
+pub fn worker_identity_block(room_name: &str, self_name: &str) -> String {
+    format!(
+        "# You are {self_name}\n\
+         You are \"{self_name}\", a worker in the AgentDeck Room \"{room_name}\". \
+         If anyone asks who you are, answer exactly that: your name is \
+         {self_name} and you work in the room \"{room_name}\"."
+    )
+}
+
+/// Room-lead framing for a room's channel session. Plain talk in a room goes
+/// to this agent, which is otherwise spawned bare and answers as a generic
+/// agent that has never heard of its own roster. Naming the team and the
+/// chief makes it answer as the room.
+pub fn room_lead_section(
+    room_name: &str,
+    roster: &[(String, Vec<String>)],
+    chief: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "## You lead the AgentDeck Room \"{room_name}\"\n\
+         You ARE the room's voice in this chat — not a narrator describing \
+         it. Speak as the lead (\"I\", \"my team\", \"I'll have the team \
+         check that\"), never as a third party explaining the setup. Never \
+         name workers outside the roster above. Never \
+         open with what you are not; just lead, no unprompted roster \
+         recitals. When asked who you are, lead with your room role first \
+         (\"I'm the lead of ...\") and mention your model only if asked. \
+         If anyone asks who is in this room, answer briefly \
+         from this roster — never invent workers."
+    )];
+    if roster.is_empty() {
+        lines.push("The roster is currently empty.".to_string());
+    } else {
+        lines.push("Roster:".to_string());
+        for (worker, skills) in roster {
+            if skills.is_empty() {
+                lines.push(format!("- {worker}"));
+            } else {
+                lines.push(format!("- {worker} (skills: {})", skills.join(", ")));
+            }
+        }
+    }
+    match chief {
+        Some(chief) => lines.push(format!(
+            "The Chief of Staff is {chief}: they lead merge steps and speak \
+             for the team when workers disagree."
+        )),
+        None => lines.push(
+            "No Chief of Staff is designated: merge steps synthesize every \
+             worker's answer directly."
+                .to_string(),
+        ),
+    }
+    lines.join("\n")
+}
+
 pub fn room_worker_section(
     room_name: &str,
     self_name: &str,
@@ -534,6 +624,50 @@ mod tests {
         let leaderless = room_worker_section("Build Team", "Scout", &[], None);
         assert!(leaderless.contains("merge step will read"));
         assert!(leaderless.contains("only worker"));
+    }
+
+    #[test]
+    fn model_identity_section_names_provider_model_and_config() {
+        let text = model_identity_section(
+            "OmniRoute",
+            "agnes-2.0-flash",
+            &[("effort".to_string(), "high".to_string())],
+        );
+        assert!(text.starts_with("IDENTITY (follow strictly):"));
+        assert!(text.contains("\"agnes-2.0-flash\""));
+        assert!(text.contains("\"OmniRoute\""));
+        assert!(text.contains("- effort: high"));
+        assert!(text.contains("YOUR CURRENT CONFIGURATION"));
+    }
+
+    #[test]
+    fn worker_identity_block_answers_who_are_you() {
+        let block = worker_identity_block("Code Crew", "Scout");
+        assert!(block.starts_with("# You are Scout"));
+        assert!(block.contains("\"Code Crew\""));
+        assert!(block.contains("your name is Scout"));
+    }
+
+    #[test]
+    fn room_lead_section_names_roster_skills_and_chief() {
+        let section = room_lead_section(
+            "Code Crew",
+            &[
+                ("Scout".to_string(), vec!["tdd".to_string()]),
+                ("Maven".to_string(), vec![]),
+            ],
+            Some("Maven"),
+        );
+        assert!(section.contains("\"Code Crew\""));
+        assert!(section.contains("- Scout (skills: tdd)"));
+        assert!(section.contains("- Maven"));
+        assert!(section.contains("Chief of Staff is Maven"));
+        // First-person lead voice, never narrator disclaimers.
+        assert!(section.contains("You ARE the room's voice"));
+        assert!(!section.to_lowercase().contains("i'm not one of"));
+
+        let empty = room_lead_section("Code Crew", &[], None);
+        assert!(empty.contains("roster is currently empty"));
     }
 
     #[test]

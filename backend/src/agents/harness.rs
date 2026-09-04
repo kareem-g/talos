@@ -176,8 +176,16 @@ impl AgentTurn for ApiTurn {
             .map_err(crate::AgentDeckError::Unknown)
     }
 
-    async fn stop(&self, _state: &AppState, _session_id: &str) -> Result<()> {
-        // API sessions have no resident process to stop.
+    async fn interrupt(&self, state: &AppState, session_id: &str) -> Result<()> {
+        // No resident process, but the turn task (provider stream or parked
+        // approval) must still end and the session return to idle — a no-op
+        // here is what made Stop a dead button for API sessions.
+        state.api_manager.interrupt_turn(state, session_id).await;
+        Ok(())
+    }
+
+    async fn stop(&self, state: &AppState, session_id: &str) -> Result<()> {
+        state.api_manager.stop_turn(state, session_id).await;
         Ok(())
     }
 }

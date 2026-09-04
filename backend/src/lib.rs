@@ -24,6 +24,7 @@ pub mod tunnel;
 pub mod verification;
 pub mod websocket;
 pub mod workspace;
+pub mod workspace_serve;
 pub mod worktree;
 pub mod agents;
 pub mod agent_events;

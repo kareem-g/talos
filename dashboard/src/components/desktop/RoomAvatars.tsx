@@ -1,14 +1,37 @@
 /**
  * RoomAvatars — identity marks for rooms and their workers.
  *
- * Every worker gets a stable, name-derived hue and an initial tile; a room is
- * represented by a stack of its workers' tiles (its roster is its face). A
- * status ring on the worker tile carries live state: pulsing green while
- * working, orange while blocked on an approval, red on failure, dim when idle.
+ * Every worker gets a tile: either a picked gradient + optional emoji (chosen
+ * in the creation modal) or the legacy stable name-derived hue with an
+ * initial. A room is represented by a stack of its workers' tiles (its roster
+ * is its face). A status ring on the worker tile carries live state: pulsing
+ * green while working, orange while blocked on an approval, red on failure,
+ * dim when idle.
  */
 
 import { cn } from '@/lib/format'
-import type { PanelStatus } from '@/lib/rooms'
+import type { PanelStatus, WorkerAvatarSpec } from '@/lib/rooms'
+
+/** Pickable gradient grounds, grokbot-style vivid duotones. */
+export const AVATAR_GRADIENTS: string[] = [
+  'linear-gradient(135deg, #7c3aed, #4f46e5)',
+  'linear-gradient(135deg, #0ea5e9, #22d3ee)',
+  'linear-gradient(135deg, #f59e0b, #ef4444)',
+  'linear-gradient(135deg, #10b981, #14b8a6)',
+  'linear-gradient(135deg, #ec4899, #8b5cf6)',
+  'linear-gradient(135deg, #f97316, #eab308)',
+  'linear-gradient(135deg, #64748b, #334155)',
+  'linear-gradient(135deg, #14b8a6, #3b82f6)',
+]
+
+/** Suggested glyphs for the tile; empty string means "use the initial". */
+export const AVATAR_EMOJIS: string[] = ['🤖', '🧠', '⚡', '🔍', '🛠️', '🧪', '🎨', '📦', '🌿', '🔥']
+
+export function gradientFor(spec: WorkerAvatarSpec | undefined, index: number): string {
+  const gradients = AVATAR_GRADIENTS
+  if (spec) return gradients[((spec.gradient % gradients.length) + gradients.length) % gradients.length]!
+  return gradients[index % gradients.length]!
+}
 
 export type WorkerState = 'working' | 'done' | 'failed' | 'blocked' | 'idle'
 
@@ -46,19 +69,22 @@ export function ringFor(status: PanelStatus | 'idle' | undefined): string {
   }
 }
 
-/** One worker's identity tile: initial on a name-hued ground, status ring. */
+/** One worker's identity tile: picked gradient/emoji or legacy hued initial. */
 export function WorkerAvatar({
   name,
+  avatar,
   status,
   size = 18,
   ring,
 }: {
   name: string
+  avatar?: WorkerAvatarSpec
   status?: PanelStatus | 'idle'
   size?: number
   ring?: boolean
 }) {
   const hue = nameHue(name)
+  const glyph = avatar?.emoji || name.slice(0, 1).toUpperCase()
   return (
     <span
       aria-hidden
@@ -70,12 +96,13 @@ export function WorkerAvatar({
       style={{
         width: size,
         height: size,
-        backgroundColor: `hsl(${hue} 42% 24%)`,
-        color: `hsl(${hue} 75% 70%)`,
-        fontSize: Math.max(8, Math.round(size * 0.45)),
+        background: avatar ? gradientFor(avatar, 0) : `hsl(${hue} 42% 24%)`,
+        color: avatar ? '#fff' : `hsl(${hue} 75% 70%)`,
+        fontSize: avatar?.emoji ? Math.max(8, Math.round(size * 0.52)) : Math.max(8, Math.round(size * 0.45)),
+        textShadow: avatar ? '0 1px 2px rgba(0,0,0,0.4)' : undefined,
       }}
     >
-      {name.slice(0, 1).toUpperCase()}
+      {glyph}
     </span>
   )
 }
@@ -85,12 +112,15 @@ export function WorkerAvatar({
  * flight reads as a pulsing stack of who is working. */
 export function RoomAvatarStack({
   names,
+  avatars,
   size = 24,
   overlap = 7,
   max = 4,
   statuses,
 }: {
   names: string[]
+  /** Picked identity tiles, keyed by exact roster name. */
+  avatars?: Record<string, WorkerAvatarSpec | undefined>
   size?: number
   overlap?: number
   max?: number
@@ -104,11 +134,12 @@ export function RoomAvatarStack({
       {shown.map((name, index) => (
         <span
           key={name}
-          className="rounded-full ring-2 ring-[#0a0a0c]"
+          className="rounded-full ring-2 ring-[#191613]"
           style={{ marginLeft: index === 0 ? 0 : -overlap, zIndex: shown.length - index }}
         >
           <WorkerAvatar
             name={name}
+            avatar={avatars?.[name]}
             size={size}
             status={statuses?.[name]}
             ring={Boolean(statuses?.[name])}
@@ -117,7 +148,7 @@ export function RoomAvatarStack({
       ))}
       {overflow > 0 ? (
         <span
-          className="flex items-center justify-center rounded-full bg-white/[0.07] font-mono text-[9px] text-zinc-500 ring-2 ring-[#0a0a0c]"
+          className="flex items-center justify-center rounded-full bg-white/[0.07] font-mono text-[9px] text-zinc-500 ring-2 ring-[#191613]"
           style={{ width: size, height: size, marginLeft: -overlap }}
         >
           +{overflow}

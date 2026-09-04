@@ -3,72 +3,78 @@
 @tailwind utilities;
 
 /**
- * Design tokens — Grok × Apple premium dark.
- * Deep navy-charcoal surfaces, cool blue accent, subdued status palette.
- * Inspired by Grok's dark UI and Apple's SF aesthetic: maximum contrast
- * for text, minimal color for chrome, premium feel through restraint.
+ * Design tokens — Plumb "warm studio / dark terminal room".
+ * Deep charcoal-espresso surfaces with warm brown undertones, an amber/copper
+ * accent used for emphasis only, and a subdued warm status palette. The brief
+ * forbids green as an accent: running = amber, success = muted gold, failure =
+ * muted terracotta.
  *
- * Contrast against `--canvas`:
- *   --ink     ≈18:1  body text (past WCAG AAA)
- *   --ink-2   ≈7:1   secondary text
- *   --ink-3   ≈4.6:1 timestamps, hints (AA floor)
+ * Contrast against `--canvas` (#141210):
+ *   --ink      ≈15:1  body text
+ *   --ink-2    ≈7:1   secondary text
+ *   --ink-3    ≈4.5:1 timestamps, hints
  */
 @layer base {
   :root {
-    /* Surfaces — deep charcoal with blue undertone, no green. */
-    --canvas: #09090b;
-    --inset: #0c0c0f;
-    --field: #111114;
-    --surface: #151518;
-    --hover-2: #1a1a1f;
-    --hover: #1f1f25;
+    /* Surfaces — warm charcoal/espresso, no cool blue or green. */
+    --canvas: #141210;
+    --inset: #191613;
+    --field: #211d19;
+    --surface: #2a241e;
+    --hover-2: #241f1a;
+    --hover: #332a22;
 
-    /* Text. */
-    --ink: #f0f0f2;
-    --ink-2: #9e9ea8;
-    --ink-3: #686878;
+    /* Text — warm parchment scale. */
+    --ink: #f3e9dc;
+    --ink-2: #b5a596;
+    --ink-3: #817366;
 
-    /* Hairlines. */
-    --line: #1e1e25;
-    --line-strong: #2a2a33;
+    /* Hairlines — warm brown. */
+    --line: #3d332a;
+    --line-strong: #4a3e32;
 
-    /* Primary accent — dark neutral (replaces blue). Deep charcoal with subtle lift. */
-    --accent: #23232a;
-    --accent-ink: #f0f0f2;
-    --accent-tint: rgba(255, 255, 255, 0.08);
-    --accent-2: #2a2a33;
+    /* Primary accent — amber, reserved for emphasis (buttons, active nav,
+       focus, running/progress marks, selected tabs, primary links). */
+    --accent: #e3a15d;
+    --accent-hover: #f0b875;
+    --accent-ink: #211711;
+    --accent-tint: rgba(227, 161, 93, 0.12);
+    --accent-2: #d08a47;
 
-    /* Status hues — muted and premium. */
-    --green: #34d399;
-    --green-tint: rgba(52, 211, 153, 0.10);
-    --red: #f87171;
-    --red-tint: rgba(248, 113, 113, 0.10);
-    --orange: #fb923c;
-    --orange-tint: rgba(251, 146, 60, 0.10);
+    /* Status hues — warm and muted. No green. */
+    /* Success / completed = muted gold. */
+    --green: #c7a56a;
+    --green-tint: rgba(199, 165, 106, 0.12);
+    /* Error / failure = muted terracotta. */
+    --red: #d96c5f;
+    --red-tint: rgba(217, 108, 95, 0.12);
+    /* Attention / blocked / warning = copper. */
+    --orange: #c97855;
+    --orange-tint: rgba(201, 120, 85, 0.12);
 
     /* Border-strength status colors. */
-    --green-border: rgba(52, 211, 153, 0.30);
-    --red-border: rgba(248, 113, 113, 0.30);
-    --orange-border: rgba(251, 146, 60, 0.30);
+    --green-border: rgba(199, 165, 106, 0.30);
+    --red-border: rgba(217, 108, 95, 0.30);
+    --orange-border: rgba(201, 120, 85, 0.30);
 
-    /* Agent identity hues. */
-    --agent-green: #34d399;
-    --agent-purple: #a78bfa;
-    --agent-blue: #60a5fa;
-    --agent-orange: #fb923c;
-    --agent-yellow: #facc15;
-    --agent-pink: #f472b6;
+    /* Agent identity hues — warm set. */
+    --agent-green: #c7a56a;
+    --agent-purple: #c9a0dc;
+    --agent-blue: #8eadbf;
+    --agent-orange: #e3a15d;
+    --agent-yellow: #d9b554;
+    --agent-pink: #d98a8a;
 
-    /* Terminal: true black. */
-    --term-bg: #050506;
-    --term-fg: #e0e0e4;
+    /* Terminal: warm editor dark. */
+    --term-bg: #171513;
+    --term-fg: #e8ddcd;
 
-    /* Elevation — subtle, Apple-style. */
-    --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    /* Elevation — subtle, warm-neutral. */
+    --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.05);
     --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255,255,255,0.02);
-    --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.45);
-    --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.03);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(243, 233, 220, 0.02);
+    --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(243, 233, 220, 0.03);
   }
 
   .home-scope {
@@ -104,7 +110,7 @@
     overscroll-behavior-y: none;
   }
 
-  /* Atmosphere: subtle grain — neutral, not blue. */
+  /* Atmosphere: faint warm grain from the top — neutral, not blue. */
   body::before {
     content: '';
     position: fixed;
@@ -113,7 +119,7 @@
     pointer-events: none;
     background-image: radial-gradient(
       ellipse at 50% 0%,
-      rgba(255, 255, 255, 0.03) 0%,
+      rgba(227, 161, 93, 0.045) 0%,
       transparent 60%
     );
   }
@@ -132,12 +138,13 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--line-strong);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 
   ::selection {
-    background: rgba(255, 255, 255, 0.08);
+    background: #533522;
+    color: #f3e9dc;
   }
 }
 

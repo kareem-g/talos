@@ -1,33 +1,42 @@
 /**
  * Timeline — the conversation.
  *
- * The main column stays prose-first. Reasoning and tool activity are compact,
- * collapsed rows in the Beautiful UI idiom rather than an expanded debug log,
- * and file changes are grouped into chips at the end of a turn instead of one
- * row each.
+ * Vertical rhythm (the redesign rule):
+ *   - Turns are separated by 24px (gap-6). A turn is a unit; parts inside
+ *     a turn are closer (8px) than turns are to each other.
+ *   - Consecutive tool/command rows collapse into one ToolGroup card with
+ *     1px dividers and 24px rows — no loose stack of identical rows with
+ *     large gaps between them.
+ *   - Single tools render bare (no card chrome). Cards are reserved for
+ *     real groups, files, plans, and approvals.
+ *   - Usage + turn-summary merge into one 10px footer row, not two rows.
  *
  * A navigator rail floats at the center-left: one tick per user turn, the
- * in-view turn bolded. Hovering expands it into a card of turn previews you can
- * click to jump.
+ * in-view turn bolded. Hovering expands it into a card of turn previews.
  *
  * Terminal bytes never reach here — the reducer routes `terminal_output` to the
  * terminal view only.
  */
 
 import { memo, useEffect, useRef, useState } from 'react'
-import { Part } from './chat'
+import { Part, Step, TurnSummary, UsageMeter } from './chat'
 import { FileChips } from './chat'
-import { Chips, ContextChip } from './chat'
+import { Chips } from './chat'
 import LoadingState from './LoadingState'
+import { ChevronDown } from 'lucide-react'
 import { CopyButton, IconButton, RefreshIcon } from './ui'
-import { cn } from '@/lib/format'
+import { cn, formatDuration } from '@/lib/format'
 import { useStore } from '@/store'
 import type {
   Activity,
+  CommandPart,
   Conversation,
   FileChangePart,
   Message,
   MessagePart,
+  ToolPart,
+  TurnSummaryPart,
+  UsagePart,
 } from '@/types/conversation'
 
 /**
@@ -61,6 +70,88 @@ function turnPreview(message: Message): string {
   return text.length > 46 ? `${text.slice(0, 46).trimEnd()}…` : text
 }
 
+type ToolRow = ToolPart | CommandPart
+
+function isToolRow(part: MessagePart): part is ToolRow {
+  return part.kind === 'tool' || part.kind === 'command'
+}
+
+type Block = { kind: 'tools'; parts: ToolRow[] } | { kind: 'part'; part: MessagePart }
+
+/** Fold consecutive tool/command rows into shared groups. Everything else stays singular. */
+function groupBlocks(parts: MessagePart[]): Block[] {
+  const blocks: Block[] = []
+  let run: ToolRow[] = []
+  const flush = () => {
+    if (run.length > 0) {
+      blocks.push({ kind: 'tools', parts: run })
+      run = []
+    }
+  }
+  for (const part of parts) {
+    if (isToolRow(part)) run.push(part)
+    else {
+      flush()
+      blocks.push({ kind: 'part', part })
+    }
+  }
+  flush()
+  return blocks
+}
+
+/**
+ * A run of consecutive tool calls — one bordered card, 1px dividers, 24px
+ * rows. A single tool renders bare (no chrome). Long groups (>4) collapse
+ * behind a header showing the count + total time; running groups stay open.
+ */
+function ToolGroup({ parts }: { parts: ToolRow[] }) {
+  const running = parts.some((p) => p.status === 'running')
+  const failed = parts.filter((p) => p.status === 'failed').length
+  const totalMs = parts.reduce((sum, p) => sum + (p.durationMs ?? 0), 0)
+  const [collapsed, setCollapsed] = useState(false)
+  const collapsible = parts.length > 4 && !running
+
+  if (parts.length === 1) {
+    return <Step part={parts[0]!} />
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-line/50 bg-surface/30">
+      <div className="flex flex-col gap-px p-1">
+        {(collapsed ? [] : parts).map((part) => (
+          <Step key={part.toolId} part={part} />
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => collapsible && setCollapsed((v) => !v)}
+        disabled={!collapsible}
+        className={cn(
+          'flex h-6 w-full items-center gap-1.5 border-t border-line/40 bg-surface/40 px-2.5',
+          collapsible ? 'cursor-pointer hover:bg-hover/60' : 'cursor-default',
+        )}
+      >
+        <span
+          className={cn('size-1.5 rounded-full', running ? 'bg-accent breathe' : failed > 0 ? 'bg-red' : 'bg-green')}
+          aria-hidden
+        />
+        <span className="font-mono text-[10px] tabular-nums text-ink-3">
+          {collapsed ? `+${parts.length} steps` : `${parts.length} steps`}
+          {totalMs > 0 ? ` · ${formatDuration(totalMs)}` : ''}
+          {failed > 0 ? ` · ${failed} failed` : ''}
+          {running ? ' · running' : ''}
+        </span>
+        {collapsible ? (
+          <ChevronDown
+            size={11}
+            className={cn('ml-auto text-ink-3 transition-transform duration-200', collapsed && '-rotate-90')}
+          />
+        ) : null}
+      </button>
+    </div>
+  )
+}
+
 const Turn = memo(function Turn({
   message,
   onRespond,
@@ -81,34 +172,31 @@ const Turn = memo(function Turn({
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
-    const context = message.parts.find(
-      (part): part is Extract<MessagePart, { kind: 'context' }> => part.kind === 'context',
-    )
+    // Context enrichment stays in the data model (the agent still receives
+    // it) — it just no longer renders under the bubble.
     const time = new Date(message.createdAt)
     return (
       <div
-        className="group flex justify-end transition-opacity duration-200 !hover:opacity-100"
+        className="group flex justify-end transition-opacity duration-200 hover:!opacity-100"
         style={dim !== undefined ? { opacity: dim } : undefined}
       >
-        <div className="flex max-w-[86%] flex-col items-end">
+        <div className="flex max-w-[82%] flex-col items-end">
           <time
             dateTime={message.createdAt}
             title={Number.isNaN(time.getTime()) ? undefined : time.toLocaleString()}
-            className="mb-0.5 pr-0.5 font-mono text-[10px] text-ink-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+            className="mb-1 pr-0.5 font-mono text-[10px] tabular-nums text-ink-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
           >
             {Number.isNaN(time.getTime()) ? '' : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </time>
           <div
             className={cn(
-              'rounded-2xl rounded-br-md bg-accent/[0.08] border border-accent/[0.12] px-3.5 py-2.5',
-              'transition-opacity duration-200',
+              'rounded-2xl rounded-br-md border border-accent/[0.12] bg-accent/[0.08] px-3 py-2',
               message.optimistic && 'opacity-60',
             )}
           >
             <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
               <Chips text={text} />
             </p>
-            {context ? <ContextChip part={context} /> : null}
           </div>
         </div>
       </div>
@@ -124,24 +212,53 @@ const Turn = memo(function Turn({
     .reverse()
     .find((part): part is Extract<MessagePart, { kind: 'usage' }> => part.kind === 'usage')
 
+  // Usage + turn_summary merge into one footer row — accounting, not prose.
+  const footer: { usage?: UsagePart; summary?: TurnSummaryPart } = {}
+  const content: MessagePart[] = []
+  for (const part of inline) {
+    if (part.kind === 'usage') footer.usage = part
+    else if (part.kind === 'turn_summary') footer.summary = part
+    else content.push(part)
+  }
+  const blocks = groupBlocks(content)
+  const hasFooter = footer.usage !== undefined || footer.summary !== undefined
+
   return (
     <div
-      className="group flex flex-col gap-2 transition-opacity duration-200 !hover:opacity-100"
+      className="group flex flex-col transition-opacity duration-200 hover:!opacity-100"
       style={dim !== undefined ? { opacity: dim } : undefined}
     >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          {inline.map((part, index) => (
-            <Part
-              key={index}
-              part={part}
-              onRespond={onRespond}
-              sessionId={sessionId}
-              onViewPlan={onViewPlan}
-              usage={usage}
-            />
-          ))}
-          {files.length > 0 ? <FileChips files={files} project={project} sessionId={sessionId} /> : null}
+      <div className="flex items-start gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {blocks.map((block, index) =>
+            block.kind === 'tools' ? (
+              <ToolGroup key={`tools-${index}`} parts={block.parts} />
+            ) : (
+              <div key={index} className="min-w-0">
+                <Part
+                  part={block.part}
+                  onRespond={onRespond}
+                  sessionId={sessionId}
+                  onViewPlan={onViewPlan}
+                  usage={usage}
+                />
+              </div>
+            ),
+          )}
+          {files.length > 0 ? (
+            <div className="mt-0.5">
+              <FileChips files={files} project={project} sessionId={sessionId} />
+            </div>
+          ) : null}
+          {hasFooter ? (
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-0.5">
+              {footer.summary ? <TurnSummary part={footer.summary} /> : null}
+              {footer.summary && footer.usage ? (
+                <span aria-hidden className="text-[10px] text-ink-3/50">·</span>
+              ) : null}
+              {footer.usage ? <UsageMeter part={footer.usage} /> : null}
+            </div>
+          ) : null}
         </div>
         {/* Assistant action bar — revealed on hover, like ChatGPT's controls. */}
         <div className="flex shrink-0 items-center gap-0.5 pt-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
@@ -155,19 +272,18 @@ const Turn = memo(function Turn({
   )
 })
 
-/** Live activity — a bare spinner row, no card: work in progress, not furniture. */
+/** Live activity — a 24px row matching tool-row height: work in progress, not furniture. */
 function ActivityLine({ activity }: { activity: Activity }) {
-  const hasDetail = Boolean(activity.detail)
   return (
-    <div className="flex items-start gap-2.5 animate-up py-0.5">
+    <div className="flex h-6 items-center gap-2 animate-up">
       <span
-        className="mt-0.5 size-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-ink-3 border-t-transparent"
+        className="ml-1.5 size-3 shrink-0 animate-spin rounded-full border-[1.5px] border-ink-3 border-t-transparent"
         aria-hidden
       />
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
         <LoadingState label={activity.label} variant="Drive" since={activity.since} />
-        {hasDetail ? (
-          <span className="mt-1 block truncate font-mono text-[11px] leading-none text-ink-3">{activity.detail}</span>
+        {activity.detail ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] leading-none text-ink-3">{activity.detail}</span>
         ) : null}
       </div>
     </div>
@@ -198,13 +314,13 @@ function TimelineNavigator({
 
   return (
     <div
-      className="absolute left-1 top-1/2 z-20 flex -translate-y-1/2 items-center"
+      className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
       {/* Collapsed rail: spine + one tick per turn. Ticks rest small and grow
           to full width when the rail is hovered; the in-view turn stays bold. */}
-      <div className="relative flex flex-col items-center gap-2.5 py-2">
+      <div className="relative flex flex-col items-center gap-2 py-2">
         <div
           className={cn(
             'absolute inset-y-0 w-px transition-colors duration-200',
@@ -329,12 +445,11 @@ export function Timeline({
     .map((message) => ({ id: message.id, preview: turnPreview(message) }))
 
   // Recency fade: the latest two turns are full brightness; everything older
-  // steps down, the way this design distinguishes history from "now" —
-  // brightness, not bubbles or dividers. Hover restores any turn to full ink.
+  // steps down — brightness, not bubbles or dividers. Hover restores any turn.
   const fadeFor = (index: number): number | undefined => {
     if (index >= conversation.messages.length - 2) return undefined
     const distance = conversation.messages.length - 1 - index
-    return distance <= 2 ? 0.72 : distance <= 4 ? 0.55 : 0.4
+    return distance <= 2 ? 0.8 : distance <= 4 ? 0.65 : 0.5
   }
 
   return (
@@ -350,13 +465,20 @@ export function Timeline({
         }}
         className="scroll-thin h-full overflow-y-auto overscroll-contain"
       >
-        <div className="mx-auto flex w-full max-w-[52rem] flex-col gap-5 px-4 py-4 pl-9">
+        <div className="mx-auto flex w-full max-w-[48rem] flex-col gap-6 px-4 py-5 pl-10">
           {empty ? (
-            <div className="flex flex-col items-center gap-1.5 py-14 text-center">
-              <p className="text-[12.5px] font-medium text-ink-2">The transcript is empty.</p>
-              <p className="max-w-[36ch] text-[12px] leading-[1.6] text-ink-3">
-                Send the first message below — the agent's work, tool calls, and
-                approvals will stream here.
+            <div className="mx-auto flex w-full max-w-[26rem] flex-col items-center gap-2 rounded-2xl border border-dashed border-line/70 bg-surface/30 px-6 py-10 text-center">
+              <span className="flex size-9 items-center justify-center rounded-xl bg-accent/10 text-[15px]" aria-hidden>
+                ✦
+              </span>
+              <p className="text-[13px] font-semibold text-ink">New session — say where to start</p>
+              <p className="max-w-[34ch] text-[12px] leading-[1.65] text-ink-3">
+                Describe the task below. Tool calls will group here as compact
+                steps, approvals will pause the agent until you answer.
+              </p>
+              <p className="mt-1 font-mono text-[10.5px] text-ink-3/80">
+                Tip: <span className="rounded bg-field px-1 py-px text-ink-2">@file</span> attaches context ·{' '}
+                <span className="rounded bg-field px-1 py-px text-ink-2">/command</span> runs a shortcut
               </p>
             </div>
           ) : null}
@@ -364,6 +486,7 @@ export function Timeline({
             <div
               key={message.id}
               data-turn-id={message.role === 'user' ? message.id : undefined}
+              className="scroll-mt-4"
             >
               <Turn
                 message={message}

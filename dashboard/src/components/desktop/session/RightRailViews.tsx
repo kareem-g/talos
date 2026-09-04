@@ -22,10 +22,14 @@ import {
   Globe2,
   Loader2,
   MessagesSquare,
+  Play,
   Plus,
   RefreshCw,
+  Square,
 } from 'lucide-react'
 import { useStore, getConversation, useConversation } from '@/store'
+import { serveApi, workspaceApi } from '@/lib/api'
+import { closeFile, useOpenFile } from '@/lib/fileViewer'
 import { cn } from '@/lib/format'
 import { mentionedWorkers, useActiveRoomId, useRooms, runRoomTask } from '@/lib/rooms'
 import { getSideSessionId } from '@/lib/sideSession'
@@ -232,7 +236,7 @@ export function AgentsView({
                 return (
                   <li key={`${event.timestamp}-${idx}`} className="relative">
                     <span className={cn('absolute -left-[15.5px] top-1 flex size-2.5 items-center justify-center rounded-full border border-line/50 bg-surface text-ink-3', active && event.kind !== 'error' && 'text-green')} aria-hidden>
-                      <span className={cn('size-1 rounded-full', event.kind === 'error' ? 'bg-red' : active ? 'bg-green breathe' : 'bg-current')} />
+                      <span className={cn('size-1 rounded-full', event.kind === 'error' ? 'bg-red' : active ? 'bg-accent breathe' : 'bg-current')} />
                     </span>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className={cn('min-w-0 flex-1 truncate text-[11px]', event.kind === 'error' ? 'text-red' : active ? 'font-medium text-ink' : 'text-ink-2')}>{event.label}</span>
@@ -450,6 +454,99 @@ export function BrowserView({
     } catch { /* ignore */ }
   }
 
+  /* ── Workspace app server ("run this app") ──────────────────────────── */
+  const project = session?.project ?? null
+  const [serving, setServing] = useState<{ port: number; command: string } | null>(null)
+  const [serveBusy, setServeBusy] = useState(false)
+  const [serveError, setServeError] = useState<string | null>(null)
+  const [serveCommand, setServeCommand] = useState('')
+  const [hasPackageJson, setHasPackageJson] = useState(false)
+
+  // Serving state + a package.json hint, refreshed with the project and
+  // re-polled: the port changes on every restart (by you, the agent, or
+  // another client), and a one-shot read goes stale — the stale :port chip
+  // is what sent agents sleuthing with lsof.
+  useEffect(() => {
+    if (!project) {
+      setServing(null)
+      setHasPackageJson(false)
+      return
+    }
+    let cancelled = false
+    const refreshServing = () => {
+      serveApi
+        .status(project)
+        .then((status) => {
+          if (!cancelled && status.running && status.port) {
+            setServing({ port: status.port, command: status.command ?? '' })
+          } else if (!cancelled) {
+            setServing(null)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setServing(null)
+        })
+    }
+    refreshServing()
+    const interval = setInterval(refreshServing, 5000)
+    workspaceApi
+      .dirs(project, true)
+      .then((listing) => {
+        if (!cancelled) {
+          setHasPackageJson((listing.entries ?? []).some((entry) => !entry.dir && entry.name === 'package.json'))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [project])
+
+  /** One-tap commands for common stacks — {port} is wired automatically. */
+  const SERVE_PRESETS: Array<{ label: string; command: string }> = [
+    { label: 'Static', command: '' },
+    { label: 'npm run dev', command: 'npm run dev -- --port {port} --host 127.0.0.1' },
+    { label: 'Vite', command: 'npx vite --port {port} --host 127.0.0.1 --strictPort' },
+    { label: 'Next.js', command: 'npx next dev -p {port} -H 127.0.0.1' },
+  ]
+
+  function appUrl(port: number): string {
+    const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'
+    return `http://${host}:${port}`
+  }
+
+  async function startApp() {
+    if (!project || serveBusy) return
+    setServeBusy(true)
+    setServeError(null)
+    try {
+      const result = await serveApi.start(project, serveCommand.trim() || undefined)
+      if (result.ok && result.port) {
+        setServing({ port: result.port, command: serveCommand.trim() })
+        const url = appUrl(result.port)
+        setDraft(url)
+        setUrl(url)
+        setReloadKey((k) => k + 1)
+        setLoading(true)
+      } else {
+        setServeError(result.error ?? 'Could not start the app server')
+      }
+    } catch (e) {
+      setServeError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setServeBusy(false)
+    }
+  }
+
+  async function stopApp() {
+    if (!project) return
+    try {
+      await serveApi.stop(project)
+    } catch { /* best effort */ }
+    setServing(null)
+  }
+
   const navigate = () => {
     const v = draft.trim()
     if (!v) return
@@ -585,6 +682,91 @@ export function BrowserView({
               <Button variant="surface" className="min-h-6 rounded-md px-2 py-0 text-[11px]" onClick={navigate}>Go</Button>
             </div>
           ) : null}
+          {project ? (
+            <div className="mt-3 w-full max-w-[280px] rounded-xl border border-line/50 bg-surface/60 p-3 text-left">
+              <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-ink">
+                <Play size={11} className="text-green" /> Run this workspace app
+              </p>
+              <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-3" title={project}>
+                {project.split('/').pop() ?? project}
+              </p>
+              {serveError ? <p className="mt-1.5 text-[10.5px] leading-snug text-red">{serveError}</p> : null}
+              {serving ? (
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10.5px] text-green">
+                    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-green" aria-hidden />
+                    <span className="truncate">:{serving.port}</span>
+                  </span>
+                  <Button
+                    variant="surface"
+                    className="min-h-7 rounded-lg px-2.5 py-0 text-[11px]"
+                    onClick={() => {
+                      const next = appUrl(serving.port)
+                      setDraft(next)
+                      setUrl(next)
+                      setReloadKey((k) => k + 1)
+                      setLoading(true)
+                    }}
+                  >
+                    Open
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => void stopApp()}
+                    aria-label="Stop app server"
+                    title="Stop app server"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition hover:bg-red-tint hover:text-red"
+                  >
+                    <Square size={11} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {SERVE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setServeCommand(preset.command)}
+                        aria-pressed={serveCommand === preset.command}
+                        title={preset.command || 'Serve files statically'}
+                        className={cn(
+                          'rounded-full border px-2 py-0.5 font-mono text-[9.5px] transition',
+                          serveCommand === preset.command
+                            ? 'border-accent/50 bg-accent-tint text-accent-ink'
+                            : 'border-line/60 text-ink-3 hover:bg-hover-2 hover:text-ink-2',
+                        )}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-line/50 bg-field px-2 py-1">
+                    <input
+                      value={serveCommand}
+                      onChange={(e) => setServeCommand(e.target.value)}
+                      placeholder="Custom command, {port} (empty = static files)"
+                      aria-label="Custom run command"
+                      className="h-6 min-w-0 flex-1 bg-transparent font-mono text-[10px] text-ink outline-none placeholder:text-ink-3"
+                    />
+                  </div>
+                  <Button
+                    variant="primary"
+                    className="mt-2 min-h-8 w-full rounded-lg text-[12px]"
+                    disabled={serveBusy}
+                    onClick={() => void startApp()}
+                  >
+                    {serveBusy ? 'Starting…' : '▶ Run app'}
+                  </Button>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-ink-3">
+                    {hasPackageJson
+                      ? 'Tip: package.json found — try `npm run dev -- --port {port} --host 127.0.0.1`.'
+                      : 'Serves the folder statically by default.'}
+                  </p>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -596,6 +778,18 @@ export function BrowserView({
         eyebrow="Browser"
         right={
           <span className="flex items-center gap-1">
+            {serving ? (
+              <button
+                type="button"
+                onClick={() => void stopApp()}
+                title={`Stop app server (:${serving.port})`}
+                aria-label="Stop app server"
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] text-green hover:bg-red-tint hover:text-red"
+              >
+                <span className="size-1.5 animate-pulse rounded-full bg-green" aria-hidden />
+                :{serving.port}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => { setReloadKey((k) => k + 1); setLoading(true) }}
@@ -725,7 +919,7 @@ export function SubSessionsView({
                       isCurrent ? 'bg-hover text-ink' : 'hover:bg-hover-2 hover:text-ink',
                     )}
                   >
-                    <span className={cn('size-1.5 shrink-0 rounded-full', active ? 'bg-green breathe' : s.status === 'waiting_for_approval' || s.status === 'waiting_for_input' ? 'bg-orange' : 'bg-ink-3/60')} aria-hidden />
+                    <span className={cn('size-1.5 shrink-0 rounded-full', active ? 'bg-accent breathe' : s.status === 'waiting_for_approval' || s.status === 'waiting_for_input' ? 'bg-orange' : 'bg-ink-3/60')} aria-hidden />
                     <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">{s.name}</span>
                     <span className="shrink-0 font-mono text-[9px] uppercase text-ink-3">{s.agent}</span>
                     <span className="shrink-0 font-mono text-[9px] text-ink-3">{s.status.replace(/_/g, ' ')}</span>
@@ -796,7 +990,7 @@ export function SideSessionView({
             {sideSess ? (
               <span className="max-w-[140px] truncate font-mono text-[10px] text-ink-3">{sideSess.name}</span>
             ) : null}
-            <span className={cn('size-1.5 shrink-0 rounded-full', sideSess?.status === 'running' ? 'bg-green breathe' : 'bg-ink-3/60')} aria-hidden />
+            <span className={cn('size-1.5 shrink-0 rounded-full', sideSess?.status === 'running' ? 'bg-accent breathe' : 'bg-ink-3/60')} aria-hidden />
           </span>
         }
       />
@@ -886,7 +1080,7 @@ export function RoomChannelView({ session }: { session: Session }) {
               className={cn(
                 'size-1.5 shrink-0 rounded-full',
                 room.panels.some((panel) => panel.status === 'working') || channel?.status === 'running'
-                  ? 'bg-green breathe'
+                  ? 'bg-accent breathe'
                   : 'bg-ink-3/60',
               )}
               aria-hidden
@@ -988,6 +1182,147 @@ export function RoomChannelView({ session }: { session: Session }) {
               : 'This room has no workers yet — edit it in the sidebar to add some.'}
           </p>
         </div>
+      )}
+    </div>
+  )
+}
+
+/* ── File — workspace file preview ─────────────────────────────────────────
+   Opened from the sidebar explorer: read-only preview of one workspace file
+   with line numbers. keept mounted per tab so switching away preserves the
+   scroll position. */
+
+const FILE_CAP_CHARS = 200_000
+const FILE_CAP_LINES = 3_000
+
+function fileExtension(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+export function FileView({ session }: { session: Session }) {
+  const open = useOpenFile()
+  const [contents, setContents] = useState<string | null>(null)
+  const [error, setError] = useState<string>()
+  const [loading, setLoading] = useState(false)
+  const project = open?.project ?? session.project ?? undefined
+
+  useEffect(() => {
+    if (!open || !project) {
+      setContents(null)
+      setError(undefined)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(undefined)
+    workspaceApi
+      .file(project, open.path)
+      .then((body) => {
+        if (cancelled) return
+        if (body.error || body.contents === undefined) {
+          setError(body.error ?? 'Could not read this file')
+          setContents(null)
+        } else {
+          setContents(body.contents)
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'Could not read this file')
+          setContents(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open?.nonce])
+
+  const lines: { rows: string[]; truncated: boolean } = useMemo(() => {
+    if (contents === null) return { rows: [], truncated: false }
+    let text = contents
+    let truncated = false
+    if (text.length > FILE_CAP_CHARS) {
+      text = text.slice(0, FILE_CAP_CHARS)
+      truncated = true
+    }
+    const split = text.split('\n')
+    if (split.length > FILE_CAP_LINES) {
+      return { rows: split.slice(0, FILE_CAP_LINES), truncated: true }
+    }
+    return { rows: split, truncated }
+  }, [contents])
+
+  const ext = open ? fileExtension(open.name) : ''
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ViewHeader
+        eyebrow={open ? `File · ${ext || 'text'}` : 'File'}
+        right={
+          open ? (
+            <span className="flex items-center gap-1">
+              <RailButton
+                label="Copy path"
+                onClick={() => void navigator.clipboard?.writeText(open.path)}
+              >
+                Copy path
+              </RailButton>
+              <RailButton label="Close file" onClick={closeFile}>
+                ✕
+              </RailButton>
+            </span>
+          ) : null
+        }
+      />
+      {!open ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-6 text-center">
+          <FileText size={18} className="text-ink-3" />
+          <p className="text-[12px] font-medium text-ink-2">No file open</p>
+          <p className="max-w-[26ch] text-[11px] leading-[1.6] text-ink-3">
+            Pick a file in the sidebar explorer to preview it here.
+          </p>
+        </div>
+      ) : loading ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <span className="flex items-center gap-2 text-[11px] text-ink-3">
+            <Loader2 size={13} className="animate-spin" /> Reading {open.name}…
+          </span>
+        </div>
+      ) : error ? (
+        <p className="p-4 font-mono text-[11px] leading-relaxed text-red">{error}</p>
+      ) : (
+        <>
+          <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-line/40 bg-inset px-3 py-1.5">
+            <FileText size={12} className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink" title={open.path}>
+              {open.path}
+            </span>
+          </div>
+          <div className="scroll-thin min-h-0 flex-1 overflow-auto">
+            <pre className="min-w-max px-0 py-2 font-mono text-[11px] leading-[1.65]">
+              <code>
+                {lines.rows.map((line, index) => (
+                  <span key={index} className="flex min-w-full hover:bg-hover/50">
+                    <span className="w-10 shrink-0 select-none pr-3 text-right tabular-nums text-ink-3/50">
+                      {index + 1}
+                    </span>
+                    <span className="whitespace-pre pr-4 text-ink-2">{line || ' '}</span>
+                  </span>
+                ))}
+              </code>
+            </pre>
+            {lines.truncated ? (
+              <p className="border-t border-line/40 px-3 py-2 font-mono text-[10px] text-ink-3">
+                Truncated preview — open the file in your editor for the rest.
+              </p>
+            ) : null}
+          </div>
+        </>
       )}
     </div>
   )

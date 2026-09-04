@@ -24,6 +24,7 @@ import { SessionWorkspace } from './components/desktop/SessionWorkspace'
 import { Dot, IconButton } from './components/ui'
 import LoadingState from './components/LoadingState'
 import { useRoute } from './lib/route'
+import { roomOpenApproval, useRooms } from './lib/rooms'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
 import { ensureSessionLoaded } from './lib/rooms'
@@ -103,6 +104,10 @@ function ConnectionPill({ state }: { state: ConnectionState }) {
 function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
   const sessions = useStore((state) => state.sessions)
   const connection = useStore((state) => state.connection)
+  // Transcript streams mutate conversations in place — subscribe so room card
+  // scans below recompute as approvals arrive and resolve.
+  const revisions = useStore((state) => state.revisions)
+  const rooms = useRooms()
   // Derive outside the selector: `.filter` in a zustand v5 selector returns a
   // fresh array every call, which useSyncExternalStore reads as "changed" on
   // every render — an infinite update loop. Selecting the stable `sessions`
@@ -115,13 +120,35 @@ function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
         const uiState = sessionUIState(session, getConversation(session.id), connection)
         return uiState === 'approval' || uiState === 'input' || uiState === 'failed'
       }),
-    [sessions, connection],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessions, connection, revisions],
   )
-  if (blocked.length === 0) return null
+  // Room channels and workers never appear in the workspace lists, so their
+  // approval cards are unreachable through `blocked` — page them by room.
+  const roomNeeds = useMemo(
+    () =>
+      rooms
+        .map((room) => ({ room, approval: roomOpenApproval(room) }))
+        .filter((entry): entry is { room: (typeof rooms)[number]; approval: { sessionId: string; requestId: string } } =>
+          entry.approval !== null,
+        ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rooms, revisions],
+  )
+  if (blocked.length === 0 && roomNeeds.length === 0) return null
+  const label =
+    blocked.length === 1
+      ? blocked[0].name
+      : blocked.length > 1
+        ? `${blocked.length} agents need you`
+        : roomNeeds.length === 1
+          ? `${roomNeeds[0].room.name} needs review`
+          : `${roomNeeds.length} rooms need review`
+  const target = blocked.length > 0 ? blocked[0].id : roomNeeds[0].approval.sessionId
   return (
     <button
       type="button"
-      onClick={() => onOpen(blocked[0].id)}
+      onClick={() => onOpen(target)}
       className={cn(
         'animate-up fixed bottom-20 left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 lg:bottom-5 lg:left-auto lg:right-5 lg:translate-x-0 lg:max-w-none',
         'inline-flex min-h-12 items-center gap-2.5 rounded-full bg-surface border border-line px-5 py-2.5',
@@ -130,9 +157,7 @@ function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
       )}
     >
       <span className="size-2 shrink-0 rounded-full bg-accent breathe" aria-hidden />
-      <span className="min-w-0 max-w-40 truncate sm:max-w-56">
-        {blocked.length === 1 ? blocked[0].name : `${blocked.length} agents need you`}
-      </span>
+      <span className="min-w-0 max-w-40 truncate sm:max-w-56">{label}</span>
       <span className="hidden shrink-0 text-[11px] font-medium uppercase tracking-[0.1em] opacity-60 sm:inline">
         Tap to open
       </span>
@@ -319,11 +344,11 @@ export default function App() {
             selectedId={selectedId}
             searchQuery={homeSearch}
           />
-          <main className="flex min-w-0 flex-1 flex-col bg-[#0f0f10]">{body}</main>
+          <main className="flex min-w-0 flex-1 flex-col bg-[#141210]">{body}</main>
           <AttentionPill onOpen={openSessionFrom} />
           {showCommandPalette ? (
             <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-              <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1a1a1c] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
                 <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
               </div>
@@ -374,7 +399,7 @@ export default function App() {
 
       {showCommandPalette ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[14vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1a1a1c] p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <input autoFocus type="search" placeholder="Search sessions, projects, agents..." value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
             <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter. Press Esc to close.</p>
           </div>

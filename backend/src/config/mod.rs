@@ -113,6 +113,8 @@ pub struct AppState {
     pub pi_stream: Arc<crate::agents::pi_stream::PiStreamManager>,
     /// Custom API providers (OpenAI-compatible, Anthropic-compatible).
     pub api_manager: Arc<crate::agents::api::ApiManager>,
+    /// Workspace app servers (right-pane browser "run this app").
+    pub app_servers: Arc<crate::workspace_serve::WorkspaceServers>,
     pub broadcast: BroadcastHub,
     pub transcript_tails: Option<Arc<TranscriptTails>>,
     pub browser_manager: Arc<crate::browser::manager::BrowserManager>,

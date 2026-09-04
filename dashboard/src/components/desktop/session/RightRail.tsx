@@ -21,6 +21,7 @@ import { RightRailTabs } from './RightRailTabs'
 import {
   AgentsView,
   BrowserView,
+  FileView,
   GitDiffView,
   GitFilesView,
   GoalView,
@@ -236,6 +237,8 @@ export const RightRail = forwardRef<RightRailHandle, {
         return <SideSessionView session={session} />
       case 'rooms':
         return <RoomChannelView session={session} />
+      case 'file':
+        return <FileView session={session} />
       default:
         return null
     }
@@ -293,10 +296,10 @@ export const RightRail = forwardRef<RightRailHandle, {
           style={{
             backgroundColor:
               connection === 'connected'
-                ? '#34d399'
+                ? '#c7a56a'
                 : connection === 'connecting' || connection === 'reconnecting'
-                  ? '#fb923c'
-                  : '#f87171',
+                  ? '#e3a15d'
+                  : '#d96c5f',
           }}
         />
 

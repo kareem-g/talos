@@ -77,6 +77,9 @@ pub async fn assemble(
     // context chip (it is the agent's instruction set, not per-turn
     // enrichment). First turns get the first-turn variant; custom instruction
     // sets (subagent role, eval determinism) replace the standing set.
+    // A custom set also means "identity already handled" (room workers carry
+    // their own) — only standing-set turns get the room-lead check below.
+    let custom = instructions.is_some();
     let mut instructions = match instructions {
         Some(custom) => custom.to_string(),
         None => {
@@ -107,6 +110,20 @@ pub async fn assemble(
             instructions.push('\n');
             instructions.push_str(crate::prompts::CUSTOM_TRANSPORT.trim());
         }
+    }
+    // Room channel sessions talk to the user as the room's lead — but the
+    // channel agent is spawned bare, so without this it answers as a generic
+    // agent that has never heard of its own roster. Workers already carry
+    // their identity in the custom set and skip this.
+    if !custom
+        && let Some(info) = crate::api::rooms::find_room_by_channel(state, &session.id).await
+    {
+        instructions.push('\n');
+        instructions.push_str(&crate::prompts::room_lead_section(
+            &info.name,
+            &info.roster,
+            info.chief.as_deref(),
+        ));
     }
     sections.push(instructions);
 
