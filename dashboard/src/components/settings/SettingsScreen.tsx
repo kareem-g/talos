@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Check, ChevronDown, Chip, Dots, DropdownList, Search, SectionLabel, TextField } from '../ui'
-import { apiProvidersApi, type ApiProviderConfig } from '@/lib/api'
+import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type CloudflareSettings } from '@/lib/api'
 import { useStore } from '@/store'
 import { cn } from '@/lib/format'
 
@@ -125,6 +125,8 @@ export function SettingsScreen() {
           </ol>
         </section>
 
+        <CloudflareTunnelSection />
+
         <ApiProvidersSection />
 
         <SectionLabel>Keyboard</SectionLabel>
@@ -156,6 +158,179 @@ export function SettingsScreen() {
         </section>
       </div>
     </div>
+  )
+}
+
+function CloudflareTunnelSection() {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [token, setToken] = useState('')
+  const [hostname, setHostname] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string>()
+  const [testResult, setTestResult] = useState<{ url?: string; error?: string }>()
+
+  // Load current settings on mount.
+  useEffect(() => {
+    let cancelled = false
+    settingsApi
+      .get()
+      .then((res) => {
+        if (cancelled) return
+        const cf: CloudflareSettings = res.settings.tunnel.cloudflare
+        setToken(cf.token ?? '')
+        setHostname(cf.hostname ?? '')
+      })
+      .catch(() => {
+        /* non-fatal — fields stay empty */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function maskToken(t: string): string {
+    if (t.length <= 12) return '•'.repeat(t.length)
+    return t.slice(0, 6) + '•'.repeat(Math.min(20, t.length - 12)) + t.slice(-4)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setError(undefined)
+    setSaved(false)
+    setTestResult(undefined)
+    try {
+      await settingsApi.update({
+        tunnel: {
+          cloudflare: {
+            token: token.trim() || undefined,
+            hostname: hostname.trim() || undefined,
+          },
+        },
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save settings')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleTest() {
+    setTesting(true)
+    setError(undefined)
+    setTestResult(undefined)
+    try {
+      const res = await tunnelApi.start('cloudflare', {
+        token: token.trim() || undefined,
+        ...(hostname.trim() ? { hostname: hostname.trim() } : {}),
+      })
+      if (res.status === 'error') {
+        setTestResult({ error: res.error ?? 'Tunnel failed to start' })
+      } else if (res.url) {
+        setTestResult({ url: res.url })
+      } else {
+        setTestResult({ error: 'Tunnel started but returned no URL' })
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not test tunnel')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <>
+      <SectionLabel>Cloudflare Tunnel</SectionLabel>
+      <section className="rounded-card border border-line bg-surface p-3.5 shadow-card">
+        <p className="text-[11px] leading-[1.6] text-ink-3">
+          A Cloudflare tunnel gives this machine a public HTTPS URL that works from anywhere — no
+          VPN, no port forwarding, no same-network requirement. Paste a named-tunnel token (from
+          dash.cloudflare.com → Cloudflare Tunnel) or leave blank for a quick trycloudflare.com URL.
+        </p>
+        {loading ? (
+          <div className="mt-3">
+            <Dots />
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col gap-3">
+            <label className="space-y-1">
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">
+                Tunnel token {token ? <span className="text-emerald-400">(set)</span> : '(optional)'}
+              </span>
+              <TextField
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="eyJhIjoiLi4uIiwidCI6Ii4uLiJ9"
+                type={token ? 'text' : 'password'}
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
+                data-1pignore="true"
+                spellCheck={false}
+              />
+              {token ? (
+                <span className="font-mono text-[10px] text-zinc-500">{maskToken(token)}</span>
+              ) : (
+                <span className="text-[10px] text-zinc-500">
+                  Long-lived secret from dash.cloudflare.com → Account → Cloudflare Tunnel.
+                </span>
+              )}
+            </label>
+            <label className="space-y-1">
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">
+                Hostname {token ? <span className="text-amber-400">(required for named tunnels)</span> : <span className="text-zinc-600">(optional)</span>}
+              </span>
+              <TextField
+                value={hostname}
+                onChange={(e) => setHostname(e.target.value)}
+                placeholder="agentdeck.example.com"
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
+                data-1pignore="true"
+                spellCheck={false}
+                inputMode="url"
+              />
+              <span className="text-[10px] text-zinc-500">
+                {token
+                  ? 'Named tunnels need the public hostname you set in the Cloudflare dashboard (Public Hostnames).'
+                  : 'For quick tunnels this is generated automatically.'}
+              </span>
+            </label>
+            {error ? (
+              <p className="rounded-lg border border-red/20 bg-red-tint px-3 py-2 text-[11.5px] text-red">
+                {error}
+              </p>
+            ) : null}
+            {testResult?.url ? (
+              <div className="rounded-lg border border-green/20 bg-green-tint px-3 py-2">
+                <p className="text-[11.5px] font-medium text-green">Tunnel is up</p>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-ink-2">{testResult.url}</p>
+              </div>
+            ) : null}
+            {testResult?.error ? (
+              <p className="rounded-lg border border-red/20 bg-red-tint px-3 py-2 text-[11.5px] text-red">
+                {testResult.error}
+              </p>
+            ) : null}
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={() => void handleSave()} disabled={saving} className="flex-1">
+                {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+              </Button>
+              <Button variant="surface" onClick={() => void handleTest()} disabled={testing || saving}>
+                {testing ? 'Testing…' : 'Test'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
+    </>
   )
 }
 

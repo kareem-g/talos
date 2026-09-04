@@ -375,16 +375,30 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
         model_config_option(&models, candidate.transport, &candidate.id),
         permission_option,
     ];
-    // The harness-level dimensions apply to every transport, not just custom
-    // HTTP providers: effort when the model can reason, the output cap, and
-    // the total context window (custom-set or the model's own default).
-    if let Some(effort) = crate::providers::types::effort_config_option(capabilities.reasoning, false) {
-        config_options.push(effort);
+    // Effort is only offered where something consumes it, and the levels come
+    // from the real binary — never a hardcoded list. Claude documents its
+    // accepted levels in `--help` and gets a real --effort flag at spawn; a
+    // claude without the flag gets no knob at all. Other StreamJson/Jsonl/Pty
+    // CLIs (pi included) have no channel for it, and offering the knob there
+    // produced a control that always answered "unsupported". max_tokens is
+    // likewise API-turn-only and stays off CLI descriptors. The context
+    // window stays everywhere: it feeds the composer's meter even though no
+    // request sends it.
+    if candidate.transport == crate::providers::types::Transport::StreamJson && candidate.id == "claude" {
+        let levels = discovery::claude_effort_levels(&executable).await;
+        if let Some(effort) = crate::providers::types::effort_config_option_from_names(&levels) {
+            config_options.push(effort);
+        }
     }
-    config_options.push(crate::providers::types::context_window_config_option(
-        models.first().and_then(|m| m.capabilities.as_ref()).and_then(|c| c.context_window),
-    ));
-    config_options.push(crate::providers::types::max_output_tokens_config_option());
+    // Context window only with CLI-reported data — a "Not set" chip here
+    // adjusts nothing, since no CLI request sends it.
+    if let Some(window) = models
+        .first()
+        .and_then(|m| m.capabilities.as_ref())
+        .and_then(|c| c.context_window)
+    {
+        config_options.push(crate::providers::types::context_window_config_option(Some(window)));
+    }
 
     ProviderDescriptor {
         id: candidate.id.clone(),

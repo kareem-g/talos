@@ -375,22 +375,119 @@ export interface DirListing {
   entries: Array<{ name: string; path: string; dir?: boolean }>
 }
 
+/** Phone-pairing payload returned after a successful Headscale login. */
+export interface PairInfo {
+  /** `tailscale://…` deep link the Tailscale app parses on iOS/Android. */
+  qr_payload: string
+  /** Plain-https fallback for browsers / older clients. */
+  fallback_url: string
+  /** MagicDNS handle of this node on the user's Headscale tailnet. */
+  tailnet: string
+  /** Underlying preauth key — surfaced for copy-to-clipboard. */
+  key: string
+  /** RFC3339 expiry of the preauth key, when the server returns it. */
+  expires_at?: string | null
+}
+
+/** A single transport option in the QR picker. */
+export interface EndpointOption {
+  base_url: string
+  /** Which transport this is — drives the label and icon. */
+  source:
+    | 'explicit'
+    | 'cloudflare'
+    | 'tailnet_magic_dns'
+    | 'tailnet_ipv4'
+    | 'tailnet_ipv6'
+    | 'lan'
+    | 'localhost'
+  host: string
+  port: number
+  secure: boolean
+  reachable: boolean
+  via?: string | null
+  /** QR payload for this option (only present when returned by the pairing
+   *  offer endpoint, not by the bare `/api/tunnel/endpoints` list). */
+  qr_data?: string
+  /** Human label the picker chip displays — server-built so it stays in
+   *  sync with the source taxonomy. */
+  label?: string
+}
+
+/** Response shape of GET /api/tunnel/endpoints — used by the QR method picker. */
+export interface EndpointList {
+  port: number
+  endpoints: EndpointOption[]
+  best: EndpointOption | null
+}
+
 /** Workspace browsing for the project picker and the @context menu. */
 export interface TunnelState {
   kind: string
   status: 'disconnected' | 'connecting' | 'connected' | 'error'
   url?: string | null
   ip?: string | null
+  /** Control-plane label for tailnet kinds ("tailscale", "headscale <host>"). */
+  via?: string | null
+  /** Connection token for token-based kinds, when active. */
+  token?: string | null
+  /** Phone-pairing payload, when this kind offers one. */
+  pair?: PairInfo | null
+  /** Human-readable error message when status is "error". */
   error?: string | null
+  /** Structured failure reason — drives targeted next-step buttons. */
+  error_kind?:
+    | 'needs_authorization'
+    | 'unreachable_control_plane'
+    | 'invalid_auth_key'
+    | 'daemon_not_running'
+    | 'tailscale_not_installed'
+    | 'tailscale_failed'
+    | null
 }
 
-/** Native tunnel control — bring Tailscale / Cloudflare up from the UI. */
+/** Native tunnel control — Tailscale / Headscale / Cloudflare from the UI. */
 export const tunnelApi = {
-  status: () => request<{ tailscale: unknown; cloudflare: unknown }>('/api/tunnel/status'),
-  start: (kind: 'tailscale' | 'cloudflare') =>
-    request<TunnelState>(`/api/tunnel/${kind}/start`, { method: 'POST' }),
-  stop: (kind: 'tailscale' | 'cloudflare') =>
+  status: () =>
+    request<{ tailscale: unknown; headscale: unknown; cloudflare: unknown }>('/api/tunnel/status'),
+  start: (
+    kind: 'tailscale' | 'headscale' | 'cloudflare',
+    body?: {
+      login_server?: string
+      auth_key?: string
+      /** Headscale admin API key — used to mint preauth keys for the QR. */
+      api_key?: string
+      /** Headscale user the preauth key is bound to. */
+      user?: string
+      /** Cloudflare tunnel token (long-lived secret). Persisted to settings
+       *  when present so subsequent bring-ups don't need it re-typed. */
+      token?: string
+      /** Cloudflare tunnel hostname, e.g. agentdeck.example.com. */
+      hostname?: string
+    },
+  ) =>
+    request<TunnelState>(`/api/tunnel/${kind}/start`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  stop: (kind: 'tailscale' | 'headscale' | 'cloudflare') =>
     request<TunnelState>(`/api/tunnel/${kind}/stop`, { method: 'POST' }),
+  /** Promote the current user to tailscale operator — used after a
+   * `needs_authorization` error to unblock `tailscale up`. */
+  authorizeHeadscale: () =>
+    request<{ ok: boolean; error?: string }>('/api/tunnel/headscale/authorize', { method: 'POST' }),
+  /** Mint a fresh preauth key without re-running `tailscale up`. */
+  createPreauth: (body: { login_server: string; api_key?: string; user?: string; reusable?: boolean }) =>
+    request<{
+      ok: boolean
+      key?: string
+      expires_at?: string | null
+      qr_payload?: string
+      fallback_url?: string
+      tailnet?: string
+      error_kind?: string
+      error?: string
+    }>('/api/tunnel/headscale/preauth', { method: 'POST', body: JSON.stringify(body) }),
+  /** Every reachable transport (LAN, Tailnet, Cloudflare, …) — feeds the
+   * "pick where your phone is" QR picker on the Remote screen. */
+  endpoints: () => request<EndpointList>('/api/tunnel/endpoints'),
 }
 
 export interface WorktreeInfo {
@@ -781,8 +878,13 @@ export const configApi = {
 
 export interface PairingOffer {
   offer_id: string
-  /** A full URL the phone can open directly — encode this in the QR code. */
+  /** A full URL the phone can open directly — encode this in the QR code.
+   *  Defaults to the best endpoint. The picker may swap this for an
+   *  option from `qr_options` when the user picks a different transport. */
   qr_data: string
+  /** Per-transport QR payloads — drives the "pick where your phone is"
+   *  picker. First entry is the recommended default. */
+  qr_options?: EndpointOption[]
   /** Short hash of the offer secret, for out-of-band confirmation. */
   fingerprint: string
   expires_at: string
@@ -794,6 +896,7 @@ export interface PairingOffer {
     port: number
     secure: boolean
     reachable: boolean
+    via?: string | null
   }
 }
 
@@ -823,6 +926,8 @@ export const pairingApi = {
         port: number
         secure: boolean
         reachable: boolean
+        /** Control-plane label for tailnet paths ("tailscale", "headscale <host>"). */
+        via?: string | null
       }
     }>('/api/pair/endpoint'),
 
@@ -868,4 +973,37 @@ export const devicesApi = {
   list: () => request<{ devices: PairedDeviceInfo[] }>('/api/devices'),
   revoke: (id: string) =>
     request<{ revoked: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
+/** Persisted settings — the operator's tunnel token, hostname, and which
+ *  transports are enabled. Mirrors the TOML fields the daemon reads on boot. */
+export interface CloudflareSettings {
+  enabled: boolean
+  token: string | null
+  hostname: string | null
+  tunnel_id: string | null
+}
+
+export interface TunnelSettings {
+  cloudflare: CloudflareSettings
+}
+
+export interface SettingsPayload {
+  tunnel?: {
+    cloudflare?: {
+      enabled?: boolean
+      token?: string
+      hostname?: string
+    }
+  }
+}
+
+export const settingsApi = {
+  get: () =>
+    request<{ settings: { tunnel: TunnelSettings } }>('/api/settings'),
+  update: (body: SettingsPayload) =>
+    request<{ ok: boolean }>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 }

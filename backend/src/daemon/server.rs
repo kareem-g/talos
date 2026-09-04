@@ -122,7 +122,10 @@ pub async fn start(
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))
         .route("/api/tunnel/{kind}/start", post(crate::api::routes::tunnel_start))
         .route("/api/tunnel/{kind}/stop", post(crate::api::routes::tunnel_stop))
+        .route("/api/tunnel/headscale/authorize", post(crate::api::routes::tunnel_authorize_headscale))
+        .route("/api/tunnel/headscale/preauth", post(crate::api::routes::tunnel_preauth_headscale))
         .route("/api/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
+        .route("/api/tunnel/endpoints", get(crate::api::routes::tunnel_endpoints))
 
         // Pairing
         .route("/api/pair", post(crate::api::routes::initiate_pairing))

@@ -108,6 +108,68 @@ pub async fn help_model_aliases(binary: &str) -> Vec<Model> {
         .collect()
 }
 
+/// Effort levels a CLI really accepts, read off its own `--help`.
+///
+/// Parses the `--effort` paragraph's parenthesized list, e.g.
+/// `--effort <level>  Effort level … (low, medium, high, xhigh, max)`.
+/// Empty when the flag is absent (this CLI has no effort dimension — the
+/// caller hides the knob) or unparseable. Order follows the help text.
+pub async fn claude_effort_levels(binary: &str) -> Vec<String> {
+    let Ok(Ok(output)) = timeout(HELP_TIMEOUT, Command::new(binary).arg("--help").output()).await
+    else {
+        return Vec::new();
+    };
+    let mut help = String::from_utf8_lossy(&output.stdout).to_string();
+    if help.trim().is_empty() {
+        help = String::from_utf8_lossy(&output.stderr).to_string();
+    }
+    extract_effort_levels(&help)
+}
+
+fn extract_effort_levels(help: &str) -> Vec<String> {
+    let mut levels = Vec::new();
+    let mut paragraph = String::new();
+    let mut in_effort = false;
+    for line in help.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('-') {
+            if in_effort {
+                break;
+            }
+            // The flag may appear as `--effort <level>`; match the flag token.
+            in_effort = trimmed.split_whitespace().next() == Some("--effort");
+            if in_effort {
+                paragraph.push_str(trimmed);
+                paragraph.push('\n');
+            }
+            continue;
+        }
+        if trimmed.is_empty() {
+            if in_effort {
+                break;
+            }
+            continue;
+        }
+        if in_effort {
+            paragraph.push_str(trimmed);
+            paragraph.push(' ');
+        }
+    }
+    // First parenthesized group is the level list.
+    let Some(start) = paragraph.find('(') else { return levels };
+    let Some(end) = paragraph[start..].find(')') else { return levels };
+    for token in paragraph[start + 1..start + end].split(',') {
+        let token = token.trim().trim_matches('"').trim_matches('\'').to_string();
+        if !token.is_empty()
+            && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            && !levels.contains(&token)
+        {
+            levels.push(token);
+        }
+    }
+    levels
+}
+
 /// Pull single-quoted tokens from the `--model` paragraph, following wrapped
 /// continuation lines.
 fn extract_quoted_aliases(help: &str) -> Vec<String> {
@@ -221,6 +283,27 @@ mod tests {
                 line
             );
         }
+    }
+
+    #[test]
+    fn parses_effort_levels_from_help_paragraph() {
+        let help = "  --effort <level>                      Effort level for the current session\n                                        (low, medium, high, xhigh, max)\n  --exclude-dynamic-system-prompt-sections\n                                        Move per-machine sections\n";
+        assert_eq!(
+            super::extract_effort_levels(help),
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+    }
+
+    #[test]
+    fn missing_effort_flag_yields_no_levels() {
+        assert!(super::extract_effort_levels("--model <m>  Model to use\n").is_empty());
+        assert!(super::extract_effort_levels("").is_empty());
+    }
+
+    #[test]
+    fn wrapped_effort_paragraphs_still_parse() {
+        let help = "  --effort <level>\n      Effort level\n      (low,\n      medium,\n      high)\n";
+        assert_eq!(super::extract_effort_levels(help), vec!["low", "medium", "high"]);
     }
 
     #[test]

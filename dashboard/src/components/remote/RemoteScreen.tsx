@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PairDeviceLayerContent } from '../Pairing'
 import { Button, Chip, CopyButton, Dots, EmptyState, SectionLabel } from '../ui'
-import { devicesApi, pairingApi, tunnelApi, type PairedDeviceInfo } from '@/lib/api'
+import { devicesApi, pairingApi, type PairedDeviceInfo } from '@/lib/api'
 import {
   notificationState,
   requestNotificationPermission,
@@ -85,6 +85,11 @@ function EndpointCard() {
             <div className="flex items-center gap-2">
               <EndpointSourceChip source={endpoint.source} />
               <span className="min-w-0 truncate font-mono text-[11.5px] text-ink-2">{endpoint.host}</span>
+              {endpoint.via ? (
+                <span className="shrink-0 rounded-full bg-white/[0.06] px-1.5 py-px font-mono text-[9.5px] text-ink-3">
+                  via {endpoint.via}
+                </span>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
               <span className={cn(endpoint.reachable ? 'text-green' : 'text-orange')}>
@@ -218,62 +223,6 @@ function NotificationsCard() {
     </section>
   )
 }
-
-
-/** Card: native Tailscale / Cloudflare tunnels — up, down, and copied. */
-function TunnelsCard() {
-  const [rows, setRows] = useState<Array<{ kind: 'tailscale' | 'cloudflare'; state?: string; url?: string | null; ip?: string | null; error?: string | null }>>([
-    { kind: 'tailscale' },
-    { kind: 'cloudflare' },
-  ])
-  const [busy, setBusy] = useState<string>()
-
-  async function act(kind: 'tailscale' | 'cloudflare', action: 'start' | 'stop') {
-    setBusy(`${kind}:${action}`)
-    try {
-      const result = action === 'start' ? await tunnelApi.start(kind) : await tunnelApi.stop(kind)
-      setRows((current) =>
-        current.map((row) =>
-          row.kind === kind
-            ? { ...row, state: result.status, url: result.url ?? null, ip: result.ip ?? null, error: result.error ?? null }
-            : row,
-        ),
-      )
-    } finally {
-      setBusy(undefined)
-    }
-  }
-
-  return (
-    <section className="rounded-card border border-line bg-surface shadow-card">
-      <header className="border-b border-line px-3.5 py-2.5">
-        <h3 className="text-[12.5px] font-medium text-ink">Tunnels</h3>
-        <p className="mt-0.5 text-[11px] leading-[1.5] text-ink-3">
-          Reach this station from anywhere without port forwarding.
-        </p>
-      </header>
-      <div className="flex flex-col gap-2 p-3">
-        {rows.map((row) => (
-          <div key={row.kind} className="flex items-center gap-2 rounded-control bg-inset px-2.5 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-medium capitalize text-ink">{row.kind}</p>
-              <p className="truncate text-[10.5px] text-ink-3">
-                {row.error ? row.error : row.url ? row.url : row.ip ? row.ip : row.state ?? 'idle'}
-              </p>
-            </div>
-            <Button variant="primary" disabled={busy !== undefined} onClick={() => void act(row.kind, 'start')} className="min-h-7 px-2 text-[11px]">
-              Up
-            </Button>
-            <Button variant="ghost" disabled={busy !== undefined} onClick={() => void act(row.kind, 'stop')} className="min-h-7 px-2 text-[11px]">
-              Down
-            </Button>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 // declared after EndpointCard so the refresh hook above stays hoisted
 
 export function RemoteScreen() {
@@ -300,7 +249,6 @@ export function RemoteScreen() {
         <DevicesCard />
 
         <SectionLabel>Machine</SectionLabel>
-        <TunnelsCard />
         <EndpointCard />
         <NotificationsCard />
       </div>

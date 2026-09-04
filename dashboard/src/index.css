@@ -360,4 +360,22 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /*
+   * iOS Safari auto-zooms on focus whenever a field renders under 16px.
+   * Apply 16px unconditionally so the rule holds on every iOS variant
+   * (older devices, iPadOS without `pointer: coarse`, split-view, etc.).
+   * Desktop rendering at 16px is fine — text inputs are that size almost
+   * everywhere. `touch-action: manipulation` kills the double-tap zoom
+   * delay so the app responds like native chrome.
+   */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  html {
+    touch-action: manipulation;
+  }
 }

@@ -171,22 +171,45 @@ async fn run_handshake(
             Ok(session) => {
                 probe.config_options = parse_config_options(&session);
                 probe.models = models_from_options(&probe.config_options);
-                // Inject the harness-level dimensions that every transport
-                // should offer: permission mode, effort (ACP agents assume
-                // reasoning, which is the common case), the output token cap,
-                // and the total context window.
+                // Harness-level dimensions, offered only when the agent did
+                // not report its own: pushing ours alongside a native twin
+                // produced two same-named knobs, and set_config by id could
+                // not tell them apart.
                 probe.config_options.push(permission_mode_config_option());
-                probe.config_options.push(effort_config_option(None, false).unwrap());
-                probe.config_options.push(context_window_config_option(
-                    probe.models.first().and_then(|m| m.capabilities.as_ref()).and_then(|c| c.context_window),
-                ));
-                probe.config_options.push(max_output_tokens_config_option());
+                if !has_option_like(&probe.config_options, &["effort", "thinking", "reasoning", "reasoning_effort", "thinking_budget"]) {
+                    // ACP agents assume reasoning, which is the common case.
+                    probe.config_options.push(effort_config_option(None, false).unwrap());
+                }
+                if !has_option_like(&probe.config_options, &["context_window", "contextwindow", "max_context", "context"]) {
+                    // Only with a real reported number — otherwise the chip
+                    // (and its meter) measures against fiction.
+                    if let Some(window) = probe
+                        .models
+                        .first()
+                        .and_then(|m| m.capabilities.as_ref())
+                        .and_then(|c| c.context_window)
+                    {
+                        probe.config_options.push(context_window_config_option(Some(window)));
+                    }
+                }
+                if !has_option_like(&probe.config_options, &["max_tokens", "max_output_tokens", "maxtokens", "max_completion_tokens"]) {
+                    probe.config_options.push(max_output_tokens_config_option());
+                }
             }
             Err(reason) => probe.session_error = reason,
         }
     }
 
     Some(probe)
+}
+
+/// Whether the agent natively reported an option under any of these ids
+/// (case-insensitive) — used to avoid pushing a harness twin beside it.
+fn has_option_like(options: &[ConfigOption], ids: &[&str]) -> bool {
+    options.iter().any(|option| {
+        let id = option.id.to_lowercase();
+        ids.iter().any(|wanted| id == wanted.to_lowercase())
+    })
 }
 
 async fn send(stdin: &mut tokio::process::ChildStdin, message: Value) -> Option<()> {
@@ -493,6 +516,26 @@ mod tests {
                 "the agent's explanation must survive unedited"
             );
         }
+    }
+
+    #[test]
+    fn native_options_suppress_harness_twins() {
+        use crate::providers::{ConfigMutability, ConfigOption, ConfigOptionType};
+        let native = |id: &str| ConfigOption {
+            id: id.to_string(),
+            name: id.to_string(),
+            category: None,
+            option_type: ConfigOptionType::Select,
+            current_value: None,
+            choices: vec![],
+            allows_custom_value: true,
+            mutability: ConfigMutability::Live,
+        };
+        let options = vec![native("thinking"), native("max_tokens")];
+        assert!(has_option_like(&options, &["effort", "thinking", "reasoning"]));
+        assert!(has_option_like(&options, &["max_tokens", "max_output_tokens"]));
+        assert!(!has_option_like(&options, &["context_window", "context"]));
+        assert!(!has_option_like(&[], &["effort"]));
     }
 
     #[test]

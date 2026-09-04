@@ -29,6 +29,10 @@ pub struct ReachableEndpoint {
     pub port: u16,
     pub secure: bool,
     pub reachable: bool,
+    /// Control-plane label for tailnet sources ("tailscale" or
+    /// "headscale <host>") so clients can say where the path runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 /// Try `tailscale status --json` and extract `Self.DNSName` + `Self.Online` + tailnet name.
@@ -154,6 +158,7 @@ pub async fn resolve_endpoint(
             port,
             secure,
             reachable: true,
+            via: None,
         };
     }
 
@@ -166,11 +171,14 @@ pub async fn resolve_endpoint(
                 port,
                 secure: true,
                 reachable: true,
+                via: None,
             };
         }
     }
 
     if tailscale_enabled {
+        // One control-plane lookup shared by every tailnet source below.
+        let via = super::tailscale::control_plane_label().await;
         if let Some(dns) = magic_dns().await {
             return ReachableEndpoint {
                 base_url: format!("http://{}:{}", dns, port),
@@ -179,6 +187,7 @@ pub async fn resolve_endpoint(
                 port,
                 secure: false,
                 reachable: true,
+                via,
             };
         }
         if let Some(ip) = tailscale_ip_v4().await {
@@ -189,6 +198,7 @@ pub async fn resolve_endpoint(
                 port,
                 secure: false,
                 reachable: true,
+                via,
             };
         }
         if let Some(ip) = tailscale_ip_v6().await {
@@ -200,6 +210,7 @@ pub async fn resolve_endpoint(
                 port,
                 secure: false,
                 reachable: true,
+                via,
             };
         }
         // If tailscale is enabled but we couldn't determine an IP, still report
@@ -214,6 +225,7 @@ pub async fn resolve_endpoint(
                     port,
                     secure: false,
                     reachable: false,
+                    via,
                 };
             }
         }
@@ -227,6 +239,7 @@ pub async fn resolve_endpoint(
             port,
             secure: false,
             reachable: true,
+            via: None,
         };
     }
 
@@ -237,5 +250,145 @@ pub async fn resolve_endpoint(
         port,
         secure: false,
         reachable: true,
+        via: None,
     }
+}
+
+/// Probe every transport method and return them all in priority order so
+/// the dashboard can render a method picker — the user picks the one that
+/// matches where the phone currently is (home LAN, away on cellular,
+/// behind a corporate VPN, etc.).
+///
+/// `reachable` is set on each entry: tailnet sources are marked reachable
+/// only when we actually got an IP / DNS name back. Explicit and Cloudflare
+/// entries are always marked reachable when configured — the daemon
+/// trusts the operator's URL.
+pub async fn list_endpoints(
+    port: u16,
+    cloudflare_host: Option<&str>,
+    tailscale_enabled: bool,
+    tailscale_hostname: Option<&str>,
+    advertise_base_url: Option<&str>,
+) -> Vec<ReachableEndpoint> {
+    let mut out = Vec::new();
+
+    if let Some(url) = advertise_base_url {
+        let trimmed = url.trim_end_matches('/');
+        let secure = trimmed.starts_with("https://");
+        let host = trimmed
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(trimmed)
+            .to_string();
+        out.push(ReachableEndpoint {
+            base_url: trimmed.to_string(),
+            source: EndpointSource::Explicit,
+            host,
+            port,
+            secure,
+            reachable: true,
+            via: None,
+        });
+    }
+
+    if let Some(host) = cloudflare_host.map(str::trim).filter(|h| !h.is_empty()) {
+        out.push(ReachableEndpoint {
+            base_url: format!("https://{host}"),
+            source: EndpointSource::Cloudflare,
+            host: host.to_string(),
+            port,
+            secure: true,
+            reachable: true,
+            via: None,
+        });
+    }
+
+    if tailscale_enabled {
+        let via = super::tailscale::control_plane_label().await;
+        if let Some(dns) = magic_dns().await {
+            out.push(ReachableEndpoint {
+                base_url: format!("http://{dns}:{port}"),
+                source: EndpointSource::TailnetMagicDns,
+                host: dns,
+                port,
+                secure: false,
+                reachable: true,
+                via: via.clone(),
+            });
+        }
+        if let Some(ip) = tailscale_ip_v4().await {
+            out.push(ReachableEndpoint {
+                base_url: format!("http://{ip}:{port}"),
+                source: EndpointSource::TailnetIpv4,
+                host: ip,
+                port,
+                secure: false,
+                reachable: true,
+                via: via.clone(),
+            });
+        }
+        if let Some(ip) = tailscale_ip_v6().await {
+            let bh = bracket_host(&ip);
+            out.push(ReachableEndpoint {
+                base_url: format!("http://{bh}:{port}"),
+                source: EndpointSource::TailnetIpv6,
+                host: ip,
+                port,
+                secure: false,
+                reachable: true,
+                via: via.clone(),
+            });
+        }
+        // Configured MagicDNS name as fallback. Trust the operator's intent:
+        // if they've configured a hostname, the QR should point there even
+        // before tailscaled is up, so the phone is ready when they flip the
+        // switch. If the daemon isn't actually running, the QR just fails
+        // to load — surfaced by the existing error path. Skip if a live
+        // probe already produced the same row, to avoid dupes.
+        if let Some(hostname) = tailscale_hostname.map(str::trim).filter(|h| !h.is_empty() && h.contains('.')) {
+            let already_listed = out.iter().any(|ep| {
+                ep.source == EndpointSource::TailnetMagicDns
+                    && ep.host.eq_ignore_ascii_case(hostname)
+            });
+            if !already_listed {
+                out.push(ReachableEndpoint {
+                    base_url: format!("http://{hostname}:{port}"),
+                    source: EndpointSource::TailnetMagicDns,
+                    host: hostname.to_string(),
+                    port,
+                    secure: false,
+                    reachable: true,
+                    via,
+                });
+            }
+        }
+    }
+
+    if let Some(ip) = lan_ip().await {
+        out.push(ReachableEndpoint {
+            base_url: format!("http://{ip}:{port}"),
+            source: EndpointSource::Lan,
+            host: ip,
+            port,
+            secure: false,
+            reachable: true,
+            via: None,
+        });
+    }
+
+    // Localhost is always an option — useful when the phone is on the same
+    // machine through SSH / Termux, or for the dashboard self-test button.
+    out.push(ReachableEndpoint {
+        base_url: format!("http://localhost:{port}"),
+        source: EndpointSource::Localhost,
+        host: "localhost".to_string(),
+        port,
+        secure: false,
+        reachable: true,
+        via: None,
+    });
+
+    out
 }

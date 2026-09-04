@@ -83,6 +83,11 @@ pub struct SecurityConfig {
 pub struct TunnelConfig {
     pub tailscale: TailscaleConfig,
     pub cloudflare: CloudflareConfig,
+    /// Headscale-specific knobs. `api_key` is the admin-level API token used
+    /// to mint preauth keys; it lives in the same plaintext file as
+    /// `cloudflare.token` and is never echoed back to clients.
+    #[serde(default)]
+    pub headscale: HeadscaleConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +103,31 @@ pub struct CloudflareConfig {
     pub token: Option<String>,
     pub hostname: Option<String>,
     pub tunnel_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadscaleConfig {
+    /// Admin API key (Bearer token) for the Headscale control plane. Used
+    /// only to mint preauth keys so a phone can join the same tailnet.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Headscale user to mint preauth keys for. Must already exist on the
+    /// server (the operator creates it once via `headscale users create`).
+    #[serde(default = "default_headscale_user")]
+    pub user: String,
+}
+
+impl Default for HeadscaleConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            user: default_headscale_user(),
+        }
+    }
+}
+
+fn default_headscale_user() -> String {
+    "agentdeck".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -356,6 +386,7 @@ impl Default for Settings {
                     hostname: None,
                     tunnel_id: None,
                 },
+                headscale: HeadscaleConfig::default(),
             },
             agents: AgentsConfig {
                 claude: AgentBinary {

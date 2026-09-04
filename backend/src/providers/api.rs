@@ -34,7 +34,7 @@
 //! not return a model list, the provider is reported with an empty model
 //! list and `allows_custom_value: true` so any model id can still be used.
 
-use crate::providers::types::{DiscoverySource, Model, ProviderCapabilities, Transport};
+use crate::providers::types::{DiscoverySource, Model, ModelCapabilities, ProviderCapabilities, Transport};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -316,6 +316,8 @@ pub async fn probe_effort_levels(
 
     let mut accepted = Vec::new();
     for level in EFFORT_LEVELS {
+        // Anthropic's Messages API requires max_tokens; without it every
+        // probe fails 400 and the result says nothing about the parameter.
         let body = serde_json::json!({
             "model": model,
             "max_tokens": 1,
@@ -347,6 +349,45 @@ pub async fn probe_effort_levels(
     Some(accepted)
 }
 
+/// Capability numbers reported alongside a model entry, in decreasing order
+/// of reliability. OpenRouter is explicit (`context_length`,
+/// `top_provider.max_completion_tokens`); other endpoints use assorted
+/// spellings. Anything unparseable (strings, floats, zeros) is ignored —
+/// an honest unknown beats a wrong number in the context meter.
+fn capability_u64(item: &serde_json::Value, keys: &[&str]) -> Option<u64> {
+    for key in keys {
+        if let Some(value) = item.get(*key).and_then(|v| v.as_u64()).filter(|v| *v > 0) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn model_capabilities(item: &serde_json::Value) -> Option<ModelCapabilities> {
+    let context_window = capability_u64(item, &["context_length", "context_window", "max_context_window", "max_context"]);
+    let max_output_tokens = capability_u64(
+        item,
+        &["max_completion_tokens", "max_output_tokens", "max_tokens_out", "output_limit"],
+    )
+    .or_else(|| {
+        item.get("top_provider")
+            .and_then(|p| capability_u64(p, &["max_completion_tokens", "max_output_tokens"]))
+    });
+    if context_window.is_none() && max_output_tokens.is_none() {
+        return None;
+    }
+    Some(ModelCapabilities {
+        reasoning: None,
+        tool_calling: None,
+        attachments: None,
+        vision: None,
+        context_window,
+        max_output_tokens,
+        input_types: None,
+        output_types: None,
+    })
+}
+
 /// Extract model ids from a JSON API response.
 ///
 /// Accepts both OpenAI (`{ "data": [{ "id": "…" }] }`) and Anthropic
@@ -368,6 +409,14 @@ fn parse_models(body: &serde_json::Value) -> Vec<Model> {
                     }
                     if let Some(owned) = item.get("owned_by").and_then(|v| v.as_str()) {
                         model = model.with_model_provider(owned.to_string());
+                    }
+                    // Real capability data when the endpoint reports it
+                    // (OpenRouter's `context_length`, assorted `context_window`
+                    // spellings, per-model output caps). Without this every
+                    // model shows "Not set" and the context meter has nothing
+                    // to measure against.
+                    if let Some(capabilities) = model_capabilities(item) {
+                        model.capabilities = Some(capabilities);
                     }
                     models.push(model);
                 }
@@ -441,22 +490,30 @@ pub fn build_api_descriptor(
     let mut config_options = vec![model_config_option(&result.models)];
 
     // Effort options: the probe determined which reasoning_effort levels the
-    // API actually accepts. This replaces the transport-type guess — the only
-    // way to know whether the endpoint supports the field is to try it.
-    if let Some(effort) = crate::providers::types::effort_config_option_from_levels(
-        result.effort_levels.as_deref(),
-        result.capabilities.reasoning,
-        matches!(provider.transport, ApiTransport::AnthropicCompatible),
-    ) {
-        config_options.push(effort);
+    // API actually accepts — but only on the OpenAI-compatible path, which is
+    // the only one that sends the field. Anthropic-compatible endpoints never
+    // receive it (their API rejects the parameter), so offering the knob
+    // there would be a control wired to nothing, however the probe reads.
+    if matches!(provider.transport, ApiTransport::OpenAiCompatible) {
+        if let Some(effort) = crate::providers::types::effort_config_option_from_levels(
+            result.effort_levels.as_deref(),
+            result.capabilities.reasoning,
+            false,
+        ) {
+            config_options.push(effort);
+        }
     }
-    config_options.push(crate::providers::types::context_window_config_option(
-        result
-            .models
-            .first()
-            .and_then(|m| m.capabilities.as_ref())
-            .and_then(|c| c.context_window),
-    ));
+    // Context window only with provider-reported data: without a real
+    // number the chip is fiction — and the meter it feeds measures against
+    // nothing. max_tokens stays always: API turns genuinely send it.
+    if let Some(window) = result
+        .models
+        .first()
+        .and_then(|m| m.capabilities.as_ref())
+        .and_then(|c| c.context_window)
+    {
+        config_options.push(crate::providers::types::context_window_config_option(Some(window)));
+    }
     config_options.push(crate::providers::types::max_output_tokens_config_option());
     config_options.push(permission_option);
 
@@ -549,6 +606,95 @@ mod tests {
         let body = serde_json::json!({});
         let models = parse_models(&body);
         assert!(models.is_empty());
+    }
+
+    #[test]
+    fn parse_models_extracts_real_context_windows() {
+        let body = serde_json::json!({
+            "data": [
+                { "id": "m1", "context_length": 128000, "top_provider": { "max_completion_tokens": 4096 } },
+                { "id": "m2", "context_window": 64000 },
+                { "id": "m3" },
+            ]
+        });
+        let models = parse_models(&body);
+        assert_eq!(models.len(), 3);
+        let caps = models[0].capabilities.as_ref().expect("m1 capabilities");
+        assert_eq!(caps.context_window, Some(128000));
+        assert_eq!(caps.max_output_tokens, Some(4096));
+        assert_eq!(
+            models[1].capabilities.as_ref().and_then(|c| c.context_window),
+            Some(64000)
+        );
+        assert!(models[2].capabilities.is_none());
+    }
+
+    #[test]
+    fn anthropic_transport_never_offers_effort() {
+        // The turn code never sends reasoning_effort on this path, so the
+        // knob must not exist no matter what a probe claims to accept.
+        let provider = ApiProvider {
+            id: "p".to_string(),
+            name: "P".to_string(),
+            api_url: "https://example.com".to_string(),
+            api_key: None,
+            transport: ApiTransport::AnthropicCompatible,
+            models: vec![],
+            default_model: None,
+            extra_headers: BTreeMap::new(),
+            max_output_tokens: None,
+        };
+        let result = ApiProbeResult {
+            models: vec![],
+            capabilities: ProviderCapabilities::default(),
+            error: None,
+            effort_levels: Some(vec!["low".to_string(), "medium".to_string()]),
+        };
+        let descriptor = build_api_descriptor(&provider, &result);
+        assert!(descriptor.config_options.iter().all(|o| o.id != "effort"));
+    }
+
+    #[test]
+    fn context_window_offered_only_with_reported_data() {
+        let provider = ApiProvider {
+            id: "p".to_string(),
+            name: "P".to_string(),
+            api_url: "https://example.com".to_string(),
+            api_key: None,
+            transport: ApiTransport::OpenAiCompatible,
+            models: vec![],
+            default_model: None,
+            extra_headers: BTreeMap::new(),
+            max_output_tokens: None,
+        };
+        let with_data = ApiProbeResult {
+            models: vec![{
+                let mut m = Model::opaque("m", DiscoverySource::ProviderApi);
+                m.capabilities = Some(ModelCapabilities {
+                    context_window: Some(128000),
+                    ..Default::default()
+                });
+                m
+            }],
+            capabilities: ProviderCapabilities::default(),
+            error: None,
+            effort_levels: Some(vec![]),
+        };
+        let ids = |d: &crate::providers::types::ProviderDescriptor| {
+            d.config_options.iter().map(|o| o.id.clone()).collect::<Vec<_>>()
+        };
+        let descriptor = build_api_descriptor(&provider, &with_data);
+        assert!(ids(&descriptor).contains(&"context_window".to_string()));
+        assert!(ids(&descriptor).contains(&"max_tokens".to_string()));
+
+        let bare = ApiProbeResult {
+            models: vec![Model::opaque("m", DiscoverySource::ProviderApi)],
+            ..Default::default()
+        };
+        let descriptor = build_api_descriptor(&provider, &bare);
+        assert!(!ids(&descriptor).contains(&"context_window".to_string()));
+        // max_tokens is consumed by every API turn, so it always stays.
+        assert!(ids(&descriptor).contains(&"max_tokens".to_string()));
     }
 
     #[test]

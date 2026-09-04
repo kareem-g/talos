@@ -496,6 +496,47 @@ pub(crate) fn effort_config_option(reasoning: Option<bool>, extended: bool) -> O
     })
 }
 
+/// Build the effort config option from a CLI-reported level list (e.g.
+/// `claude --help`). Every reported level is kept verbatim — it came from
+/// the real binary, so it is valid by construction. Known levels get their
+/// descriptions; unknown ones get a title-cased name. Empty means the CLI
+/// has no effort dimension: no option, no dead knob.
+pub(crate) fn effort_config_option_from_names(levels: &[String]) -> Option<ConfigOption> {
+    if levels.is_empty() {
+        return None;
+    }
+    let choices: Vec<ConfigChoice> = levels
+        .iter()
+        .map(|level| {
+            let (name, description) = match level.as_str() {
+                "low" => ("Low".to_string(), Some("Fast, cheaper reasoning".to_string())),
+                "medium" => ("Medium".to_string(), Some("Balanced reasoning".to_string())),
+                "high" => ("High".to_string(), Some("Deep reasoning, slower".to_string())),
+                "xhigh" => ("X-High".to_string(), Some("Extended deep reasoning".to_string())),
+                "max" => ("Max".to_string(), Some("Maximum reasoning budget".to_string())),
+                _ => {
+                    let mut titled = level.clone();
+                    if let Some(first) = titled.get_mut(0..1) {
+                        first.make_ascii_uppercase();
+                    }
+                    (titled, None)
+                }
+            };
+            ConfigChoice { value: level.clone(), name, description }
+        })
+        .collect();
+    Some(ConfigOption {
+        id: "effort".to_string(),
+        name: "Effort".to_string(),
+        category: Some("model".to_string()),
+        option_type: ConfigOptionType::Select,
+        current_value: None,
+        choices,
+        allows_custom_value: true,
+        mutability: ConfigMutability::Live,
+    })
+}
+
 /// Build the effort config option from an API-probed list of accepted levels.
 /// `Some(levels)` shows exactly those levels; `Some(empty)` returns `None` (the
 /// API rejects the parameter entirely); `None` (probe couldn't tell) falls back

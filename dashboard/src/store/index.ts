@@ -143,6 +143,11 @@ interface StoreState {
    * killing the whole session.
    */
   interruptSession: (sessionId: string) => void
+  /**
+   * Re-fetch configs for every session currently holding one. Used after
+   * reconnect so config chips reflect fresh provider descriptors.
+   */
+  refreshConfigs: () => Promise<void>
   /** Restart the agent so a stopped or imported session can continue. */
   resumeSession: (sessionId: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<void>
@@ -537,6 +542,26 @@ export const useStore = create<StoreState>((set, get) => ({
     socket.interruptSession(sessionId)
   },
 
+  async refreshConfigs() {
+    const ids = Object.keys(get().configs)
+    if (ids.length === 0) return
+    const results = await Promise.all(
+      ids.map((sessionId) =>
+        configApi
+          .get(sessionId)
+          .then((config) => ({ sessionId, config }) as const)
+          .catch(() => null),
+      ),
+    )
+    set((state) => {
+      const configs = { ...state.configs }
+      for (const result of results) {
+        if (result) configs[result.sessionId] = result.config
+      }
+      return { configs }
+    })
+  },
+
   /**
    * Restart the agent for a stopped or imported session.
    *
@@ -771,7 +796,12 @@ export const useStore = create<StoreState>((set, get) => ({
       if (connection === 'connected' && wasOffline) {
         // Resynchronize with backend truth after interruption — replay covers events but
         // Session rows may have changed (status, new sessions) while we were away.
+        // Provider descriptors and per-session configs go stale the same way
+        // (e.g. daemon restarted with new probe results), so refresh those
+        // too — otherwise chips keep showing yesterday's choices.
         void get().loadSessions()
+        void get().loadProviders()
+        void get().refreshConfigs()
         void import('@/lib/rooms').then(({ syncRooms }) => syncRooms())
       }
     })

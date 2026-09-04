@@ -949,6 +949,21 @@ async fn resume_acp_session(
         Ok(info) => {
             state.session_manager.set_session_pid(&id, info.pid).await;
             let _ = state.session_manager.set_resume_command(&id, "").await;
+            // Re-apply choices made while stopped (model/effort): without
+            // this a "NextRun" promise was stored but never honored.
+            let pending = state.session_manager.pending_config(&id).await.unwrap_or_default();
+            let requested: Vec<(String, String)> = ["model", "effort"]
+                .into_iter()
+                .filter_map(|key| {
+                    pending
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, v)| (key.to_string(), v.clone()))
+                })
+                .collect();
+            if !requested.is_empty() {
+                apply_requested_acp_config(state, &session, requested, &info.config_options).await;
+            }
             if let Err(error) = state
                 .session_manager
                 .update_status(&id, SessionStatus::Idle)
@@ -1945,6 +1960,66 @@ pub(crate) async fn spawn_session(
     finish_spawn(state, session, project, prompt.as_deref(), command, requested_model, requested_effort, false).await
 }
 
+/// Apply generic model/effort requests against an ACP agent's own
+/// `session/new` option report — shared by spawn and resume so a choice made
+/// while stopped is not silently dropped on the way back up. Matches by
+/// option id, or by category so a provider naming its reasoning dimension
+/// something else still receives the request.
+async fn apply_requested_acp_config(
+    state: &AppState,
+    session: &crate::sessions::Session,
+    requested: Vec<(String, String)>,
+    options: &[crate::providers::ConfigOption],
+) {
+    for (config_id, value) in requested {
+        let target = options
+            .iter()
+            .find(|option| option.id == config_id)
+            .or_else(|| {
+                options
+                    .iter()
+                    .find(|option| option.category.as_deref() == Some(config_id.as_str()))
+            })
+            .map(|option| option.id.clone());
+
+        match target {
+            Some(option_id) => {
+                if let Err(error) = state
+                    .acp_manager
+                    .set_config_option(&session.id, &option_id, &value)
+                    .await
+                {
+                    // A rejected model is not a reason to abandon the session,
+                    // but the user must know their choice did not take effect.
+                    tracing::warn!(
+                        "[AgentDeck][ACP][{}] {} rejected {}={}: {}",
+                        session.id, session.agent, option_id, value, error
+                    );
+                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                        &session.id,
+                        "session_config_rejected",
+                        serde_json::json!({
+                            "config_id": option_id,
+                            "value": value,
+                            "message": error.to_string(),
+                        }),
+                    ));
+                }
+            }
+            None => {
+                tracing::info!(
+                    "[AgentDeck][ACP][{}] {} exposes no '{}' setting; request recorded only",
+                    session.id, session.agent, config_id
+                );
+                let _ = state
+                    .session_manager
+                    .set_pending_config(&session.id, &config_id, &value)
+                    .await;
+            }
+        }
+    }
+}
+
 /// ACP spawn path: launch the subprocess, complete the initialize/session/new
 /// handshake, then submit the initial prompt over the protocol. The process
 /// stays alive so follow-up messages reuse the same conversation.
@@ -2010,57 +2085,8 @@ async fn finish_acp_spawn(
         .into_iter()
         .filter_map(|(id, value)| value.map(|value| (id.to_string(), value)))
         .collect();
+    apply_requested_acp_config(state, &session, requested, &info.config_options).await;
 
-    for (config_id, value) in requested {
-        // Match by option id, or by category so a provider naming its reasoning
-        // dimension something else still receives the request.
-        let target = info
-            .config_options
-            .iter()
-            .find(|option| option.id == config_id)
-            .or_else(|| {
-                info.config_options
-                    .iter()
-                    .find(|option| option.category.as_deref() == Some(config_id.as_str()))
-            })
-            .map(|option| option.id.clone());
-
-        match target {
-            Some(option_id) => {
-                if let Err(error) = state
-                    .acp_manager
-                    .set_config_option(&session.id, &option_id, &value)
-                    .await
-                {
-                    // A rejected model is not a reason to abandon the session,
-                    // but the user must know their choice did not take effect.
-                    tracing::warn!(
-                        "[AgentDeck][ACP][{}] {} rejected {}={}: {}",
-                        session.id, session.agent, option_id, value, error
-                    );
-                    state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
-                        &session.id,
-                        "session_config_rejected",
-                        serde_json::json!({
-                            "config_id": option_id,
-                            "value": value,
-                            "message": error.to_string(),
-                        }),
-                    ));
-                }
-            }
-            None => {
-                tracing::info!(
-                    "[AgentDeck][ACP][{}] {} exposes no '{}' setting; request recorded only",
-                    session.id, session.agent, config_id
-                );
-                let _ = state
-                    .session_manager
-                    .set_pending_config(&session.id, &config_id, &value)
-                    .await;
-            }
-        }
-    }
 
     if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
         let mut clean_prompt = prompt.trim().to_string();
@@ -3003,19 +3029,26 @@ pub struct BrowserEventQuery {
 pub async fn tunnel_start(
     State(state): State<Arc<AppState>>,
     Path(kind): Path<String>,
+    body: Option<Json<serde_json::Value>>,
 ) -> Response {
-    run_tunnel_action(&state, &kind, true).await
+    run_tunnel_action(&state, &kind, true, body.map(|b| b.0)).await
 }
 
 /// POST /api/tunnel/{kind}/stop
 pub async fn tunnel_stop(
     State(state): State<Arc<AppState>>,
     Path(kind): Path<String>,
+    body: Option<Json<serde_json::Value>>,
 ) -> Response {
-    run_tunnel_action(&state, &kind, false).await
+    run_tunnel_action(&state, &kind, false, body.map(|b| b.0)).await
 }
 
-async fn run_tunnel_action(state: &Arc<AppState>, kind: &str, start: bool) -> Response {
+async fn run_tunnel_action(
+    state: &Arc<AppState>,
+    kind: &str,
+    start: bool,
+    body: Option<serde_json::Value>,
+) -> Response {
     let cfg = state.config.read().await;
     let settings = cfg.settings().tunnel.clone();
     drop(cfg);
@@ -3027,20 +3060,132 @@ async fn run_tunnel_action(state: &Arc<AppState>, kind: &str, start: bool) -> Re
                     settings.tailscale.hostname.clone(),
                 );
             if start {
-                crate::tunnel::TunnelProvider::start(&provider).await
+                let info = crate::tunnel::TunnelProvider::start(&provider).await;
+                // A successful Up means the tailnet is the way phones reach
+                // this station: flip the flag so pairing QRs, endpoint
+                // resolution, and diagnostics prefer it. Persisted.
+                if matches!(info, Ok(ref info) if matches!(info.status, crate::tunnel::TunnelStatus::Connected)) {
+                    let mut cfg = state.config.write().await;
+                    cfg.settings_mut().tunnel.tailscale.enabled = true;
+                    let _ = cfg.save().await;
+                }
+                info
+            } else {
+                let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
+                crate::tunnel::TunnelProvider::status(&provider).await
+            }
+        }
+        // Headscale: POST /api/tunnel/headscale/start
+        // {login_server, auth_key?, api_key?, user?}. Without a server it
+        // just reports — a node already on Headscale shows Connected with
+        // nothing to type. `api_key` and `user` are kept in-memory only for
+        // the duration of the request so the preauth-key mint has the
+        // credentials it needs; the persistent copy lives in settings.
+        "headscale" => {
+            let login_server = body
+                .as_ref()
+                .and_then(|b| b.get("login_server").or_else(|| b.get("loginServer")))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let auth_key = body
+                .as_ref()
+                .and_then(|b| b.get("auth_key").or_else(|| b.get("authKey")))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let request_api_key = body
+                .as_ref()
+                .and_then(|b| b.get("api_key").or_else(|| b.get("apiKey")))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty());
+            let request_user = body
+                .as_ref()
+                .and_then(|b| b.get("user"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty());
+            let stored = &settings.headscale;
+            let api_key = request_api_key.or_else(|| stored.api_key.clone());
+            let user = request_user.unwrap_or_else(|| stored.user.clone());
+            let provider = crate::tunnel::headscale::HeadscaleProvider::new(
+                login_server,
+                auth_key,
+                settings.tailscale.hostname.clone(),
+                api_key,
+                Some(user),
+            );
+            if start {
+                let info = crate::tunnel::TunnelProvider::start(&provider).await;
+                // A successful Headscale login means the tailnet is the way
+                // phones reach this station: flip the flag so pairing QRs,
+                // endpoint resolution, and diagnostics prefer it. Persisted —
+                // logout keeps the flag (resolution falls through to LAN
+                // when no tailnet is up, so nothing breaks).
+                if matches!(info, Ok(ref info) if matches!(info.status, crate::tunnel::TunnelStatus::Connected)) {
+                    let mut cfg = state.config.write().await;
+                    cfg.settings_mut().tunnel.tailscale.enabled = true;
+                    let _ = cfg.save().await;
+                }
+                info
             } else {
                 let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
                 crate::tunnel::TunnelProvider::status(&provider).await
             }
         }
         "cloudflare" => {
-            let token = settings.cloudflare.token.clone().unwrap_or_default();
-            let hostname = settings.cloudflare.hostname.clone();
+            // Cloudflare: POST /api/tunnel/cloudflare/start
+            // Body: { token?, hostname? }. `token` overrides whatever is in
+            // settings; `hostname` overrides the configured one. Whichever
+            // arrives in the body is persisted to settings so subsequent
+            // bring-ups (and /api/tunnel/status) don't need them re-typed.
+            // A successful start flips `cloudflare.enabled = true` so
+            // /api/tunnel/status, /api/tunnel/endpoints, and the QR picker
+            // see the route. The token in this code path is the one the
+            // operator just pasted in; it stays in-memory unless we save.
+            let request_token = body
+                .as_ref()
+                .and_then(|b| b.get("token").or_else(|| b.get("token")))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty());
+            let request_hostname = body
+                .as_ref()
+                .and_then(|b| b.get("hostname").or_else(|| b.get("hostname")))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty());
+            let token = request_token
+                .clone()
+                .or_else(|| settings.cloudflare.token.clone())
+                .unwrap_or_default();
+            let hostname = request_hostname
+                .clone()
+                .or_else(|| settings.cloudflare.hostname.clone());
             let provider = crate::tunnel::cloudflare::CloudflareProvider::new(token, hostname);
             if start {
-                crate::tunnel::TunnelProvider::start(&provider).await
+                let info = crate::tunnel::TunnelProvider::start(&provider).await;
+                // A successful start means Cloudflare is the way phones reach
+                // this station: flip the flag and persist whatever the operator
+                // just provided so a later restart keeps using it.
+                if matches!(info, Ok(ref info) if matches!(info.status, crate::tunnel::TunnelStatus::Connected)) {
+                    let mut cfg = state.config.write().await;
+                    cfg.settings_mut().tunnel.cloudflare.enabled = true;
+                    if request_token.is_some() {
+                        cfg.settings_mut().tunnel.cloudflare.token = request_token;
+                    }
+                    if request_hostname.is_some() {
+                        cfg.settings_mut().tunnel.cloudflare.hostname = request_hostname;
+                    }
+                    let _ = cfg.save().await;
+                }
+                info
             } else {
                 let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
+                // Flip the flag off so the status/endpoints/QR picker stop
+                // offering a route that's just been torn down.
+                let mut cfg = state.config.write().await;
+                cfg.settings_mut().tunnel.cloudflare.enabled = false;
+                let _ = cfg.save().await;
                 crate::tunnel::TunnelProvider::status(&provider).await
             }
         }
@@ -3050,23 +3195,159 @@ async fn run_tunnel_action(state: &Arc<AppState>, kind: &str, start: bool) -> Re
     };
 
     match info {
-        Ok(info) => Json(json!({
-            "kind": kind,
-            "status": match info.status {
-                crate::tunnel::TunnelStatus::Disconnected => "disconnected",
-                crate::tunnel::TunnelStatus::Connecting => "connecting",
-                crate::tunnel::TunnelStatus::Connected => "connected",
-                crate::tunnel::TunnelStatus::Error(_) => "error",
-            },
-            "url": info.url,
-            "ip": info.ip,
-            "error": match info.status {
-                crate::tunnel::TunnelStatus::Error(message) => Some(message),
-                _ => None,
-            },
+        Ok(info) => {
+            // Name the control plane for tailnet kinds so the UI can say
+            // "via Headscale" instead of assuming Tailscale.com.
+            let via = if matches!(
+                info.kind,
+                crate::tunnel::TunnelKind::Tailscale | crate::tunnel::TunnelKind::Headscale
+            ) {
+                crate::tunnel::tailscale::control_plane_label().await
+            } else {
+                None
+            };
+            // Extract the structured error kind that the headscale provider
+            // embeds as `"<kind>:<message>"` (kept in-band so the existing
+            // TunnelStatus::Error(String) shape still owns the human text).
+            let (status_string, error_message, error_kind) =
+                match info.status {
+                    crate::tunnel::TunnelStatus::Error(message) => {
+                        let (kind, rest) = split_kind_and_message(&message);
+                        ("error", Some(rest.to_string()), Some(kind.to_string()))
+                    }
+                    crate::tunnel::TunnelStatus::Connected => ("connected", None, None),
+                    crate::tunnel::TunnelStatus::Connecting => ("connecting", None, None),
+                    crate::tunnel::TunnelStatus::Disconnected => ("disconnected", None, None),
+                };
+            Json(json!({
+                "kind": kind,
+                "status": status_string,
+                "url": info.url,
+                "ip": info.ip,
+                "via": via,
+                "token": info.token,
+                "pair": info.pair,
+                "error": error_message,
+                "error_kind": error_kind,
+            }))
+            .into_response()
+        }
+        Err(error) => Json(json!({ "error": error.to_string() })).into_response(),
+    }
+}
+
+/// Split the `<kind>:<message>` shape produced by the headscale provider's
+/// `start()` failure path. Unknown kinds fall back to `tailscale_failed`.
+fn split_kind_and_message(message: &str) -> (&str, &str) {
+    let known = [
+        "needs_authorization",
+        "unreachable_control_plane",
+        "invalid_auth_key",
+        "daemon_not_running",
+        "tailscale_not_installed",
+    ];
+    if let Some((kind, rest)) = message.split_once(':') {
+        if known.contains(&kind) {
+            return (kind, rest);
+        }
+    }
+    ("tailscale_failed", message)
+}
+
+/// POST /api/tunnel/headscale/authorize — promote the current user to
+/// tailscale operator (pkexec/sudo). Used by the dashboard's "Authorize"
+/// button to unblock the `tailscale up` path.
+pub async fn tunnel_authorize_headscale(
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match crate::tunnel::tailscale::ensure_operator().await {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => Json(json!({
+            "ok": false,
+            "error": "Could not find a working privilege elevator (pkexec/sudo/doas). Open a terminal and run `sudo tailscale set --operator=$USER` once.",
         }))
         .into_response(),
-        Err(error) => Json(json!({ "error": error.to_string() })).into_response(),
+        Err(error) => Json(json!({ "ok": false, "error": error.to_string() })).into_response(),
+    }
+}
+
+/// POST /api/tunnel/headscale/preauth — mint a fresh preauth key without
+/// re-running `tailscale up`. Lets the dashboard rotate the QR after the
+/// initial login without making the user reconnect.
+pub async fn tunnel_preauth_headscale(
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let cfg = state.config.read().await;
+    let settings = cfg.settings().tunnel.clone();
+    drop(cfg);
+
+    let api_key = body
+        .as_ref()
+        .and_then(|b| b.get("api_key").or_else(|| b.get("apiKey")))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| settings.headscale.api_key.clone());
+    let Some(api_key) = api_key else {
+        return Json(json!({
+            "ok": false,
+            "error": "No Headscale API key configured. Paste it into the Headscale row above.",
+        }))
+        .into_response();
+    };
+    let login_server = body
+        .as_ref()
+        .and_then(|b| b.get("login_server").or_else(|| b.get("loginServer")))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty());
+    let user = body
+        .as_ref()
+        .and_then(|b| b.get("user"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| settings.headscale.user.clone());
+
+    let Some(login_server) = login_server else {
+        return Json(json!({
+            "ok": false,
+            "error": "Need a Headscale control URL — fill in the field above first.",
+        }))
+        .into_response();
+    };
+
+    let client = crate::headscale::HeadscaleClient::new(login_server.trim(), api_key.trim());
+    match client
+        .create_preauth_key(&user, true, false, None)
+        .await
+    {
+        Ok(preauth) => {
+            let payload = crate::headscale::pair_payload(
+                login_server.trim(),
+                &settings.tailscale.hostname,
+                &preauth.key,
+            );
+            Json(json!({
+                "ok": true,
+                "key": preauth.key,
+                "expires_at": preauth.expires_at,
+                "qr_payload": payload.qr_payload,
+                "fallback_url": payload.fallback_url,
+                "tailnet": payload.tailnet,
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            let kind = match &error {
+                crate::headscale::HeadscaleError::InvalidApiKey => "invalid_api_key",
+                crate::headscale::HeadscaleError::Unreachable(_) => "unreachable_control_plane",
+                _ => "preauth_failed",
+            };
+            Json(json!({ "ok": false, "error_kind": kind, "error": error.to_string() }))
+                .into_response()
+        }
     }
 }
 
@@ -3107,12 +3388,49 @@ pub async fn tunnel_status(
         json!({ "enabled": false })
     };
 
-    // Check Cloudflare
+    // Headscale is live state, not a config flag: report the control plane
+    // whenever tailscale runs, so the UI can offer login or show status.
+    let headscale_status = {
+        let via = crate::tunnel::tailscale::control_plane_label().await;
+        let ip = tokio::process::Command::new("ip")
+            .args(["-4", "-o", "addr", "show", "dev", "tailscale0"])
+            .output()
+            .await
+            .ok()
+            .and_then(|o| {
+                if !o.status.success() {
+                    return None;
+                }
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                for line in stdout.lines() {
+                    for token in line.split_whitespace() {
+                        let addr = token.split('/').next().unwrap_or(token);
+                        if addr.parse::<std::net::Ipv4Addr>().is_ok() && !addr.starts_with("127.") {
+                            return Some(addr.to_string());
+                        }
+                    }
+                }
+                None
+            });
+        json!({ "via": via, "ip": ip, "connected": ip.is_some() })
+    };
+
+    // Check Cloudflare — named tunnels expose their hostname from settings;
+    // quick tunnels (trycloudflare) write their URL to a cache file that we
+    // read here so the URL survives the original process detaching.
     let cloudflare_status = if cfg.settings().tunnel.cloudflare.enabled {
+        let url = cfg
+            .settings()
+            .tunnel
+            .cloudflare
+            .hostname
+            .as_ref()
+            .map(|h| format!("https://{}", h))
+            .or_else(crate::tunnel::cloudflare::CloudflareProvider::cached_url);
         json!({
             "enabled": true,
             "hostname": cfg.settings().tunnel.cloudflare.hostname,
-            "url": cfg.settings().tunnel.cloudflare.hostname.as_ref().map(|h| format!("https://{}", h)),
+            "url": url,
         })
     } else {
         json!({ "enabled": false })
@@ -3120,6 +3438,7 @@ pub async fn tunnel_status(
 
     Json(json!({
         "tailscale": tailscale_status,
+        "headscale": headscale_status,
         "cloudflare": cloudflare_status,
     }))
 }
@@ -3176,10 +3495,76 @@ pub async fn tunnel_diagnostics(
         json!({ "enabled": false })
     };
 
+    let cloudflare_url = cloudflare_host
+        .map(|h| format!("https://{}", h))
+        .or_else(crate::tunnel::cloudflare::CloudflareProvider::cached_url);
     Json(json!({
         "endpoint": endpoint,
         "tailscale": tailscale_diag,
-        "cloudflare": cloudflare_host.map(|h| json!({ "enabled": true, "hostname": h, "url": format!("https://{}", h) })).unwrap_or(json!({ "enabled": false })),
+        "cloudflare": cloudflare_url.map(|u| json!({ "enabled": true, "hostname": u.trim_start_matches("https://").trim_start_matches("http://").split('/').next().unwrap_or(""), "url": u })).unwrap_or(json!({ "enabled": false })),
+    }))
+}
+
+/// GET /api/tunnel/endpoints — every reachable transport method in priority
+/// order, so the dashboard can render a "pick where the phone is" picker
+/// with a QR per option (LAN, Tailnet MagicDNS, Tailnet IPv4, Tailnet IPv6,
+/// Cloudflare, Localhost). The top entry matches `tunnel_diagnostics`'s
+/// `endpoint` field, so anything pointing at `/api/tunnel/diagnostics`
+/// keeps working.
+pub async fn tunnel_endpoints(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+    let cloudflare_host = if cfg.settings().tunnel.cloudflare.enabled {
+        cfg.settings().tunnel.cloudflare.hostname.clone()
+    } else {
+        None
+    };
+    let tailscale_enabled = cfg.settings().tunnel.tailscale.enabled;
+    let tailscale_hostname = cfg.settings().tunnel.tailscale.hostname.clone();
+    let port = cfg.settings().server.port;
+    drop(cfg);
+
+    let mut endpoints = crate::tunnel::resolver::list_endpoints(
+        port,
+        cloudflare_host.as_deref(),
+        tailscale_enabled,
+        Some(&tailscale_hostname),
+        None,
+    )
+    .await;
+
+    // Quick tunnels (trycloudflare) have no hostname in settings, so the
+    // resolver skips them. If the cache has a quick-tunnel URL, prepend a
+    // cloudflare endpoint so the QR picker offers it.
+    if cloudflare_host.is_none() {
+        if let Some(url) = crate::tunnel::cloudflare::CloudflareProvider::cached_url() {
+            let host = url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            endpoints.insert(
+                0,
+                crate::tunnel::resolver::ReachableEndpoint {
+                    base_url: url.clone(),
+                    source: crate::tunnel::resolver::EndpointSource::Cloudflare,
+                    host,
+                    port,
+                    secure: true,
+                    reachable: true,
+                    via: None,
+                },
+            );
+        }
+    }
+
+    Json(json!({
+        "port": port,
+        "endpoints": endpoints,
+        "best": endpoints.first().cloned(),
     }))
 }
 
@@ -3259,7 +3644,7 @@ pub async fn initiate_pairing(
     let port = cfg.settings().server.port;
     drop(cfg);
 
-    let endpoint = crate::tunnel::resolver::resolve_endpoint(
+    let mut endpoints = crate::tunnel::resolver::list_endpoints(
         port,
         cloudflare_host.as_deref(),
         tailscale_enabled,
@@ -3268,10 +3653,61 @@ pub async fn initiate_pairing(
     )
     .await;
 
-    let qr_data = format!(
-        "{}/mobile/pair?offer={}&secret={}",
-        endpoint.base_url, offer_id, offer_secret
-    );
+    // Quick tunnels (trycloudflare) have no hostname in settings, so the
+    // resolver skips them. If the cache has a quick-tunnel URL, prepend a
+    // cloudflare endpoint so the QR picker offers it.
+    if cloudflare_host.is_none() {
+        if let Some(url) = crate::tunnel::cloudflare::CloudflareProvider::cached_url() {
+            let host = url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            endpoints.insert(
+                0,
+                crate::tunnel::resolver::ReachableEndpoint {
+                    base_url: url,
+                    source: crate::tunnel::resolver::EndpointSource::Cloudflare,
+                    host,
+                    port,
+                    secure: true,
+                    reachable: true,
+                    via: None,
+                },
+            );
+        }
+    }
+
+    // Build a QR payload per endpoint. The phone only needs the offer id +
+    // secret; the host part just has to be a URL the phone can open from
+    // wherever it currently is (LAN, away on cellular, etc.).
+    let qr_options: Vec<serde_json::Value> = endpoints
+        .iter()
+        .map(|ep| {
+            let qr_data = format!(
+                "{}/mobile/pair?offer={}&secret={}",
+                ep.base_url, offer_id, offer_secret
+            );
+            json!({
+                "source": ep.source,
+                "label": endpoint_label(ep),
+                "host": ep.host,
+                "port": ep.port,
+                "secure": ep.secure,
+                "reachable": ep.reachable,
+                "via": ep.via,
+                "qr_data": qr_data,
+                "base_url": ep.base_url,
+            })
+        })
+        .collect();
+
+    let best = endpoints.first();
+    let default_qr_data = best
+        .map(|ep| format!("{}/mobile/pair?offer={}&secret={}", ep.base_url, offer_id, offer_secret))
+        .unwrap_or_default();
 
     let expires_at = chrono::Utc::now() + chrono::Duration::minutes(2);
 
@@ -3284,12 +3720,31 @@ pub async fn initiate_pairing(
 
     Json(json!({
         "offer_id": offer_id,
-        "qr_data": qr_data,
+        "qr_data": default_qr_data,
+        "qr_options": qr_options,
         "fingerprint": fingerprint,
         "expires_at": expires_at.to_rfc3339(),
         "status": "waiting_for_device",
-        "endpoint": endpoint,
+        "endpoint": best.cloned(),
     }))
+}
+
+/// Human label for an endpoint, used as the chip text on each picker row.
+fn endpoint_label(ep: &crate::tunnel::resolver::ReachableEndpoint) -> String {
+    use crate::tunnel::resolver::EndpointSource::*;
+    match ep.source {
+        Explicit => "Custom URL".to_string(),
+        Cloudflare => format!("Cloudflare · {}", ep.host),
+        TailnetMagicDns => match &ep.via {
+            Some(via) if via.starts_with("headscale") => format!("Headscale · {}", ep.host),
+            Some(_) => format!("Tailnet · {}", ep.host),
+            None => ep.host.clone(),
+        },
+        TailnetIpv4 => format!("Tailnet IPv4 · {}", ep.host),
+        TailnetIpv6 => format!("Tailnet IPv6 · {}", ep.host),
+        Lan => format!("LAN · {}", ep.host),
+        Localhost => "This machine".to_string(),
+    }
 }
 
 pub async fn verify_pairing(
@@ -3406,8 +3861,20 @@ pub async fn update_settings(
             if let Some(enabled) = cf.get("enabled").and_then(|v| v.as_bool()) {
                 cfg.settings_mut().tunnel.cloudflare.enabled = enabled;
             }
-            if let Some(token) = cf.get("token").and_then(|v| v.as_str()) {
-                cfg.settings_mut().tunnel.cloudflare.token = Some(token.to_string());
+            if cf.get("token").is_some() {
+                // Accept both a string and an explicit null (to clear).
+                cfg.settings_mut().tunnel.cloudflare.token = cf
+                    .get("token")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+            }
+            if cf.get("hostname").is_some() {
+                // Accept both a string and an explicit null (to clear).
+                cfg.settings_mut().tunnel.cloudflare.hostname = cf
+                    .get("hostname")
+                    .and_then(|v| v.as_str())
+                    .filter(|h| !h.trim().is_empty())
+                    .map(str::to_string);
             }
         }
     }
