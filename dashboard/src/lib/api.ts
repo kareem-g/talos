@@ -986,6 +986,13 @@ export interface TunnelSettings {
   cloudflare: CloudflareSettings
 }
 
+export interface BuiltinEngineSettings {
+  summarizer?: string | null
+  planner?: string | null
+  reviewer?: string | null
+  worker?: string | null
+}
+
 export interface SettingsPayload {
   tunnel?: {
     cloudflare?: {
@@ -994,11 +1001,14 @@ export interface SettingsPayload {
       hostname?: string
     }
   }
+  agents?: {
+    builtin?: BuiltinEngineSettings
+  }
 }
 
 export const settingsApi = {
   get: () =>
-    request<{ settings: { tunnel: TunnelSettings } }>('/api/settings'),
+    request<{ settings: { tunnel: TunnelSettings; agents?: { builtin?: BuiltinEngineSettings } } }>('/api/settings'),
   update: (body: SettingsPayload) =>
     request<{ ok: boolean }>('/api/settings', {
       method: 'PUT',

@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Check, ChevronDown, Chip, Dots, DropdownList, Search, SectionLabel, TextField } from '../ui'
-import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type CloudflareSettings } from '@/lib/api'
+import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type BuiltinEngineSettings, type CloudflareSettings } from '@/lib/api'
 import { useStore } from '@/store'
 import { cn } from '@/lib/format'
 
@@ -120,6 +120,8 @@ export function SettingsSection() {
       <CloudflareTunnelSection />
 
       <ApiProvidersSection />
+
+      <BuiltinAgentsSection />
 
       <SectionLabel>Keyboard</SectionLabel>
       <section className="flex flex-col rounded-card border border-line bg-surface shadow-card">
@@ -691,6 +693,82 @@ function ApiProvidersSection() {
             </form>
           </div>
         )}
+      </section>
+    </>
+  )
+}
+
+const BUILTIN_ROLES: Array<{ id: keyof NonNullable<BuiltinEngineSettings>; label: string; hint: string }> = [
+  { id: 'summarizer', label: 'Summarizer', hint: 'Compresses long histories.' },
+  { id: 'planner', label: 'Planner', hint: 'Plans tasks before executing.' },
+  { id: 'reviewer', label: 'Reviewer', hint: 'Reviews code after file changes.' },
+  { id: 'worker', label: 'Worker', hint: 'Bounded task-runner.' },
+]
+
+/** Default engine picker for the four built-in agents. */
+function BuiltinAgentsSection() {
+  const providers = useStore((s) => s.providers)
+  const ready = providers.filter((p) => p.state === 'ready')
+  const [values, setValues] = useState<BuiltinEngineSettings>({})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    settingsApi
+      .get()
+      .then((res) => {
+        if (!cancelled) setValues(res.settings.agents?.builtin ?? {})
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function save() {
+    setSaving(true)
+    try {
+      await settingsApi.update({ agents: { builtin: values } })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <SectionLabel>Built-in agents</SectionLabel>
+      <section className="rounded-card border border-line bg-surface p-3.5 shadow-card">
+        <p className="text-[11px] leading-[1.6] text-ink-3">
+          The harness can auto-spawn helper agents. Choose which engine each runs on; "Auto" lets a
+          helper follow the session's own engine.
+        </p>
+        <div className="mt-3 flex flex-col gap-3">
+          {BUILTIN_ROLES.map((role) => {
+            const value = values[role.id]
+            return (
+              <label key={role.id} className="space-y-1">
+                <span className="flex items-baseline justify-between">
+                  <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">{role.label}</span>
+                  <span className="text-[10px] text-zinc-600">{role.hint}</span>
+                </span>
+                <FancySelect
+                  value={value ?? ''}
+                  onChange={(v) => setValues((prev) => ({ ...prev, [role.id]: v || null }))}
+                  options={[{ value: '', label: 'Auto — follow session' }, ...ready.map((p) => ({ value: p.id, label: p.name }))]}
+                  placeholder="Auto — follow session"
+                />
+              </label>
+            )
+          })}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Button variant="primary" onClick={() => void save()} disabled={saving} className="flex-1">
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save engines'}
+          </Button>
+        </div>
       </section>
     </>
   )
