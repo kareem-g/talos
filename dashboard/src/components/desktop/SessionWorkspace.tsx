@@ -32,7 +32,6 @@ import { LeftSidebar } from './LeftSidebar'
 import { RightRail, type RightRailHandle } from './session/RightRail'
 import { FloatingHud } from './session/FloatingHud'
 import { RoomAvatarStack } from './RoomAvatars'
-import { EngineSwitch } from '../EngineSwitch'
 import { useRooms } from '@/lib/rooms'
 import { openFile } from '@/lib/fileViewer'
 import { createSessionSendHandlers } from '@/lib/sessionCommands'
@@ -138,14 +137,9 @@ export function SessionWorkspace({
   const titleInputRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [engineOpen, setEngineOpen] = useState(false)
   const [restartingForConfig, setRestartingForConfig] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Engine switching is only meaningful on top-level sessions — subagent and
-  // room-channel rows are identity-bound to their parent/room.
-  const canSwitchEngine =
-    !session.hidden && !session.parent_id && !roomOfSession
 
   async function restartForConfig() {
     setRestartingForConfig(true)
@@ -440,7 +434,6 @@ export function SessionWorkspace({
                   onSetConfig={(id, v) => void setConfig(session.id, id, v)}
                   rooms={rooms.map((r) => r.name)}
                   workers={roomOfSession?.workers.map((w) => w.name)}
-                  onSwitchEngine={canSwitchEngine ? () => setEngineOpen(true) : undefined}
                 />
               </>
             ) : (
@@ -474,7 +467,6 @@ export function SessionWorkspace({
         ) : null}
       </div>
 
-      {engineOpen ? <EngineSwitch session={session} onClose={() => setEngineOpen(false)} /> : null}
     </div>
   )
 }

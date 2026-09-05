@@ -20,6 +20,7 @@ import {
 import { getConversation, useStore } from '@/store'
 import { cn } from '@/lib/format'
 import { DropdownList } from '@/components/ui'
+import { EngineModelMenu } from '@/components/EngineModelMenu'
 import type { Session } from '@/types/session'
 
 /* ── Progress checklist ─────────────────────────────────────────────────── */
@@ -245,8 +246,7 @@ export function ComposerControls({
   onChange,
   part = 'left',
   subagents,
-  onOpenEngine,
-  engineName,
+  session,
 }: {
   config?: { options: ConfigOptionLike[]; live?: boolean } | undefined
   agent?: string
@@ -260,13 +260,11 @@ export function ComposerControls({
   /** Subagents spawned by this session — renders the popup control. */
   subagents?: Array<{ id: string; name: string; kind: string; status: 'working' | 'completed' | 'failed' }>
   /**
-   * When provided (engine switching is available for this session), the model
-   * chip on the right half becomes an engine chip that opens the engine/model
-   * picker — its label is the current model name.
+   * The session this composer belongs to. On the right half, when the session
+   * is a top-level row the model chip becomes the EngineModelMenu dropdown
+   * (providers → models); subagent/hidden rows keep the plain model chip.
    */
-  onOpenEngine?: () => void
-  /** Human name of the current engine, shown when no model is set. */
-  engineName?: string
+  session: Session
 }) {
   void agent // no per-agent filtering: every advertised choice stays offered
   void modelsSource
@@ -301,19 +299,16 @@ export function ComposerControls({
   const rest = ordered.filter((option) => !isPrimary(option))
 
   if (part === 'right') {
-    const modelOption = ordered.find(isModelOption)
-    // When engine switching is available the model chip becomes the entry
-    // point for the engine/model picker: one place, labelled by the current
-    // model. Thinking/effort chips stay inline.
-    const shown = onOpenEngine ? primary.filter((option) => !isModelOption(option)) : primary
+    const canSwitch = !session.hidden && !session.parent_id
+    // Top-level sessions: the model chip becomes the engine/model dropdown
+    // (providers → models). Subagent/hidden rows keep the plain model chips.
+    const shown = canSwitch ? primary.filter((option) => !isModelOption(option)) : primary
     return (
       <>
         {mode && mode.modes.length > 0 ? (
           <SessionModeChip mode={mode} onChange={(value) => onChange('mode', value)} />
         ) : null}
-        {onOpenEngine ? (
-          <EngineOptionChip option={modelOption} engineName={engineName} onOpen={onOpenEngine} />
-        ) : null}
+        {canSwitch ? <EngineModelMenu session={session} /> : null}
         {shown.map((option) => (
           <InlineOptionChip
             key={option.id}
@@ -351,48 +346,6 @@ function isThinkingOption(option: ConfigOptionLike): boolean {
 
 function isModelOption(option: ConfigOptionLike): boolean {
   return option.id === 'model' || option.id.includes('model')
-}
-
-/**
- * The composer's engine/model entry point: looks like the other config chips,
- * but opens the engine picker (switch CLI/API engine, or change the model of
- * the current one). Labelled with engine + model so "what's running" is
- * exactly where you tap to change it — never engine alone.
- */
-function EngineOptionChip({
-  option,
-  engineName,
-  onOpen,
-}: {
-  option?: ConfigOptionLike
-  engineName?: string
-  onOpen: () => void
-}) {
-  const current = option?.currentValue
-  const modelLabel =
-    current && current !== 'Not set'
-      ? (option?.choices.find((choice) => choice.value === current)?.name ?? current)
-      : undefined
-  const label =
-    modelLabel && engineName && modelLabel !== engineName
-      ? `${engineName} · ${modelLabel}`
-      : (modelLabel ?? engineName ?? 'Engine')
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`Switch engine or model · ${label}`}
-      aria-label={`Switch engine or model · ${label}`}
-      className={cn(
-        'inline-flex min-h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
-        'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
-      )}
-    >
-      <Bot size={13} className="shrink-0 opacity-70" />
-      <span className="min-w-0 max-w-44 truncate font-medium">{label}</span>
-      <ChevronDown size={11} className="shrink-0 opacity-60" />
-    </button>
-  )
 }
 
 /* ── Inline config chips (dropdown lists, no modal) ─────────────────────── */

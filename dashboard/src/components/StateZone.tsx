@@ -20,6 +20,8 @@
 import { useMemo, useState } from 'react'
 import { Composer } from './Composer'
 import { ComposerControls, PermissionChip } from '@/components/desktop/session/TasksAndExecution'
+import { EngineModelMenu } from '@/components/EngineModelMenu'
+import { ThoughtChip } from '@/components/ThoughtChip'
 import { deriveSubagents } from '@/components/desktop/session/workspaceData'
 import { Button } from './ui'
 import LoadingState from './LoadingState'
@@ -250,7 +252,6 @@ export function StateZone({
   rooms,
   workers,
   compact,
-  onSwitchEngine,
 }: {
   session: Session
   conversation: Conversation
@@ -270,13 +271,6 @@ export function StateZone({
   workers?: string[]
   /** Mobile compact mode: hide the in-line config chips in the composer. */
   compact?: boolean
-  /**
-   * Opens the engine/model picker for this session. When present, the desktop
-   * model chip becomes the engine chip and the mobile model summary chip
-   * becomes a button — the switch lives in the composer, next to the model
-   * name, on both shapes.
-   */
-  onSwitchEngine?: () => void
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -408,10 +402,14 @@ export function StateZone({
       header={dockHeader}
       compactControls={
         compact ? (
-          <PermissionChip
-            currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
-            onChange={handleSetConfig}
-          />
+          <>
+            {!session.hidden && !session.parent_id ? <EngineModelMenu session={session} compact /> : null}
+            <ThoughtChip session={session} compact />
+            <PermissionChip
+              currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
+              onChange={handleSetConfig}
+            />
+          </>
         ) : undefined
       }
       onSend={onSend}
@@ -451,6 +449,7 @@ export function StateZone({
         compact ? undefined : (
           <ComposerControls
             part="left"
+            session={session}
             config={config}
             agent={session.agent}
             modelsSource={provider?.modelsSource}
@@ -465,18 +464,16 @@ export function StateZone({
         compact ? undefined : (
           <ComposerControls
             part="right"
+            session={session}
             config={config}
             agent={session.agent}
             modelsSource={provider?.modelsSource}
             busyId={updating}
             mode={conversation.mode}
             onChange={handleSetConfig}
-            onOpenEngine={onSwitchEngine}
-            engineName={provider?.name}
           />
         )
       }
-      onSummaryClick={compact ? onSwitchEngine : undefined}
     />
   )
 

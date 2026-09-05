@@ -17,7 +17,6 @@ import { StateZone } from './StateZone'
 import { Timeline } from './Timeline'
 import { PanelLeft, PanelRight } from 'lucide-react'
 import { Dot, IconButton, Layer, Notice, StatusPill, ChevronLeft } from './ui'
-import { EngineSwitch } from './EngineSwitch'
 import { LeftSidebar } from './desktop/LeftSidebar'
 import { RightRail, type RightRailHandle } from './desktop/session/RightRail'
 import { useConversation, useStore } from '@/store'
@@ -53,7 +52,6 @@ export function SessionView({
   const [pane, setPane] = useState<'sessions' | 'details' | null>(null)
   // Lets the explorer/left sheet open a file in the right rail's File tab.
   const rightRailRef = useRef<RightRailHandle>(null)
-  const [engineOpen, setEngineOpen] = useState(false)
   const { navigate } = useRoute()
 
   // Hydrate on every session switch. The store now clears and
@@ -95,9 +93,6 @@ export function SessionView({
      thread) navigates to it — the mobile analog of the desktop's rails. */
   const rooms = useRooms()
   const roomOfSession = rooms.find((room) => room.sessionId === session.id) ?? null
-  // Engine switching only applies to top-level sessions — room channels and
-  // subagent rows are identity-bound to their room/parent.
-  const canSwitchEngine = Boolean(onBack) && !session.hidden && !session.parent_id && !roomOfSession
   const dispatch = createSessionSendHandlers(session, {
     openSessionView: (id) => {
       if (id !== session.id) navigate({ name: 'session', sessionId: id })
@@ -207,7 +202,6 @@ export function SessionView({
         rooms={rooms.map((r) => r.name)}
         workers={roomOfSession?.workers.map((w) => w.name)}
         compact={Boolean(onBack)}
-        onSwitchEngine={canSwitchEngine ? () => setEngineOpen(true) : undefined}
       />
 
       {/* Left sheet — the desktop session navigator reused for mobile:
@@ -282,7 +276,6 @@ export function SessionView({
         </div>
       </Layer>
 
-      {engineOpen ? <EngineSwitch session={session} onClose={() => setEngineOpen(false)} /> : null}
     </div>
   )
 }

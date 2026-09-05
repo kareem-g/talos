@@ -233,12 +233,14 @@ export function NewSessionLayer({
         project: project.trim() || undefined,
         prompt: prompt.trim() || undefined,
         name: prompt.trim().split('\n')[0]?.slice(0, 60) || undefined,
-        // `model` is accepted at creation and applied before the first prompt.
+        // `model` is accepted at creation and applied before the first prompt;
+        // the harness Thought level is persisted before the first turn too.
         model: values.model,
+        thought: values.thought,
       })
       // Any other dimension the provider exposes is set once the session exists.
       for (const [configId, value] of Object.entries(values)) {
-        if (configId === 'model') continue
+        if (configId === 'model' || configId === 'thought') continue
         await setConfig(session.id, configId, value)
       }
       setPrompt('')

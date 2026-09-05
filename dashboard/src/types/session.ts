@@ -113,6 +113,8 @@ export interface CreateSessionRequest {
    */
   model?: string
   effort?: string
+  /** Harness Thought level (off|on|high|max) applied before the first turn. */
+  thought?: string
   /** Hide from the default session lists (room channels / harness workers). */
   hidden?: boolean
 }

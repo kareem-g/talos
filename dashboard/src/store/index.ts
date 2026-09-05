@@ -120,6 +120,7 @@ interface StoreState {
     prompt?: string
     name?: string
     model?: string
+    thought?: string
   }) => Promise<Session>
   sendPrompt: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   /** Queue a follow-up message (typed while the agent is working). */
