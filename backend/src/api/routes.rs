@@ -692,7 +692,21 @@ pub async fn switch_session_engine(
     // Relaunch on the same row. `launch_session_engine` broadcasts `marker` as
     // the chat bubble and sends `prompt` (which carries the digest) to the new
     // engine, keeping the transcript readable.
+    //
+    // Re-fetch the row AFTER set_agent: the launcher reads `session.agent` to
+    // resolve the provider (API transports resolve from it), so passing the
+    // pre-switch session would launch the NEW engine under the OLD agent's id
+    // ("API provider 'opencode' not found").
     let relaunched = {
+        let session = match state.session_manager.get_session(&id).await {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                return (StatusCode::NOT_FOUND, Json(json!({ "switched": false, "error": "Session disappeared during switch", "id": id }))).into_response()
+            }
+            Err(error) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "switched": false, "error": error.to_string() }))).into_response()
+            }
+        };
         let project = session.project.clone();
         launch_session_engine(
             &state,
