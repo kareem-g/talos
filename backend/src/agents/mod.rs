@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod api;
 pub mod api_tools;
+pub mod builtin;
 pub mod catalog;
 pub mod claude;
 pub mod claude_stream;

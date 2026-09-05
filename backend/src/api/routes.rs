@@ -381,32 +381,63 @@ pub async fn spawn_subagent(
         .filter(|s| *s > 0)
         .unwrap_or(crate::agents::orchestrate::DEFAULT_CHILD_TIMEOUT_SECS);
 
-    if state.session_manager.get_session(&parent_id).await.ok().flatten().is_none() {
+    let Some(parent_session) = state.session_manager.get_session(&parent_id).await.ok().flatten() else {
         return Json(json!({ "error": "parent session not found", "id": parent_id }));
-    }
+    };
 
-    // The shared orchestration runner owns the whole lifecycle: spawn with the
-    // subagent instruction set, parent link, budget, timeout, and
-    // parent-kill cancellation. Children inherit the parent's model unless the
-    // caller pins another one, and are hidden from the workspace lists.
-    let name = format!("subagent-{agent}");
+    let role = body
+        .get("role")
+        .and_then(|v| v.as_str())
+        .filter(|role| crate::agents::builtin::BUILTIN_ROLES.contains(role))
+        .map(str::to_string);
+
+    // Built-in agent (summarizer/planner/reviewer/worker): engine comes from the
+    // configured `[agents.builtin]` default, else follows the parent session.
+    let (name, engine) = if let Some(role) = &role {
+        let engine = {
+            let cfg = state.config.read().await;
+            crate::agents::builtin::configured_engine(&cfg.settings(), role)
+                .unwrap_or_else(|| parent_session.agent.clone())
+        };
+        (format!("{role}-{engine}"), engine)
+    } else {
+        (format!("subagent-{agent}"), agent)
+    };
+
     let model = match body.get("model").and_then(|v| v.as_str()) {
         Some(m) => Some(m.to_string()),
         None => crate::agents::harness::session_model(&state, &parent_id).await,
     };
-    let outcome = crate::agents::orchestrate::run_child(
-        &state,
-        &parent_id,
-        &name,
-        &agent,
-        &prompt,
-        max_cost_usd,
-        std::time::Duration::from_secs(timeout_secs),
-        model.as_deref(),
-        None,
-        &[],
-    )
-    .await;
+    let outcome = match &role {
+        Some(role) => {
+            crate::agents::orchestrate::spawn_builtin_child(
+                &state,
+                &parent_id,
+                role,
+                &engine,
+                &prompt,
+                max_cost_usd,
+                std::time::Duration::from_secs(timeout_secs),
+                model.as_deref(),
+            )
+            .await
+        }
+        None => {
+            crate::agents::orchestrate::run_child(
+                &state,
+                &parent_id,
+                &name,
+                &engine,
+                &prompt,
+                max_cost_usd,
+                std::time::Duration::from_secs(timeout_secs),
+                model.as_deref(),
+                None,
+                &[],
+            )
+            .await
+        }
+    };
 
     Json(json!({
         "child_session_id": outcome.session_id,
@@ -4056,6 +4087,29 @@ pub async fn update_settings(
             }
             if let Some(url) = slack.get("webhook_url").and_then(|v| v.as_str()) {
                 cfg.settings_mut().notifications.slack.webhook_url = Some(url.to_string());
+            }
+        }
+    }
+
+    // Built-in agent default engines: agents.builtin.{role} → provider id or
+    // null to follow the parent session's engine.
+    if let Some(agents) = body.get("agents") {
+        if let Some(builtin) = agents.get("builtin") {
+            let b = &mut cfg.settings_mut().agents.builtin;
+            for (key, slot) in [
+                ("summarizer", &mut b.summarizer),
+                ("planner", &mut b.planner),
+                ("reviewer", &mut b.reviewer),
+                ("worker", &mut b.worker),
+            ] {
+                if builtin.get(key).is_some() {
+                    *slot = builtin
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string);
+                }
             }
         }
     }

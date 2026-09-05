@@ -123,6 +123,26 @@ pub struct AgentsConfig {
     /// These connect via HTTP rather than a local CLI binary.
     #[serde(default)]
     pub api_providers: Vec<ApiProvider>,
+    /// Default engine (provider id) for each built-in agent. `None`/empty =
+    /// "follow the parent session's engine".
+    #[serde(default)]
+    pub builtin: BuiltinEngineDefaults,
+}
+
+/// Default engines for the built-in harness agents (summarizer, planner,
+/// reviewer, worker). Each value is a provider id from the ready list (CLI,
+/// ACP, or API). Empty/`None` means the child follows the parent session's
+/// agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BuiltinEngineDefaults {
+    #[serde(default)]
+    pub summarizer: Option<String>,
+    #[serde(default)]
+    pub planner: Option<String>,
+    #[serde(default)]
+    pub reviewer: Option<String>,
+    #[serde(default)]
+    pub worker: Option<String>,
 }
 
 impl AgentBinary {
@@ -405,6 +425,7 @@ impl Default for Settings {
                 custom: vec![],
                 providers: vec![],
                 api_providers: vec![],
+                builtin: BuiltinEngineDefaults::default(),
             },
             worktree: WorktreeConfig {
                 enabled: true,

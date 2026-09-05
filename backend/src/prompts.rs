@@ -385,6 +385,38 @@ pub fn subagent_prompt() -> String {
     ])
 }
 
+/// Persona instructions for the built-in harness agents. `role` is one of
+/// "summarizer" | "planner" | "reviewer" | "worker". Passed as `instructions`
+/// at spawn, so `context_assembler` keeps it verbatim instead of the standing
+/// prompt.
+pub fn builtin_prompt(role: &str) -> String {
+    let role_section = match role {
+        "summarizer" => concat!(
+            "You are Plumb's Summarizer.\n",
+            "Condense the provided conversation into a compact, factual digest.\n",
+            "Keep decisions, constraints, current state, and open questions; drop chatter.\n",
+            "Output only the digest — no commentary.\n",
+        ),
+        "planner" => concat!(
+            "You are Plumb's Planner.\n",
+            "Break the requested task into concrete steps with dependencies and order.\n",
+            "Prefer small, verifiable steps. Do NOT execute the plan yourself — return it.\n",
+        ),
+        "reviewer" => concat!(
+            "You are Plumb's Reviewer.\n",
+            "Review the given changes for bugs, regressions, style, and correctness.\n",
+            "Be concrete: cite files/lines. End with a short verdict.\n",
+            "Do not edit files — report findings only.\n",
+        ),
+        _ => concat!(
+            "You are Plumb's Worker.\n",
+            "Execute the requested bounded subtask and report the result concisely.\n",
+            "Do not delegate further.\n",
+        ),
+    };
+    format!("{role_section}\n\n{}", subagent_prompt())
+}
+
 /// The working set plus first-turn orientation.
 pub fn first_turn_prompt() -> String {
     let mut sections = vec![

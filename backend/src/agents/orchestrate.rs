@@ -176,6 +176,33 @@ pub async fn run_child(
     spawn_and_await_child(state, parent_id, name, agent, prompt, budget_usd, timeout, child_body).await
 }
 
+/// Spawn one of the built-in harness agents (summarizer / planner / reviewer /
+/// worker) as a hidden, parent-bound child on `agent`. The persona instructions
+/// come from [`crate::prompts::builtin_prompt`]; everything else mirrors a
+/// bounded room worker (hidden, subagent → no recursive Dispatch).
+pub async fn spawn_builtin_child(
+    state: &AppState,
+    parent_id: &str,
+    role: &str,
+    agent: &str,
+    prompt: &str,
+    budget_usd: Option<f64>,
+    timeout: Duration,
+    model: Option<&str>,
+) -> ChildOutcome {
+    let name = format!("{role}-{agent}");
+    let mut child_body = json!({
+        "instructions": crate::prompts::builtin_prompt(role),
+        "parent_id": parent_id,
+        "subagent": true,
+        "hidden": true,
+    });
+    if let Some(model) = model {
+        child_body["model"] = Value::String(model.to_string());
+    }
+    spawn_and_await_child(state, parent_id, &name, agent, prompt, budget_usd, timeout, child_body).await
+}
+
 /// Spawn one child with a fully pre-built create body and run it to a
 /// terminal state (completion, failure, budget, timeout, or parent death).
 /// The room-aware [`run_child`] and the Chief-of-Staff merge step both come
