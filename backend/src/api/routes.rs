@@ -558,6 +558,177 @@ fn session_mutation_error(error: crate::AgentDeckError) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
+/// Compact, bounded rendering of a session's prior conversation for an engine
+/// switch handoff. User prompts come from the `messages` table; assistant prose
+/// is reconstructed by concatenating the `assistant_text` delta stream from
+/// `agent_events`. The tail (most recent) is kept when over budget so the new
+/// engine gets the freshest context.
+async fn build_session_digest(state: &AppState, id: &str, max_chars: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for message in state.session_manager.get_messages(id).await.unwrap_or_default() {
+        if message.role == "user" {
+            let content = message.content.trim();
+            if !content.is_empty() {
+                lines.push(format!("User: {content}"));
+            }
+        }
+    }
+    let mut assistant = String::new();
+    for event in state.session_manager.get_agent_events(id).await.unwrap_or_default() {
+        if event.kind == "assistant_text"
+            && let Some(text) = event.payload.get("text").and_then(serde_json::Value::as_str)
+        {
+            assistant.push_str(text);
+        }
+    }
+    if !assistant.trim().is_empty() {
+        lines.push(format!("Assistant: {}", assistant.trim()));
+    }
+    let joined = lines.join("\n");
+    if joined.trim().is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = joined.chars().collect();
+    if chars.len() <= max_chars {
+        joined
+    } else {
+        chars[chars.len() - max_chars..].iter().collect()
+    }
+}
+
+/// POST /api/sessions/{id}/engine — switch the engine backing an existing
+/// session to another ready CLI/API provider while keeping the SAME session
+/// row, project, and transcript. The current engine is stopped, the row is
+/// rebound to `agent`, and the new engine is launched fresh with a digest of
+/// the prior conversation (a different CLI cannot `--resume` the previous
+/// provider's private session).
+pub async fn switch_session_engine(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let Some(Json(body)) = body else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "switched": false, "error": "Missing body" }))).into_response();
+    };
+    let Some(agent) = body.get("agent").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "switched": false, "error": "`agent` is required" }))).into_response();
+    };
+    let requested_model = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let session = match state.session_manager.get_session(&id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "switched": false, "error": "Session not found", "id": id }))).into_response()
+        }
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "switched": false, "error": error.to_string() }))).into_response()
+        }
+    };
+
+    // Orchestration children (subagents), room channels, and hidden rows are
+    // identity-bound to a parent/room that subscribes to their outcome —
+    // swapping their engine would strand the waiter, so refuse.
+    if session.hidden || session.parent_id.is_some() {
+        return (StatusCode::CONFLICT, Json(json!({
+            "switched": false,
+            "error": "Engine switching isn't available for subagent or hidden sessions.",
+        })))
+        .into_response();
+    }
+    if crate::api::rooms::find_room_by_channel(&state, &id).await.is_some() {
+        return (StatusCode::CONFLICT, Json(json!({
+            "switched": false,
+            "error": "Engine switching isn't available for room channel sessions.",
+        })))
+        .into_response();
+    }
+    let old_agent = session.agent.clone();
+    if old_agent == agent {
+        return Json(json!({ "switched": false, "error": format!("This session already runs {agent}.") })).into_response();
+    }
+
+    // ── Teardown the current engine (mirrors kill_session) ─────────────────
+    let _ = state.pty_manager.kill_session(&id).await;
+    let _ = state.acp_manager.kill_session(&id).await;
+    let _ = state.claude_stream.kill_session(&id).await;
+    state.api_manager.stop_turn(&state, &id).await;
+    let _ = state.session_manager.cancel_pending_approvals(&id).await;
+    let _ = state.browser_manager.stop(&id).await;
+    // Cancel in-flight children this session spawned — they belong to the old
+    // engine's context.
+    crate::agents::orchestrate::cancel_children(&state, &id).await;
+
+    // ── Rebind the row to the new engine ───────────────────────────────────
+    let _ = state.session_manager.clear_external_id(&id).await;
+    let _ = state.session_manager.set_resume_command(&id, "").await;
+    if let Some(model) = &requested_model {
+        let _ = state.session_manager.set_pending_config(&id, "model", model).await;
+    }
+    let _ = state.session_manager.set_agent(&id, agent).await;
+    let _ = state
+        .session_manager
+        .update_status(&id, SessionStatus::Starting)
+        .await;
+
+    let digest = build_session_digest(&state, &id, 4000).await;
+    let marker = format!(
+        "Engine switched from {old_agent} to {agent} — continuing the same session.",
+    );
+    let prompt = if digest.is_empty() {
+        format!(
+            "The previous session engine was {old_agent}. You are now {agent}. Read the context you were given, then wait for the user's next instruction.",
+        )
+    } else {
+        format!(
+            "Engine switched from {old_agent} to {agent}. The text below is a digest of the prior conversation — read it to get context, but do not start working yet; wait for the user's next instruction.\n\n<prior conversation>\n{digest}\n</prior conversation>",
+        )
+    };
+
+    // Relaunch on the same row. `launch_session_engine` broadcasts `marker` as
+    // the chat bubble and sends `prompt` (which carries the digest) to the new
+    // engine, keeping the transcript readable.
+    let relaunched = {
+        let project = session.project.clone();
+        launch_session_engine(
+            &state,
+            session,
+            agent,
+            project.as_deref(),
+            Some(&prompt),
+            Some(&marker),
+            None,
+            requested_model,
+            None,
+            &json!({}),
+        )
+        .await
+    };
+
+    match relaunched {
+        Ok(current) => {
+            state
+                .broadcast
+                .broadcast(crate::websocket::WsMessage::SessionUpdate { session: current.clone() });
+            state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
+                &id,
+                "engine_switched",
+                json!({ "from": old_agent, "to": agent }),
+            ));
+            Json(json!({ "switched": true, "session": current, "digest_chars": digest.chars().count() }))
+                .into_response()
+        }
+        Err(error) => {
+            tracing::error!(session_id = %id, %agent, %error, "engine switch relaunch failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "switched": false, "error": error }))).into_response()
+        }
+    }
+}
+
 pub async fn archive_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -1732,6 +1903,45 @@ pub(crate) async fn spawn_session(
         .await
         .map_err(|error| error.to_string())?;
 
+    apply_spawn_body_flags(state, &session, body).await;
+
+    // Create-with-prompt runs (headless `agentdeck run`, dashboard "start with
+    // a first message") must get the same harness context enrichment as
+    // websocket turns: environment, skills, similar trajectories, memory.
+    // `instructions`/`mode` let callers swap in a custom instruction set
+    // (subagent role, eval determinism).
+    let instructions: Option<String> = body
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            (body.get("mode").and_then(|v| v.as_str()) == Some("eval"))
+                .then(crate::prompts::eval_prompt)
+        });
+
+    // Optional model + effort requested by the client (agent-agnostic).
+    let requested_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
+    let requested_effort = body.get("effort").and_then(|v| v.as_str()).map(str::to_string);
+
+    launch_session_engine(
+        state,
+        session,
+        agent,
+        project,
+        prompt,
+        None,
+        instructions,
+        requested_model,
+        requested_effort,
+        body,
+    )
+    .await
+}
+
+/// Apply orchestration/room flags from a spawn body to a freshly created row
+/// (parent link, subagent marker, hidden, permission mode, skip-policy,
+/// room-child). Shared by every spawn path that creates a row.
+async fn apply_spawn_body_flags(state: &AppState, session: &crate::sessions::Session, body: &serde_json::Value) {
     // Orchestration children identify their spawning session via the body.
     // The link lets a killed parent cascade cancellation to its children and
     // lets the UI tell spawned rows apart.
@@ -1775,12 +1985,39 @@ pub(crate) async fn spawn_session(
             .set_pending_config(&session.id, "room_child", room_id)
             .await;
     }
+}
 
+/// Launch an engine against an EXISTING session row (same id, same transcript,
+/// same project). Used by `spawn_session` for brand-new rows and by the
+/// in-session engine switch, which stops the old engine, rebinds the row to a
+/// new agent, then relaunches through here.
+///
+/// `initial_user_text`, when given, is what lands in the chat timeline as the
+/// user bubble — distinct from `prompt`, which is the text actually sent to the
+/// engine. The engine switch broadcasts a short "engine changed" marker while
+/// sending the full context digest as the engine prompt, so the transcript
+/// doesn't swallow a giant digest-shaped bubble.
+async fn launch_session_engine(
+    state: &AppState,
+    session: crate::sessions::Session,
+    agent: &str,
+    project: Option<&str>,
+    prompt: Option<&str>,
+    initial_user_text: Option<&str>,
+    instructions: Option<String>,
+    requested_model: Option<String>,
+    requested_effort: Option<String>,
+    body: &serde_json::Value,
+) -> std::result::Result<crate::sessions::Session, String> {
     // The chat shows the RAW prompt the user sent — the enriched prompt
     // (charter + context) goes to the agent but is never displayed. This is
     // the single user-message broadcast for create-with-prompt runs; backend
-    // spawn paths must not broadcast it again.
-    if let Some(raw) = prompt.filter(|p| !p.trim().is_empty()) {
+    // spawn paths must not broadcast it again. Engine switch passes a short
+    // marker here instead of the full prompt.
+    let broadcast_text = initial_user_text
+        .or(prompt)
+        .filter(|p| !p.trim().is_empty());
+    if let Some(raw) = broadcast_text {
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
             message: crate::agent_events::AgentMessage {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -1792,20 +2029,6 @@ pub(crate) async fn spawn_session(
         });
     }
 
-    // Create-with-prompt runs (headless `agentdeck run`, dashboard "start with
-    // a first message") must get the same harness context enrichment as
-    // websocket turns: environment, skills, similar trajectories, memory.
-    // Without this the first turn bypassed context assembly entirely.
-    // `instructions`/`mode` let callers swap in a custom instruction set
-    // (subagent role, eval determinism).
-    let instructions: Option<String> = body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| {
-            (body.get("mode").and_then(|v| v.as_str()) == Some("eval"))
-                .then(crate::prompts::eval_prompt)
-        });
     let prompt = match prompt {
         Some(prompt) => match crate::context_assembler::assemble(state, &session, prompt, instructions.as_deref()).await {
             Ok((ctx, breakdown)) => {
@@ -1831,10 +2054,6 @@ pub(crate) async fn spawn_session(
         },
         None => None,
     };
-
-    // Optional model + effort requested by the client (agent-agnostic).
-    let requested_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
-    let requested_effort = body.get("effort").and_then(|v| v.as_str()).map(str::to_string);
 
     // Custom API providers (OpenAI-compatible, Anthropic-compatible) — direct HTTP, no subprocess.
     {

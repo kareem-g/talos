@@ -188,6 +188,44 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Forget the provider-side session id (used when an engine switch rebinds
+    /// a row to a different provider). NULL — not the empty string — so resume
+    /// falls back to this app's own id instead of targeting "".
+    pub async fn clear_external_id(&self, id: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET external_id = NULL, updated_at = ?1 WHERE id = ?2")
+            .bind(chrono::Utc::now())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut active = self.active_sessions.write().await;
+        if let Some(session) = active.get_mut(id) {
+            session.external_id = None;
+        }
+        Ok(())
+    }
+
+    /// Rebind a session to a different agent/provider while keeping its row,
+    /// transcript, and project. Used by the in-session engine switch: the old
+    /// engine's subprocess is stopped first, then this persists the new agent
+    /// so a fresh spawn relaunches under it. Callers must clear the old
+    /// engine's `external_id` / `resume_command` (they belong to the previous
+    /// provider) and set the row to a starting status before spawning.
+    pub async fn set_agent(&self, id: &str, agent: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET agent = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(agent)
+            .bind(chrono::Utc::now())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut active = self.active_sessions.write().await;
+        if let Some(session) = active.get_mut(id) {
+            session.agent = agent.to_string();
+        }
+        Ok(())
+    }
+
     /// Link a session to the session that spawned it. Called right after a
     /// subagent / orchestration child is created; the link is what makes
     /// cancellation cascade and spawned-row UI possible.

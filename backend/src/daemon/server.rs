@@ -77,6 +77,7 @@ pub async fn start(
         .route("/api/sessions/{id}/restore", post(crate::api::routes::restore_session))
         .route("/api/sessions/{id}/fork", post(crate::api::routes::fork_session))
         .route("/api/sessions/{id}/resume", post(crate::api::routes::resume_session))
+        .route("/api/sessions/{id}/engine", post(crate::api::routes::switch_session_engine))
         // Session configuration: model, mode, effort, or any dimension the
         // provider exposes. PATCH returns whether the change actually applied.
         .route(
