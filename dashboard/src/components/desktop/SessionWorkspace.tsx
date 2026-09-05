@@ -371,15 +371,6 @@ export function SessionWorkspace({
                       }}
                     />
                     <div className="border-t border-line" aria-hidden />
-                    {canSwitchEngine ? (
-                      <MenuButton
-                        label="Switch engine…"
-                        onClick={() => {
-                          setMenuOpen(false)
-                          setEngineOpen(true)
-                        }}
-                      />
-                    ) : null}
                     <MenuButton
                       label="Delete session"
                       destructive
@@ -449,6 +440,7 @@ export function SessionWorkspace({
                   onSetConfig={(id, v) => void setConfig(session.id, id, v)}
                   rooms={rooms.map((r) => r.name)}
                   workers={roomOfSession?.workers.map((w) => w.name)}
+                  onSwitchEngine={canSwitchEngine ? () => setEngineOpen(true) : undefined}
                 />
               </>
             ) : (

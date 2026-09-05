@@ -27,10 +27,6 @@ function transportLabel(provider: Provider): string {
   }
 }
 
-function modelOptionOf(provider: Provider) {
-  return provider.configOptions?.find((option) => option.id === 'model' || option.category === 'model')
-}
-
 export function EngineSwitch({
   session,
   onClose,
@@ -39,7 +35,9 @@ export function EngineSwitch({
   onClose: () => void
 }) {
   const providers = useStore((s) => s.providers)
+  const liveConfig = useStore((s) => s.configs[session.id])
   const switchSessionEngine = useStore((s) => s.switchSessionEngine)
+  const setConfig = useStore((s) => s.setConfig)
   const [busy, setBusy] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined)
@@ -50,12 +48,25 @@ export function EngineSwitch({
     [providers],
   )
   const selected = ready.find((provider) => provider.id === selectedId) ?? null
-  const modelOption = selected ? modelOptionOf(selected) : undefined
-  const modelChoices = modelOption?.choices ?? []
-  const cannotSwitch = busy || !selected || selected.id === session.agent
+  const sameEngine = selected?.id === session.agent
 
-  // When a provider is picked, preselect its own default model (never carry
-  // the previous engine's choice across the switch).
+  /** Model option for a provider: live session config for the current engine,
+   *  the provider's own reported option otherwise. */
+  function modelOptionOf(provider: Provider | null) {
+    if (!provider) return undefined
+    if (provider.id === session.agent) {
+      const live = liveConfig?.options?.find((option) => option.id === 'model' || option.category === 'model')
+      if (live) return live
+    }
+    return provider.configOptions?.find((option) => option.id === 'model' || option.category === 'model')
+  }
+
+  const modelOption = modelOptionOf(selected)
+  const modelChoices = modelOption?.choices ?? []
+  // Different engine: model optional (engine default). Same engine: a model
+  // selection is required for the change to mean anything.
+  const canApply = !!selected && !busy && (sameEngine ? !!selectedModel : true)
+
   function pickProvider(provider: Provider) {
     setSelectedId(provider.id)
     const option = modelOptionOf(provider)
@@ -67,11 +78,18 @@ export function EngineSwitch({
   }
 
   async function confirm() {
-    if (!selected || cannotSwitch) return
+    if (!selected || !canApply) return
     setBusy(true)
     try {
-      const ok = await switchSessionEngine(session.id, selected.id, selectedModel)
-      if (ok) onClose()
+      if (sameEngine) {
+        if (!selectedModel) return
+        const applied = await setConfig(session.id, 'model', selectedModel)
+        if (applied.applied === 'unsupported') return // notice already shown — stay open
+      } else {
+        const ok = await switchSessionEngine(session.id, selected.id, selectedModel)
+        if (!ok) return
+      }
+      onClose()
     } finally {
       setBusy(false)
     }
@@ -86,11 +104,11 @@ export function EngineSwitch({
   }, [session.id])
 
   return (
-    <Layer open onClose={onClose} title="Switch engine" side="bottom" size="lg">
+    <Layer open onClose={onClose} title="Engine & model" side="bottom" size="lg">
       <div className="flex flex-col gap-3 px-1 pb-2 pt-1">
         <p className="text-[12px] leading-[1.6] text-ink-3">
-          Switch this session to another agent without losing the conversation. The current run
-          stops and the new engine continues the same task from a digest of what happened so far.
+          Pick another engine to continue this session with it (same conversation, seeded with a
+          digest of what happened). Pick the current engine to change just its model.
         </p>
 
         {/* Engine list */}
@@ -104,36 +122,35 @@ export function EngineSwitch({
               const isCurrent = provider.id === session.agent
               const active = selectedId === provider.id
               const option = modelOptionOf(provider)
+              const modelLabel = option?.currentValue && option.currentValue !== 'Not set'
+                ? (option.choices.find((choice) => choice.value === option.currentValue)?.name ?? option.currentValue)
+                : undefined
               return (
                 <button
                   key={provider.id}
                   type="button"
                   onClick={() => pickProvider(provider)}
-                  disabled={isCurrent}
                   aria-pressed={active}
                   className={cn(
-                    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
+                    'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors',
                     active ? 'bg-accent-tint' : 'hover:bg-hover-2',
-                    isCurrent ? 'cursor-default opacity-70' : '',
                   )}
                 >
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[12.5px] font-medium text-ink">{provider.name}</span>
                       {isCurrent ? (
-                        <span className="shrink-0 rounded-full bg-accent/15 px-1.5 py-px font-mono text-[9px] font-medium uppercase tracking-wide text-accent-ink">
+                        <span className="shrink-0 rounded-[4px] bg-accent/15 px-1.5 py-px font-mono text-[9px] font-medium uppercase tracking-wide text-accent-ink">
                           current
                         </span>
                       ) : null}
                     </span>
                     <span className="mt-0.5 block truncate font-mono text-[10.5px] text-ink-3">
                       {provider.id}
-                      {option?.currentValue && option.currentValue !== 'Not set'
-                        ? ` · ${option.currentValue}`
-                        : ''}
+                      {modelLabel ? ` · ${modelLabel}` : ''}
                     </span>
                   </span>
-                  <span className="shrink-0 rounded-full border border-line/70 bg-surface px-1.5 py-px font-mono text-[9px] uppercase tracking-wide text-ink-3">
+                  <span className="shrink-0 rounded-[4px] border border-line/70 bg-surface px-1.5 py-px font-mono text-[9px] uppercase tracking-wide text-ink-3">
                     {transportLabel(provider)}
                   </span>
                 </button>
@@ -143,14 +160,16 @@ export function EngineSwitch({
         </div>
 
         {/* Model picker for the chosen engine */}
-        {selected && !cannotSwitch ? (
+        {selected ? (
           <div className="rounded-control border border-line/70 bg-inset p-2">
             <p className="px-1 pb-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3">
-              Start model · {selected.name}
+              {sameEngine ? `Model · ${selected.name} (current engine)` : `Start model · ${selected.name}`}
             </p>
             {modelChoices.length === 0 ? (
               <p className="px-1 py-1 text-[11.5px] text-ink-3">
-                No model list reported — {selected.name} will use its default.
+                {sameEngine
+                  ? 'This engine reports no model list — switch via its own config instead.'
+                  : `${selected.name} reports no model list — it will use its default.`}
               </p>
             ) : (
               <div className="scroll-thin max-h-44 space-y-0.5 overflow-y-auto overscroll-contain">
@@ -183,19 +202,16 @@ export function EngineSwitch({
           <Button variant="ghost" onClick={onClose} disabled={busy} className="flex-1">
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => void confirm()}
-            disabled={cannotSwitch}
-            className="flex-1"
-          >
+          <Button variant="primary" onClick={() => void confirm()} disabled={!canApply} className="flex-1">
             {busy
-              ? 'Switching…'
-              : selected
-                ? selected.id === session.agent
-                  ? 'Already running this engine'
-                  : `Switch to ${selected.name}`
-                : 'Select an engine'}
+              ? 'Applying…'
+              : !selected
+                ? 'Select an engine'
+                : sameEngine
+                  ? selectedModel
+                    ? 'Change model'
+                    : 'Pick a model'
+                  : `Switch to ${selected.name}`}
           </Button>
         </div>
       </div>

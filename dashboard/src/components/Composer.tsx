@@ -16,7 +16,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, StopIcon } from './ui'
-import { CornerUpLeft, GripVertical, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Bot, ChevronDown, CornerUpLeft, GripVertical, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { skillsApi, workspaceApi, type DirListing } from '@/lib/api'
 import { isInternalSession } from '@/lib/sessionState'
 import { cn } from '@/lib/format'
@@ -153,6 +153,7 @@ export function Composer({
   compact,
   summary,
   compactControls,
+  onSummaryClick,
 }: {
   /**
    * Send the draft. Returns `false` to reject it (an incomplete command) and
@@ -225,6 +226,11 @@ export function Composer({
    * phone can still reach the permission state without the full chip row.
    */
   compactControls?: ReactNode
+  /**
+   * When provided (compact mode) the model summary chip becomes a button that
+   * opens the engine/model switch — the model name IS the switch on mobile.
+   */
+  onSummaryClick?: () => void
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
@@ -895,12 +901,26 @@ export function Composer({
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
               {compact ? compactControls : null}
               {compact && summary ? (
-                <span
-                  className="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-2"
-                  title={summary}
-                >
-                  <span className="truncate">{summary}</span>
-                </span>
+                onSummaryClick ? (
+                  <button
+                    type="button"
+                    onClick={onSummaryClick}
+                    title={`${summary} — tap to switch engine or model`}
+                    aria-label={`Engine and model: ${summary}`}
+                    className="flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/50 bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
+                  >
+                    <Bot size={11} className="shrink-0 text-ink-3" />
+                    <span className="truncate">{summary}</span>
+                    <ChevronDown size={10} className="shrink-0 text-ink-3" />
+                  </button>
+                ) : (
+                  <span
+                    className="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-2"
+                    title={summary}
+                  >
+                    <span className="truncate">{summary}</span>
+                  </span>
+                )
               ) : null}
               {onUploadFiles ? (
                 <>

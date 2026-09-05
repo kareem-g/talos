@@ -239,6 +239,7 @@ export function StateZone({
   rooms,
   workers,
   compact,
+  onSwitchEngine,
 }: {
   session: Session
   conversation: Conversation
@@ -258,6 +259,13 @@ export function StateZone({
   workers?: string[]
   /** Mobile compact mode: hide the in-line config chips in the composer. */
   compact?: boolean
+  /**
+   * Opens the engine/model picker for this session. When present, the desktop
+   * model chip becomes the engine chip and the mobile model summary chip
+   * becomes a button — the switch lives in the composer, next to the model
+   * name, on both shapes.
+   */
+  onSwitchEngine?: () => void
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -416,9 +424,12 @@ export function StateZone({
             busyId={updating}
             mode={conversation.mode}
             onChange={handleSetConfig}
+            onOpenEngine={onSwitchEngine}
+            engineName={provider?.name}
           />
         )
       }
+      onSummaryClick={compact ? onSwitchEngine : undefined}
     />
   )
 

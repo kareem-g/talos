@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StateZone } from './StateZone'
 import { Timeline } from './Timeline'
-import { PanelLeft, PanelRight, ArrowLeftRight } from 'lucide-react'
+import { PanelLeft, PanelRight } from 'lucide-react'
 import { Dot, IconButton, Layer, Notice, StatusPill, ChevronLeft } from './ui'
 import { EngineSwitch } from './EngineSwitch'
 import { LeftSidebar } from './desktop/LeftSidebar'
@@ -173,20 +173,10 @@ export function SessionView({
                 onClick={() => setPane((current) => (current === 'details' ? null : 'details'))}
                 aria-expanded={pane === 'details'}
                 aria-haspopup="dialog"
-                className="shrink-0"
+                className="-mr-1 shrink-0"
               >
                 <PanelRight size={15} />
               </IconButton>
-              {canSwitchEngine ? (
-                <IconButton
-                  label="Switch engine"
-                  title="Switch this session to another CLI or API engine"
-                  onClick={() => setEngineOpen(true)}
-                  className="-mr-1 shrink-0"
-                >
-                  <ArrowLeftRight size={15} />
-                </IconButton>
-              ) : null}
             </>
           ) : null}
         </div>
@@ -217,6 +207,7 @@ export function SessionView({
         rooms={rooms.map((r) => r.name)}
         workers={roomOfSession?.workers.map((w) => w.name)}
         compact={Boolean(onBack)}
+        onSwitchEngine={canSwitchEngine ? () => setEngineOpen(true) : undefined}
       />
 
       {/* Left sheet — the desktop session navigator reused for mobile:
