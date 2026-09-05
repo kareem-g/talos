@@ -2797,6 +2797,99 @@ pub(crate) async fn respawn_claude_with_model(
     }
 }
 
+/// Restart a live claude-stream session to apply a new Thought level NOW
+/// (conversation preserved via the CLI's native resume id) instead of
+/// deferring to "next time the session runs". The pending `thought` value was
+/// already persisted by the caller; `claude_spawn_config` turns it into the
+/// matching `--effort` flag for the restarted process.
+pub(crate) async fn respawn_claude_with_effort(
+    state: &AppState,
+    session_id: &str,
+) -> Result<(crate::providers::types::ConfigApplied, crate::sessions::config::SessionConfig), String> {
+    let session = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let cfg = state.config.read().await;
+    let binary = cfg.settings().agents.claude.path.clone();
+    drop(cfg);
+
+    // Stop the current process silently — its conversation lives in Claude's
+    // own store keyed by the external id. An "exited" broadcast here would
+    // race the new spawn and flip the session to needs_resume.
+    let _ = state.claude_stream.replace_session(session_id).await;
+    let resume_target = session.external_id.clone();
+
+    let (model, extra_args) = claude_spawn_config(state, session_id, None, None).await;
+
+    match state
+        .claude_stream
+        .spawn_session(
+            session_id,
+            session.project.as_deref(),
+            &binary,
+            resume_target.as_deref().filter(|id| !id.is_empty()),
+            model.as_deref(),
+            &extra_args,
+        )
+        .await
+    {
+        Ok(info) => {
+            state.session_manager.set_session_pid(session_id, info.pid).await;
+            if !info.claude_session_id.is_empty() {
+                persist_claude_external_id(state, session_id, &info.claude_session_id).await;
+            } else {
+                spawn_claude_id_watcher(state, session_id);
+            }
+            let _ = state
+                .session_manager
+                .update_status(session_id, SessionStatus::Idle)
+                .await;
+
+            let mut config = crate::sessions::config::read_config(state, session_id).await?;
+            let pending_level = state
+                .session_manager
+                .pending_config(session_id)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .find(|(key, _)| key == crate::providers::thought::THOUGHT_ID)
+                .map(|(_, value)| value);
+            if let Some(level) = pending_level {
+                for option in config.options.iter_mut() {
+                    if option.id == crate::providers::thought::THOUGHT_ID {
+                        option.current_value = Some(level.clone());
+                    }
+                }
+            }
+            state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
+                session_id: session_id.to_string(),
+                state: "idle".to_string(),
+            });
+            if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
+                state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
+            }
+            tracing::info!(session_id = %session_id, "Claude restarted to apply the new Thought level");
+            Ok((crate::providers::types::ConfigApplied::Immediate, config))
+        }
+        Err(error) => {
+            let message = match &error {
+                crate::AgentDeckError::Session(message)
+                | crate::AgentDeckError::Pty(message) => message.clone(),
+                other => other.to_string(),
+            };
+            let _ = state
+                .session_manager
+                .update_status(session_id, SessionStatus::Idle)
+                .await;
+            Err(format!("Thought level change failed: {message}"))
+        }
+    }
+}
+
 /// One Pi turn: record the user message, run the headless process to
 /// completion, then return the session to idle. Spawned as a task by the WS
 /// input handler so the socket is never blocked on a turn.

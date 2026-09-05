@@ -370,6 +370,18 @@ async fn apply_thought(
         return apply_acp_thought(state, session_id, value).await;
     }
 
+    // Live claude (stream-json): effort was fixed at spawn, but the process can
+    // be restarted on its native resume id with the new --effort — so the
+    // change applies NOW instead of "next time the session runs".
+    if session.agent == "claude" && state.claude_stream.has_active_session(session_id).await {
+        state
+            .session_manager
+            .set_pending_config(session_id, crate::providers::thought::THOUGHT_ID, value)
+            .await
+            .map_err(|error| error.to_string())?;
+        return crate::api::routes::respawn_claude_with_effort(state, session_id).await;
+    }
+
     let current = read_config(state, session_id).await?;
     if !current.options.iter().any(|option| option.id == thought_id) {
         let applied = ConfigApplied::Unsupported {
