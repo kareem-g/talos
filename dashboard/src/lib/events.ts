@@ -583,12 +583,23 @@ export function applyAgentEvent(
         cacheReadTokens: numAny(payload, 'cache_read_tokens', 'cache_tokens'),
         costUsd: numAny(payload, 'cost_usd', 'cost'),
       }
-      const last = turn.parts[turn.parts.length - 1]
-      if (last?.kind === 'usage') {
-        if (incoming.inputTokens !== undefined) last.inputTokens = incoming.inputTokens
-        if (incoming.outputTokens !== undefined) last.outputTokens = incoming.outputTokens
-        if (incoming.cacheReadTokens !== undefined) last.cacheReadTokens = incoming.cacheReadTokens
-        if (incoming.costUsd !== undefined) last.costUsd = incoming.costUsd
+      // Tool-calling turns send several requests; each reports ITS OWN request's
+      // usage. Accumulate into one trailing usage part so the meter shows the
+      // turn's cumulative totals (what was actually shipped), not just the last
+      // request.
+      let mergedIndex = -1
+      for (let i = turn.parts.length - 1; i >= 0; i--) {
+        if (turn.parts[i].kind === 'usage') {
+          mergedIndex = i
+          break
+        }
+      }
+      const last = mergedIndex >= 0 ? turn.parts[mergedIndex] : undefined
+      if (last && last.kind === 'usage') {
+        last.inputTokens = (last.inputTokens ?? 0) + (incoming.inputTokens ?? 0)
+        last.outputTokens = (last.outputTokens ?? 0) + (incoming.outputTokens ?? 0)
+        last.cacheReadTokens = (last.cacheReadTokens ?? 0) + (incoming.cacheReadTokens ?? 0)
+        last.costUsd = (last.costUsd ?? 0) + (incoming.costUsd ?? 0)
         return true
       }
       if (

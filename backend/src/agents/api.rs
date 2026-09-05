@@ -276,6 +276,9 @@ async fn run_api_turn(
         .into_iter()
         .map(|m| json!({ "role": m.role, "content": m.content }))
         .collect();
+    // Long chats: keep the newest prompts, fold the rest into one note, so a
+    // many-message history isn't re-shipped verbatim on every turn.
+    messages = trim_user_history(messages, 60);
     if !messages.iter().any(|m| m.get("content").and_then(|c| c.as_str()) == Some(prompt)) {
         messages.push(json!({ "role": "user", "content": prompt }));
     }
@@ -340,6 +343,38 @@ async fn run_api_turn(
             Err(e)
         }
     }
+}
+
+/// Cap applied to a single tool result before it is sent back to the model.
+/// Tool outputs (file reads, diffs, listings) are the biggest chunk of prompt
+/// tokens and are re-sent on every following request in the turn, so we keep
+/// the head of each result instead of the whole blob.
+const MAX_TOOL_RESULT_CHARS: usize = 8000;
+
+fn cap_tool_output(output: &str) -> String {
+    if output.chars().count() <= MAX_TOOL_RESULT_CHARS {
+        return output.to_string();
+    }
+    let head: String = output.chars().take(MAX_TOOL_RESULT_CHARS).collect();
+    format!("{head}\n…[truncated: {} more chars omitted]…", output.chars().count() - MAX_TOOL_RESULT_CHARS)
+}
+
+/// Keep only the most recent `keep` entries of a user-prompt history. Each
+/// request re-sends the whole list, so an unbounded backlog inflates input
+/// tokens without helping the model.
+fn trim_user_history(messages: Vec<Value>, keep: usize) -> Vec<Value> {
+    if messages.len() <= keep {
+        return messages;
+    }
+    let mut trimmed: Vec<Value> = messages[messages.len() - keep..].to_vec();
+    trimmed.insert(
+        0,
+        json!({
+            "role": "user",
+            "content": "[Earlier messages in this conversation were trimmed to keep context within budget.]",
+        }),
+    );
+    trimmed
 }
 
 async fn call_openai_stream(
@@ -602,7 +637,7 @@ async fn call_openai_stream(
                 &parsed_args,
             )
             .await;
-            results.push(json!({ "role": "tool", "tool_call_id": id, "content": output }));
+            results.push(json!({ "role": "tool", "tool_call_id": id, "content": cap_tool_output(&output) }));
         }
         conversation.push(json!({
             "role": "assistant",
@@ -967,7 +1002,7 @@ async fn call_anthropic_stream(
                 &parsed_args,
             )
             .await;
-            results.push(json!({ "type": "tool_result", "tool_use_id": id, "content": output }));
+            results.push(json!({ "type": "tool_result", "tool_use_id": id, "content": cap_tool_output(&output) }));
         }
         conversation.push(json!({ "role": "assistant", "content": assistant_content }));
         for result in results {

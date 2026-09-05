@@ -588,6 +588,7 @@ function FileChip({
  * list, so the plan reads as the agent wrote it.
  */
 export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => void }) {
+  const [open, setOpen] = useState(true)
   const body = (part.text ?? '').trim()
   // Title: the payload title, else the first heading/line of the body.
   const firstLine = body.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
@@ -597,12 +598,41 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
     ? body
     : body.split('\n').slice(body.split('\n').findIndex((l) => l.trim()) + 1).join('\n').trim()
 
+  // Todo steps with live status — the model's checklist, collapsible.
+  const steps = useMemo(() => {
+    const entries = part.entries ?? []
+    return (part.steps ?? []).map((step) => {
+      const raw = entries.find((e) => e.content === step)?.status?.toLowerCase() ?? 'pending'
+      const status = raw.includes('progress')
+        ? 'in_progress'
+        : raw.includes('complet') || raw === 'done'
+          ? 'completed'
+          : raw.includes('fail')
+            ? 'failed'
+            : raw.includes('block')
+              ? 'blocked'
+              : 'pending'
+      return { step, status: status as 'completed' | 'in_progress' | 'pending' | 'blocked' | 'failed' }
+    })
+  }, [part.steps, part.entries])
+  const done = steps.filter((s) => s.status === 'completed').length
+
   return (
     <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#191613] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
-      {/* Header — document icon + "Plan" + copy */}
-      <div className="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+      {/* Header — collapsible toggle + "Plan" + progress + copy */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
+      >
         <FileIcon size={13} className="shrink-0 text-zinc-500" />
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Plan</span>
+        {steps.length > 0 ? (
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-zinc-500">
+            {done}/{steps.length}
+          </span>
+        ) : null}
         {part.status && part.status !== 'proposed' ? (
           <span
             className={cn(
@@ -615,57 +645,99 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
             {part.status}
           </span>
         ) : null}
-        {body ? (
-          <span className="ml-auto">
-            <CopyButton value={body} label="Copy plan" />
-          </span>
-        ) : null}
-      </div>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {body ? (
+            <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+              <CopyButton value={body} label="Copy plan" />
+            </span>
+          ) : null}
+          <ChevronDown
+            size={13}
+            className={cn('shrink-0 text-zinc-500 transition-transform duration-200', open && 'rotate-180')}
+          />
+        </span>
+      </button>
 
-      {/* Title + body preview */}
-      <div className="px-4 pb-3 pt-3.5">
-        <h3 className="text-[15px] font-semibold leading-[1.4] text-white">{title}</h3>
-        {bodyWithoutTitle ? (
-          <div className="mt-2 flex flex-col gap-1.5">
-            {bodyWithoutTitle
-              .split('\n')
-              .map((l) => l.trim())
-              .filter(Boolean)
-              .slice(0, 6)
-              .map((line, index) => {
-                const heading = /^#{1,6}\s+/.test(line)
-                const bullet = /^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)
-                const clean = line.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')
-                return (
-                  <p
-                    key={index}
+      <Collapse open={open}>
+        <div>
+          {/* Todo checklist */}
+          {steps.length > 0 ? (
+            <ol className="space-y-0.5 px-2.5 pt-2">
+              {steps.map(({ step, status }, index) => (
+                <li
+                  key={`${step}-${index}`}
+                  className={cn('flex items-start gap-2 rounded-lg px-1.5 py-1', status === 'in_progress' && 'bg-white/[0.04]')}
+                >
+                  <span className="mt-0.5 shrink-0 text-[11px] leading-none" aria-hidden>
+                    {status === 'completed' ? (
+                      <span className="text-green">✓</span>
+                    ) : status === 'in_progress' ? (
+                      <span className="inline-block size-2.5 animate-pulse rounded-full border-[1.5px] border-accent border-t-transparent" />
+                    ) : status === 'failed' || status === 'blocked' ? (
+                      <span className="text-red">⚠</span>
+                    ) : (
+                      <span className="text-zinc-600">○</span>
+                    )}
+                  </span>
+                  <span
                     className={cn(
-                      'whitespace-pre-wrap break-words leading-[1.6]',
-                      heading ? 'text-[13px] font-semibold text-zinc-100' : 'text-[12.5px] text-zinc-400',
+                      'min-w-0 flex-1 break-words text-[12px] leading-snug',
+                      status === 'completed' ? 'text-zinc-500 line-through' : status === 'in_progress' ? 'font-medium text-zinc-100' : 'text-zinc-300',
                     )}
                   >
-                    {bullet ? <span className="mr-1.5 text-zinc-600">•</span> : null}
-                    {inline(clean)}
-                  </p>
-                )
-              })}
-            {bodyWithoutTitle.split('\n').filter((l) => l.trim()).length > 6 ? (
-              <p className="font-mono text-[10.5px] text-zinc-600">…</p>
+                    {index + 1}. {step}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+
+          {/* Title + body preview */}
+          <div className="px-4 pb-3 pt-3.5">
+            <h3 className="text-[15px] font-semibold leading-[1.4] text-white">{title}</h3>
+            {bodyWithoutTitle ? (
+              <div className="mt-2 flex flex-col gap-1.5">
+                {bodyWithoutTitle
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .filter(Boolean)
+                  .slice(0, 6)
+                  .map((line, index) => {
+                    const heading = /^#{1,6}\s+/.test(line)
+                    const bullet = /^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)
+                    const clean = line.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')
+                    return (
+                      <p
+                        key={index}
+                        className={cn(
+                          'whitespace-pre-wrap break-words leading-[1.6]',
+                          heading ? 'text-[13px] font-semibold text-zinc-100' : 'text-[12.5px] text-zinc-400',
+                        )}
+                      >
+                        {bullet ? <span className="mr-1.5 text-zinc-600">•</span> : null}
+                        {inline(clean)}
+                      </p>
+                    )
+                  })}
+                {bodyWithoutTitle.split('\n').filter((l) => l.trim()).length > 6 ? (
+                  <p className="font-mono text-[10.5px] text-zinc-600">…</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {onViewPlan ? (
+              <button
+                type="button"
+                onClick={onViewPlan}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 transition hover:bg-white/[0.06] active:scale-[0.99]"
+              >
+                View full plan
+                <span aria-hidden className="text-zinc-500">→</span>
+              </button>
             ) : null}
           </div>
-        ) : null}
-
-        {onViewPlan ? (
-          <button
-            type="button"
-            onClick={onViewPlan}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 transition hover:bg-white/[0.06] active:scale-[0.99]"
-          >
-            View full plan
-            <span aria-hidden className="text-zinc-500">→</span>
-          </button>
-        ) : null}
-      </div>
+        </div>
+      </Collapse>
     </div>
   )
 }
@@ -687,12 +759,14 @@ function formatTokens(count: number | undefined): string | null {
 export function UsageMeter({ part }: { part: UsagePart }) {
   const input = formatTokens(part.inputTokens)
   const output = formatTokens(part.outputTokens)
-  if (input === null && output === null) return null
+  const cached = formatTokens(part.cacheReadTokens)
+  if (input === null && output === null && cached === null) return null
 
   return (
     <span className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums text-ink-3">
-      {input !== null ? <span title={`${part.inputTokens} input tokens`}>↑{input}</span> : null}
-      {output !== null ? <span title={`${part.outputTokens} output tokens`}>↓{output}</span> : null}
+      {input !== null ? <span title={`${part.inputTokens} input tokens (total this turn)`}>↑{input}</span> : null}
+      {output !== null ? <span title={`${part.outputTokens} output tokens (total this turn)`}>↓{output}</span> : null}
+      {cached !== null ? <span title={`${part.cacheReadTokens} cache-read tokens`}>↻{cached}</span> : null}
     </span>
   )
 }
