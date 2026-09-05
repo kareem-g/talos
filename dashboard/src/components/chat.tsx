@@ -89,8 +89,37 @@ function splitFences(text: string): Array<{ text: string; code: boolean; lang?: 
     .filter((segment) => segment.text.length > 0)
 }
 
-/** Inline `code`, **bold**, and bullet lines. Deliberately minimal. */
-function inline(text: string): React.ReactNode {
+/** Inline `code` and **bold** — the markdown every agent actually emits.
+ *  Deliberately no @/$/#// chips here: those belong to the composer and user
+ *  bubbles. Wrapping agent prose tokens (markdown `#` headings, `/paths`)
+ *  in mention chips garbled real messages. */
+function inlineMarkdown(text: string): React.ReactNode {
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+  return tokens.map((token, index) => {
+    if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
+      return (
+        <code
+          key={index}
+          className="rounded-[5px] bg-field px-1 py-[1px] font-mono text-[11.5px] text-ink-2"
+        >
+          {token.slice(1, -1)}
+        </code>
+      )
+    }
+    if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
+      return (
+        <strong key={index} className="font-medium text-ink">
+          {token.slice(2, -2)}
+        </strong>
+      )
+    }
+    return token
+  })
+}
+
+/** Inline text with @/$/#/ and / tokens as colored chips (shared by
+ *  the composer transcript and user bubbles — never agent prose). */
+function inlineChips(text: string): React.ReactNode {
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|[@$#/][^\s]+)/g)
   return tokens.map((token, index) => {
     if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
@@ -135,10 +164,8 @@ function inline(text: string): React.ReactNode {
   })
 }
 
-/** Render inline text with @/$/#/ and / tokens as colored chips (shared by
- *  the composer transcript and user bubbles). */
 export const Chips = memo(function Chips({ text }: { text: string }) {
-  return <>{inline(text)}</>
+  return <>{inlineChips(text)}</>
 })
 
 /** Code block: header with language and copy, mono body. */
@@ -156,6 +183,68 @@ export function Code({ text, lang }: { text: string; lang?: string }) {
       </pre>
     </div>
   )
+}
+
+/** One parsed block of agent markdown: a paragraph, a heading, or a list. */
+type MdBlock =
+  | { kind: 'p'; text: string }
+  | { kind: 'h'; level: number; text: string }
+  | { kind: 'ul' | 'ol'; items: string[] }
+
+/** Line-based markdown block parser — headings (#…####), bullet (- / *),
+ *  ordered (1. / 1)) lists, paragraphs. Deliberately minimal: agents emit
+ *  this subset; full markdown is a dependency we don't need. */
+function parseBlocks(text: string): MdBlock[] {
+  const blocks: MdBlock[] = []
+  let para: string[] = []
+  let list: { kind: 'ul' | 'ol'; items: string[] } | null = null
+  const flushPara = () => {
+    if (para.length > 0) {
+      blocks.push({ kind: 'p', text: para.join('\n') })
+      para = []
+    }
+  }
+  const flushList = () => {
+    if (list) {
+      blocks.push(list)
+      list = null
+    }
+  }
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line)
+    // `**bold**` must not read as a `*` bullet: the marker requires a space.
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line)
+    const ordered = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+    if (heading) {
+      flushPara()
+      flushList()
+      blocks.push({ kind: 'h', level: heading[1]!.length, text: heading[2]! })
+    } else if (bullet) {
+      flushPara()
+      if (!list || list.kind !== 'ul') {
+        flushList()
+        list = { kind: 'ul', items: [] }
+      }
+      list.items.push(bullet[1]!)
+    } else if (ordered) {
+      flushPara()
+      if (!list || list.kind !== 'ol') {
+        flushList()
+        list = { kind: 'ol', items: [] }
+      }
+      list.items.push(ordered[1]!)
+    } else if (line.trim() === '') {
+      flushPara()
+      flushList()
+    } else {
+      flushList()
+      para.push(line)
+    }
+  }
+  flushPara()
+  flushList()
+  return blocks
 }
 
 export const Prose = memo(function Prose({
@@ -176,16 +265,53 @@ export const Prose = memo(function Prose({
             </div>
           )
         const isLast = index === segments.length - 1
+        const blocks = parseBlocks(segment.text)
         return (
-          <p
-            key={index}
-            className={cn(
-              'whitespace-pre-wrap break-words text-[13px] leading-[1.7] text-ink',
-              streaming && isLast && 'caret',
-            )}
-          >
-            {inline(segment.text)}
-          </p>
+          <div key={index} className="flex min-w-0 flex-col gap-2">
+            {blocks.map((block, blockIndex) => {
+              const blockIsLast = isLast && blockIndex === blocks.length - 1
+              if (block.kind === 'h') {
+                return (
+                  <p
+                    key={blockIndex}
+                    className={cn(
+                      'font-semibold tracking-[-0.01em] text-ink',
+                      block.level === 1 && 'text-[15px]',
+                      block.level === 2 && 'text-[13.5px]',
+                      block.level >= 3 && 'text-[12.5px]',
+                    )}
+                  >
+                    {inlineMarkdown(block.text)}
+                  </p>
+                )
+              }
+              if (block.kind === 'ul' || block.kind === 'ol') {
+                return (
+                  <ul key={blockIndex} className="flex min-w-0 flex-col gap-1.5">
+                    {block.items.map((item, itemIndex) => (
+                      <li key={itemIndex} className="flex min-w-0 gap-2 text-[13px] leading-[1.65] text-ink">
+                        <span className="shrink-0 select-none font-mono text-[11px] leading-[1.9] text-ink-3" aria-hidden>
+                          {block.kind === 'ul' ? '•' : `${itemIndex + 1}.`}
+                        </span>
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{inlineMarkdown(item)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
+              return (
+                <p
+                  key={blockIndex}
+                  className={cn(
+                    'whitespace-pre-wrap break-words text-[13px] leading-[1.7] text-ink',
+                    streaming && blockIsLast && 'caret',
+                  )}
+                >
+                  {inlineMarkdown((block as { text: string }).text)}
+                </p>
+              )
+            })}
+          </div>
         )
       })}
     </div>
@@ -720,7 +846,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
                         )}
                       >
                         {bullet ? <span className="mr-1.5 text-zinc-600">•</span> : null}
-                        {inline(clean)}
+                        {inlineMarkdown(clean)}
                       </p>
                     )
                   })}
