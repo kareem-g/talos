@@ -25,7 +25,6 @@
 
 use super::types::{
     ConfigChoice, ConfigMutability, ConfigOption, ConfigOptionType, DiscoverySource, Model,
-    context_window_config_option, effort_config_option, max_output_tokens_config_option,
     permission_mode_config_option,
 };
 use serde_json::{json, Value};
@@ -171,30 +170,13 @@ async fn run_handshake(
             Ok(session) => {
                 probe.config_options = parse_config_options(&session);
                 probe.models = models_from_options(&probe.config_options);
-                // Harness-level dimensions, offered only when the agent did
-                // not report its own: pushing ours alongside a native twin
-                // produced two same-named knobs, and set_config by id could
-                // not tell them apart.
+                // Harness-level permission mode. Reasoning is deliberately NOT
+                // injected here: an agent without a native reasoning option
+                // can't apply our level, so pushing a fake "effort" knob just
+                // ends in a refusal once the session is live. Native reasoning
+                // options are collapsed into the single harness Thought level.
                 probe.config_options.push(permission_mode_config_option());
-                if !has_option_like(&probe.config_options, &["effort", "thinking", "reasoning", "reasoning_effort", "thinking_budget"]) {
-                    // ACP agents assume reasoning, which is the common case.
-                    probe.config_options.push(effort_config_option(None, false).unwrap());
-                }
-                if !has_option_like(&probe.config_options, &["context_window", "contextwindow", "max_context", "context"]) {
-                    // Only with a real reported number — otherwise the chip
-                    // (and its meter) measures against fiction.
-                    if let Some(window) = probe
-                        .models
-                        .first()
-                        .and_then(|m| m.capabilities.as_ref())
-                        .and_then(|c| c.context_window)
-                    {
-                        probe.config_options.push(context_window_config_option(Some(window)));
-                    }
-                }
-                if !has_option_like(&probe.config_options, &["max_tokens", "max_output_tokens", "maxtokens", "max_completion_tokens"]) {
-                    probe.config_options.push(max_output_tokens_config_option());
-                }
+                super::thought::collapse_reasoning(&mut probe.config_options);
             }
             Err(reason) => probe.session_error = reason,
         }
@@ -204,7 +186,8 @@ async fn run_handshake(
 }
 
 /// Whether the agent natively reported an option under any of these ids
-/// (case-insensitive) — used to avoid pushing a harness twin beside it.
+/// (case-insensitive) — kept for tests that assert no harness twin is pushed.
+#[cfg(test)]
 fn has_option_like(options: &[ConfigOption], ids: &[&str]) -> bool {
     options.iter().any(|option| {
         let id = option.id.to_lowercase();

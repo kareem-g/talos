@@ -2543,7 +2543,15 @@ async fn claude_spawn_config(
             .map(|(_, value)| value.clone())
     };
     let model = requested_model.or_else(|| pick("model"));
-    let effort = requested_effort.or_else(|| pick("effort"));
+    let effort = requested_effort
+        .or_else(|| pick("effort"))
+        .or_else(|| {
+            // Harness thought level → claude's --effort flag. On (default) and
+            // off spell no flag; only explicit high/max are passed through.
+            pick("thought").and_then(|level| {
+                crate::providers::thought::explicit_effort_flag(&level).map(str::to_string)
+            })
+        });
 
     let mut extra = claude_permission_args(state, session_id).await;
     if let Some(effort) = effort.as_deref() {
@@ -2557,7 +2565,7 @@ async fn claude_spawn_config(
 
 /// Drop the one-shot config values that were just applied at spawn.
 async fn clear_claude_spawn_config(state: &AppState, session_id: &str) {
-    for key in ["model", "effort"] {
+    for key in ["model", "effort", "thought"] {
         let _ = state.session_manager.clear_pending_config(session_id, key).await;
     }
 }

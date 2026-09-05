@@ -62,7 +62,8 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
     // Only a live PTY accepts keystrokes. Checked per session, not per provider.
     let interactive_terminal = state.pty_manager.has_active_session(session_id).await;
 
-    if let Some(options) = state.acp_manager.config_options(session_id).await {
+    if let Some(mut options) = state.acp_manager.config_options(session_id).await {
+        crate::providers::thought::collapse_reasoning(&mut options);
         return Ok(SessionConfig {
             session_id: session_id.to_string(),
             agent: session.agent,
@@ -112,11 +113,14 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
             // If still no currentValue (flag-driven provider), keep the honest
             // "Not set" — the frontend will render the first choice as a subtle default,
             // but we must not lie about liveness.
+            let transport = provider.transport;
+            let mut options = provider.config_options;
+            crate::providers::thought::collapse_reasoning(&mut options);
             return Ok(SessionConfig {
                 session_id: session_id.to_string(),
                 agent: session.agent.clone(),
-                transport: provider.transport,
-                options: provider.config_options,
+                transport,
+                options,
                 live: true,
                 interactive_terminal,
             });
@@ -168,6 +172,7 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
             }
         }
     }
+    crate::providers::thought::collapse_reasoning(&mut options);
     Ok(SessionConfig {
         session_id: session_id.to_string(),
         agent: session.agent,
@@ -207,11 +212,16 @@ pub async fn apply_config(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Session not found".to_string())?;
 
+    // Thought level is our harness dimension, not a passthrough config id: it
+    // translates per engine. Intercept before generic routing.
+    if config_id == crate::providers::thought::THOUGHT_ID {
+        return apply_thought(state, session_id, &session, value).await;
+    }
+
     // Permission mode is backend-only: it doesn't get sent to the agent,
     // but controls how the permission broker handles tool requests.
     // Handle it before routing to ACP so it applies to any session type.
-    if config_id == "permission_mode" {
-        let _ = state
+    if config_id == "permission_mode" {        let _ = state
             .session_manager
             .set_pending_config(session_id, "permission_mode", value)
             .await;
@@ -332,6 +342,152 @@ pub async fn apply_config(
 
     broadcast_config(state, session_id, &applied, &config);
     Ok((applied, config))
+}
+
+async fn apply_thought(
+    state: &AppState,
+    session_id: &str,
+    session: &crate::sessions::Session,
+    value: &str,
+) -> Result<(ConfigApplied, SessionConfig), String> {
+    let thought_id = crate::providers::thought::THOUGHT_ID;
+
+    // PTY scrapes a TUI — no channel for any config, let alone thought level.
+    if state.pty_manager.has_active_session(session_id).await {
+        let current = read_config(state, session_id).await?;
+        let applied = ConfigApplied::Unsupported {
+            reason: format!(
+                "{} runs as a terminal session, which offers no way to change the thought level programmatically.",
+                session.agent
+            ),
+        };
+        broadcast_config(state, session_id, &applied, &current);
+        return Ok((applied, current));
+    }
+
+    // Live ACP agent: translate our level to the agent's own reasoning knob.
+    if state.acp_manager.has_active_session(session_id).await {
+        return apply_acp_thought(state, session_id, value).await;
+    }
+
+    let current = read_config(state, session_id).await?;
+    if !current.options.iter().any(|option| option.id == thought_id) {
+        let applied = ConfigApplied::Unsupported {
+            reason: format!("{} does not support a Thought level.", current.agent),
+        };
+        broadcast_config(state, session_id, &applied, &current);
+        return Ok((applied, current));
+    }
+
+    // Persist so the next API request or spawn honors it.
+    state
+        .session_manager
+        .set_pending_config(session_id, thought_id, value)
+        .await
+        .map_err(|error| error.to_string())?;
+    let applied = if matches!(current.transport, Transport::Api) {
+        ConfigApplied::Immediate
+    } else {
+        ConfigApplied::NextRun {
+            reason: "Thought level applies the next time this session runs.".to_string(),
+        }
+    };
+    let mut config = current;
+    if let Some(option) = config.options.iter_mut().find(|option| option.id == thought_id) {
+        option.current_value = Some(value.to_string());
+    }
+    broadcast_config(state, session_id, &applied, &config);
+    Ok((applied, config))
+}
+
+/// Translate a harness Thought level to a live ACP agent's native reasoning
+/// option (boolean toggle or effort enum) and send it via
+/// `session/set_config_option`.
+async fn apply_acp_thought(
+    state: &AppState,
+    session_id: &str,
+    value: &str,
+) -> Result<(ConfigApplied, SessionConfig), String> {
+    let agent = state
+        .session_manager
+        .get_session(session_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|session| session.agent)
+        .unwrap_or_else(|| "agent".to_string());
+    let unsupported = |reason: String| {
+        let applied = ConfigApplied::Unsupported { reason };
+        Ok((
+            applied,
+            SessionConfig {
+                session_id: session_id.to_string(),
+                agent: agent.clone(),
+                transport: Transport::Acp,
+                options: Vec::new(),
+                live: true,
+                interactive_terminal: false,
+            },
+        ))
+    };
+    let Some(raw) = state.acp_manager.config_options(session_id).await else {
+        return unsupported("ACP session has no config surface.".to_string());
+    };
+    let Some(native) = raw.iter().find(|option| crate::providers::thought::is_reasoning_option(option)).cloned() else {
+        return unsupported("This agent has no reasoning setting to map the thought level onto.".to_string());
+    };
+
+    let boolean = native.option_type == crate::providers::types::ConfigOptionType::Boolean
+        || (!native.choices.is_empty()
+            && native
+                .choices
+                .iter()
+                .all(|choice| matches!(choice.value.to_lowercase().as_str(), "true" | "false" | "on" | "off" | "yes" | "no" | "enabled" | "disabled")));
+    let native_value = if boolean {
+        if crate::providers::thought::canonical_level(value) == "off" {
+            "false".to_string()
+        } else {
+            "true".to_string()
+        }
+    } else {
+        let tokens: Vec<String> = native.choices.iter().map(|choice| choice.value.clone()).collect();
+        match crate::providers::thought::map_level_to_tokens(value, &tokens) {
+            Some(token) => token,
+            None => {
+                let has_off = tokens.iter().any(|token| token.eq_ignore_ascii_case("off"));
+                if crate::providers::thought::canonical_level(value) == "off" && has_off {
+                    "off".to_string()
+                } else {
+                    return unsupported("This agent's reasoning levels don't include the chosen thought level.".to_string());
+                }
+            }
+        }
+    };
+
+    match state
+        .acp_manager
+        .set_config_option(session_id, &native.id, &native_value)
+        .await
+    {
+        Ok(_) => {
+            let config = read_config(state, session_id).await?;
+            let applied = ConfigApplied::Immediate;
+            broadcast_config(state, session_id, &applied, &config);
+            Ok((applied, config))
+        }
+        Err(error) => {
+            let reason = match &error {
+                crate::AgentDeckError::Session(message)
+                | crate::AgentDeckError::Pty(message)
+                | crate::AgentDeckError::Unknown(message) => message.clone(),
+                other => other.to_string(),
+            };
+            let applied = ConfigApplied::Unsupported { reason };
+            let config = read_config(state, session_id).await?;
+            broadcast_config(state, session_id, &applied, &config);
+            Ok((applied, config))
+        }
+    }
 }
 
 async fn apply_acp_config(

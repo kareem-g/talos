@@ -416,8 +416,16 @@ async fn call_openai_stream(
             "stream_options": { "include_usage": true },
             "tools": crate::agents::api_tools::openai_tool_definitions(is_subagent, in_room),
         });
-        if let Some((_, effort)) = pending.iter().find(|(k, _)| k == "effort") {
-            body["reasoning_effort"] = Value::String(effort.clone());
+        if let Some((_, level)) = pending
+            .iter()
+            .find(|(key, _)| key == crate::providers::thought::THOUGHT_ID || key == "effort")
+        {
+            // Harness thought level → native reasoning_effort token. Off → no
+            // parameter (nothing to disable on OpenAI-style endpoints).
+            let tokens = ["low", "medium", "high", "xhigh", "max"].map(str::to_string);
+            if let Some(token) = crate::providers::thought::map_level_to_tokens(level, &tokens) {
+                body["reasoning_effort"] = Value::String(token);
+            }
         }
 
         let resp = req

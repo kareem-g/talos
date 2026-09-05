@@ -25,6 +25,7 @@ pub mod catalog;
 pub mod discovery;
 pub mod native;
 pub mod registry;
+pub mod thought;
 pub mod types;
 
 pub use registry::{CustomProvider, ProviderRegistry};

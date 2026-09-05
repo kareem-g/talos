@@ -321,6 +321,8 @@ mod tests {
                 action: "deny".to_string(),
             }],
             network: Vec::new(),
+            skip_network_policy: false,
+            full_access: false,
         };
         assert_eq!(p.decide_path("/home/kareem/.ssh/id_rsa"), PolicyDecision::Deny);
         assert_eq!(p.decide_path("/home/kareem/.ssh/config"), PolicyDecision::Deny);
