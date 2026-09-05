@@ -160,6 +160,9 @@ export default {
         raised: 'var(--shadow-raised)',
         overlay: 'var(--shadow-overlay)',
       },
+      opacity: {
+        '55': '0.55',
+      },
       spacing: {
         '4.5': '1.125rem',
         '5.5': '1.375rem',

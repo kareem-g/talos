@@ -62,7 +62,7 @@
     --agent-purple: #a78bfa;
     --agent-blue: #6396cc;
     --agent-orange: #e07a5f;
-    --agent-yellow: #d9a03f;
+    --agent-yellow: #45b8c2;
     --agent-pink: #d96a8a;
 
     /* Terminal: warm editor dark. */
@@ -96,11 +96,11 @@
     --emerald-500: #46a04c;
     --emerald-600: #3a8a40;
     --emerald-700: #2f6f34;
-    --amber-300: #e0a94e;
-    --amber-400: #d4942f;
-    --amber-500: #bd8121;
-    --amber-600: #a06c1c;
-    --amber-700: #7f5516;
+    --amber-300: #e0884e;
+    --amber-400: #d97a3e;
+    --amber-500: #c96c33;
+    --amber-600: #ac5b2a;
+    --amber-700: #8a4922;
     --orange-300: #e08a4e;
     --orange-400: #db6d28;
     --orange-500: #c55f1f;
@@ -175,11 +175,11 @@
     --zinc-50: #fdfdfd;
     --zinc-100: #26262b;
     --zinc-200: #3a3a40;
-    --zinc-300: #55555e;
-    --zinc-400: #8a8a93;
-    --zinc-500: #a5a5ad;
-    --zinc-600: #b9b9c0;
-    --zinc-700: #c9c9cf;
+    --zinc-300: #4a4a52;
+    --zinc-400: #6b6b74;
+    --zinc-500: #7d7d85;
+    --zinc-600: #8f8f97;
+    --zinc-700: #a6a6ae;
     --zinc-800: #d8d8dd;
     --zinc-900: #e5e5e9;
     --zinc-950: #efeff2;
@@ -188,11 +188,11 @@
     --emerald-500: #296e37;
     --emerald-600: #235d2e;
     --emerald-700: #1d4d26;
-    --amber-300: #9a6c15;
-    --amber-400: #8a5f12;
-    --amber-500: #7a5310;
-    --amber-600: #68450d;
-    --amber-700: #56380a;
+    --amber-300: #a3541d;
+    --amber-400: #93491a;
+    --amber-500: #823f16;
+    --amber-600: #6f3413;
+    --amber-700: #5c2b10;
     --orange-300: #a3541d;
     --orange-400: #93491a;
     --orange-500: #823f16;
@@ -364,6 +364,7 @@
   [data-theme='light'] .hover\:border-white\/\[0\.15\]:hover {
     border-color: var(--line-strong);
   }
+  [data-theme='light'] .bg-black\/10,
   [data-theme='light'] .bg-black\/20,
   [data-theme='light'] .bg-black\/25,
   [data-theme='light'] .bg-black\/30 {
@@ -372,6 +373,7 @@
   [data-theme='light'] .bg-black\/40,
   [data-theme='light'] .bg-black\/50,
   [data-theme='light'] .bg-black\/60,
+  [data-theme='light'] .bg-black\/65,
   [data-theme='light'] .bg-black\/70 {
     /* Backdrop dims stay dark — they sit above content by design. */
     background-color: rgba(38, 32, 26, 0.32);

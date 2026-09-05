@@ -1120,7 +1120,7 @@ function StatusContextControl({ working, usage }: { working?: boolean; usage?: C
   const ringRadius = 5.5
   const ringCircumference = 2 * Math.PI * ringRadius
   const ringOffset = pct !== undefined ? ringCircumference * (1 - pct / 100) : ringCircumference
-  const ringColor = isOverflow ? '#d96c5f' : pct !== undefined && pct > 85 ? '#c97855' : pct !== undefined && pct > 60 ? '#e3a15d' : '#c7a56a'
+  const ringColor = isOverflow ? 'var(--red)' : pct !== undefined && pct > 85 ? 'var(--red)' : pct !== undefined && pct > 60 ? 'var(--orange)' : 'var(--green)'
 
   return (
     <div className="relative shrink-0 pr-0.5" ref={ref}>

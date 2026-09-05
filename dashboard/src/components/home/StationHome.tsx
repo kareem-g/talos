@@ -577,7 +577,7 @@ export function StationHome({
                                         e.stopPropagation()
                                         toggleStar(session.id)
                                       }}
-                                      className={cn('rounded p-1 text-ink-3 hover:text-amber-500', isStarred ? 'text-amber-500 opacity-100' : 'opacity-30 group-hover:opacity-100')}
+                                      className={cn('rounded p-1 text-ink-3 hover:text-amber-500', isStarred ? 'text-amber-500 opacity-100' : 'opacity-55 group-hover:opacity-100')}
                                     >
                                       ★
                                     </button>
@@ -590,7 +590,7 @@ export function StationHome({
                                           e.stopPropagation()
                                           void restoreSession(session.id).catch(() => {})
                                         }}
-                                        className="rounded p-1 text-ink-3 opacity-30 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
+                                        className="rounded p-1 text-ink-3 opacity-55 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
                                       >
                                         <RotateCcw size={12} />
                                       </button>
@@ -603,7 +603,7 @@ export function StationHome({
                                           e.stopPropagation()
                                           void archiveSession(session.id).catch(() => {})
                                         }}
-                                        className="rounded p-1 text-ink-3 opacity-30 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
+                                        className="rounded p-1 text-ink-3 opacity-55 transition hover:bg-hover-2 hover:text-ink group-hover:opacity-100"
                                       >
                                         <Archive size={12} />
                                       </button>
