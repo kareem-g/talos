@@ -375,13 +375,13 @@ export interface DirListing {
   entries: Array<{ name: string; path: string; dir?: boolean }>
 }
 
-/** Phone-pairing payload returned after a successful Headscale login. */
+/** Phone-pairing payload returned after a successful Tailscale login. */
 export interface PairInfo {
   /** `tailscale://…` deep link the Tailscale app parses on iOS/Android. */
   qr_payload: string
   /** Plain-https fallback for browsers / older clients. */
   fallback_url: string
-  /** MagicDNS handle of this node on the user's Headscale tailnet. */
+  /** MagicDNS handle of this node on the user's tailnet. */
   tailnet: string
   /** Underlying preauth key — surfaced for copy-to-clipboard. */
   key: string
@@ -389,22 +389,29 @@ export interface PairInfo {
   expires_at?: string | null
 }
 
-/** A single transport option in the QR picker. */
+/** A single transport option in the QR picker. The backend collapses all
+ *  tailnet rows (MagicDNS / IPv4 / IPv6) to one — `source` is one of those
+ *  three but the picker treats them all as "Tailnet". Self-hosted Headscale
+ *  control planes still report via the `via` field. */
 export interface EndpointOption {
   base_url: string
   /** Which transport this is — drives the label and icon. */
   source:
     | 'explicit'
     | 'cloudflare'
+    | 'tailnet'
     | 'tailnet_magic_dns'
     | 'tailnet_ipv4'
     | 'tailnet_ipv6'
     | 'lan'
     | 'localhost'
+    | (string & {})
   host: string
   port: number
   secure: boolean
   reachable: boolean
+  /** "tailscale" or "headscale <host>" — the latter means a self-hosted
+   *  control plane, surfaced honestly in the picker. */
   via?: string | null
   /** QR payload for this option (only present when returned by the pairing
    *  offer endpoint, not by the bare `/api/tunnel/endpoints` list). */
@@ -446,19 +453,13 @@ export interface TunnelState {
     | null
 }
 
-/** Native tunnel control — Tailscale / Headscale / Cloudflare from the UI. */
+/** Native tunnel control — Tailscale / Cloudflare from the UI. */
 export const tunnelApi = {
   status: () =>
-    request<{ tailscale: unknown; headscale: unknown; cloudflare: unknown }>('/api/tunnel/status'),
+    request<{ tailscale: unknown; cloudflare: unknown }>('/api/tunnel/status'),
   start: (
-    kind: 'tailscale' | 'headscale' | 'cloudflare',
+    kind: 'tailscale' | 'cloudflare',
     body?: {
-      login_server?: string
-      auth_key?: string
-      /** Headscale admin API key — used to mint preauth keys for the QR. */
-      api_key?: string
-      /** Headscale user the preauth key is bound to. */
-      user?: string
       /** Cloudflare tunnel token (long-lived secret). Persisted to settings
        *  when present so subsequent bring-ups don't need it re-typed. */
       token?: string
@@ -467,26 +468,10 @@ export const tunnelApi = {
     },
   ) =>
     request<TunnelState>(`/api/tunnel/${kind}/start`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
-  stop: (kind: 'tailscale' | 'headscale' | 'cloudflare') =>
+  stop: (kind: 'tailscale' | 'cloudflare') =>
     request<TunnelState>(`/api/tunnel/${kind}/stop`, { method: 'POST' }),
-  /** Promote the current user to tailscale operator — used after a
-   * `needs_authorization` error to unblock `tailscale up`. */
-  authorizeHeadscale: () =>
-    request<{ ok: boolean; error?: string }>('/api/tunnel/headscale/authorize', { method: 'POST' }),
-  /** Mint a fresh preauth key without re-running `tailscale up`. */
-  createPreauth: (body: { login_server: string; api_key?: string; user?: string; reusable?: boolean }) =>
-    request<{
-      ok: boolean
-      key?: string
-      expires_at?: string | null
-      qr_payload?: string
-      fallback_url?: string
-      tailnet?: string
-      error_kind?: string
-      error?: string
-    }>('/api/tunnel/headscale/preauth', { method: 'POST', body: JSON.stringify(body) }),
   /** Every reachable transport (LAN, Tailnet, Cloudflare, …) — feeds the
-   * "pick where your phone is" QR picker on the Remote screen. */
+   *  "pick where your phone is" QR picker on the home page. */
   endpoints: () => request<EndpointList>('/api/tunnel/endpoints'),
 }
 

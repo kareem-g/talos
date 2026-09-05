@@ -225,33 +225,23 @@ function NotificationsCard() {
 }
 // declared after EndpointCard so the refresh hook above stays hoisted
 
-export function RemoteScreen() {
+export function PairSection() {
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-24 pt-5 sm:px-6 lg:pb-6">
-        <div>
-          <h1 className="text-[16px] font-semibold tracking-[-0.01em] text-ink">Remote control</h1>
-          <p className="mt-0.5 text-[12px] leading-[1.6] text-ink-3">
-            Scan with any phone — no app store required. The scanner pairs, gets a private token,
-            and can install this station to its home screen.
-          </p>
-        </div>
+    <div className="flex flex-col gap-4">
+      {/* QR pairing, inline — the phone-side flow lives at /?offer=…&secret=… */}
+      <section className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
+        <header className="border-b border-line px-3.5 py-2.5">
+          <h3 className="text-[12.5px] font-medium text-ink">Pair a new device</h3>
+        </header>
+        <PairDeviceLayerContent />
+      </section>
 
-        {/* QR pairing, inline — the phone-side flow lives at /?offer=…&secret=… */}
-        <section className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-          <header className="border-b border-line px-3.5 py-2.5">
-            <h3 className="text-[12.5px] font-medium text-ink">Pair a new device</h3>
-          </header>
-          <PairDeviceLayerContent />
-        </section>
+      <SectionLabel>Access</SectionLabel>
+      <DevicesCard />
 
-        <SectionLabel>Access</SectionLabel>
-        <DevicesCard />
-
-        <SectionLabel>Machine</SectionLabel>
-        <EndpointCard />
-        <NotificationsCard />
-      </div>
+      <SectionLabel>Machine</SectionLabel>
+      <EndpointCard />
+      <NotificationsCard />
     </div>
   )
 }

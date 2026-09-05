@@ -3,13 +3,9 @@ import {
   Archive,
   ChevronRight,
   Folder,
-  AppWindow,
   LayoutGrid,
   Plus,
-  RadioTower,
   Search,
-  Settings2,
-  Sparkles,
   X,
 } from 'lucide-react'
 import { useStore, getConversation } from '@/store'
@@ -18,26 +14,22 @@ import { sessionUIState, isInternalSession } from '@/lib/sessionState'
 import type { Session } from '@/types/session'
 
 type GroupMode = 'group' | 'project'
-type AppSection = 'automations' | 'skills' | 'remote' | 'settings'
 
 /**
- * Home sidebar — sessions/workspaces first. The workspace tool mini-panels
- * (Agents, Terminals, Browser, Tasks, Git) were removed from here: that
- * activity lives in the session workspace's own panel, and the home is a
- * control station, not a second workbench.
+ * Home sidebar — sessions/workspaces only. The former nav buttons
+ * (Automations, Skills, Remote, Settings) are gone: those live on the home
+ * page itself as in-page sections the user scrolls to.
  */
 export function HomeSidebar({
   onNewTask,
   onSearch,
   onSelectSession,
-  onNavigate,
   selectedId,
   searchQuery,
 }: {
   onNewTask: () => void
   onSearch: () => void
   onSelectSession: (id: string) => void
-  onNavigate: (section: AppSection) => void
   selectedId?: string
   searchQuery: string
 }) {
@@ -134,12 +126,6 @@ export function HomeSidebar({
         <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-white/[0.07] py-3">
           <button type="button" aria-label="Plumb" title="Plumb" className="mb-4 flex size-10 items-center justify-center rounded-xl bg-accent text-[15px] font-bold tracking-[-0.05em] text-accent-ink shadow-lg shadow-black/20">A</button>
           <div className="flex flex-1 flex-col items-center justify-start gap-2" />
-          <div className="flex flex-col items-center gap-2">
-            <button type="button" onClick={() => onNavigate('automations')} aria-label="Automations" title="Automations" className="flex size-12 items-center justify-center rounded-2xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"><RadioTower size={26} strokeWidth={1.7} /></button>
-            <button type="button" onClick={() => onNavigate('skills')} aria-label="Skills" title="Skills" className="flex size-12 items-center justify-center rounded-2xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"><Sparkles size={26} strokeWidth={1.7} /></button>
-            <button type="button" onClick={() => onNavigate('remote')} aria-label="Remote" title="Remote" className="flex size-12 items-center justify-center rounded-2xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"><AppWindow size={26} strokeWidth={1.7} /></button>
-            <button type="button" onClick={() => onNavigate('settings')} aria-label="Settings" title="Settings" className="flex size-12 items-center justify-center rounded-2xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"><Settings2 size={26} strokeWidth={1.7} /></button>
-          </div>
           <span className={cn('mt-3 size-2 rounded-full', connection === 'connected' ? 'bg-green' : connection === 'connecting' || connection === 'reconnecting' ? 'bg-orange-400 breathe' : 'bg-red-400')} title={connection} />
         </div>
 
@@ -159,7 +145,6 @@ export function HomeSidebar({
             <div className="flex items-center gap-2 rounded-xl bg-white/[0.045] px-2.5 py-2">
               <span className={cn('size-2 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-zinc-600')} />
               <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-zinc-200">{connection === 'connected' ? 'Station connected' : 'Station offline'}</p><p className="truncate font-mono text-[9px] text-zinc-600">localhost · {connection}</p></div>
-              <button type="button" onClick={() => onNavigate('remote')} className="rounded-md p-1 text-zinc-600 hover:bg-white/[0.08] hover:text-zinc-200" aria-label="Open remote control"><AppWindow size={13} /></button>
             </div>
           </div>
         </div>
@@ -170,7 +155,7 @@ export function HomeSidebar({
         {mobileOpen ? <div className="fixed inset-0 z-40"><button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} aria-label="Close command center" /><section className="absolute inset-x-0 bottom-0 flex max-h-[82dvh] min-h-[58dvh] flex-col rounded-t-2xl border border-white/10 bg-[#191613] shadow-2xl animate-sheet" aria-label="Command center">
           <div className="shrink-0 border-b border-white/[0.07] px-4 pb-3 pt-2"><div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" /><div className="flex items-center gap-2"><div className="flex-1"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Command center</p><p className="text-[13px] font-semibold text-white">Workspaces</p></div><button type="button" onClick={() => { onNewTask(); setMobileOpen(false) }} className="rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-accent-ink">New task</button></div></div>
           <div className="flex min-h-0 flex-1 flex-col">{renderSessionsPanel()}</div>
-          <div className="shrink-0 border-t border-white/[0.08] p-3"><div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className={cn('size-2 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-zinc-600')} /> {connection === 'connected' ? 'Station connected' : 'Station offline'}<button type="button" onClick={() => onNavigate('automations')} className="ml-auto text-zinc-300">Automations</button><button type="button" onClick={() => onNavigate('skills')} className="text-zinc-300">Skills</button></div></div>
+          <div className="shrink-0 border-t border-white/[0.08] p-3"><div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className={cn('size-2 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-zinc-600')} /> {connection === 'connected' ? 'Station connected' : 'Station offline'}</div></div>
         </section></div> : null}
       </div>
     </>

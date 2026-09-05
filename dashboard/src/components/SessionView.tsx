@@ -6,61 +6,27 @@
  * lines) and a desktop hook, with seven pieces of derivation maintained in
  * parallel and already drifting.
  *
- * Zcode-style header: compact two-line top nav showing
- *   - connection status (dot + reconnecting/offline)
- *   - session + project breadcrumb
- *   - current model chip (taps to ConfigLayer)
- *   - derived agent state with detail (Working / Editing src/... )
+ * Mobile vs desktop share the same body (Timeline + StateZone); the mobile
+ * header adds PanelLeft/PanelRight buttons that open the same Sessions list
+ * and Agent Workspace right rail the desktop session uses, just surfaced as
+ * side sheets. So the "right pane" looks and behaves the same on both shapes.
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { SessionPanels } from './SessionPanels'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { StateZone } from './StateZone'
-import { TerminalView } from './TerminalView'
 import { Timeline } from './Timeline'
-import {
-  ChevronLeft,
-  Dot,
-  IconButton,
-  Layer,
-  MessageIcon,
-  Notice,
-  Segmented,
-  StatusPill,
-  Terminal as TerminalIcon,
-} from './ui'
+import { PanelLeft, PanelRight } from 'lucide-react'
+import { Dot, IconButton, Layer, Notice, StatusPill, ChevronLeft } from './ui'
+import { LeftSidebar } from './desktop/LeftSidebar'
+import { RightRail, type RightRailHandle } from './desktop/session/RightRail'
 import { useConversation, useStore } from '@/store'
-import { socket } from '@/lib/socket'
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
-import { agentStateDisplay } from '@/types/remote'
 import { agentDisplayFor } from '@/lib/remote'
+import { openFile } from '@/lib/fileViewer'
 import type { Session } from '@/types/session'
 import { useRoute } from '@/lib/route'
-import { cn } from '@/lib/format'
 import { useRooms } from '@/lib/rooms'
 import { createSessionSendHandlers } from '@/lib/sessionCommands'
-
-type Tab = 'chat' | 'terminal'
-
-function LayersIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-      <path d="M2 17l10 5 10-5" />
-      <path d="M2 12l10 5 10-5" />
-    </svg>
-  )
-}
 
 export function SessionView({
   session,
@@ -70,20 +36,22 @@ export function SessionView({
   /** Present on mobile, where a session occupies the whole screen. */
   onBack?: () => void
 }) {
-  const [tab, setTab] = useState<Tab>('chat')
   const conversation = useConversation(session.id)
   const config = useStore((state) => state.configs[session.id])
   const notice = useStore((state) => state.notices[session.id])
   const connection = useStore((state) => state.connection)
   const providers = useStore((state) => state.providers)
-  const sessions = useStore((state) => state.sessions)
 
   const openSession = useStore((state) => state.openSession)
   const setConfig = useStore((state) => state.setConfig)
   const respondToApproval = useStore((state) => state.respondToApproval)
   const dismissNotice = useStore((state) => state.dismissNotice)
-  const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [panelsOpen, setPanelsOpen] = useState(false)
+  // Which side panel is open, if any. The pane button in the header opens
+  // a small popover to choose between them; tapping a destination sets the
+  // state and the Layer renders.
+  const [pane, setPane] = useState<'sessions' | 'details' | null>(null)
+  // Lets the explorer/left sheet open a file in the right rail's File tab.
+  const rightRailRef = useRef<RightRailHandle>(null)
   const { navigate } = useRoute()
 
   // Hydrate on every session switch. The store now clears and
@@ -100,15 +68,11 @@ export function SessionView({
   )
 
   /**
-   * The terminal view is always available.
-   *
-   * Every session's raw output is recorded by the backend, so there is always
-   * something to show — and hiding the tab for ACP providers meant no way to see
-   * what an agent actually emitted. What varies is whether the terminal accepts
-   * *input*, which the session reports via `interactiveTerminal` (a PTY does; ACP
-   * over piped stdio does not).
+   * The terminal view is always available on desktop. On mobile we lock the
+   * body to chat only — the chat/terminal Segmented toggle was removed from
+   * the mobile header to free header space, and the desktop `SessionWorkspace`
+   * keeps the toggle for users on a real desktop terminal.
    */
-  const interactiveTerminal = config?.interactiveTerminal === true
 
   const uiState = sessionUIState(session, conversation, connection)
   const stateDisplay = uiStateDisplay(uiState)
@@ -121,11 +85,6 @@ export function SessionView({
     () => agentDisplayFor(session, conversation, connection),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session, activity, connection],
-  )
-
-  const modelOption = useMemo(
-    () => config?.options.find((o) => o.id === 'model' || o.category === 'model'),
-    [config],
   )
 
   /* ── Command dispatch — same shared handlers as the desktop workspace ─────
@@ -149,13 +108,13 @@ export function SessionView({
   const showConnectionInline = connection !== 'connected'
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-canvas">
-      {/* ── Compact remote-control header ─────────────────────────────────── */}
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-canvas">
+      {/* ── Compact remote-control header ─────────────────────────────── */}
       <header
         className="flex shrink-0 flex-col gap-1 border-b border-line/60 bg-canvas px-2.5 py-2"
         style={onBack ? { paddingTop: 'max(0.5rem, env(safe-area-inset-top))' } : undefined}
       >
-        {/* Row 1: navigation + title + model + actions */}
+        {/* Row 1: navigation + title + actions + segmented */}
         <div className="flex min-w-0 items-center gap-2">
           {onBack ? (
             <IconButton label="Back to sessions" onClick={onBack} className="-ml-1 shrink-0">
@@ -188,28 +147,33 @@ export function SessionView({
             </div>
           </div>
 
-          <IconButton label="Session details" onClick={() => setPanelsOpen(true)} className="-mr-1 shrink-0">
-            <svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="3" width="18" height="18" rx="3" />
-              <path d="M7 8h10M7 12h6M7 16h4" />
-            </svg>
-          </IconButton>
-
-          {/* Session switcher (mobile) */}
+          {/* Pane openers (mobile only): PanelLeft opens the sessions
+              sheet, PanelRight opens the same Agent Workspace right rail
+              the desktop session uses, anchored to the right edge. Two
+              dedicated icons replace the single popover the mobile
+              header used to have. */}
           {onBack ? (
-            <IconButton label="Switch session" onClick={() => setSwitcherOpen(true)} className="-mr-1 shrink-0">
-              <LayersIcon />
-            </IconButton>
+            <>
+              <IconButton
+                label="Sessions"
+                onClick={() => setPane((current) => (current === 'sessions' ? null : 'sessions'))}
+                aria-expanded={pane === 'sessions'}
+                aria-haspopup="dialog"
+                className="shrink-0"
+              >
+                <PanelLeft size={15} />
+              </IconButton>
+              <IconButton
+                label="Workspace"
+                onClick={() => setPane((current) => (current === 'details' ? null : 'details'))}
+                aria-expanded={pane === 'details'}
+                aria-haspopup="dialog"
+                className="-mr-1 shrink-0"
+              >
+                <PanelRight size={15} />
+              </IconButton>
+            </>
           ) : null}
-
-          <Segmented
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'chat', label: 'Chat', icon: <MessageIcon size={12} /> },
-              { value: 'terminal', label: 'Terminal', icon: <TerminalIcon size={12} /> },
-            ]}
-          />
         </div>
 
         {/* Row 2 (mobile detail overflow): show file detail full width on narrow */}
@@ -220,93 +184,97 @@ export function SessionView({
 
       {notice ? <Notice message={notice} onDismiss={() => dismissNotice(session.id)} /> : null}
 
-      {tab === 'chat' ? (
-        <>
-          <Timeline
-            conversation={conversation}
-            onRespond={(requestId, decision, meta) => respondToApproval(session.id, requestId, decision, meta)}
-            project={session.project ?? undefined}
-            sessionId={session.id}
-          />
-          <StateZone
-            session={session}
-            conversation={conversation}
-            connection={connection}
-            config={config}
-            provider={provider}
-            onSend={(t, attachments) => dispatch.send(t, attachments)}
-            onQueue={(t, attachments) => dispatch.queue(t, attachments)}
-            onSetConfig={(id, v) => void setConfig(session.id, id, v)}
-            rooms={rooms.map((r) => r.name)}
-            workers={roomOfSession?.workers.map((w) => w.name)}
-          />
-        </>
-      ) : (
-        <TerminalView
-          output={conversation.terminal}
-          interactive={interactiveTerminal}
-          transport={config?.transport}
-          connectionState={connection}
-          onInput={(data) => socket.sendTerminalInput(session.id, data)}
-          onResize={(cols, rows) => socket.resizeTerminal(session.id, cols, rows)}
-        />
-      )}
+      <Timeline
+        conversation={conversation}
+        onRespond={(requestId, decision, meta) => respondToApproval(session.id, requestId, decision, meta)}
+        project={session.project ?? undefined}
+        sessionId={session.id}
+      />
+      <StateZone
+        session={session}
+        conversation={conversation}
+        connection={connection}
+        config={config}
+        provider={provider}
+        onSend={(t, attachments) => dispatch.send(t, attachments)}
+        onQueue={(t, attachments) => dispatch.queue(t, attachments)}
+        onSetConfig={(id, v) => void setConfig(session.id, id, v)}
+        rooms={rooms.map((r) => r.name)}
+        workers={roomOfSession?.workers.map((w) => w.name)}
+        compact={Boolean(onBack)}
+      />
 
-      {/* Details / git changes / worktrees — right-panel parity on mobile */}
-      <Layer open={panelsOpen} onClose={() => setPanelsOpen(false)} title="Session details" size="md">
-        <SessionPanels
-          sessionId={session.id}
-          facts={{
-            createdAt: session.created_at,
-            updatedAt: session.updated_at,
-            project: session.project,
-            branch: session.branch,
-            agentName: provider?.name ?? session.agent,
-            statusLabel: stateDisplay.label,
-            modelValue: modelOption?.currentValue ?? undefined,
-            worktreePath: (session as { worktree_path?: string | null }).worktree_path ?? null,
-          }}
-        />
+      {/* Left sheet — the desktop session navigator reused for mobile:
+          workspace-scoped Sessions, Rooms channels, and the file Explorer.
+          Opening a session/room navigates here; opening a file previews it
+          in the right rail's File tab, just like on the desktop. */}
+      <Layer
+        open={pane === 'sessions'}
+        onClose={() => setPane(null)}
+        title="Sessions"
+        size="md"
+        side="left"
+        footer={
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPane('details')}
+              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-line/60 bg-surface px-2.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover-2"
+            >
+              <PanelRight size={12} /> Workspace
+            </button>
+          </div>
+        }
+      >
+        <div className="-m-1.5 flex h-full min-h-0 flex-col">
+          <LeftSidebar
+            session={session}
+            fill
+            onSelect={(id) => {
+              setPane(null)
+              if (id !== session.id) navigate({ name: 'session', sessionId: id })
+            }}
+            onOpenFile={(project, path) => {
+              openFile(project, path)
+              // Close the navigator and open the file in the right rail.
+              setPane('details')
+              window.setTimeout(() => rightRailRef.current?.openTab('file'), 0)
+            }}
+          />
+        </div>
       </Layer>
 
-      {/* Session switcher bottom sheet (mobile) */}
-      {onBack ? (
-        <Layer open={switcherOpen} onClose={() => setSwitcherOpen(false)} title="Switch session" size="md">
-          <div className="flex flex-col gap-1">
-            <div className="px-1 pb-2 text-[11px] text-ink-3">
-              {sessions.length} sessions · {sessions.filter((s) => s.status === 'running' || s.status === 'starting').length} active
-            </div>
-            {sessions.map((s) => {
-              const disp = agentStateDisplay(
-                agentDisplayFor(s, undefined, connection).state,
-              )
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => {
-                    setSwitcherOpen(false)
-                    navigate({ name: 'session', sessionId: s.id })
-                  }}
-                  className={cn(
-                    'flex w-full items-center gap-2.5 rounded-control px-2.5 py-2.5 text-left transition-colors',
-                    s.id === session.id ? 'bg-accent-tint' : 'hover:bg-hover-2',
-                  )}
-                >
-                  <Dot tone={disp.tone} pulse={disp.pulse} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-ink">{s.name}</span>
-                    <span className="block truncate text-[11px] text-ink-3">
-                      {disp.label} · {s.agent} {s.project ? `· ${s.project.split('/').pop()}` : ''}
-                    </span>
-                  </span>
-                  {s.id === session.id ? <span className="text-[11px] font-medium text-accent-ink">Active</span> : null}
-                </button>
-              )
-            })}
-          </div>
-        </Layer>
-      ) : null}
+      {/* Right rail — the same browser-style Agent Workspace the desktop
+          session uses, surfaced as a right-anchored sheet on mobile. Tapping
+          the PanelRight header button opens it; tapping the dim or pressing
+          Escape closes it. Sub-sessions inside the rail navigate the
+          underlying route, just like they would in the desktop workspace. */}
+      <Layer
+        open={pane === 'details'}
+        onClose={() => setPane(null)}
+        title="Workspace"
+        size="lg"
+        side="right"
+      >
+        {/* The Layer body has 6px padding; cancel it so the rail's tab strip
+            and content fill the sheet edge-to-edge like on the desktop. */}
+        <div className="-m-1.5 flex h-full min-h-0 flex-col">
+          <RightRail
+            ref={rightRailRef}
+            session={session}
+            fill
+            onOpenSession={(id) => {
+              setPane(null)
+              navigate({ name: 'session', sessionId: id })
+            }}
+            notify={(message, tone) => {
+              if (tone === 'error') {
+                useStore.setState((state) => ({ notices: { ...state.notices, [session.id]: message } }))
+              }
+            }}
+          />
+        </div>
+      </Layer>
     </div>
   )
 }

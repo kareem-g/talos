@@ -1,27 +1,23 @@
 /**
- * App shell — one control station, three surfaces.
+ * App shell — one control station, two surfaces.
  *
- * Desktop: a slim icon rail (Sessions · Remote · Settings) beside full-height
- * screens; a session opens into the two-pane workspace. Mobile: same screens
- * under a bottom tab bar, with a session taking over the whole screen and the
- * bar hidden — thumb reach beats navigation chrome there.
+ * Desktop: a HomeSidebar beside the home page; a session opens into the
+ * two-pane workspace. Mobile: same content under a header and a home page
+ * that fills the screen — there are no sub-screens anymore, every section
+ * lives on the home page.
  *
  * The redesign rule this shell enforces: the *home screen* is a control
  * station (what's running, what needs me), not a file manager for sessions.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Globe2, LayoutGrid, Settings2, Sparkles, Workflow } from 'lucide-react'
 import { PairingScreen } from './components/Pairing'
 import { StationHome } from './components/home/StationHome'
 import { HomeSidebar } from './components/home/HomeSidebar'
-import { AutomationsScreen } from './components/automations/AutomationsScreen'
-import { SkillsScreen } from './components/skills/SkillsScreen'
-import { RemoteScreen } from './components/remote/RemoteScreen'
-import { SettingsScreen } from './components/settings/SettingsScreen'
+import { AddToHomeButton } from './components/home/AddToHomeButton'
 import { SessionView } from './components/SessionView'
 import { SessionWorkspace } from './components/desktop/SessionWorkspace'
-import { Dot, IconButton } from './components/ui'
+import { Dot } from './components/ui'
 import LoadingState from './components/LoadingState'
 import { useRoute } from './lib/route'
 import { roomOpenApproval, useRooms } from './lib/rooms'
@@ -46,16 +42,6 @@ function useIsDesktop(): boolean {
   }, [])
   return isDesktop
 }
-
-type Screen = 'home' | 'automations' | 'skills' | 'remote' | 'settings'
-
-const SCREENS: Array<{ id: Screen; label: string; icon: typeof LayoutGrid }> = [
-  { id: 'home', label: 'Sessions', icon: LayoutGrid },
-  { id: 'automations', label: 'Automations', icon: Workflow },
-  { id: 'skills', label: 'Skills', icon: Sparkles },
-  { id: 'remote', label: 'Remote', icon: Globe2 },
-  { id: 'settings', label: 'Settings', icon: Settings2 },
-]
 
 function BrandMark({ compact }: { compact?: boolean }) {
   return (
@@ -171,7 +157,6 @@ export default function App() {
   const connection = useStore((state) => state.connection)
   const sessions = useStore((state) => state.sessions)
   const sessionsLoading = useStore((state) => state.sessionsLoading)
-  const [screen, setScreen] = useState<Screen>('home')
   const isDesktop = useIsDesktop()
   const [homeSearch, setHomeSearch] = useState('')
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -227,7 +212,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onGlobalKey)
   }, [navigate])
 
-  // Route → screen sync: opening a session from anywhere lands on its view.
+  // Route → home: opening a session from anywhere lands on its view.
   const openSessionFrom = useCallback(
     (sessionId: string) => navigate({ name: 'session', sessionId }),
     [navigate],
@@ -313,55 +298,40 @@ export default function App() {
     )
   }
 
-  /* ── Screens shell ─────────────────────────────────────────────────────── */
-  const body =
-    screen === 'automations' ? (
-      <AutomationsScreen />
-    ) : screen === 'skills' ? (
-      <SkillsScreen />
-    ) : screen === 'remote' ? (
-      <RemoteScreen />
-    ) : screen === 'settings' ? (
-      <SettingsScreen />
-    ) : (
-      <StationHome
-        onOpenSession={(session) => openSessionFrom(session.id)}
-        searchQuery={homeSearch}
-        onSearchQueryChange={setHomeSearch}
-        newTaskTick={homeNewTaskTick}
-      />
-    )
+  /* ── Home shell ──────────────────────────────────────────────────────────
+   *  One page, two shapes. Desktop: a sidebar beside the home. Mobile: a
+   *  compact top bar (brand + connection pill) above the home. The home
+   *  itself owns the Sessions / Pair / Automations / Skills / Settings
+   *  sections via the anchor strip. */
+  const homeProps = {
+    onOpenSession: (session: { id: string }) => openSessionFrom(session.id),
+    searchQuery: homeSearch,
+    onSearchQueryChange: setHomeSearch,
+    newTaskTick: homeNewTaskTick,
+  } as const
 
   if (isDesktop) {
-    if (screen === 'home') {
-      return (
-        <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
-          <HomeSidebar
-            onNewTask={() => setHomeNewTaskTick((x) => x + 1)}
-            onSearch={() => setShowCommandPalette(true)}
-            onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
-            onNavigate={setScreen}
-            selectedId={selectedId}
-            searchQuery={homeSearch}
-          />
-          <main className="flex min-w-0 flex-1 flex-col bg-[#141210]">{body}</main>
-          <AttentionPill onOpen={openSessionFrom} />
-          {showCommandPalette ? (
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-              <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
-                <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )
-    }
     return (
       <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
-        <Rail screen={screen} onScreen={setScreen} connection={connection} />
-        <main className="flex min-w-0 flex-1 flex-col">{body}</main>
+        <HomeSidebar
+          onNewTask={() => setHomeNewTaskTick((x) => x + 1)}
+          onSearch={() => setShowCommandPalette(true)}
+          onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
+          selectedId={selectedId}
+          searchQuery={homeSearch}
+        />
+        <main className="flex min-w-0 flex-1 flex-col bg-[#141210]">
+          <StationHome {...homeProps} />
+        </main>
         <AttentionPill onOpen={openSessionFrom} />
+        {showCommandPalette ? (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
+            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
+              <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
+            </div>
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -373,7 +343,10 @@ export default function App() {
         style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
       >
         <BrandMark compact />
-        <ConnectionPill state={connection} />
+        <div className="flex items-center gap-1.5">
+          <AddToHomeButton />
+          <ConnectionPill state={connection} />
+        </div>
       </header>
 
       {route.name === 'session' && !selected && sessionsLoading ? (
@@ -381,19 +354,18 @@ export default function App() {
           <LoadingState label="Opening session" variant="Drive" />
         </div>
       ) : (
-        <main className="flex min-h-0 flex-1 flex-col">{body}</main>
+        <main className="flex min-h-0 flex-1 flex-col">
+          <StationHome {...homeProps} />
+        </main>
       )}
 
-      {screen === 'home' ? (
-        <HomeSidebar
-          onNewTask={() => setHomeNewTaskTick((value) => value + 1)}
-          onSearch={() => setShowCommandPalette(true)}
-          onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
-          onNavigate={setScreen}
-          selectedId={selectedId}
-          searchQuery={homeSearch}
-        />
-      ) : null}
+      <HomeSidebar
+        onNewTask={() => setHomeNewTaskTick((value) => value + 1)}
+        onSearch={() => setShowCommandPalette(true)}
+        onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
+        selectedId={selectedId}
+        searchQuery={homeSearch}
+      />
 
       <AttentionPill onOpen={openSessionFrom} />
 
@@ -405,106 +377,6 @@ export default function App() {
           </div>
         </div>
       ) : null}
-
-      {/* Bottom tab bar */}
-      <nav
-        aria-label="Main"
-        className="z-30 flex shrink-0 items-stretch border-t border-line/60 bg-canvas/95 backdrop-blur-xl"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        {SCREENS.map((entry) => {
-          const Glyph = entry.icon
-          const active = screen === entry.id
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              aria-current={active ? 'page' : undefined}
-              onClick={() => setScreen(entry.id)}
-              className={cn(
-                'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 transition-colors duration-100',
-                active ? 'text-accent-ink' : 'text-ink-3 hover:text-ink-2',
-              )}
-            >
-              <Glyph size={22} strokeWidth={1.8} />
-              <span className="text-[10px] font-medium">{entry.label}</span>
-            </button>
-          )
-        })}
-      </nav>
     </div>
-  )
-}
-
-/** Desktop icon rail — brand up top, screens mid, connection low. */
-function Rail({
-  screen,
-  onScreen,
-  connection,
-}: {
-  screen: Screen
-  onScreen: (screen: Screen) => void
-  connection: ConnectionState
-}) {
-  return (
-    <aside className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line/60 bg-canvas py-3">
-      <button
-        type="button"
-        aria-label="Sessions"
-        onClick={() => onScreen('home')}
-        className="mb-3 transition-transform duration-150 hover:scale-105 active:scale-95"
-      >
-        <BrandMark compact />
-      </button>
-
-      <div className="flex flex-1 flex-col items-center gap-1">
-        {SCREENS.map((entry) => {
-          const Glyph = entry.icon
-          const active = screen === entry.id
-          return (
-            <IconButton
-              key={entry.id}
-              label={entry.label}
-              onClick={() => onScreen(entry.id)}
-              tone={active ? 'accent' : 'ghost'}
-              className={cn(active && 'glow-accent')}
-            >
-              <Glyph size={22} strokeWidth={1.8} />
-            </IconButton>
-          )
-        })}
-      </div>
-
-      {/* Compact connection dot — the pill overflows the 56px rail */}
-      <span
-        role="status"
-        title={
-          (
-            {
-              idle: 'Offline',
-              connecting: 'Connecting',
-              connected: 'Connected',
-              reconnecting: 'Reconnecting',
-              disconnected: 'Disconnected',
-              offline: 'Offline',
-              unauthorized: 'Not paired',
-              error: 'Connection error',
-            } as const
-          )[connection]
-        }
-        className="flex size-7 items-center justify-center rounded-full bg-surface border border-line/40"
-      >
-        <Dot
-          tone={
-            connection === 'connected'
-              ? 'green'
-              : connection === 'connecting' || connection === 'reconnecting'
-                ? 'orange'
-                : 'red'
-          }
-          pulse={connection === 'connecting' || connection === 'reconnecting'}
-        />
-      </span>
-    </aside>
   )
 }

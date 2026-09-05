@@ -5,8 +5,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#070708",
-  "theme_color": "#070708",
+  "background_color": "#141210",
+  "theme_color": "#141210",
   "description": "Scan, pair, and control AI coding agents running on your own machine — from any browser.",
   "icons": [
     {

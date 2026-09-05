@@ -93,6 +93,13 @@
     height: 100%;
   }
 
+  html {
+    /* Same as the app canvas — iOS paints the edge/safe areas (status bar,
+       home indicator, overscroll) with the root background, so this keeps
+       the installed app from showing black seams around the layout. */
+    background: var(--canvas);
+  }
+
   body {
     margin: 0;
     background: var(--canvas);
@@ -285,6 +292,18 @@
   }
 }
 
+@keyframes sheet-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes sheet-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
 @layer utilities {
   /* Streaming caret, appended to the trailing text run. */
   .caret::after {
@@ -326,6 +345,13 @@
     }
   }
 
+  .animate-sheet-left {
+    animation: sheet-in-left 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .animate-sheet-right {
+    animation: sheet-in-right 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
   .animate-fade {
     animation: fade-in 140ms ease-out;
   }
@@ -363,16 +389,29 @@
 
   /*
    * iOS Safari auto-zooms on focus whenever a field renders under 16px.
-   * Apply 16px unconditionally so the rule holds on every iOS variant
-   * (older devices, iPadOS without `pointer: coarse`, split-view, etc.).
-   * Desktop rendering at 16px is fine — text inputs are that size almost
-   * everywhere. `touch-action: manipulation` kills the double-tap zoom
-   * delay so the app responds like native chrome.
+   * The element rule below is beaten by font-size utilities (text-[12px],
+   * text-[13px], …), which drops fields back under 16px and re-triggers the
+   * zoom. Re-assert 16px with a utility-beating declaration, scoped to the
+   * only engine that auto-zooms (-webkit-touch-callout is iOS Safari/iPadOS)
+   * so desktop/Android keep their compact field sizes.
    */
   input,
   textarea,
   select {
     font-size: 16px;
+  }
+  @supports (-webkit-touch-callout: none) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+    /* The chat composer renders its draft in a mirror div behind the
+       (transparent) textarea; both must use the same 16px so caret position
+       and wrapped lines stay in sync once iOS re-sizes the field. */
+    .composer-backdrop {
+      font-size: 16px !important;
+    }
   }
 
   html {

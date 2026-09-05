@@ -366,6 +366,7 @@ export function Layer({
   children,
   footer,
   size = 'md',
+  side = 'bottom',
 }: {
   open: boolean
   onClose: () => void
@@ -373,6 +374,9 @@ export function Layer({
   children: ReactNode
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg'
+  /** Which edge the panel anchors to. Defaults to the bottom-sheet behavior
+   *  used by every existing caller. */
+  side?: 'bottom' | 'left' | 'right'
 }) {
   const depth = useContext(LayerDepth)
   const titleId = useId()
@@ -415,12 +419,37 @@ export function Layer({
 
   if (!open) return null
 
-  const widths = { sm: 'sm:max-w-80', md: 'sm:max-w-md', lg: 'sm:max-w-lg' }
+  // `size` sets a max-width on small+ viewports; side panels ignore it for
+  // their anchored width and just stick to a sensible reading column.
+  const sideMaxWidths: Record<'sm' | 'md' | 'lg', string> = {
+    sm: 'sm:max-w-80',
+    md: 'sm:max-w-md',
+    lg: 'sm:max-w-lg',
+  }
+
+  const isSide = side === 'left' || side === 'right'
+
+  // Side panels fill the anchor edge on small viewports so the user can
+  // actually use them on a phone. They cap at 75vw so the chat stays partly
+  // visible behind the dim — that hint of the underlying view is what makes
+  // a sheet feel like a side drawer rather than a full takeover.
+  const sidePanelBase = 'fixed inset-y-0 w-[75vw] max-w-md flex flex-col'
+  const sidePanelPosition =
+    side === 'left'
+      ? 'left-0 border-r'
+      : side === 'right'
+        ? 'right-0 border-l'
+        : ''
+  const sidePanelAnimation =
+    side === 'left' ? 'animate-sheet-left' : side === 'right' ? 'animate-sheet-right' : ''
 
   return createPortal(
     <LayerDepth.Provider value={depth + 1}>
       <div
-        className="fixed inset-0 flex items-end justify-center sm:items-center"
+        className={cn(
+          'fixed inset-0 z-50',
+          isSide ? 'flex' : 'flex items-end justify-center sm:items-center',
+        )}
         style={{ zIndex: 50 + depth * 10 }}
         role="dialog"
         aria-modal="true"
@@ -435,10 +464,14 @@ export function Layer({
           ref={panelRef}
           tabIndex={-1}
           className={cn(
-            'animate-sheet relative flex max-h-[88dvh] w-full flex-col overflow-hidden',
-            'border border-line/60 bg-surface shadow-overlay outline-none',
-            'rounded-t-2xl sm:rounded-2xl',
-            widths[size],
+            isSide
+              ? `${sidePanelBase} ${sidePanelPosition} ${sidePanelAnimation} bg-surface border-line/60 shadow-overlay`
+              : cn(
+                  'animate-sheet relative flex max-h-[88dvh] w-full flex-col overflow-hidden',
+                  'border border-line/60 bg-surface shadow-overlay outline-none',
+                  'rounded-t-2xl sm:rounded-2xl',
+                  sideMaxWidths[size],
+                ),
           )}
         >
           <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line/40 px-3.5 py-2.5">

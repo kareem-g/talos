@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Clock3, Copy, MoreHorizontal, Play, Plus, Trash2, Workflow, X, Zap } from 'lucide-react'
+import { Check, Clock3, Copy, MoreHorizontal, Play, Plus, Trash2, X, Zap } from 'lucide-react'
 import { Button, Chip, IconButton, TextField } from '../ui'
 import { cn } from '@/lib/format'
 import { useStore } from '@/store'
@@ -35,7 +35,7 @@ function loadAutomations(): Automation[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Automation[] } catch { return [] }
 }
 
-export function AutomationsScreen() {
+export function AutomationsSection() {
   const [automations, setAutomations] = useState<Automation[]>(loadAutomations)
   const [keepAwake, setKeepAwake] = useState(() => localStorage.getItem(KEEP_AWAKE_KEY) === '1')
   const [editor, setEditor] = useState<Automation | null>(null)
@@ -86,24 +86,25 @@ export function AutomationsScreen() {
   function remove(id: string) { setAutomations((current) => current.filter((automation) => automation.id !== id)) }
 
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-[#141210]">
-      <div className="mx-auto w-full max-w-5xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
-        <header className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div><div className="mb-2 flex items-center gap-2 text-zinc-500"><Workflow size={17} /><span className="font-mono text-[10px] uppercase tracking-[0.16em]">Control center</span></div><h1 className="text-[26px] font-semibold tracking-[-0.04em] text-zinc-100">Automations</h1><p className="mt-1 max-w-xl text-[12px] leading-[1.6] text-zinc-500">Schedule recurring tasks or queue background work that runs during idle time.</p><p className="mt-2 font-mono text-[10px] text-zinc-600">{scheduled.length} scheduled · {idle.length} idle-time</p></div>
-          <div className="flex items-center gap-2"><Button onClick={() => openNew('scheduled')} className="bg-white text-black hover:bg-zinc-200"><Plus size={13} /> Create scheduled task</Button><IconButton label="More automation actions" onClick={() => setShowAll((value) => !value)} className="size-9"><MoreHorizontal size={16} /></IconButton></div>
-        </header>
+    <div className="flex flex-col gap-4">
+      {notice ? <div role="status" className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-[11px] text-emerald-300"><Check size={13} /> {notice}</div> : null}
 
-        {notice ? <div role="status" className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-[11px] text-emerald-300"><Check size={13} /> {notice}</div> : null}
-
-        <section className="mt-6 rounded-2xl border border-white/[0.1] bg-white/[0.018]">
-          {automations.length === 0 ? <div className="flex min-h-[190px] flex-col items-center justify-center p-6 text-center"><Clock3 size={21} className="mb-3 text-zinc-600" /><p className="text-[13px] font-medium text-zinc-300">No scheduled tasks yet.</p><p className="mt-1 text-[11px] text-zinc-600">Create one now or start from a template below.</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button onClick={() => openNew('scheduled')} className="bg-white text-black hover:bg-zinc-200">Create scheduled task <span className="ml-1 text-zinc-500">⌄</span></Button><Button onClick={() => openNew('idle')} variant="ghost" disabled={false}>Create idle-time task</Button></div></div> : <div className="divide-y divide-white/[0.08]">{(showAll ? automations : automations.slice(0, 4)).map((automation) => <AutomationRow key={automation.id} automation={automation} onToggle={() => toggle(automation.id)} onRun={() => runNow(automation.id)} onEdit={() => setEditor(automation)} onDelete={() => remove(automation.id)} />)}{automations.length > 4 ? <button type="button" onClick={() => setShowAll((value) => !value)} className="w-full py-2 text-[11px] text-zinc-500 hover:text-zinc-200">{showAll ? 'Show less' : `Show all ${automations.length} automations`}</button> : null}</div>}
-        </section>
-
-        <button type="button" onClick={() => setKeepAwake((value) => !value)} className="mt-4 flex w-full items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.035] px-3.5 py-3 text-left transition hover:bg-white/[0.05]"><span className="flex size-7 items-center justify-center rounded-lg bg-white/[0.06] text-zinc-500"><Zap size={14} /></span><span className="flex-1"><span className="block text-[12px] text-zinc-300">Keep your computer awake while Plumb is running a task.</span><span className="mt-0.5 block font-mono text-[10px] text-zinc-600">Browser setting · applies to this device</span></span><span className={cn('flex h-5 w-9 items-center rounded-full p-0.5 transition', keepAwake ? 'bg-white justify-end' : 'bg-zinc-800 justify-start')}><span className={cn('size-4 rounded-full transition', keepAwake ? 'bg-black' : 'bg-zinc-400')} /></span></button>
-
-        <TemplateSection title="Idle-time task templates" templates={IDLE_TEMPLATES} onCreate={(template) => openNew('idle', template)} />
-        <TemplateSection title="Scheduled task templates" templates={SCHEDULED_TEMPLATES} onCreate={(template) => openNew('scheduled', template)} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-[10px] text-zinc-600">{scheduled.length} scheduled · {idle.length} idle-time</p>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => openNew('scheduled')} className="bg-white text-black hover:bg-zinc-200"><Plus size={13} /> Create scheduled task</Button>
+          <IconButton label="More automation actions" onClick={() => setShowAll((value) => !value)} className="size-9"><MoreHorizontal size={16} /></IconButton>
+        </div>
       </div>
+
+      <section className="rounded-2xl border border-white/[0.1] bg-white/[0.018]">
+        {automations.length === 0 ? <div className="flex min-h-[190px] flex-col items-center justify-center p-6 text-center"><Clock3 size={21} className="mb-3 text-zinc-600" /><p className="text-[13px] font-medium text-zinc-300">No scheduled tasks yet.</p><p className="mt-1 text-[11px] text-zinc-600">Create one now or start from a template below.</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button onClick={() => openNew('scheduled')} className="bg-white text-black hover:bg-zinc-200">Create scheduled task <span className="ml-1 text-zinc-500">⌄</span></Button><Button onClick={() => openNew('idle')} variant="ghost" disabled={false}>Create idle-time task</Button></div></div> : <div className="divide-y divide-white/[0.08]">{(showAll ? automations : automations.slice(0, 4)).map((automation) => <AutomationRow key={automation.id} automation={automation} onToggle={() => toggle(automation.id)} onRun={() => runNow(automation.id)} onEdit={() => setEditor(automation)} onDelete={() => remove(automation.id)} />)}{automations.length > 4 ? <button type="button" onClick={() => setShowAll((value) => !value)} className="w-full py-2 text-[11px] text-zinc-500 hover:text-zinc-200">{showAll ? 'Show less' : `Show all ${automations.length} automations`}</button> : null}</div>}
+      </section>
+
+      <button type="button" onClick={() => setKeepAwake((value) => !value)} className="flex w-full items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.035] px-3.5 py-3 text-left transition hover:bg-white/[0.05]"><span className="flex size-7 items-center justify-center rounded-lg bg-white/[0.06] text-zinc-500"><Zap size={14} /></span><span className="flex-1"><span className="block text-[12px] text-zinc-300">Keep your computer awake while Plumb is running a task.</span><span className="mt-0.5 block font-mono text-[10px] text-zinc-600">Browser setting · applies to this device</span></span><span className={cn('flex h-5 w-9 items-center rounded-full p-0.5 transition', keepAwake ? 'bg-white justify-end' : 'bg-zinc-800 justify-start')}><span className={cn('size-4 rounded-full transition', keepAwake ? 'bg-black' : 'bg-zinc-400')} /></span></button>
+
+      <TemplateSection title="Idle-time task templates" templates={IDLE_TEMPLATES} onCreate={(template) => openNew('idle', template)} />
+      <TemplateSection title="Scheduled task templates" templates={SCHEDULED_TEMPLATES} onCreate={(template) => openNew('scheduled', template)} />
       {editor ? <AutomationEditor value={editor} onClose={() => setEditor(null)} onSave={saveAutomation} /> : null}
     </div>
   )

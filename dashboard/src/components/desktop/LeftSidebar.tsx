@@ -52,6 +52,7 @@ export function LeftSidebar({
   onSelect,
   onOpenFile,
   searchRef,
+  fill,
 }: {
   session: Session
   onSelect: (id: string) => void
@@ -59,6 +60,10 @@ export function LeftSidebar({
   onOpenFile: (project: string, path: string) => void
   /** Ref for the search input, so the right-panel Search icon can focus it. */
   searchRef?: React.RefObject<HTMLInputElement | null>
+  /** Fit the sidebar to its container instead of a fixed 304px width. Used
+   *  when embedded in a constrained surface (the mobile side sheet), where
+   *  the fixed desktop width would overflow the phone screen. */
+  fill?: boolean
 }) {
   const sessions = useStore((s) => s.sessions)
   const connection = useStore((s) => s.connection)
@@ -194,7 +199,12 @@ export function LeftSidebar({
   }
 
   return (
-    <aside className="flex w-[304px] shrink-0 flex-col border-r border-line/60 bg-[#191613] text-zinc-100">
+    <aside
+      className={cn(
+        'flex flex-col bg-[#191613] text-zinc-100',
+        fill ? 'h-full w-full min-w-0 overflow-hidden' : 'w-[304px] shrink-0 border-r border-line/60',
+      )}
+    >
       {/* ── 1. Workspace ─────────────────────────────────────────────── */}
       <div className="shrink-0 px-2.5 pb-1.5 pt-2.5" data-workspace-menu>
         <div className="flex items-center gap-1.5">

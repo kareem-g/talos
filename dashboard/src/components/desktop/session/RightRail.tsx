@@ -120,7 +120,12 @@ export const RightRail = forwardRef<RightRailHandle, {
   onOpenSession?: (sessionId: string) => void
   /** Surface operation results; errors bubble up as session notices. */
   notify?: (message: string, tone?: 'ok' | 'error') => void
-}>(function RightRail({ session, onOpenSession, notify }, ref) {
+  /** Fit the panel to its container instead of a fixed 380/680px width.
+   *  Used when the rail is embedded in a constrained surface (the mobile
+   *  side sheet), where a fixed width would overflow and the widen control
+   *  would make no sense. */
+  fill?: boolean
+}>(function RightRail({ session, onOpenSession, notify, fill }, ref) {
   const connection = useStore((s) => s.connection)
 
   /* ── Width preference ─────────────────────────────────────────────────── */
@@ -248,12 +253,16 @@ export const RightRail = forwardRef<RightRailHandle, {
   return (
     <div
       className={cn(
-        'flex h-full shrink-0 flex-col bg-canvas transition-[width] duration-200',
-        wide ? 'w-[680px]' : 'w-[380px]',
+        'flex h-full flex-col bg-canvas transition-[width] duration-200',
+        // Desktop: fixed-width panel next to the fluid chat column. Sheet:
+        // fill whatever width the host surface gives us.
+        fill ? 'w-full min-w-0' : 'shrink-0',
+        !fill && wide ? 'w-[680px]' : '',
+        !fill && !wide ? 'w-[380px]' : '',
       )}
     >
       {/* 1. Tab strip + open-tab picker */}
-      <RightRailTabs tabs={tabs} active={tab} onSelect={setTab} onClose={closeTab} onAdd={addTab} />
+      <RightRailTabs tabs={tabs} active={tab} onSelect={setTab} onClose={closeTab} onAdd={addTab} compact={fill} />
 
       {/* 1b. Slim toolbar — refresh + widen */}
       <div className="flex shrink-0 items-center gap-1 border-b border-line/40 bg-inset px-2 py-1">
@@ -267,19 +276,24 @@ export const RightRail = forwardRef<RightRailHandle, {
         >
           <RotateCw size={12} />
         </button>
-        <button
-          type="button"
-          onClick={toggleWide}
-          aria-label={wide ? 'Normal width' : 'Wider panel'}
-          title={wide ? 'Normal width' : 'Wider panel'}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
-        >
-          {wide ? <X size={12} /> : <Maximize2 size={12} />}
-        </button>
+        {fill ? null : (
+          <button
+            type="button"
+            onClick={toggleWide}
+            aria-label={wide ? 'Normal width' : 'Wider panel'}
+            title={wide ? 'Normal width' : 'Wider panel'}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+          >
+            {wide ? <X size={12} /> : <Maximize2 size={12} />}
+          </button>
+        )}
       </div>
 
-      {/* 2. Content — keep open tabs mounted so state survives switching */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* 2. Content — keep open tabs mounted so state survives switching.
+          overflow-hidden contains each view's own scroll region so a wide
+          child can never push a scrollbar onto a host surface (e.g. the
+          mobile sheet) around this panel. */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {tabs.map((id) => (
             <div key={id} className={cn('min-h-0 min-w-0 flex-1 flex-col', tab === id ? 'flex' : 'hidden')}>

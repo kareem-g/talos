@@ -19,7 +19,7 @@
 
 import { useMemo, useState } from 'react'
 import { Composer } from './Composer'
-import { ComposerControls } from '@/components/desktop/session/TasksAndExecution'
+import { ComposerControls, PermissionChip } from '@/components/desktop/session/TasksAndExecution'
 import { deriveSubagents } from '@/components/desktop/session/workspaceData'
 import { Button } from './ui'
 import LoadingState from './LoadingState'
@@ -238,6 +238,7 @@ export function StateZone({
   onSetConfig,
   rooms,
   workers,
+  compact,
 }: {
   session: Session
   conversation: Conversation
@@ -255,6 +256,8 @@ export function StateZone({
   rooms?: string[]
   /** Room worker names for the @-menu (when this session is a room channel). */
   workers?: string[]
+  /** Mobile compact mode: hide the in-line config chips in the composer. */
+  compact?: boolean
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -316,9 +319,46 @@ export function StateZone({
     if (message) setDraftSeed({ text: message.text, attachments: message.attachments, nonce: Date.now() })
   }
 
+  // Mobile summary chip: model + mode + effort in one short string, so the
+  // user can see what's set without opening the right pane. Same data as the
+  // right-pane rows, just flattened.
+  const summary = useMemo(() => {
+    if (!compact) return undefined
+    const isThinking = (id: string) => ['effort', 'thinking', 'reasoning'].includes(id) || id.includes('effort')
+    const isModel = (id: string) => id === 'model' || id.includes('model')
+    const parts: string[] = []
+    const opts = config?.options ?? []
+    const model = opts.find((o) => isModel(o.id))
+    if (model?.currentValue) {
+      const choice = model.choices?.find((c) => c.value === model.currentValue)
+      parts.push(choice?.name ?? model.currentValue)
+    }
+    if (conversation.mode) {
+      const cur = conversation.mode.modes.find((m) => m.id === conversation.mode!.id)
+      const label = cur?.name ?? cur?.id
+      if (label) parts.push(label)
+    }
+    const effort = opts.find((o) => !isModel(o.id) && isThinking(o.id))
+    if (effort?.currentValue) {
+      const choice = effort.choices?.find((c) => c.value === effort.currentValue)
+      parts.push(choice?.name ?? effort.currentValue)
+    }
+    return parts.length > 0 ? parts.join(' · ') : undefined
+  }, [compact, config?.options, conversation.mode])
+
   const composer = (
     <Composer
       wide
+      compact={compact}
+      summary={summary}
+      compactControls={
+        compact ? (
+          <PermissionChip
+            currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
+            onChange={handleSetConfig}
+          />
+        ) : undefined
+      }
       onSend={onSend}
       // Stop ends the running response only — the session stays resumable, so
       // the next message or a steer just works (auto-resume on send).
@@ -353,27 +393,31 @@ export function StateZone({
       rooms={rooms}
       workers={workers}
       controls={
-        <ComposerControls
-          part="left"
-          config={config}
-          agent={session.agent}
-          modelsSource={provider?.modelsSource}
-          busyId={updating}
-          mode={conversation.mode}
-          onChange={handleSetConfig}
-          subagents={subagents}
-        />
+        compact ? undefined : (
+          <ComposerControls
+            part="left"
+            config={config}
+            agent={session.agent}
+            modelsSource={provider?.modelsSource}
+            busyId={updating}
+            mode={conversation.mode}
+            onChange={handleSetConfig}
+            subagents={subagents}
+          />
+        )
       }
       controlsRight={
-        <ComposerControls
-          part="right"
-          config={config}
-          agent={session.agent}
-          modelsSource={provider?.modelsSource}
-          busyId={updating}
-          mode={conversation.mode}
-          onChange={handleSetConfig}
-        />
+        compact ? undefined : (
+          <ComposerControls
+            part="right"
+            config={config}
+            agent={session.agent}
+            modelsSource={provider?.modelsSource}
+            busyId={updating}
+            mode={conversation.mode}
+            onChange={handleSetConfig}
+          />
+        )
       }
     />
   )

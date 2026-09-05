@@ -35,6 +35,10 @@ import { basename, cn, relativeTime } from '@/lib/format'
 import { uiStateDisplay } from '@/lib/sessionState'
 import { describeApproval } from '@/lib/approvals'
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
+import { AutomationsSection } from './AutomationsSection'
+import { PairSection } from './PairSection'
+import { SettingsSection } from './SettingsSection'
+import { SkillsSection } from './SkillsSection'
 import type { Session } from '@/types/session'
 import type { Provider } from '@/types/provider'
 
@@ -43,6 +47,34 @@ function hueFor(id: string): string {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
   return AGENT_HUES[h % AGENT_HUES.length]
+}
+
+/** Anchor-strip entries: the section id must match the `<section id=…>` below. */
+const HOME_SECTIONS: Array<{ id: string; label: string }> = [
+  { id: 'home-sessions', label: 'Sessions' },
+  { id: 'home-pair', label: 'Pair' },
+  { id: 'home-automations', label: 'Automations' },
+  { id: 'home-skills', label: 'Skills' },
+  { id: 'home-settings', label: 'Settings' },
+]
+
+/** One section header used by every other section on the home page. */
+function SectionHeading({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string
+  title: string
+  description: string
+}) {
+  return (
+    <div className="mb-4">
+      <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-zinc-500">{eyebrow}</p>
+      <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-zinc-100 sm:text-[24px]">{title}</h2>
+      <p className="mt-1 max-w-2xl text-[12.5px] leading-[1.6] text-zinc-400">{description}</p>
+    </div>
+  )
 }
 
 function useSharedNow(active: boolean): number {
@@ -252,8 +284,28 @@ export function StationHome({
         ) : null}
       </header>
 
+      {/* Anchor strip — jumps to each section without leaving the page. */}
+      <nav aria-label="Home sections" className="sticky top-[57px] z-10 border-b border-white/[0.06] bg-[#191613]/85 backdrop-blur-xl">
+        <ul className="mx-auto flex w-full max-w-[1280px] items-center gap-1 overflow-x-auto px-4 py-2 sm:gap-2 sm:px-6 lg:px-8">
+          {HOME_SECTIONS.map((entry) => (
+            <li key={entry.id}>
+              <a
+                href={`#${entry.id}`}
+                onClick={(event) => {
+                  event.preventDefault()
+                  document.getElementById(entry.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 font-mono text-[10.5px] uppercase tracking-[0.12em] text-zinc-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+              >
+                {entry.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
       {/* Body: 12-col grid — left triage, right detail */}
-      <div className="mx-auto grid w-full max-w-[1280px] grid-cols-12 gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      <div id="home-sessions" className="mx-auto grid w-full max-w-[1280px] scroll-mt-32 grid-cols-12 gap-6 px-4 py-6 sm:px-6 lg:px-8">
         {/* Left: triage timeline */}
         <div className="col-span-12 lg:col-span-5">
           <div className="sticky top-[168px] space-y-6">
@@ -629,6 +681,58 @@ export function StationHome({
           </div>
         </div>
       ) : null}
+
+      {/* ── Other home sections ─────────────────────────────────────────
+       *  Each section sits in its own card with an id used by the anchor
+       *  strip above. The Sessions section above owns the top of the page;
+       *  everything below is one section per former standalone screen. */}
+      <section
+        id="home-pair"
+        className="mx-auto w-full max-w-[1280px] scroll-mt-32 px-4 pb-6 pt-4 sm:px-6 lg:px-8"
+      >
+        <SectionHeading
+          eyebrow="Phone"
+          title="Pair a device"
+          description="Scan with any phone — no app store required. The scanner pairs, gets a private token, and can install this station to its home screen."
+        />
+        <PairSection />
+      </section>
+
+      <section
+        id="home-automations"
+        className="mx-auto w-full max-w-[1280px] scroll-mt-32 border-t border-white/[0.05] px-4 pb-6 pt-6 sm:px-6 lg:px-8"
+      >
+        <SectionHeading
+          eyebrow="Automations"
+          title="Scheduled and idle-time tasks"
+          description="Schedule recurring tasks or queue background work that runs during idle time."
+        />
+        <AutomationsSection />
+      </section>
+
+      <section
+        id="home-skills"
+        className="mx-auto w-full max-w-[1280px] scroll-mt-32 border-t border-white/[0.05] px-4 pb-6 pt-6 sm:px-6 lg:px-8"
+      >
+        <SectionHeading
+          eyebrow="Prompt library"
+          title="Skills"
+          description="Skills install to .agentdeck/skills/ in the project — the same files the context assembler injects into every turn."
+        />
+        <SkillsSection />
+      </section>
+
+      <section
+        id="home-settings"
+        className="mx-auto w-full max-w-[1280px] scroll-mt-32 border-t border-white/[0.05] px-4 pb-12 pt-6 sm:px-6 lg:px-8"
+      >
+        <SectionHeading
+          eyebrow="Settings"
+          title="Station, tunnels, and providers"
+          description="Cloudflare tunnel tokens, API provider endpoints, keyboard shortcuts, and the station config file."
+        />
+        <SettingsSection />
+      </section>
 
       <NewSessionLayer open={creating} onClose={() => { setCreating(false); setCreateProject(undefined) }} onCreated={onOpenSession} initialProject={createProject} />
       <SyncLayer open={syncing} onClose={() => setSyncing(false)} />

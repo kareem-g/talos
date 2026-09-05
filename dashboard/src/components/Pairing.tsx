@@ -40,16 +40,19 @@ function transportName(opt: EndpointOption): string {
   switch (opt.source) {
     case 'cloudflare':
       return 'Cloudflare'
+    case 'tailnet':
     case 'tailnet_magic_dns':
     case 'tailnet_ipv4':
     case 'tailnet_ipv6':
-      return opt.via?.startsWith('headscale') ? 'Headscale' : 'Tailnet'
+      return 'Tailnet'
     case 'lan':
       return 'Home LAN'
     case 'localhost':
       return 'This machine'
     case 'explicit':
       return 'Custom'
+    default:
+      return opt.label ?? opt.source
   }
 }
 
@@ -59,18 +62,19 @@ function transportHint(opt: EndpointOption): string {
   switch (opt.source) {
     case 'cloudflare':
       return 'Works anywhere — routed through your Cloudflare tunnel.'
+    case 'tailnet':
     case 'tailnet_magic_dns':
     case 'tailnet_ipv4':
     case 'tailnet_ipv6':
-      return opt.via?.startsWith('headscale')
-        ? 'Works anywhere — but the phone needs your Headscale tailnet joined (Tailscale app ON).'
-        : 'Works anywhere — but the phone needs the Tailscale app ON and joined.';
+      return 'Works anywhere — but the phone needs the Tailscale app ON and joined.'
     case 'lan':
       return 'Works at home — phone must be on the same Wi-Fi.'
     case 'localhost':
       return 'Works on this machine only.'
     case 'explicit':
       return 'Uses the address configured in settings.'
+    default:
+      return ''
   }
 }
 
@@ -123,6 +127,7 @@ function transportKey(opt: EndpointOption): string {
 function transportPriority(opt: EndpointOption): number {
   if (!opt.reachable) return 99
   switch (opt.source) {
+    case 'tailnet':
     case 'tailnet_magic_dns':
     case 'tailnet_ipv4':
     case 'tailnet_ipv6':
@@ -135,6 +140,8 @@ function transportPriority(opt: EndpointOption): number {
       return 3
     case 'explicit':
       return 0
+    default:
+      return 4
   }
 }
 
@@ -193,36 +200,14 @@ function ConnectPhoneCard() {
   // list and re-runs auto-pick so the new route's QR is one tap away.
   const [bringBusy, setBringBusy] = useState<string | null>(null)
   const [bringError, setBringError] = useState<string>()
-  const [hsUrl, setHsUrl] = useState(() => {
-    try {
-      return localStorage.getItem('agentdeck-headscale-url') ?? ''
-    } catch {
-      return ''
-    }
-  })
-  const [hsKey, setHsKey] = useState('')
   const [cfToken, setCfToken] = useState('')
   const [cfHostname, setCfHostname] = useState('')
 
-  async function bringUp(kind: 'tailscale' | 'headscale' | 'cloudflare') {
+  async function bringUp(kind: 'tailscale' | 'cloudflare') {
     setBringBusy(kind)
     setBringError(undefined)
     try {
-      if (kind === 'headscale') {
-        if (!hsUrl.trim()) {
-          setBringError('Type the Headscale control URL first — https://headscale.example.com.')
-          return
-        }
-        try {
-          localStorage.setItem('agentdeck-headscale-url', hsUrl.trim())
-        } catch {
-          /* non-fatal */
-        }
-        await tunnelApi.start('headscale', {
-          login_server: hsUrl.trim(),
-          ...(hsKey.trim() ? { auth_key: hsKey.trim() } : {}),
-        })
-      } else if (kind === 'cloudflare') {
+      if (kind === 'cloudflare') {
         if (!cfToken.trim() && !cfHostname.trim()) {
           setBringError(
             'Paste your Cloudflare tunnel token (named tunnel) OR a hostname for a quick trycloudflare tunnel.',
@@ -397,22 +382,12 @@ function ConnectPhoneCard() {
           <p className="text-[9.5px] font-medium uppercase tracking-[0.14em] text-ink-3">
             Bring up
           </p>
-          {(['tailscale', 'headscale', 'cloudflare'] as const).map((kind) => (
+          {(['tailscale', 'cloudflare'] as const).map((kind) => (
             <div key={kind} className="flex items-center gap-1.5">
               <span className="w-[68px] shrink-0 text-[11px] font-medium capitalize text-ink-2">
                 {kind}
               </span>
-              {kind === 'headscale' ? (
-                <input
-                  value={hsUrl}
-                  onChange={(e) => setHsUrl(e.target.value)}
-                  placeholder="https://headscale.example.com"
-                  aria-label="Headscale control plane URL"
-                  spellCheck={false}
-                  inputMode="url"
-                  className="h-7 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 font-mono text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/25"
-                />
-              ) : kind === 'cloudflare' ? (
+              {kind === 'cloudflare' ? (
                 <input
                   value={cfHostname}
                   onChange={(e) => setCfHostname(e.target.value)}
@@ -440,15 +415,6 @@ function ConnectPhoneCard() {
             onChange={(e) => setCfToken(e.target.value)}
             placeholder="Cloudflare tunnel token (optional if hostname set, stored on success)"
             aria-label="Cloudflare tunnel token"
-            type="password"
-            autoComplete="off"
-            className="h-7 w-full rounded-lg border border-white/10 bg-black/30 px-2 font-mono text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/25"
-          />
-          <input
-            value={hsKey}
-            onChange={(e) => setHsKey(e.target.value)}
-            placeholder="Headscale pre-auth key (optional, never stored)"
-            aria-label="Headscale pre-auth key"
             type="password"
             autoComplete="off"
             className="h-7 w-full rounded-lg border border-white/10 bg-black/30 px-2 font-mono text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/25"
@@ -595,7 +561,7 @@ function TunnelHealthHint() {
   if (tailscaleConnected || cloudflareEnabled) return null
   return (
     <p className="mt-1 text-[10.5px] leading-[1.55] text-ink-3">
-      No public route — connect Tailscale / Headscale / Cloudflare below so the
+      No public route — connect Tailscale or Cloudflare below so the
       phone can reach this machine from anywhere.
     </p>
   )

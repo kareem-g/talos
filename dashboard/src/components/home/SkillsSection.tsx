@@ -47,7 +47,7 @@ function readProject(): string {
 
 type InstallTab = 'registry' | 'skillssh' | 'url' | 'paste' | 'file'
 
-export function SkillsScreen() {
+export function SkillsSection() {
   const [project, setProject] = useState<string>(readProject)
   const [view, setView] = useState<View>('installed')
   const [query, setQuery] = useState('')
@@ -161,129 +161,111 @@ export function SkillsScreen() {
   )
 
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-[#141210]">
-      <div className="mx-auto w-full max-w-5xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
-        <header className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-zinc-500">
-              <Box size={17} />
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em]">Prompt library</span>
-              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-2 py-0.5 font-mono text-[9.5px] normal-case tracking-normal text-emerald-300">
-                live · project skills
-              </span>
-            </div>
-            <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-zinc-100">Skills</h1>
-            <p className="mt-1 max-w-xl text-[12px] leading-[1.6] text-zinc-500">
-              Skills install to <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[11px] text-zinc-300">.agentdeck/skills/</code> in the
-              project — the same files the context assembler injects into every turn.
-            </p>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button onClick={() => setInstallOpen(true)} className="bg-white text-black hover:bg-zinc-200">
-              <Plus size={13} /> Install
-            </Button>
-            <IconButton label="Refresh skills" onClick={() => void refresh()} className="size-9">
-              <RefreshCw size={15} />
-            </IconButton>
-          </div>
-        </header>
-
-        {notice ? (
-          <div role="status" className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-[11px] text-emerald-300">
-            <Check size={13} /> {notice}
-          </div>
-        ) : null}
-
-        {/* Project target */}
-        <div className="mt-5">
-          <label className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
-            <FolderOpen size={12} /> Project
-          </label>
-          <TextField
-            value={project}
-            onChange={(event) => onProjectChange(event.target.value)}
-            placeholder="/path/to/project"
-            aria-label="Project directory"
-            className="max-w-xl"
-          />
+    <div className="flex flex-col gap-4">
+      {notice ? (
+        <div role="status" className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-[11px] text-emerald-300">
+          <Check size={13} /> {notice}
         </div>
+      ) : null}
 
-        {/* Toolbar */}
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <Segmented<View>
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'installed', label: `Installed (${installed.length})` },
-              { value: 'available', label: `Registry (${visibleAvailable.length})` },
-            ]}
-          />
-          <TextField
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search skills…"
-            aria-label="Search skills"
-            leading={<Search size={14} />}
-            className="sm:w-64"
-          />
-        </div>
-
-        <div className="mb-2 mt-5 flex items-center gap-2">
-          <h2 className="text-[13px] font-medium text-zinc-300">
-            {view === 'installed' ? 'Installed skills' : 'Available from registry'}
-          </h2>
-          {loading ? (
-            <span className="font-mono text-[10px] text-zinc-600">loading…</span>
-          ) : (
-            <span className="font-mono text-[10px] text-zinc-600">
-              {view === 'installed' ? visibleInstalled.length : visibleAvailable.length}
-            </span>
-          )}
-        </div>
-
-        <section className="overflow-hidden rounded-2xl border border-white/[0.1] bg-white/[0.018]">
-          {loading ? (
-            <div className="p-10 text-center text-[12px] text-zinc-500">Loading skills…</div>
-          ) : view === 'installed' ? (
-            visibleInstalled.length === 0 ? (
-              <div className="p-10 text-center text-[12px] text-zinc-500">
-                No skills installed in this project. Install one from the registry or another source.
-              </div>
-            ) : (
-              visibleInstalled.map((skill) => (
-                <InstalledRow
-                  key={skill.id}
-                  skill={skill}
-                  busy={busy}
-                  onToggle={() => toggle(skill)}
-                  onEdit={() => setEditing(skill)}
-                  onDelete={() => remove(skill)}
-                />
-              ))
-            )
-          ) : visibleAvailable.length === 0 ? (
-            <div className="p-10 text-center text-[12px] text-zinc-500">
-              {installed.length > 0
-                ? 'Every registry skill is already installed.'
-                : 'The registry is empty or loading.'}
-            </div>
-          ) : (
-            visibleAvailable.map((skill) => (
-              <AvailableRow
-                key={skill.id}
-                skill={skill}
-                busy={busy}
-                onInstall={() =>
-                  install({ kind: 'registry', skill_id: skill.id }, skill.name)
-                }
-              />
-            ))
-          )}
-        </section>
-        <p className="mt-3 font-mono text-[10px] text-zinc-600">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => setInstallOpen(true)} className="bg-white text-black hover:bg-zinc-200">
+          <Plus size={13} /> Install
+        </Button>
+        <IconButton label="Refresh skills" onClick={() => void refresh()} className="size-9">
+          <RefreshCw size={15} />
+        </IconButton>
+        <p className="ml-2 font-mono text-[10px] text-zinc-600">
           {installed.filter((skill) => skill.enabled).length} enabled · {installed.length} installed
         </p>
       </div>
+
+      {/* Project target */}
+      <div>
+        <label className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+          <FolderOpen size={12} /> Project
+        </label>
+        <TextField
+          value={project}
+          onChange={(event) => onProjectChange(event.target.value)}
+          placeholder="/path/to/project"
+          aria-label="Project directory"
+          className="max-w-xl"
+        />
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Segmented<View>
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'installed', label: `Installed (${installed.length})` },
+            { value: 'available', label: `Registry (${visibleAvailable.length})` },
+          ]}
+        />
+        <TextField
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search skills…"
+          aria-label="Search skills"
+          leading={<Search size={14} />}
+          className="sm:w-64"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <h2 className="text-[13px] font-medium text-zinc-300">
+          {view === 'installed' ? 'Installed skills' : 'Available from registry'}
+        </h2>
+        {loading ? (
+          <span className="font-mono text-[10px] text-zinc-600">loading…</span>
+        ) : (
+          <span className="font-mono text-[10px] text-zinc-600">
+            {view === 'installed' ? visibleInstalled.length : visibleAvailable.length}
+          </span>
+        )}
+      </div>
+
+      <section className="overflow-hidden rounded-2xl border border-white/[0.1] bg-white/[0.018]">
+        {loading ? (
+          <div className="p-10 text-center text-[12px] text-zinc-500">Loading skills…</div>
+        ) : view === 'installed' ? (
+          visibleInstalled.length === 0 ? (
+            <div className="p-10 text-center text-[12px] text-zinc-500">
+              No skills installed in this project. Install one from the registry or another source.
+            </div>
+          ) : (
+            visibleInstalled.map((skill) => (
+              <InstalledRow
+                key={skill.id}
+                skill={skill}
+                busy={busy}
+                onToggle={() => toggle(skill)}
+                onEdit={() => setEditing(skill)}
+                onDelete={() => remove(skill)}
+              />
+            ))
+          )
+        ) : visibleAvailable.length === 0 ? (
+          <div className="p-10 text-center text-[12px] text-zinc-500">
+            {installed.length > 0
+              ? 'Every registry skill is already installed.'
+              : 'The registry is empty or loading.'}
+          </div>
+        ) : (
+          visibleAvailable.map((skill) => (
+            <AvailableRow
+              key={skill.id}
+              skill={skill}
+              busy={busy}
+              onInstall={() =>
+                install({ kind: 'registry', skill_id: skill.id }, skill.name)
+              }
+            />
+          ))
+        )}
+      </section>
 
       {installOpen ? (
         <InstallDialog

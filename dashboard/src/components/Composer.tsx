@@ -150,6 +150,9 @@ export function Composer({
   controlsRight,
   workers,
   rooms,
+  compact,
+  summary,
+  compactControls,
 }: {
   /**
    * Send the draft. Returns `false` to reject it (an incomplete command) and
@@ -204,6 +207,24 @@ export function Composer({
   workers?: string[]
   /** Room names addressable with # (routes the message to that room). */
   rooms?: string[]
+  /**
+   * Mobile compact mode: hide the in-line config chips (`controls` and
+   * `controlsRight`). The right side sheet shows them on mobile instead, so
+   * the composer's bottom row stays one line.
+   */
+  compact?: boolean
+  /**
+   * Short summary of the current config (e.g. "GPT-4 · Plan · Medium"). Shown
+   * inline on the left of the bottom row only in `compact` mode so the user
+   * can see the active settings without opening the right pane.
+   */
+  summary?: string
+  /**
+   * Icon-only controls shown at the front of the bottom row in `compact`
+   * mode (e.g. the permission-mode chip). Kept separate from `controls` so a
+   * phone can still reach the permission state without the full chip row.
+   */
+  compactControls?: ReactNode
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
@@ -750,16 +771,18 @@ export function Composer({
           {working && (value.trim().length > 0 || attachments.some((a) => a.contentType?.startsWith('image/'))) ? (
             <div className="rounded-t-xl border-b border-line/50 bg-inset/40 px-3.5 pb-2.5 pt-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ink-3">
-                  Queued follow-up
-                </p>
+                {compact ? null : (
+                  <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ink-3">
+                    Queued follow-up
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     setValue('')
                     setAttachments([])
                   }}
-                  className="shrink-0 text-ink-3 transition-colors hover:text-red"
+                  className={cn('shrink-0 text-ink-3 transition-colors hover:text-red', compact && 'ml-auto')}
                   aria-label="Discard queued draft"
                   title="Discard this queued draft"
                 >
@@ -792,7 +815,7 @@ export function Composer({
             <div
               aria-hidden
               className={cn(
-                'pointer-events-none absolute inset-0 overflow-hidden px-3.5 pt-3',
+                'composer-backdrop pointer-events-none absolute inset-0 overflow-hidden px-3.5 pt-3',
                 'whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink',
               )}
               ref={backdropRef}
@@ -870,6 +893,15 @@ export function Composer({
 
           <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1.5">
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              {compact ? compactControls : null}
+              {compact && summary ? (
+                <span
+                  className="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-2"
+                  title={summary}
+                >
+                  <span className="truncate">{summary}</span>
+                </span>
+              ) : null}
               {onUploadFiles ? (
                 <>
                   <button
@@ -913,14 +945,18 @@ export function Composer({
               ) : null}
               {/* No overflow scrolling here: a scroll container would clip the popups
     (subagents, permission) that open upward from these chips. Chips wrap
-    instead on narrow screens. */}
-<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{controls}</div>
+    instead on narrow screens. In `compact` mode only the permission chip is
+    shown (via compactControls) plus the summary; the rest of the config lives
+    in the right side sheet. */}
+              {compact ? null : (
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{controls}</div>
+              )}
             </div>
 
             {/* One sleek control: a spinner while the agent works, a quiet ring
                 when idle — and clicking it opens the context-windows popover. */}
             <StatusContextControl working={working} usage={contextUsage} />
-            {controlsRight}
+            {compact ? null : controlsRight}
 
             {working ? (
               <span className="flex shrink-0 items-center gap-1.5">

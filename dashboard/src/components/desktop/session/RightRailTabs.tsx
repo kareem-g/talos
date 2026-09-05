@@ -18,19 +18,30 @@ export function RightRailTabs({
   onSelect,
   onClose,
   onAdd,
+  compact,
 }: {
   tabs: RightTabType[]
   active: RightTabType
   onSelect: (id: RightTabType) => void
   onClose: (id: RightTabType) => void
   onAdd: (id: RightTabType) => void
+  /** Tighter strip for constrained surfaces (mobile sheet): every open tab
+   *  shows its full label at a smaller size (never truncated or icon-only),
+   *  and the close button appears only on the active tab so the whole set
+   *  fits the sheet width. */
+  compact?: boolean
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerRef = useRef<HTMLButtonElement>(null)
   const available = RIGHT_TABS.filter((tab) => !tabs.includes(tab.id))
 
   return (
-    <div className="flex shrink-0 items-stretch gap-0.5 border-b border-line/40 bg-inset px-2 pt-1.5">
+    <div
+      className={cn(
+        'flex shrink-0 items-stretch gap-0.5 border-b border-line/40 bg-inset pt-1.5',
+        compact ? 'px-1' : 'px-1.5',
+      )}
+    >
       <div className="scroll-thin flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
         {tabs.map((id) => {
           const meta = RIGHT_TAB_BY_ID[id]
@@ -40,6 +51,10 @@ export function RightRailTabs({
           if (!meta) return null
           const Icon = meta.icon
           const isActive = id === active
+          // On the compact (mobile) strip only the active tab carries a close
+          // button; tap the tab first, then close it. Saves ~20px per tab so
+          // full labels fit the phone-width sheet.
+          const closable = compact ? isActive && tabs.length > 1 : tabs.length > 1 || !isActive
           return (
             <div
               key={id}
@@ -55,14 +70,23 @@ export function RightRailTabs({
                 role="tab"
                 title={meta.label}
                 className={cn(
-                  'flex items-center gap-1 rounded-t-lg px-2 py-1.5 text-[10.5px] transition-colors',
+                  'flex items-center rounded-t-lg transition-colors',
+                  compact ? 'gap-1 px-1 py-1.5' : 'gap-1 px-2 py-1.5 text-[10.5px]',
                   isActive ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
                 )}
               >
-                <Icon size={12} />
-                <span className="max-w-[96px] truncate">{meta.label}</span>
+                <Icon size={12} className="shrink-0" />
+                <span
+                  className={cn(
+                    // Labels are always visible and full width; `truncate`
+                    // would crop them, so only the desktop strip caps width.
+                    compact ? 'whitespace-nowrap text-[10px]' : 'max-w-[96px] truncate',
+                  )}
+                >
+                  {meta.label}
+                </span>
               </button>
-              {(tabs.length > 1 || !isActive) ? (
+              {closable ? (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -71,13 +95,13 @@ export function RightRailTabs({
                   }}
                   aria-label={`Close ${meta.label}`}
                   title={`Close ${meta.label}`}
-                  className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-ink-3 transition hover:bg-hover-2 hover:text-ink"
+                  className="mr-0.5 flex size-4 shrink-0 items-center justify-center rounded text-ink-3 transition hover:bg-hover-2 hover:text-ink"
                 >
-                  <X size={10} />
+                  <X size={compact ? 9 : 10} />
                 </button>
               ) : null}
               {isActive ? (
-                <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent-2" aria-hidden />
+                <span className="absolute inset-x-1.5 bottom-0 h-0.5 rounded-full bg-accent-2" aria-hidden />
               ) : null}
             </div>
           )
@@ -92,9 +116,12 @@ export function RightRailTabs({
           onClick={() => setPickerOpen((v) => !v)}
           aria-label="Open a tab"
           title="Open a tab"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+          className={cn(
+            'flex shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink',
+            compact ? 'size-5' : 'size-6',
+          )}
         >
-          <Plus size={14} />
+          <Plus size={compact ? 12 : 14} />
         </button>
         {pickerOpen ? (
           <DropdownList anchorRef={pickerRef} onClose={() => setPickerOpen(false)} width={240}>
