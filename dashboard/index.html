@@ -21,6 +21,31 @@
     <title>Plumb</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- Pre-paint theme: mirror lib/theme.ts using the stored prefs so a light
+         user never sees a dark flash. Must run before the stylesheet paints. -->
+    <script>
+      ;(function () {
+        try {
+          var mode = localStorage.getItem('agentdeck-theme')
+          if (mode !== 'dark' && mode !== 'light' && mode !== 'system') mode = 'system'
+          var resolved =
+            mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : mode === 'light'
+                ? 'light'
+                : 'dark'
+          document.documentElement.dataset.theme = resolved
+          var accent = localStorage.getItem('agentdeck-accent')
+          if (accent && /^#?[0-9a-f]{6}$/i.test(accent)) {
+            var s = document.documentElement.style
+            s.setProperty('--accent', accent)
+            s.setProperty('--accent-hover', accent)
+          }
+        } catch (e) {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -42,7 +42,7 @@ import { SkillsSection } from './SkillsSection'
 import type { Session } from '@/types/session'
 import type { Provider } from '@/types/provider'
 
-const AGENT_HUES = ['#8eadbf', '#a78bfa', '#c7a56a', '#e3a15d', '#d9b554', '#f472b6']
+const AGENT_HUES = ['#6396cc', '#a78bfa', '#4fae7c', '#e07a5f', '#d96a8a', '#7fa8d8']
 function hueFor(id: string): string {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
@@ -216,9 +216,9 @@ export function StationHome({
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin bg-[#191613]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin bg-inset">
       {/* Distinctive top bar — control deck header, not a hero */}
-      <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[#191613]/90 backdrop-blur-xl">
+      <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-inset/90 backdrop-blur-xl">
         <div className="relative overflow-hidden">
           {/* Subtle grid signature — faint, not decorative */}
           <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`, backgroundSize: '24px 24px' }} aria-hidden />
@@ -285,7 +285,7 @@ export function StationHome({
       </header>
 
       {/* Anchor strip — jumps to each section without leaving the page. */}
-      <nav aria-label="Home sections" className="sticky top-[57px] z-10 border-b border-white/[0.06] bg-[#191613]/85 backdrop-blur-xl">
+      <nav aria-label="Home sections" className="sticky top-[57px] z-10 border-b border-white/[0.06] bg-inset/85 backdrop-blur-xl">
         <ul className="mx-auto flex w-full max-w-[1280px] items-center gap-1 overflow-x-auto px-4 py-2 sm:gap-2 sm:px-6 lg:px-8">
           {HOME_SECTIONS.map((entry) => (
             <li key={entry.id}>

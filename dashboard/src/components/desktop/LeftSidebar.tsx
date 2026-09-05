@@ -201,7 +201,7 @@ export function LeftSidebar({
   return (
     <aside
       className={cn(
-        'flex flex-col bg-[#191613] text-zinc-100',
+        'flex flex-col bg-inset text-zinc-100',
         fill ? 'h-full w-full min-w-0 overflow-hidden' : 'w-[304px] shrink-0 border-r border-line/60',
       )}
     >
@@ -229,7 +229,7 @@ export function LeftSidebar({
               <ChevronDown size={13} className={cn('shrink-0 text-zinc-500 transition-transform', dropdownOpen && 'rotate-180')} />
             </button>
             {dropdownOpen ? (
-              <div role="listbox" aria-label="Workspaces" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto scroll-thin rounded-xl border border-white/[0.1] bg-[#2a241e] p-1 shadow-2xl animate-up">
+              <div role="listbox" aria-label="Workspaces" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto scroll-thin rounded-xl border border-white/[0.1] bg-surface p-1 shadow-2xl animate-up">
                 {workspaces.map((workspace) => (
                   <button
                     key={workspace.key}

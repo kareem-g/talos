@@ -17,57 +17,57 @@
 @layer base {
   :root {
     /* Surfaces — warm charcoal/espresso, no cool blue or green. */
-    --canvas: #141210;
-    --inset: #191613;
-    --field: #211d19;
-    --surface: #2a241e;
-    --hover-2: #241f1a;
-    --hover: #332a22;
+    --canvas: #131315;
+    --inset: #19191c;
+    --field: #202024;
+    --surface: #26262b;
+    --hover-2: #222226;
+    --hover: #2e2e34;
 
     /* Text — warm parchment scale. */
-    --ink: #f3e9dc;
-    --ink-2: #b5a596;
-    --ink-3: #817366;
+    --ink: #f2f2f3;
+    --ink-2: #b0b0b6;
+    --ink-3: #7e7e86;
 
     /* Hairlines — warm brown. */
-    --line: #3d332a;
-    --line-strong: #4a3e32;
+    --line: #34343a;
+    --line-strong: #42424a;
 
     /* Primary accent — amber, reserved for emphasis (buttons, active nav,
        focus, running/progress marks, selected tabs, primary links). */
-    --accent: #e3a15d;
-    --accent-hover: #f0b875;
-    --accent-ink: #211711;
-    --accent-tint: rgba(227, 161, 93, 0.12);
-    --accent-2: #d08a47;
+    --accent: #5b8def;
+    --accent-hover: #6f9bf2;
+    --accent-ink: #0d1322;
+    --accent-tint: rgba(91, 141, 239, 0.12);
+    --accent-2: #4a76d1;
 
     /* Status hues — warm and muted. No green. */
     /* Success / completed = muted gold. */
-    --green: #c7a56a;
-    --green-tint: rgba(199, 165, 106, 0.12);
+    --green: #57ab5a;
+    --green-tint: rgba(87, 171, 90, 0.12);
     /* Error / failure = muted terracotta. */
-    --red: #d96c5f;
-    --red-tint: rgba(217, 108, 95, 0.12);
+    --red: #f85149;
+    --red-tint: rgba(248, 81, 73, 0.12);
     /* Attention / blocked / warning = copper. */
-    --orange: #c97855;
-    --orange-tint: rgba(201, 120, 85, 0.12);
+    --orange: #db6d28;
+    --orange-tint: rgba(219, 109, 40, 0.12);
 
     /* Border-strength status colors. */
-    --green-border: rgba(199, 165, 106, 0.30);
-    --red-border: rgba(217, 108, 95, 0.30);
-    --orange-border: rgba(201, 120, 85, 0.30);
+    --green-border: rgba(87, 171, 90, 0.30);
+    --red-border: rgba(248, 81, 73, 0.30);
+    --orange-border: rgba(219, 109, 40, 0.30);
 
     /* Agent identity hues — warm set. */
-    --agent-green: #c7a56a;
-    --agent-purple: #c9a0dc;
-    --agent-blue: #8eadbf;
-    --agent-orange: #e3a15d;
-    --agent-yellow: #d9b554;
-    --agent-pink: #d98a8a;
+    --agent-green: #4fae7c;
+    --agent-purple: #a78bfa;
+    --agent-blue: #6396cc;
+    --agent-orange: #e07a5f;
+    --agent-yellow: #d9a03f;
+    --agent-pink: #d96a8a;
 
     /* Terminal: warm editor dark. */
-    --term-bg: #171513;
-    --term-fg: #e8ddcd;
+    --term-bg: #161618;
+    --term-fg: #e6e6e9;
 
     /* Elevation — subtle, warm-neutral. */
     --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -75,6 +75,146 @@
     --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(243, 233, 220, 0.02);
     --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.5);
     --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(243, 233, 220, 0.03);
+
+    /* Neutral ramp (zinc-*) and status ramps — var-backed so the whole
+       tailwind zinc/emerald/amber/orange/red/sky family flips with the
+       theme instead of being fixed warm-dark hexes. Only the steps the
+       app actually uses are parameterized; the rest fall back below. */
+    --zinc-50: #fafafa;
+    --zinc-100: #f4f4f5;
+    --zinc-200: #e4e4e7;
+    --zinc-300: #d4d4d8;
+    --zinc-400: #a1a1aa;
+    --zinc-500: #8b8b93;
+    --zinc-600: #71717a;
+    --zinc-700: #52525b;
+    --zinc-800: #3f3f46;
+    --zinc-900: #27272a;
+    --zinc-950: #1c1c1f;
+    --emerald-300: #6fbc7f;
+    --emerald-400: #57ab5a;
+    --emerald-500: #46a04c;
+    --emerald-600: #3a8a40;
+    --emerald-700: #2f6f34;
+    --amber-300: #e0a94e;
+    --amber-400: #d4942f;
+    --amber-500: #bd8121;
+    --amber-600: #a06c1c;
+    --amber-700: #7f5516;
+    --orange-300: #e08a4e;
+    --orange-400: #db6d28;
+    --orange-500: #c55f1f;
+    --orange-600: #a54f1a;
+    --orange-700: #844016;
+    --red-300: #f4736c;
+    --red-400: #f85149;
+    --red-500: #dd3d35;
+    --red-600: #b93129;
+    --red-700: #93271f;
+    --sky-300: #7fa8d8;
+    --sky-400: #6396cc;
+    --sky-500: #4f83ba;
+    --sky-600: #406a99;
+    --sky-700: #33557a;
+    --selection-bg: #3a3a40;
+    --selection-ink: #f2f2f3;
+    --grain: rgba(127, 127, 127, 0.04);
+    /* Translucent overlay utilities (bg-white/x etc.) — overridden per theme. */
+    --overlay-w04: rgba(255, 255, 255, 0.04);
+    --overlay-w06: rgba(255, 255, 255, 0.06);
+    --overlay-w09: rgba(255, 255, 255, 0.09);
+    --overlay-w15: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ── Light theme — warm paper ───────────────────────────────────────────
+     Same accent system, light surfaces, dark ink. Selected via
+     [data-theme='light'] on <html> (lib/theme.ts). */
+  [data-theme='light'] {
+    --canvas: #f8f8fa;
+    --inset: #f1f1f4;
+    --field: #ececf0;
+    --surface: #ffffff;
+    --hover-2: #f2f2f5;
+    --hover: #e8e8ec;
+
+    --ink: #1a1a1e;
+    --ink-2: #55555e;
+    --ink-3: #8a8a93;
+
+    --line: #e2e2e7;
+    --line-strong: #cfcfd6;
+
+    /* Accent stays user-chosen; the default amber deepens for contrast on
+       light surfaces. */
+    --accent: #3f6fb5;
+    --accent-hover: #35619e;
+    --accent-ink: #ffffff;
+    --accent-tint: rgba(63, 111, 181, 0.12);
+    --accent-2: #2f5490;
+
+    --green: #2f7d3f;
+    --green-tint: rgba(47, 125, 63, 0.12);
+    --red: #c0352b;
+    --red-tint: rgba(192, 53, 43, 0.10);
+    --orange: #b3591b;
+    --orange-tint: rgba(179, 89, 27, 0.12);
+
+    --green-border: rgba(47, 125, 63, 0.35);
+    --red-border: rgba(192, 53, 43, 0.35);
+    --orange-border: rgba(179, 89, 27, 0.35);
+
+    --term-bg: #ffffff;
+    --term-fg: #1a1a1e;
+
+    --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    --shadow-card: 0 1px 3px rgba(60, 48, 32, 0.12), 0 0 0 1px rgba(60, 48, 32, 0.05);
+    --shadow-raised: 0 8px 32px rgba(60, 48, 32, 0.16);
+    --shadow-overlay: 0 24px 64px rgba(60, 48, 32, 0.22), 0 0 0 1px rgba(60, 48, 32, 0.08);
+
+    --zinc-50: #fdfdfd;
+    --zinc-100: #26262b;
+    --zinc-200: #3a3a40;
+    --zinc-300: #55555e;
+    --zinc-400: #8a8a93;
+    --zinc-500: #a5a5ad;
+    --zinc-600: #b9b9c0;
+    --zinc-700: #c9c9cf;
+    --zinc-800: #d8d8dd;
+    --zinc-900: #e5e5e9;
+    --zinc-950: #efeff2;
+    --emerald-300: #3a8a40;
+    --emerald-400: #2f7d3f;
+    --emerald-500: #296e37;
+    --emerald-600: #235d2e;
+    --emerald-700: #1d4d26;
+    --amber-300: #9a6c15;
+    --amber-400: #8a5f12;
+    --amber-500: #7a5310;
+    --amber-600: #68450d;
+    --amber-700: #56380a;
+    --orange-300: #a3541d;
+    --orange-400: #93491a;
+    --orange-500: #823f16;
+    --orange-600: #6f3413;
+    --orange-700: #5c2b10;
+    --red-300: #c0352b;
+    --red-400: #ad2f26;
+    --red-500: #992a22;
+    --red-600: #82241d;
+    --red-700: #6b1e18;
+    --sky-300: #33628f;
+    --sky-400: #2f5a83;
+    --sky-500: #2a4f73;
+    --sky-600: #244362;
+    --sky-700: #1e3751;
+    --selection-bg: rgba(0, 0, 0, 0.14);
+    --selection-ink: #1a1a1e;
+    --grain: rgba(127, 127, 127, 0.05);
+    --overlay-w04: rgba(38, 32, 26, 0.04);
+    --overlay-w06: rgba(38, 32, 26, 0.06);
+    --overlay-w09: rgba(38, 32, 26, 0.10);
+    --overlay-w15: rgba(38, 32, 26, 0.16);
   }
 
   .home-scope {
@@ -126,7 +266,7 @@
     pointer-events: none;
     background-image: radial-gradient(
       ellipse at 50% 0%,
-      rgba(227, 161, 93, 0.045) 0%,
+      var(--grain) 0%,
       transparent 60%
     );
   }
@@ -150,8 +290,99 @@
   }
 
   ::selection {
-    background: #533522;
-    color: #f3e9dc;
+    background: var(--selection-bg);
+    color: var(--selection-ink);
+  }
+
+  /* ── Light-mode utility overrides ─────────────────────────────────────
+     The codebase uses literal white/black translucent utilities in many
+     places (bg-white/[0.06], text-white, border-white/10, …). Instead of
+     editing hundreds of call sites, remap the common ones to ink-tinted
+     overlays when the light theme is active. Escaped class selectors are
+     ugly but centralized here — one block covers every occurrence. */
+  [data-theme='light'] .text-white {
+    color: var(--ink);
+  }
+  [data-theme='light'] .text-black {
+    color: var(--canvas);
+  }
+  [data-theme='light'] .bg-white {
+    background-color: var(--ink);
+  }
+  [data-theme='light'] .bg-white\/\[0\.02\],
+  [data-theme='light'] .bg-white\/\[0\.025\],
+  [data-theme='light'] .bg-white\/\[0\.03\],
+  [data-theme='light'] .bg-white\/\[0\.035\],
+  [data-theme='light'] .bg-white\/\[0\.04\],
+  [data-theme='light'] .bg-white\/\[0\.045\] {
+    background-color: var(--overlay-w04);
+  }
+  [data-theme='light'] .bg-white\/\[0\.05\],
+  [data-theme='light'] .bg-white\/\[0\.06\],
+  [data-theme='light'] .bg-white\/\[0\.07\],
+  [data-theme='light'] .bg-white\/\[0\.08\] {
+    background-color: var(--overlay-w06);
+  }
+  [data-theme='light'] .bg-white\/\[0\.09\],
+  [data-theme='light'] .bg-white\/\[0\.1\],
+  [data-theme='light'] .bg-white\/10,
+  [data-theme='light'] .bg-white\/\[0\.12\] {
+    background-color: var(--overlay-w09);
+  }
+  [data-theme='light'] .bg-white\/\[0\.15\],
+  [data-theme='light'] .bg-white\/\[0\.2\],
+  [data-theme='light'] .bg-white\/20,
+  [data-theme='light'] .bg-white\/25 {
+    background-color: var(--overlay-w15);
+  }
+  [data-theme='light'] .hover\:bg-white\/5:hover,
+  [data-theme='light'] .hover\:bg-white\/\[0\.04\]:hover,
+  [data-theme='light'] .hover\:bg-white\/\[0\.05\]:hover,
+  [data-theme='light'] .hover\:bg-white\/\[0\.06\]:hover {
+    background-color: var(--overlay-w06);
+  }
+  [data-theme='light'] .hover\:bg-white\/10:hover,
+  [data-theme='light'] .hover\:bg-white\/\[0\.1\]:hover {
+    background-color: var(--overlay-w09);
+  }
+  [data-theme='light'] .border-white\/5,
+  [data-theme='light'] .border-white\/\[0\.05\],
+  [data-theme='light'] .border-white\/\[0\.06\],
+  [data-theme='light'] .border-white\/\[0\.07\],
+  [data-theme='light'] .border-white\/10,
+  [data-theme='light'] .border-white\/\[0\.1\] {
+    border-color: var(--line);
+  }
+  [data-theme='light'] .border-white\/\[0\.14\],
+  [data-theme='light'] .border-white\/\[0\.15\],
+  [data-theme='light'] .border-white\/20 {
+    border-color: var(--line-strong);
+  }
+  [data-theme='light'] .hover\:border-white\/10:hover,
+  [data-theme='light'] .hover\:border-white\/20:hover,
+  [data-theme='light'] .hover\:border-white\/\[0\.14\]:hover,
+  [data-theme='light'] .hover\:border-white\/\[0\.15\]:hover {
+    border-color: var(--line-strong);
+  }
+  [data-theme='light'] .bg-black\/20,
+  [data-theme='light'] .bg-black\/25,
+  [data-theme='light'] .bg-black\/30 {
+    background-color: rgba(38, 32, 26, 0.18);
+  }
+  [data-theme='light'] .bg-black\/40,
+  [data-theme='light'] .bg-black\/50,
+  [data-theme='light'] .bg-black\/60,
+  [data-theme='light'] .bg-black\/70 {
+    /* Backdrop dims stay dark — they sit above content by design. */
+    background-color: rgba(38, 32, 26, 0.32);
+  }
+  [data-theme='light'] .divide-white\/\[0\.07\] > :not([hidden]) ~ :not([hidden]),
+  [data-theme='light'] .divide-white\/10 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--line);
+  }
+  [data-theme='light'] .placeholder\:text-zinc-500::placeholder,
+  [data-theme='light'] .placeholder\:text-zinc-600::placeholder {
+    color: var(--zinc-4);
   }
 }
 

@@ -25,6 +25,40 @@ const TOUCH_KEYS: Array<{ label: string; bytes: string; aria: string }> = [
   { label: '⏎', bytes: '\r', aria: 'Enter' },
 ]
 
+/** Terminal palette from the live CSS tokens, so it follows the app theme.
+ *  ANSI colors beyond background/foreground/cursor stay per-theme constants —
+ *  they need to stay punchy against whichever background is active. */
+function terminalTheme(): { [key: string]: string } {
+  const style = getComputedStyle(document.documentElement)
+  const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
+  const light = document.documentElement.dataset.theme === 'light'
+  const bg = read('--term-bg', light ? '#ffffff' : '#141210')
+  const fg = read('--term-fg', light ? '#26201a' : '#e7dac8')
+  return {
+    background: bg,
+    foreground: fg,
+    cursor: read('--accent', '#8eadbf'),
+    cursorAccent: bg,
+    selectionBackground: 'rgba(76, 141, 255, 0.28)',
+    black: bg,
+    red: light ? '#b3402f' : '#ff6b6b',
+    green: light ? '#2f7d3f' : '#57ab5a',
+    yellow: light ? '#a8741f' : '#ffbb33',
+    blue: light ? '#386484' : '#8eadbf',
+    magenta: light ? '#7c5cae' : '#c39bff',
+    cyan: light ? '#386484' : '#8eadbf',
+    white: light ? '#5c5347' : '#d8c7b1',
+    brightBlack: light ? '#8a7f71' : '#817366',
+    brightRed: light ? '#a33a2a' : '#ff8f8f',
+    brightGreen: light ? '#296e37' : '#6fbc7f',
+    brightYellow: light ? '#96681b' : '#ffcd66',
+    brightBlue: light ? '#325874' : '#8eadbf',
+    brightMagenta: light ? '#6b4f9c' : '#d4b8ff',
+    brightCyan: light ? '#325874' : '#8eadbf',
+    brightWhite: light ? '#26201a' : '#f3e9dc',
+  }
+}
+
 export function TerminalView({
   output,
   onInput,
@@ -70,30 +104,8 @@ export function TerminalView({
       fontSize: fontSizeProp,
       lineHeight: 1.4,
       scrollback: 5000,
-      // Matches the app's terminal tokens; near-black keeps ANSI colors punchy.
-      theme: {
-        background: '#141210',
-        foreground: '#e7dac8',
-        cursor: '#8eadbf',
-        cursorAccent: '#141210',
-        selectionBackground: 'rgba(76, 141, 255, 0.28)',
-        black: '#141210',
-        red: '#ff6b6b',
-        green: '#c7a56a',
-        yellow: '#ffbb33',
-        blue: '#8eadbf',
-        magenta: '#c39bff',
-        cyan: '#8eadbf',
-        white: '#d8c7b1',
-        brightBlack: '#817366',
-        brightRed: '#ff8f8f',
-        brightGreen: '#e0c47f',
-        brightYellow: '#ffcd66',
-        brightBlue: '#8eadbf',
-        brightMagenta: '#d4b8ff',
-        brightCyan: '#8eadbf',
-        brightWhite: '#f3e9dc',
-      },
+      // Read from the live CSS tokens so the terminal follows the app theme.
+      theme: terminalTheme(),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -151,6 +163,16 @@ export function TerminalView({
       term.write(pending)
     })
   }, [output])
+
+  // Follow live theme changes (lib/theme.ts dispatches this event).
+  useEffect(() => {
+    function onThemeChange() {
+      const term = termRef.current
+      if (term) term.options.theme = terminalTheme()
+    }
+    window.addEventListener('agentdeck-theme-change', onThemeChange)
+    return () => window.removeEventListener('agentdeck-theme-change', onThemeChange)
+  }, [])
 
   function handleClear() {
     termRef.current?.clear()

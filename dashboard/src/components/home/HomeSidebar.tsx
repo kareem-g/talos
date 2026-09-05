@@ -122,7 +122,7 @@ export function HomeSidebar({
 
   return (
     <>
-      <aside className="hidden w-[324px] shrink-0 border-r border-white/[0.08] bg-[#191613] text-zinc-100 lg:flex">
+      <aside className="hidden w-[324px] shrink-0 border-r border-white/[0.08] bg-inset text-zinc-100 lg:flex">
         <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-white/[0.07] py-3">
           <button type="button" aria-label="Plumb" title="Plumb" className="mb-4 flex size-10 items-center justify-center rounded-xl bg-accent text-[15px] font-bold tracking-[-0.05em] text-accent-ink shadow-lg shadow-black/20">A</button>
           <div className="flex flex-1 flex-col items-center justify-start gap-2" />
@@ -152,7 +152,7 @@ export function HomeSidebar({
 
       <div className="lg:hidden">
         <button type="button" onClick={() => setMobileOpen((value) => !value)} className="fixed bottom-[4.5rem] right-4 z-30 flex size-12 items-center justify-center rounded-full bg-accent text-accent-ink shadow-xl" aria-label={mobileOpen ? 'Close command center' : 'Open command center'}>{mobileOpen ? <X size={19} /> : <LayoutGrid size={19} />}</button>
-        {mobileOpen ? <div className="fixed inset-0 z-40"><button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} aria-label="Close command center" /><section className="absolute inset-x-0 bottom-0 flex max-h-[82dvh] min-h-[58dvh] flex-col rounded-t-2xl border border-white/10 bg-[#191613] shadow-2xl animate-sheet" aria-label="Command center">
+        {mobileOpen ? <div className="fixed inset-0 z-40"><button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} aria-label="Close command center" /><section className="absolute inset-x-0 bottom-0 flex max-h-[82dvh] min-h-[58dvh] flex-col rounded-t-2xl border border-white/10 bg-inset shadow-2xl animate-sheet" aria-label="Command center">
           <div className="shrink-0 border-b border-white/[0.07] px-4 pb-3 pt-2"><div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" /><div className="flex items-center gap-2"><div className="flex-1"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Command center</p><p className="text-[13px] font-semibold text-white">Workspaces</p></div><button type="button" onClick={() => { onNewTask(); setMobileOpen(false) }} className="rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-accent-ink">New task</button></div></div>
           <div className="flex min-h-0 flex-1 flex-col">{renderSessionsPanel()}</div>
           <div className="shrink-0 border-t border-white/[0.08] p-3"><div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className={cn('size-2 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-zinc-600')} /> {connection === 'connected' ? 'Station connected' : 'Station offline'}</div></div>

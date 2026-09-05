@@ -310,10 +310,10 @@ export const RightRail = forwardRef<RightRailHandle, {
           style={{
             backgroundColor:
               connection === 'connected'
-                ? '#c7a56a'
+                ? 'var(--green)'
                 : connection === 'connecting' || connection === 'reconnecting'
-                  ? '#e3a15d'
-                  : '#d96c5f',
+                  ? 'var(--orange)'
+                  : 'var(--red)',
           }}
         />
 

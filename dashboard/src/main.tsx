@@ -2,7 +2,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { registerSW } from './lib/pwa'
+import { initTheme } from './lib/theme'
 import './index.css'
+
+// Theme is applied pre-paint by the inline script in index.html; this re-applies
+// stored prefs (and the system-mode listener) once the app owns the document.
+initTheme()
 
 const root = document.getElementById('root')!
 

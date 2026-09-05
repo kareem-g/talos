@@ -320,13 +320,13 @@ export default function App() {
           selectedId={selectedId}
           searchQuery={homeSearch}
         />
-        <main className="flex min-w-0 flex-1 flex-col bg-[#141210]">
+        <main className="flex min-w-0 flex-1 flex-col bg-canvas">
           <StationHome {...homeProps} />
         </main>
         <AttentionPill onOpen={openSessionFrom} />
         {showCommandPalette ? (
           <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-hover-2 p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
               <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
             </div>
@@ -371,7 +371,7 @@ export default function App() {
 
       {showCommandPalette ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[14vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-hover-2 p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <input autoFocus type="search" placeholder="Search sessions, projects, agents..." value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
             <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter. Press Esc to close.</p>
           </div>

@@ -623,7 +623,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
   const done = steps.filter((s) => s.status === 'completed').length
 
   return (
-    <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#191613] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
+    <div className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-inset shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl">
       {/* Header — collapsible toggle + "Plan" + progress + copy */}
       <button
         type="button"
@@ -921,7 +921,7 @@ function PlanApproval({
   return (
     <div
       data-approval-id={part.requestId}
-      className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-[#191613] shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
+      className="animate-up overflow-hidden rounded-2xl border border-zinc-800 bg-inset shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
       role="alert"
       aria-label="Plan approval required"
     >
@@ -1110,7 +1110,7 @@ export function Approval({
     return (
       <div
         data-approval-id={part.requestId}
-        className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-[#211d19]/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
+        className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-field/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
       >
         {part.decision && /deny|reject|no\b/i.test(part.decision) ? (
           <AlertIcon size={12} className="shrink-0 text-amber-500" />
@@ -1129,7 +1129,7 @@ export function Approval({
       data-approval-id={part.requestId}
       className={cn(
         'animate-up overflow-hidden rounded-2xl border shadow-[0_8px_32px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)]',
-        'bg-[#191613] backdrop-blur-xl',
+        'bg-inset backdrop-blur-xl',
         risky ? 'border-red-900/30' : 'border-zinc-800',
       )}
       role="alert"
@@ -1419,7 +1419,7 @@ function OrchestrationRow({ part }: { part: Extract<MessagePart, { kind: 'orches
           {display.slice(0, 4).map((name, index) => (
             <span
               key={`${name}-${index}`}
-              className="rounded-full ring-2 ring-inset ring-[#191613]"
+              className="rounded-full ring-2 ring-inset ring-inset"
               style={{ marginLeft: index === 0 ? 0 : -5, zIndex: display.length - index }}
             >
               <WorkerAvatar

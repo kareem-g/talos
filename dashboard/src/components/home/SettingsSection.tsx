@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Check, ChevronDown, Chip, Dots, DropdownList, Search, SectionLabel, TextField } from '../ui'
 import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type BuiltinEngineSettings, type CloudflareSettings } from '@/lib/api'
+import { ACCENT_PRESETS, applyTheme, readStoredTheme, type ThemeMode } from '@/lib/theme'
 import { useStore } from '@/store'
 import { cn } from '@/lib/format'
 
@@ -122,6 +123,8 @@ export function SettingsSection() {
       <ApiProvidersSection />
 
       <BuiltinAgentsSection />
+
+      <AppearanceSection />
 
       <SectionLabel>Keyboard</SectionLabel>
       <section className="flex flex-col rounded-card border border-line bg-surface shadow-card">
@@ -693,6 +696,117 @@ function ApiProvidersSection() {
             </form>
           </div>
         )}
+      </section>
+    </>
+  )
+}
+
+/** Theme + accent picker: light / dark / system and a custom accent color. */
+function AppearanceSection() {
+  const [mode, setMode] = useState<ThemeMode>('system')
+  const [accent, setAccent] = useState<string | undefined>(undefined)
+  const [customHex, setCustomHex] = useState('')
+
+  useEffect(() => {
+    const stored = readStoredTheme()
+    setMode(stored.mode)
+    setAccent(stored.accent)
+    setCustomHex(stored.accent ?? '')
+  }, [])
+
+  function chooseMode(next: ThemeMode) {
+    setMode(next)
+    applyTheme(next, accent)
+  }
+
+  function chooseAccent(hex: string | undefined) {
+    setAccent(hex)
+    setCustomHex(hex ?? '')
+    applyTheme(mode, hex)
+  }
+
+  return (
+    <>
+      <SectionLabel>Appearance</SectionLabel>
+      <section className="rounded-card border border-line bg-surface p-3.5 shadow-card">
+        <div className="flex flex-col gap-4">
+          <div>
+            <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">Theme</p>
+            <div role="tablist" className="flex items-center gap-1 rounded-xl bg-inset p-1 ring-1 ring-line">
+              {(['system', 'light', 'dark'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === option}
+                  onClick={() => chooseMode(option)}
+                  className={cn(
+                    'flex-1 rounded-lg px-3 py-1.5 text-[12px] font-medium capitalize transition',
+                    mode === option ? 'bg-surface text-ink shadow-sm ring-1 ring-line' : 'text-ink-3 hover:text-ink',
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">Accent</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => chooseAccent(undefined)}
+                aria-pressed={accent === undefined}
+                className={cn(
+                  'flex h-8 items-center rounded-lg border px-3 text-[11.5px] font-medium transition',
+                  accent === undefined ? 'border-accent text-accent-ink bg-accent' : 'border-line text-ink-2 hover:bg-hover',
+                )}
+              >
+                Default
+              </button>
+              {ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  title={preset.name}
+                  aria-label={`Accent ${preset.name}`}
+                  aria-pressed={accent === preset.hex}
+                  onClick={() => chooseAccent(preset.hex)}
+                  className={cn(
+                    'flex size-8 items-center justify-center rounded-full border-2 transition',
+                    accent === preset.hex ? 'border-ink' : 'border-transparent hover:border-line-strong',
+                  )}
+                  style={{ backgroundColor: preset.hex }}
+                >
+                  {accent === preset.hex ? <Check size={13} className="text-white drop-shadow" /> : null}
+                </button>
+              ))}
+            </div>
+            <form
+              className="mt-3 flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (/^#?[0-9a-f]{6}$/i.test(customHex.trim())) chooseAccent(customHex.trim().startsWith('#') ? customHex.trim() : `#${customHex.trim()}`)
+              }}
+            >
+              <TextField
+                value={customHex}
+                onChange={(e) => setCustomHex(e.target.value)}
+                placeholder="#7c5cff"
+                aria-label="Custom accent color"
+                spellCheck={false}
+                className="max-w-32 font-mono"
+              />
+              <Button variant="surface" type="submit" disabled={!/^#?[0-9a-f]{6}$/i.test(customHex.trim())}>
+                Apply
+              </Button>
+            </form>
+            <p className="mt-2 text-[10.5px] leading-[1.5] text-ink-3">
+              The accent recolors buttons, highlights, and the focus ring across the app.
+            </p>
+          </div>
+        </div>
       </section>
     </>
   )
