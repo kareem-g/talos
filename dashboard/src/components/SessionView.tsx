@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StateZone } from './StateZone'
 import { Timeline } from './Timeline'
-import { PanelLeft, PanelRight } from 'lucide-react'
+import { PanelLeft, PanelRight, List, SlidersHorizontal } from 'lucide-react'
 import { Dot, IconButton, Layer, Notice, StatusPill, ChevronLeft } from './ui'
 import { LeftSidebar } from './desktop/LeftSidebar'
 import { RightRail, type RightRailHandle } from './desktop/session/RightRail'
@@ -50,6 +50,8 @@ export function SessionView({
   // a small popover to choose between them; tapping a destination sets the
   // state and the Layer renders.
   const [pane, setPane] = useState<'sessions' | 'details' | null>(null)
+  const timelineDetail = useStore((s) => s.timelineDetail)
+  const setTimelineDetail = useStore((s) => s.setTimelineDetail)
   // Lets the explorer/left sheet open a file in the right rail's File tab.
   const rightRailRef = useRef<RightRailHandle>(null)
   const { navigate } = useRoute()
@@ -168,9 +170,17 @@ export function SessionView({
                 onClick={() => setPane((current) => (current === 'details' ? null : 'details'))}
                 aria-expanded={pane === 'details'}
                 aria-haspopup="dialog"
-                className="-mr-1 shrink-0"
+                className="shrink-0"
               >
                 <PanelRight size={15} />
+              </IconButton>
+              <IconButton
+                label={timelineDetail === 'simple' ? 'Show technical detail' : 'Simplify the timeline'}
+                aria-pressed={timelineDetail === 'detailed'}
+                onClick={() => setTimelineDetail(timelineDetail === 'simple' ? 'detailed' : 'simple')}
+                className="-mr-1 shrink-0"
+              >
+                {timelineDetail === 'simple' ? <List size={15} /> : <SlidersHorizontal size={15} />}
               </IconButton>
             </>
           ) : null}

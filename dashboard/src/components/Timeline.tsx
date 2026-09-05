@@ -103,22 +103,58 @@ function groupBlocks(parts: MessagePart[]): Block[] {
  * A run of consecutive tool calls — one bordered card, 1px dividers, 24px
  * rows. A single tool renders bare (no chrome). Long groups (>4) collapse
  * behind a header showing the count + total time; running groups stay open.
+ * In simple mode the group is always collapsed to one friendly line.
  */
 function ToolGroup({ parts }: { parts: ToolRow[] }) {
   const running = parts.some((p) => p.status === 'running')
   const failed = parts.filter((p) => p.status === 'failed').length
   const totalMs = parts.reduce((sum, p) => sum + (p.durationMs ?? 0), 0)
+  const simple = useStore((s) => s.timelineDetail === 'simple')
   const [collapsed, setCollapsed] = useState(false)
-  const collapsible = parts.length > 4 && !running
+  const isCollapsed = simple && !running ? true : collapsed
+  const collapsible = simple ? !running : parts.length > 4 && !running
 
-  if (parts.length === 1) {
+  if (parts.length === 1 && !simple) {
     return <Step part={parts[0]!} />
+  }
+
+  if (simple) {
+    // One friendly line, no counts/timings. One tap reveals the steps for
+    // users who want them.
+    return (
+      <div className="overflow-hidden rounded-lg border border-line/50 bg-surface/30">
+        {!isCollapsed ? (
+          <div className="flex flex-col gap-px p-1">
+            {parts.map((part) => (
+              <Step key={part.toolId} part={part} />
+            ))}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex h-7 w-full items-center gap-2 border-t border-line/40 bg-surface/40 px-2.5 text-left transition-colors hover:bg-hover/60"
+        >
+          <span
+            className={cn('size-1.5 shrink-0 rounded-full', running ? 'bg-accent breathe' : failed > 0 ? 'bg-red' : 'bg-green')}
+            aria-hidden
+          />
+          <span className="text-[12px] text-ink-2">
+            {running ? 'Working…' : failed > 0 ? 'Ran into a problem' : `Used ${parts.length} tool${parts.length === 1 ? '' : 's'}`}
+          </span>
+          <ChevronDown
+            size={11}
+            className={cn('ml-auto shrink-0 text-ink-3 transition-transform duration-200', isCollapsed && '-rotate-90')}
+          />
+        </button>
+      </div>
+    )
   }
 
   return (
     <div className="overflow-hidden rounded-lg border border-line/50 bg-surface/30">
       <div className="flex flex-col gap-px p-1">
-        {(collapsed ? [] : parts).map((part) => (
+        {(isCollapsed ? [] : parts).map((part) => (
           <Step key={part.toolId} part={part} />
         ))}
       </div>
@@ -136,7 +172,7 @@ function ToolGroup({ parts }: { parts: ToolRow[] }) {
           aria-hidden
         />
         <span className="font-mono text-[10px] tabular-nums text-ink-3">
-          {collapsed ? `+${parts.length} steps` : `${parts.length} steps`}
+          {isCollapsed ? `+${parts.length} steps` : `${parts.length} steps`}
           {totalMs > 0 ? ` · ${formatDuration(totalMs)}` : ''}
           {failed > 0 ? ` · ${failed} failed` : ''}
           {running ? ' · running' : ''}
@@ -144,7 +180,7 @@ function ToolGroup({ parts }: { parts: ToolRow[] }) {
         {collapsible ? (
           <ChevronDown
             size={11}
-            className={cn('ml-auto text-ink-3 transition-transform duration-200', collapsed && '-rotate-90')}
+            className={cn('ml-auto text-ink-3 transition-transform duration-200', isCollapsed && '-rotate-90')}
           />
         ) : null}
       </button>
@@ -170,6 +206,7 @@ const Turn = memo(function Turn({
   /** Recency fade: older turns sit dimmer, like ink drying toward the top. */
   dim?: number
 }) {
+  const simple = useStore((s) => s.timelineDetail === 'simple')
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
     // Context enrichment stays in the data model (the agent still receives
@@ -250,7 +287,7 @@ const Turn = memo(function Turn({
               <FileChips files={files} project={project} sessionId={sessionId} />
             </div>
           ) : null}
-          {hasFooter ? (
+          {hasFooter && !simple ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-0.5">
               {footer.summary ? <TurnSummary part={footer.summary} /> : null}
               {footer.summary && footer.usage ? (

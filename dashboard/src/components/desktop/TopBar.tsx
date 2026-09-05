@@ -11,9 +11,10 @@
  * keep counting.
  */
 
-import { FileCode2, Folder, PanelLeft, PanelRight, Plus, Settings } from 'lucide-react'
+import { FileCode2, Folder, List, PanelLeft, PanelRight, Plus, Settings, SlidersHorizontal } from 'lucide-react'
 import { IconButton, StatusPill } from '../ui'
 import { useOpenFile } from '@/lib/fileViewer'
+import { useStore } from '@/store'
 import { cn } from '@/lib/format'
 import type { UIState, UIStateDisplay } from '@/lib/sessionState'
 import type { ConnectionState } from '@/types/protocol'
@@ -47,6 +48,8 @@ export function TopBar({
 }) {
   const display: UIStateDisplay = uiStateDisplay(uiState)
   const openFile = useOpenFile()
+  const timelineDetail = useStore((s) => s.timelineDetail)
+  const setTimelineDetail = useStore((s) => s.setTimelineDetail)
 
   const project = session.project
   const projectName = project ? (project.split('/').pop() ?? project) : null
@@ -166,6 +169,16 @@ export function TopBar({
           </span>
         </>
       ) : null}
+
+      <IconButton
+        label={timelineDetail === 'simple' ? 'Show technical detail' : 'Simplify the timeline'}
+        title={timelineDetail === 'simple' ? 'Show technical detail (tool args, tokens, timings)' : 'Simplify the timeline'}
+        aria-pressed={timelineDetail === 'detailed'}
+        onClick={() => setTimelineDetail(timelineDetail === 'simple' ? 'detailed' : 'simple')}
+        className="size-7"
+      >
+        {timelineDetail === 'simple' ? <List size={14} strokeWidth={1.8} /> : <SlidersHorizontal size={14} strokeWidth={1.8} />}
+      </IconButton>
 
       {onOpenSettings ? (
         <IconButton label="Settings" onClick={onOpenSettings} className="size-7">

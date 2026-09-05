@@ -101,6 +101,14 @@ interface StoreState {
   starred: string[]
 
   /**
+   * Timeline verbosity: 'simple' hides developer chrome (token counts, tool
+   * args/JSON, timings) so the chat reads like a normal product; 'detailed'
+   * shows everything. Local-only, persisted to localStorage.
+   */
+  timelineDetail: 'simple' | 'detailed'
+  setTimelineDetail: (detail: 'simple' | 'detailed') => void
+
+  /**
    * Follow-up messages typed while the agent is working, per session. They
    * render as editable rows above the composer and auto-send one-per-turn as
    * the agent goes idle — or immediately via Steer.
@@ -201,6 +209,13 @@ export const useStore = create<StoreState>((set, get) => ({
       return JSON.parse(raw) as string[]
     } catch {
       return []
+    }
+  })(),
+  timelineDetail: (() => {
+    try {
+      return localStorage.getItem('agentdeck-timeline-detail') === 'detailed' ? 'detailed' : 'simple'
+    } catch {
+      return 'simple'
     }
   })(),
 
@@ -815,6 +830,15 @@ export const useStore = create<StoreState>((set, get) => ({
 
   isStarred(sessionId) {
     return get().starred.includes(sessionId)
+  },
+
+  setTimelineDetail(detail) {
+    try {
+      localStorage.setItem('agentdeck-timeline-detail', detail)
+    } catch {
+      /* storage may be unavailable */
+    }
+    set({ timelineDetail: detail })
   },
 
   /** Connect the socket and wire frames into the store. Idempotent. */

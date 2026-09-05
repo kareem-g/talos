@@ -30,6 +30,7 @@ import {
   Terminal,
 } from './ui'
 import { cn, formatDuration } from '@/lib/format'
+import { useStore } from '@/store'
 import { gitApi } from '@/lib/api'
 import { decisionLabel, describeApproval } from '@/lib/approvals'
 import { describeTool } from '@/lib/tools'
@@ -212,17 +213,18 @@ export function Reasoning({
   tokens?: { inputTokens?: number; outputTokens?: number }
 }) {
   const [override, setOverride] = useState<boolean>()
+  const simple = useStore((s) => s.timelineDetail === 'simple')
   const hasText = part.text.trim().length > 0
   // Follow the stream unless the user has said otherwise.
   const open = override ?? (part.streaming && hasText)
 
   const label = part.streaming
     ? 'Thinking'
-    : part.durationMs !== undefined
+    : part.durationMs !== undefined && !simple
       ? `Thought for ${formatDuration(part.durationMs)}`
       : 'Thought'
-  const inputTokens = formatTokens(tokens?.inputTokens)
-  const outputTokens = formatTokens(tokens?.outputTokens)
+  const inputTokens = simple ? null : formatTokens(tokens?.inputTokens)
+  const outputTokens = simple ? null : formatTokens(tokens?.outputTokens)
 
   return (
     <div className="min-w-0">
@@ -294,11 +296,13 @@ function stepIcon(glyph: string) {
  */
 export function Step({ part }: { part: ToolPart | CommandPart }) {
   const [open, setOpen] = useState(false)
+  const simple = useStore((s) => s.timelineDetail === 'simple')
 
   const isCommand = part.kind === 'command'
   const summary = describeTool(part)
   const detail = part.output
-  const expandable = Boolean(detail || (!isCommand && part.input))
+  // Simple mode: raw JSON args/output stay hidden entirely.
+  const expandable = !simple && Boolean(detail || (!isCommand && part.input))
   const failed = part.status === 'failed'
 
   // Split "src/lib/mod.rs" into a dim directory and a bright file name, the
@@ -317,8 +321,9 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
 
   // Cheap diffstat for write-like tools: the line count of the content being
   // written. Real diffs stay behind the file chips at the end of the turn.
+  // Hidden in simple mode — counts are developer detail.
   const diffstat = (() => {
-    if (isCommand || failed) return null
+    if (simple || isCommand || failed) return null
     const lower = (summary.label ?? '').toLowerCase()
     if (!lower.includes('write') && !lower.includes('edit')) return null
     try {
@@ -389,7 +394,7 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
         {diffstat ? (
           <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-green">{diffstat}</span>
         ) : null}
-        {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
+        {isCommand && !simple && part.exitCode !== undefined && part.exitCode !== 0 ? (
           <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-red">
             exit {part.exitCode}
           </span>
@@ -402,7 +407,7 @@ export function Step({ part }: { part: ToolPart | CommandPart }) {
             Failed
           </span>
         ) : null}
-        {part.durationMs !== undefined ? (
+        {!simple && part.durationMs !== undefined ? (
           <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3">
             {formatDuration(part.durationMs)}
           </span>
@@ -1484,16 +1489,21 @@ function SearchRow({ part }: { part: Extract<MessagePart, { kind: 'search' }> })
 }
 
 function GitCommitRow({ part }: { part: Extract<MessagePart, { kind: 'git_commit' }> }) {
+  const simple = useStore((s) => s.timelineDetail === 'simple')
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
       <span className="shrink-0 font-mono text-[10px] font-semibold text-green">⬆</span>
-      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">Commit {part.sha}{part.message ? ` — ${part.message}` : ''}</span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
+        Committed{part.message ? ` — ${part.message}` : simple ? '' : ` ${part.sha}`}
+      </span>
       {part.files && part.files.length > 0 ? <span className="shrink-0 font-mono text-[9px] text-ink-3">{part.files.length} files</span> : null}
     </div>
   )
 }
 
 function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_changed' }> }) {
+  const simple = useStore((s) => s.timelineDetail === 'simple')
+  if (simple) return null
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
       <span className="shrink-0 text-ink-3" aria-hidden>⚙</span>
@@ -1508,6 +1518,7 @@ function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_change
 function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verification' }> }) {
   const running = part.status === 'running'
   const failed = part.status === 'failed'
+  const simple = useStore((s) => s.timelineDetail === 'simple')
   return (
     <div className="rounded-lg border border-line/40 bg-inset px-2 py-1.5">
       <div className="flex items-center gap-2">
@@ -1521,9 +1532,9 @@ function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verifi
         <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
           {running ? 'Running tests…' : part.status === 'passed' ? 'Tests passed' : part.status === 'failed' ? 'Tests failed' : 'Tests skipped'}
         </span>
-        {part.command ? <span className="shrink-0 font-mono text-[9.5px] text-ink-3">{part.command}</span> : null}
+        {part.command && !simple ? <span className="shrink-0 font-mono text-[9.5px] text-ink-3">{part.command}</span> : null}
       </div>
-      {part.output ? (
+      {part.output && !simple ? (
         <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-canvas/60 px-2 py-1 font-mono text-[10px] leading-snug text-ink-2">
           {part.output}
         </pre>
@@ -1536,8 +1547,11 @@ function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verifi
  * The harness-context chip: what the Plumb harness injected into the user's
  * prompt before it reached the agent (environment, project skills, similar past
  * runs). Rendered under the user message so the enrichment is visible.
+ * Developer detail — hidden in simple mode.
  */
 export function ContextChip({ part }: { part: Extract<MessagePart, { kind: 'context' }> }) {
+  const simple = useStore((s) => s.timelineDetail === 'simple')
+  if (simple) return null
   const bits: string[] = []
   if (part.environment) bits.push('environment')
   if (part.skills.length > 0) bits.push(`skills: ${part.skills.join(', ')}`)
