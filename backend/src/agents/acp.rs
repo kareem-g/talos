@@ -734,7 +734,31 @@ impl AcpManager {
         // Create a new conversation, or reopen the one the agent already has.
         // MCP servers (e.g. the browser-automation server) are attached so the
         // agent starts with the tools available, mirroring claude's --mcp-config.
-        let servers = mcp_servers.unwrap_or_default();
+        //
+        // Some agents (opencode 1.18+) only accept MCP servers as http/sse
+        // *URLs* and reject stdio (`command`/`args`) entries outright —
+        // `session/new` fails with "Invalid params". Advertise capability keys
+        // say which transports are accepted: when the handshake reports MCP
+        // capabilities but no `stdio` key, our command-based servers cannot be
+        // expressed, so they are dropped rather than failing the session.
+        let stdio_mcp_supported = init
+            .pointer("/result/agentCapabilities/mcpCapabilities")
+            .and_then(Value::as_object)
+            .map(|capabilities| capabilities.contains_key("stdio"))
+            // No capability report (older agents) → keep the legacy shape.
+            .unwrap_or(true);
+        let servers = if stdio_mcp_supported {
+            mcp_servers.unwrap_or_default()
+        } else {
+            if mcp_servers.is_some() {
+                tracing::warn!(
+                    "[AgentDeck][ACP][{}] {} advertises http/sse MCP only; dropping stdio MCP servers for this session",
+                    session_id,
+                    agent
+                );
+            }
+            Vec::new()
+        };
         let (method, params) = match resume_id {
             Some(resume_id) => (
                 "session/load",
