@@ -399,6 +399,8 @@ async fn probe_flag_provider(candidate: &Candidate, executable: String) -> Provi
     {
         config_options.push(crate::providers::types::context_window_config_option(Some(window)));
     }
+    // Collapse any scraped effort option into the unified Thought level.
+    super::thought::collapse_reasoning(&mut config_options);
 
     ProviderDescriptor {
         id: candidate.id.clone(),

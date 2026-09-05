@@ -516,6 +516,8 @@ pub fn build_api_descriptor(
     }
     config_options.push(crate::providers::types::max_output_tokens_config_option());
     config_options.push(permission_option);
+    // Collapse the raw effort option into the unified harness Thought level.
+    super::thought::collapse_reasoning(&mut config_options);
 
     crate::providers::types::ProviderDescriptor {
         id: provider.id.clone(),

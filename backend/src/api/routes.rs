@@ -1919,6 +1919,13 @@ pub(crate) async fn spawn_session(
 
     apply_spawn_body_flags(state, &session, body).await;
 
+    // Harness thought level chosen at creation: persist before the first turn
+    // so the engine's very first prompt already runs on it (API reads pending
+    // per turn; claude maps pending thought to --effort at spawn).
+    if let Some(thought) = body.get("thought").and_then(|value| value.as_str()).map(str::trim).filter(|value| !value.is_empty()) {
+        let _ = state.session_manager.set_pending_config(&session.id, "thought", thought).await;
+    }
+
     // Create-with-prompt runs (headless `agentdeck run`, dashboard "start with
     // a first message") must get the same harness context enrichment as
     // websocket turns: environment, skills, similar trajectories, memory.
