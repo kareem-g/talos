@@ -94,7 +94,14 @@ export function sessionUIState(
   }
 
   const status = session.status
-  if (status === 'waiting_for_approval' || hasOpenApprovals(conversation)) return 'approval'
+  const openApprovals = hasOpenApprovals(conversation)
+  // The open card is the truth: an approval the user can actually answer. A
+  // bare `waiting_for_approval` status with no card is stale (the approval was
+  // answered/cancelled elsewhere, the session was stopped or engine-switched,
+  // or a reconnect dropped the card) — rendering it as 'approval' produced a
+  // dead-end "waiting for approval" state with nothing to approve.
+  if (openApprovals) return 'approval'
+  if (status === 'waiting_for_approval') return 'ready'
   if (status === 'waiting_for_input') return 'input'
   if (status === 'resuming') return 'resuming'
   if (status === 'starting') return 'starting'

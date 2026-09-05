@@ -150,6 +150,40 @@ pub async fn get_session(
     match state.session_manager.get_session(&id).await {
         Ok(Some(session)) => {
             let session = reconcile_interactive_state(&state, session).await;
+            // Self-heal the classic stuck state: a row left as
+            // `waiting_for_approval` whose approval/question was answered,
+            // cancelled, or lost (engine switch, kill, reconnect) has nothing
+            // left to approve. Flip it to idle so clients never render an
+            // empty "waiting for approval" dead-end.
+            let session = if matches!(session.status, SessionStatus::WaitingForApproval) {
+                let no_approvals = state
+                    .session_manager
+                    .get_pending_approvals(&id)
+                    .await
+                    .unwrap_or_default()
+                    .is_empty()
+                    && state
+                        .session_manager
+                        .get_pending_questions(&id)
+                        .await
+                        .unwrap_or_default()
+                        .is_empty();
+                if no_approvals {
+                    let _ = state
+                        .session_manager
+                        .update_status(&id, SessionStatus::Idle)
+                        .await;
+                }
+                state
+                    .session_manager
+                    .get_session(&id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or(session)
+            } else {
+                session
+            };
             let mut resp = serde_json::to_value(&session).unwrap_or_default();
             resp["transcript"] = json!([]);
             resp["approvals_pending"] = json!([]);
