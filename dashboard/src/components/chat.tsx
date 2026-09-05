@@ -1239,7 +1239,7 @@ export function Approval({
         className="animate-up flex items-center gap-2 rounded-xl border border-white/10 bg-field/80 px-3 py-2.5 text-[11.5px] text-zinc-400 backdrop-blur"
       >
         {part.decision && /deny|reject|no\b/i.test(part.decision) ? (
-          <AlertIcon size={12} className="shrink-0 text-amber-500" />
+          <AlertIcon size={12} className="shrink-0 text-orange" />
         ) : (
           <Check size={12} className="shrink-0 text-emerald-500" />
         )}
@@ -1266,11 +1266,11 @@ export function Approval({
         <SleepIcon size={14} className="shrink-0 text-zinc-500" />
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">Agent sleeping</span>
         <span className="h-2 w-px bg-white/10" aria-hidden />
-        <span className={cn('rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium', risky ? 'bg-red-500/15 text-red-400 ring-1 ring-red-500/20' : 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/15')}>
+        <span className={cn('rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium', risky ? 'bg-red-500/15 text-red-400 ring-1 ring-red-500/20' : 'bg-orange-tint text-orange ring-1 ring-orange/15')}>
           {risky ? 'high risk' : view.header ? view.header : 'needs approval'}
         </span>
         <span className="ml-auto hidden items-center gap-1 font-mono text-[10px] text-zinc-600 sm:inline-flex">
-          <span className="size-1.5 rounded-full bg-amber-500/60 animate-pulse" aria-hidden />
+          <span className="size-1.5 rounded-full bg-orange/60 animate-pulse" aria-hidden />
           waiting for you
         </span>
       </div>
@@ -1311,7 +1311,7 @@ export function Approval({
           ) : null}
           {part.riskLevel ? (
             <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-400 ring-1 ring-white/5">
-              <span className="size-1 rounded-full bg-amber-500" aria-hidden /> Risk: {part.riskLevel}
+              <span className="size-1 rounded-full bg-orange" aria-hidden /> Risk: {part.riskLevel}
             </p>
           ) : null}
           {!isMulti ? (

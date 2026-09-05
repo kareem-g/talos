@@ -85,14 +85,14 @@ export function HomeSidebar({
                   <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-zinc-200">{workspace.name}</span>
                   <span className="font-mono text-[10px] text-zinc-600">{workspace.sessions.length}</span>
                 </button>
-                {isExpanded ? <div className="ml-3 border-l border-white/[0.07] pl-2">
+                {isExpanded ? <div className="ml-3 flex flex-col gap-1 border-l border-white/[0.07] pl-2">
                   {visible.map((session) => {
                     const uiState = sessionUIState(session, getConversation(session.id), connection)
                     const active = selectedId === session.id
                     return (
                       <div key={session.id} className="group relative flex items-center">
                         <button type="button" onClick={() => { onSelectSession(session.id); setMobileOpen(false) }} className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 pr-7 text-left transition', active ? 'bg-accent-tint text-ink ring-1 ring-inset ring-accent/25' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100')}>
-                          <span className={cn('size-1.5 shrink-0 rounded-full', uiState === 'working' || uiState === 'starting' || uiState === 'resuming' ? 'bg-emerald-400' : uiState === 'approval' || uiState === 'input' || uiState === 'paused' ? 'bg-orange-400' : uiState === 'failed' ? 'bg-red-400' : active ? 'bg-accent' : 'bg-zinc-600')} />
+                          <span className={cn('size-1.5 shrink-0 rounded-full', uiState === 'working' || uiState === 'starting' || uiState === 'resuming' ? 'bg-emerald-400' : uiState === 'approval' || uiState === 'input' || uiState === 'paused' ? 'bg-orange' : uiState === 'failed' ? 'bg-red-400' : active ? 'bg-accent' : 'bg-zinc-600')} />
                           <span className="min-w-0 flex-1 truncate text-[11px]">{session.name === 'New Session' ? previewText(session.id) ?? session.name : session.name}</span>
                           <span className={cn('shrink-0 font-mono text-[9px]', active ? 'text-ink-3' : 'text-zinc-600')}>{relativeTime(session.updated_at).replace(' ago', '')}</span>
                         </button>
@@ -126,7 +126,7 @@ export function HomeSidebar({
         <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-white/[0.07] py-3">
           <button type="button" aria-label="Plumb" title="Plumb" className="mb-4 flex size-10 items-center justify-center rounded-xl bg-accent text-[15px] font-bold tracking-[-0.05em] text-accent-ink shadow-lg shadow-black/20">A</button>
           <div className="flex flex-1 flex-col items-center justify-start gap-2" />
-          <span className={cn('mt-3 size-2 rounded-full', connection === 'connected' ? 'bg-green' : connection === 'connecting' || connection === 'reconnecting' ? 'bg-orange-400 breathe' : 'bg-red-400')} title={connection} />
+          <span className={cn('mt-3 size-2 rounded-full', connection === 'connected' ? 'bg-green' : connection === 'connecting' || connection === 'reconnecting' ? 'bg-orange breathe' : 'bg-red-400')} title={connection} />
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">

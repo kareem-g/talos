@@ -15,9 +15,9 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronDown,
   Circle,
   MoreHorizontal,
-  Pin,
   RefreshCw,
 } from 'lucide-react'
 import { DropdownList } from '@/components/ui'
@@ -135,10 +135,11 @@ export function ProgressCard({ session }: { session: Session }) {
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           aria-label={collapsed ? 'Expand progress' : 'Collapse progress'}
+          aria-expanded={!collapsed}
           title={collapsed ? 'Expand progress' : 'Collapse progress'}
           className="flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
         >
-          <Pin size={12} className={collapsed ? 'fill-current' : undefined} />
+          <ChevronDown size={14} className={cn('transition-transform duration-200', collapsed && '-rotate-90')} />
         </button>
 
         {menuOpen ? (

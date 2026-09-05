@@ -36,7 +36,7 @@ import { useRooms } from '@/lib/rooms'
 import { openFile } from '@/lib/fileViewer'
 import { createSessionSendHandlers } from '@/lib/sessionCommands'
 
-const AGENT_HUES = ['#c7a56a', '#8057c8', '#8eadbf', '#e78531', '#d9b515', '#d84f8b']
+const AGENT_HUES = ['#6396cc', '#a78bfa', '#4fae7c', '#e07a5f', '#d96a8a', '#7fa8d8']
 
 function hueFor(id: string): string {
   let hash = 0

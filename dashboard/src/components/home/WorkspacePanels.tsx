@@ -126,7 +126,7 @@ function AgentsPanel({ actions }: { actions: PanelActions }) {
                       Launch
                     </button>
                   </div>
-                  {!ready && provider.remedy ? <p className="mt-2 rounded-lg bg-amber-500/[0.06] px-2 py-1.5 text-[10px] leading-[1.45] text-amber-400">{provider.remedy}</p> : null}
+                  {!ready && provider.remedy ? <p className="mt-2 rounded-lg bg-accent/[0.06] px-2 py-1.5 text-[10px] leading-[1.45] text-accent">{provider.remedy}</p> : null}
                 </div>
               )
             })}

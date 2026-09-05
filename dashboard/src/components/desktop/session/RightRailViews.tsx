@@ -587,7 +587,7 @@ export function BrowserView({
           right={
             <span className="flex items-center gap-1.5">
               <span className="font-mono text-[10px] text-green">CDP</span>
-              {acting ? <span className="font-mono text-[9px] text-amber-400">acting…</span> : null}
+              {acting ? <span className="font-mono text-[9px] text-accent">acting…</span> : null}
               {aiCursor ? <span className="font-mono text-[9px] text-ink-3">AI cursor {aiCursor.x},{aiCursor.y}</span> : null}
               {activeTabInfo ? <span className="max-w-[140px] truncate font-mono text-[9.5px] text-ink-3">{activeTabInfo.title}</span> : null}
               {browserTabs.length > 1 ? browserTabs.map((t) => (
@@ -1069,7 +1069,7 @@ export function RoomChannelView({ session }: { session: Session }) {
           <span className="flex items-center gap-1.5">
             {room.workers.length > 0 ? <RoomAvatarStack names={room.workers.map((w) => w.name)} size={18} max={3} /> : null}
             {room.chief ? (
-              <span className="font-mono text-[10px] text-amber-300/90" title="Chief of Staff">
+              <span className="font-mono text-[10px] text-accent/90" title="Chief of Staff">
                 {room.chief} leads
               </span>
             ) : null}
@@ -1109,7 +1109,7 @@ export function RoomChannelView({ session }: { session: Session }) {
                       status={panel?.status}
                       ring
                     />
-                    <span className={cn('max-w-[90px] truncate text-[10px]', room.chief === worker.name ? 'font-medium text-amber-200' : 'text-ink-2')}>
+                    <span className={cn('max-w-[90px] truncate text-[10px]', room.chief === worker.name ? 'font-medium text-accent' : 'text-ink-2')}>
                       {worker.name}
                     </span>
                   </span>

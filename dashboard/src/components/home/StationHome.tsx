@@ -232,8 +232,8 @@ export function StationHome({
                 </span>
               </div>
               <span className="ml-2 hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] sm:inline-flex">
-                <span className={cn('size-1.5 rounded-full', view.counts.attention > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')} />
-                <span className={view.counts.attention > 0 ? 'font-medium text-amber-400' : 'text-zinc-400'}>{view.counts.attention > 0 ? `${view.counts.attention} need you` : 'all clear'}</span>
+                <span className={cn('size-1.5 rounded-full', view.counts.attention > 0 ? 'bg-red animate-pulse' : 'bg-green')} />
+                <span className={view.counts.attention > 0 ? 'font-medium text-red' : 'text-zinc-400'}>{view.counts.attention > 0 ? `${view.counts.attention} need you` : 'all clear'}</span>
                 <span className="text-white/20">·</span>
                 <span className="text-zinc-400">{view.counts.running} live</span>
               </span>
@@ -312,7 +312,7 @@ export function StationHome({
             <section aria-label="Needs your attention">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-2">Triage — needs you</h2>
-                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-medium text-amber-600">{view.attention.length}</span>
+                <span className="rounded-full bg-red-tint px-2 py-0.5 font-mono text-[11px] font-medium text-red">{view.attention.length}</span>
               </div>
               {view.attention.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-line bg-surface/30 p-6 text-center">
@@ -327,7 +327,7 @@ export function StationHome({
                     {view.attention.map(({ session, uiState, headline, providerName, idleFor }) => {
                       const isPaused = uiState === 'paused'
                       const isFailed = uiState === 'failed'
-                      const tone = isFailed ? 'bg-red' : isPaused ? 'bg-amber-500' : 'bg-orange'
+                      const tone = isFailed ? 'bg-red' : isPaused ? 'bg-orange' : 'bg-orange'
                       const isBusy = !!busyMap[session.id]
                       const approval = uiState === 'approval' ? openApprovalOf(session.id) : undefined
                       const viewApproval = approval ? describeApproval(approval.prompt, approval.options as unknown as string[]) : undefined
@@ -514,7 +514,7 @@ export function StationHome({
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[13px] font-semibold text-ink">{ws.name}</span>
                           <span className="hidden rounded-full bg-surface px-1.5 py-0.5 font-mono text-[10px] text-ink-3 ring-1 ring-line sm:inline">{ws.counts.total} sessions</span>
-                          {ws.counts.attention > 0 ? <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-600">{ws.counts.attention} need you</span> : null}
+                          {ws.counts.attention > 0 ? <span className="rounded-full bg-red-tint px-1.5 py-0.5 font-mono text-[10px] font-medium text-red">{ws.counts.attention} need you</span> : null}
                           {ws.counts.running > 0 ? <span className="hidden items-center gap-1 rounded-full bg-green/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-green sm:inline-flex"><span className="size-1 rounded-full bg-accent animate-pulse" /> {ws.counts.running} running</span> : null}
                         </div>
                         <p className="truncate font-mono text-[11px] text-ink-3">{ws.project ?? 'No folder — inbox'}</p>
@@ -577,7 +577,7 @@ export function StationHome({
                                         e.stopPropagation()
                                         toggleStar(session.id)
                                       }}
-                                      className={cn('rounded p-1 text-ink-3 hover:text-amber-500', isStarred ? 'text-amber-500 opacity-100' : 'opacity-55 group-hover:opacity-100')}
+                                      className={cn('rounded p-1 text-ink-3 hover:text-accent', isStarred ? 'text-accent opacity-100' : 'opacity-55 group-hover:opacity-100')}
                                     >
                                       ★
                                     </button>

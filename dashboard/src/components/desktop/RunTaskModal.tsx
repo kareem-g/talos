@@ -149,7 +149,7 @@ export function RunTaskModal({
                         ) : null}
                       </span>
                       {room.chief === worker.name ? (
-                        <span className="shrink-0 rounded-full bg-amber-400/10 px-1.5 py-px font-mono text-[9px] text-amber-300/90">
+                        <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-px font-mono text-[9px] text-accent/90">
                           chief
                         </span>
                       ) : null}

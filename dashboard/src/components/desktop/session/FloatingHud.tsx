@@ -502,7 +502,7 @@ function CommitSubmenu({
               onClick={generateMessage}
               title="Auto-generate a draft commit message"
               aria-label="Auto-generate commit message"
-              className="shrink-0 rounded-md p-1 text-amber-300 transition hover:bg-hover-2"
+              className="shrink-0 rounded-md p-1 text-accent transition hover:bg-hover-2"
             >
               <Sparkles size={12} />
             </button>

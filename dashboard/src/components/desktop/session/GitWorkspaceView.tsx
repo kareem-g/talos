@@ -146,7 +146,7 @@ function CommitModal({
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-zinc-400">{changedCount} file{changedCount === 1 ? '' : 's'}</span>
-            <button type="button" onClick={generateMessage} title="Auto-generate a draft commit message" aria-label="Auto-generate commit message" className="rounded-lg p-1.5 text-amber-300 transition hover:bg-white/[0.06]">
+            <button type="button" onClick={generateMessage} title="Auto-generate a draft commit message" aria-label="Auto-generate commit message" className="rounded-lg p-1.5 text-accent transition hover:bg-white/[0.06]">
               <Sparkles size={14} />
             </button>
           </div>

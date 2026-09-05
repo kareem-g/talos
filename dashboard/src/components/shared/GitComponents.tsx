@@ -93,7 +93,7 @@ export function GitSummary({ overview, files }: { overview?: WorkspaceOverview; 
       </div>
       <div className="rounded-lg bg-white/[0.04] p-2">
         <p className="font-mono text-[9px] uppercase text-zinc-600">Modified</p>
-        <p className="mt-1 font-mono text-[12px] text-orange-400">{modified}</p>
+        <p className="mt-1 font-mono text-[12px] text-orange">{modified}</p>
       </div>
     </div>
   )

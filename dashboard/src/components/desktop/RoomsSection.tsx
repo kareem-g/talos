@@ -438,7 +438,7 @@ function RoomRow({
             )}
           </span>
           {room.chief ? (
-            <span className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-amber-300/90">
+            <span className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-accent/90">
               <Crown size={9} /> {room.chief} leads
             </span>
           ) : null}
@@ -463,7 +463,7 @@ function RoomRow({
               {blockedPanels.slice(0, 3).map((panel) => (
                 <WorkerAvatar key={panel.name} name={panel.name} avatar={avatarsByName[panel.name]} size={15} status="blocked" />
               ))}
-              <span className="truncate font-mono text-[10px] text-orange-300/90">
+              <span className="truncate font-mono text-[10px] text-orange/90">
                 {blockedPanels.map((panel) => panel.name).join(', ')} need{blockedPanels.length === 1 ? 's' : ''} review
               </span>
             </span>
@@ -484,13 +484,13 @@ function RoomRow({
           <button
             type="button"
             onClick={() => onOpenSession(openApproval.sessionId)}
-            className="flex w-full items-center gap-1.5 rounded-lg border border-orange-400/25 bg-orange-400/[0.08] px-2 py-1.5 text-left transition hover:bg-orange-400/[0.14] active:scale-[0.99]"
+            className="flex w-full items-center gap-1.5 rounded-lg border border-orange/25 bg-orange-tint px-2 py-1.5 text-left transition hover:bg-orange-tint active:scale-[0.99]"
           >
-            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-orange-400" aria-hidden />
-            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-orange-200">
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-orange" aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-orange">
               Needs review
             </span>
-            <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wide text-orange-300/80">
+            <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-wide text-orange/80">
               Review →
             </span>
           </button>
@@ -580,12 +580,12 @@ function RoomRow({
                   <span
                     className={cn(
                       'min-w-0 flex-1 truncate text-[12px]',
-                      isChief ? 'font-medium text-amber-200' : 'text-zinc-300',
+                      isChief ? 'font-medium text-accent' : 'text-zinc-300',
                     )}
                     title={skillCount > 0 ? `Skills: ${worker.skills!.join(', ')}` : undefined}
                   >
                     {worker.name}
-                    {isChief ? <Crown size={10} className="ml-1 inline text-amber-300" /> : null}
+                    {isChief ? <Crown size={10} className="ml-1 inline text-accent" /> : null}
                   </span>
                   {skillCount > 0 ? (
                     <span
@@ -615,7 +615,7 @@ function RoomRow({
                     }
                     className={cn(
                       'rounded p-1 transition',
-                      isChief ? 'text-amber-300' : 'text-zinc-700 hover:text-amber-300',
+                      isChief ? 'text-accent' : 'text-zinc-700 hover:text-accent',
                     )}
                   >
                     <Crown size={12} />
@@ -789,7 +789,7 @@ function RoomEditor({
               <div key={worker.name} className="flex h-9 items-center gap-1.5 rounded-lg px-1.5 hover:bg-white/[0.03]">
                 <WorkerAvatar name={worker.name} avatar={worker.avatar} size={22} />
                 <span className="min-w-0 flex-1">
-                  <span className={cn('block truncate text-[12.5px] leading-tight', isChief ? 'text-amber-200' : 'text-zinc-300')}>
+                  <span className={cn('block truncate text-[12.5px] leading-tight', isChief ? 'text-accent' : 'text-zinc-300')}>
                     {worker.name}
                   </span>
                   {skillCount > 0 ? (
@@ -812,7 +812,7 @@ function RoomEditor({
                   onClick={() => setChief(isChief ? undefined : worker.name)}
                   title={isChief ? 'Remove Chief of Staff' : 'Make Chief of Staff'}
                   aria-label={isChief ? `Remove ${worker.name} as Chief of Staff` : `Make ${worker.name} Chief of Staff`}
-                  className={cn('rounded p-1.5 transition', isChief ? 'text-amber-300' : 'text-zinc-700 hover:text-amber-300')}
+                  className={cn('rounded p-1.5 transition', isChief ? 'text-accent' : 'text-zinc-700 hover:text-accent')}
                 >
                   <Crown size={12} />
                 </button>

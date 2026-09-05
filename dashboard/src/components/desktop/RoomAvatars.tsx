@@ -37,7 +37,7 @@ export type WorkerState = 'working' | 'done' | 'failed' | 'blocked' | 'idle'
 
 const RING: Record<WorkerState, string> = {
   working: 'ring-emerald-400/80 animate-pulse',
-  blocked: 'ring-orange-400',
+  blocked: 'ring-orange',
   failed: 'ring-red-400',
   done: 'ring-zinc-500',
   idle: 'ring-zinc-700',

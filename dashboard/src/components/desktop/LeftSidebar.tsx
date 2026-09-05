@@ -43,7 +43,7 @@ const LIVE = new Set(['working', 'starting', 'resuming'])
 function dotFor(uiState: string): string {
   if (uiState === 'failed') return 'bg-red-400'
   if (LIVE.has(uiState)) return 'bg-emerald-400'
-  if (ATTENTION.has(uiState)) return 'bg-orange-400'
+  if (ATTENTION.has(uiState)) return 'bg-orange'
   return 'bg-zinc-600'
 }
 
@@ -148,7 +148,7 @@ export function LeftSidebar({
     const active = s.id === session.id
     const needsYou = ATTENTION.has(uiState)
     return (
-      <div key={s.id} className="group relative mb-px flex items-center">
+      <div key={s.id} className="group relative mb-1 flex items-center">
         <button
           type="button"
           onClick={() => onSelect(s.id)}
@@ -170,7 +170,7 @@ export function LeftSidebar({
           </span>
         </button>
         {needsYou && !active ? (
-          <span className="pointer-events-none absolute right-2 size-1.5 animate-pulse rounded-full bg-orange-400 group-hover:opacity-0" aria-hidden />
+          <span className="pointer-events-none absolute right-2 size-1.5 animate-pulse rounded-full bg-orange group-hover:opacity-0" aria-hidden />
         ) : null}
         {!active ? (
           <>
@@ -297,11 +297,11 @@ export function LeftSidebar({
         {attention.length > 0 ? (
           <section aria-label="Needs your attention" className="mt-1">
             <div className="px-2 pb-1">
-              <p className="font-mono text-[9.5px] font-medium uppercase tracking-[0.12em] text-orange-300/80">
+              <p className="font-mono text-[9.5px] font-medium uppercase tracking-[0.12em] text-red/80">
                 Needs you · {attention.length}
               </p>
             </div>
-            <div className="rounded-lg border border-orange-400/15 bg-orange-400/[0.04] p-1">
+            <div className="rounded-lg border border-red/15 bg-red/[0.04] p-1">
               {attention.map(renderRow)}
             </div>
           </section>
@@ -371,7 +371,7 @@ export function LeftSidebar({
       {/* ── Status footer ────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center gap-2 border-t border-white/[0.07] px-3 py-2">
         <span
-          className={cn('size-1.5 shrink-0 rounded-full', connection === 'connected' ? 'bg-emerald-400' : 'bg-orange-400 animate-pulse')}
+          className={cn('size-1.5 shrink-0 rounded-full', connection === 'connected' ? 'bg-green' : 'bg-orange animate-pulse')}
           title={connection}
           aria-hidden
         />

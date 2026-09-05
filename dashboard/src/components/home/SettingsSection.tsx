@@ -280,7 +280,7 @@ function CloudflareTunnelSection() {
             </label>
             <label className="space-y-1">
               <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-400">
-                Hostname {token ? <span className="text-amber-400">(required for named tunnels)</span> : <span className="text-zinc-600">(optional)</span>}
+                Hostname {token ? <span className="text-accent">(required for named tunnels)</span> : <span className="text-zinc-600">(optional)</span>}
               </span>
               <TextField
                 value={hostname}
