@@ -34,18 +34,39 @@ import type { ConnectionState } from '@/types/protocol'
 import type { Provider, SessionConfig } from '@/types/provider'
 import type { Session } from '@/types/session'
 
-/** The live strip while the agent works: pixel-grid loader + activity detail */
+/** Live status docked to the top of the composer card while the agent works. */
 function WorkingStrip({ conversation }: { conversation: Conversation }) {
   const activity = conversation.activity
   const label = activity?.label ?? 'Working'
   return (
-    <div className="flex items-center gap-3 border-t border-line/40 bg-surface/80 px-4 py-2.5">
+    <div className="flex min-w-0 items-center gap-2" role="status">
       <LoadingState label={label} variant="Drive" since={activity?.since} />
       {activity?.detail ? (
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{activity.detail}</span>
       ) : (
         <span className="flex-1" />
       )}
+    </div>
+  )
+}
+
+/** Compact dock row shared by the idle-state headers (completed / waiting). */
+function DockStatus({
+  dot,
+  title,
+  titleClass,
+  hint,
+}: {
+  dot: string
+  title: string
+  titleClass?: string
+  hint?: string
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2" role="status">
+      <span className={cn('size-1.5 shrink-0 rounded-full', dot)} aria-hidden />
+      <span className={cn('shrink-0 text-[11.5px] font-medium', titleClass ?? 'text-ink-2')}>{title}</span>
+      {hint ? <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">{hint}</span> : <span className="flex-1" />}
     </div>
   )
 }
@@ -77,27 +98,17 @@ function ApprovalPointer({ conversation }: { conversation: Conversation }) {
   const summary = view?.context ?? view?.question
 
   return (
-    <div className="border-t border-orange/20 bg-surface/80 px-4 py-3" role="status">
-      <div className="mx-auto flex w-full max-w-[46rem] items-center gap-3">
-        <span
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-orange/[0.08] text-orange"
-          aria-hidden
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 9v4M12 17h.01" />
-            <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-          </svg>
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-ink">Approval needed</p>
-          {summary ? (
-            <p className="mt-0.5 truncate font-mono text-[11px] text-ink-3">{summary}</p>
-          ) : null}
-        </div>
-        <Button variant="primary" onClick={scrollToApproval} className="shrink-0">
-          Review
-        </Button>
-      </div>
+    <div className="flex min-w-0 items-center gap-2" role="status">
+      <span className="size-1.5 shrink-0 rounded-full bg-orange" aria-hidden />
+      <span className="shrink-0 text-[11.5px] font-medium text-orange">Approval needed</span>
+      {summary ? (
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{summary}</span>
+      ) : (
+        <span className="flex-1" />
+      )}
+      <Button variant="primary" onClick={scrollToApproval} className="shrink-0 !min-h-7 px-2.5 text-[11.5px]">
+        Review
+      </Button>
     </div>
   )
 }
@@ -327,38 +338,74 @@ export function StateZone({
     if (message) setDraftSeed({ text: message.text, attachments: message.attachments, nonce: Date.now() })
   }
 
-  // Mobile summary chip: model + mode + effort in one short string, so the
-  // user can see what's set without opening the right pane. Same data as the
-  // right-pane rows, just flattened.
+  // Mobile summary chip: engine + model + mode + effort in one short string,
+  // so the user can see what's set without opening the right pane. Same data
+  // as the right-pane rows, just flattened.
   const summary = useMemo(() => {
     if (!compact) return undefined
-    const isThinking = (id: string) => ['effort', 'thinking', 'reasoning'].includes(id) || id.includes('effort')
+    const isThinking = (id: string) =>
+      id === 'thought' || ['effort', 'thinking', 'reasoning'].includes(id) || id.includes('effort')
     const isModel = (id: string) => id === 'model' || id.includes('model')
     const parts: string[] = []
     const opts = config?.options ?? []
     const model = opts.find((o) => isModel(o.id))
-    if (model?.currentValue) {
-      const choice = model.choices?.find((c) => c.value === model.currentValue)
-      parts.push(choice?.name ?? model.currentValue)
+    const modelLabel =
+      model?.currentValue && model.currentValue !== 'Not set'
+        ? (model.choices?.find((c) => c.value === model.currentValue)?.name ?? model.currentValue)
+        : undefined
+    if (provider?.name && modelLabel && modelLabel !== provider.name) {
+      parts.push(`${provider.name} · ${modelLabel}`)
+    } else if (modelLabel) {
+      parts.push(modelLabel)
+    } else if (provider?.name) {
+      parts.push(provider.name)
     }
     if (conversation.mode) {
       const cur = conversation.mode.modes.find((m) => m.id === conversation.mode!.id)
       const label = cur?.name ?? cur?.id
       if (label) parts.push(label)
     }
-    const effort = opts.find((o) => !isModel(o.id) && isThinking(o.id))
-    if (effort?.currentValue) {
-      const choice = effort.choices?.find((c) => c.value === effort.currentValue)
-      parts.push(choice?.name ?? effort.currentValue)
+    const thought = opts.find((o) => o.id === 'thought')
+    if (thought?.currentValue) {
+      const choice = thought.choices?.find((c) => c.value === thought.currentValue)
+      parts.push(`Thought ${choice?.name ?? thought.currentValue}`)
+    } else {
+      const effort = opts.find((o) => !isModel(o.id) && isThinking(o.id))
+      if (effort?.currentValue) {
+        const choice = effort.choices?.find((c) => c.value === effort.currentValue)
+        parts.push(choice?.name ?? effort.currentValue)
+      }
     }
     return parts.length > 0 ? parts.join(' · ') : undefined
-  }, [compact, config?.options, conversation.mode])
+  }, [compact, config?.options, conversation.mode, provider?.name])
+
+  // Dock header — the state strip merged into the top of the composer card,
+  // so status / queue / images share one border instead of floating bars.
+  const dockHeader =
+    state === 'approval' ? (
+      <ApprovalPointer conversation={conversation} />
+    ) : state === 'ended' ? (
+      <DockStatus
+        dot="bg-green"
+        title="Session completed"
+        hint={
+          session.resume_command
+            ? 'Process exited — resume to restart it'
+            : 'Send a message to continue this conversation'
+        }
+      />
+    ) : state === 'input' ? (
+      <DockStatus dot="bg-orange" title="The agent is waiting for you" titleClass="text-orange" />
+    ) : working ? (
+      <WorkingStrip conversation={conversation} />
+    ) : undefined
 
   const composer = (
     <Composer
       wide
       compact={compact}
       summary={summary}
+      header={dockHeader}
       compactControls={
         compact ? (
           <PermissionChip
@@ -435,14 +482,9 @@ export function StateZone({
 
   switch (state) {
     case 'approval':
-      return (
-        <div>
-          <ApprovalPointer conversation={conversation} />
-          {/* The composer stays reachable during approval — queueing a note
-              must not require answering first. */}
-          {composer}
-        </div>
-      )
+      // The composer stays reachable during approval — queueing a note
+      // must not require answering first. Status is docked in the card.
+      return composer
     case 'paused':
       return (
         <ResumeCard
@@ -459,18 +501,7 @@ export function StateZone({
       return <FailureCard reason={reason} onRetry={resume} retrying={retrying} />
     }
     case 'ended':
-      return (
-        <div>
-          <div className="flex items-center gap-2 border-t border-line/40 bg-surface/80 px-4 pt-2.5" role="status">
-            <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
-            <span className="text-[11.5px] font-medium text-ink-2">Session completed</span>
-            <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">
-              {session.resume_command ? 'Process exited — resume to restart it' : 'Send a message to continue this conversation'}
-            </span>
-          </div>
-          {composer}
-        </div>
-      )
+      return composer
     case 'resuming':
       return <StateStrip label="Resuming session…" pulse />
     case 'reconnecting':
@@ -480,23 +511,10 @@ export function StateZone({
     case 'archived':
       return <StateStrip label="Archived" hint="This session is read-only" />
     case 'input':
-      return (
-        <div>
-          <div className="flex items-center gap-2 border-t border-orange/20 bg-surface/80 px-4 pt-2" role="status">
-            <span className="size-1.5 shrink-0 rounded-full bg-orange" aria-hidden />
-            <span className="text-[11.5px] font-medium text-orange">The agent is waiting for you</span>
-          </div>
-          {composer}
-        </div>
-      )
+      return composer
     case 'working':
     case 'starting':
-      return (
-        <div>
-          <WorkingStrip conversation={conversation} />
-          {composer}
-        </div>
-      )
+      return composer
     case 'ready':
       return composer
   }

@@ -279,7 +279,10 @@ export function ComposerControls({
     // option must not render twice either.
     const liveModeShown = Boolean(mode && mode.modes.length > 0)
     const configOptions = options.filter(
-      (o) => o.id !== 'permission_mode' && !(liveModeShown && o.id === 'mode'),
+      (o) =>
+        o.id !== 'permission_mode' &&
+        o.id !== 'context_window' && // context-window data drives the meter, not a chip
+        !(liveModeShown && o.id === 'mode'),
     )
     const isThinking = (o: ConfigOptionLike) => ['effort', 'thinking', 'reasoning'].includes(o.id) || o.id.includes('effort')
     const models = configOptions.filter(isModelOption)
@@ -339,7 +342,11 @@ export function ComposerControls({
 }
 
 function isThinkingOption(option: ConfigOptionLike): boolean {
-  return ['effort', 'thinking', 'reasoning'].includes(option.id) || option.id.includes('effort')
+  return (
+    option.id === 'thought' ||
+    ['effort', 'thinking', 'reasoning'].includes(option.id) ||
+    option.id.includes('effort')
+  )
 }
 
 function isModelOption(option: ConfigOptionLike): boolean {
@@ -349,8 +356,8 @@ function isModelOption(option: ConfigOptionLike): boolean {
 /**
  * The composer's engine/model entry point: looks like the other config chips,
  * but opens the engine picker (switch CLI/API engine, or change the model of
- * the current one). Labelled with the current model name so "what's running"
- * is exactly where you tap to change it.
+ * the current one). Labelled with engine + model so "what's running" is
+ * exactly where you tap to change it — never engine alone.
  */
 function EngineOptionChip({
   option,
@@ -362,15 +369,20 @@ function EngineOptionChip({
   onOpen: () => void
 }) {
   const current = option?.currentValue
-  const label = current
-    ? (option?.choices.find((choice) => choice.value === current)?.name ?? current)
-    : engineName ?? 'Engine'
+  const modelLabel =
+    current && current !== 'Not set'
+      ? (option?.choices.find((choice) => choice.value === current)?.name ?? current)
+      : undefined
+  const label =
+    modelLabel && engineName && modelLabel !== engineName
+      ? `${engineName} · ${modelLabel}`
+      : (modelLabel ?? engineName ?? 'Engine')
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`Switch engine or model · ${engineName ?? label}`}
-      aria-label="Switch engine or model"
+      title={`Switch engine or model · ${label}`}
+      aria-label={`Switch engine or model · ${label}`}
       className={cn(
         'inline-flex min-h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2.5',
         'text-[11.5px] transition-all duration-150 hover:bg-hover hover:border-line-strong',
