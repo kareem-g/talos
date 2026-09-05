@@ -14,6 +14,17 @@ pub async fn start(
     state: Arc<AppState>,
     server_config: ServerConfig,
 ) -> Result<tokio::task::JoinHandle<()>> {
+    // The dashboard SPA root must not depend on the process CWD: `make
+    // dev-backend` launches from backend/ and the systemd unit from /, so a
+    // relative "dashboard/dist" resolves to nothing and every page becomes an
+    // empty 404 (a white screen on the phone). Resolve it absolutely from the
+    // build tree instead; AGENTDECK_DASHBOARD_DIR overrides for installs that
+    // relocate the frontend assets away from the source checkout.
+    let dashboard_dir = std::env::var("AGENTDECK_DASHBOARD_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../dashboard/dist").to_string());
+
     let mobile_api = Router::new()
         .route("/me", get(crate::api::routes::mobile_me))
         .route("/snapshot", get(crate::api::routes::mobile_snapshot))
@@ -122,8 +133,6 @@ pub async fn start(
         .route("/api/tunnel/status", get(crate::api::routes::tunnel_status))
         .route("/api/tunnel/{kind}/start", post(crate::api::routes::tunnel_start))
         .route("/api/tunnel/{kind}/stop", post(crate::api::routes::tunnel_stop))
-        .route("/api/tunnel/headscale/authorize", post(crate::api::routes::tunnel_authorize_headscale))
-        .route("/api/tunnel/headscale/preauth", post(crate::api::routes::tunnel_preauth_headscale))
         .route("/api/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
         .route("/api/tunnel/endpoints", get(crate::api::routes::tunnel_endpoints))
 
@@ -194,9 +203,8 @@ pub async fn start(
         // `.fallback` (not `not_found_service`) keeps the 200 status so the
         // browser actually renders the SPA for deep links.
         .fallback_service(
-            ServeDir::new("dashboard/dist").fallback(
-                ServeFile::new("dashboard/dist/index.html")
-            )
+            ServeDir::new(&dashboard_dir)
+                .fallback(ServeFile::new(format!("{dashboard_dir}/index.html")))
         )
         .layer(CorsLayer::permissive())
         .with_state(state);

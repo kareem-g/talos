@@ -1,5 +1,4 @@
 pub mod tailscale;
-pub mod headscale;
 pub mod cloudflare;
 pub mod resolver;
 
@@ -39,7 +38,6 @@ pub struct TunnelInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TunnelKind {
     Tailscale,
-    Headscale,
     Cloudflare,
 }
 

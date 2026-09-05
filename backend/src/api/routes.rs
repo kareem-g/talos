@@ -3075,63 +3075,6 @@ async fn run_tunnel_action(
                 crate::tunnel::TunnelProvider::status(&provider).await
             }
         }
-        // Headscale: POST /api/tunnel/headscale/start
-        // {login_server, auth_key?, api_key?, user?}. Without a server it
-        // just reports — a node already on Headscale shows Connected with
-        // nothing to type. `api_key` and `user` are kept in-memory only for
-        // the duration of the request so the preauth-key mint has the
-        // credentials it needs; the persistent copy lives in settings.
-        "headscale" => {
-            let login_server = body
-                .as_ref()
-                .and_then(|b| b.get("login_server").or_else(|| b.get("loginServer")))
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let auth_key = body
-                .as_ref()
-                .and_then(|b| b.get("auth_key").or_else(|| b.get("authKey")))
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let request_api_key = body
-                .as_ref()
-                .and_then(|b| b.get("api_key").or_else(|| b.get("apiKey")))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .filter(|s| !s.trim().is_empty());
-            let request_user = body
-                .as_ref()
-                .and_then(|b| b.get("user"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .filter(|s| !s.trim().is_empty());
-            let stored = &settings.headscale;
-            let api_key = request_api_key.or_else(|| stored.api_key.clone());
-            let user = request_user.unwrap_or_else(|| stored.user.clone());
-            let provider = crate::tunnel::headscale::HeadscaleProvider::new(
-                login_server,
-                auth_key,
-                settings.tailscale.hostname.clone(),
-                api_key,
-                Some(user),
-            );
-            if start {
-                let info = crate::tunnel::TunnelProvider::start(&provider).await;
-                // A successful Headscale login means the tailnet is the way
-                // phones reach this station: flip the flag so pairing QRs,
-                // endpoint resolution, and diagnostics prefer it. Persisted —
-                // logout keeps the flag (resolution falls through to LAN
-                // when no tailnet is up, so nothing breaks).
-                if matches!(info, Ok(ref info) if matches!(info.status, crate::tunnel::TunnelStatus::Connected)) {
-                    let mut cfg = state.config.write().await;
-                    cfg.settings_mut().tunnel.tailscale.enabled = true;
-                    let _ = cfg.save().await;
-                }
-                info
-            } else {
-                let _ = crate::tunnel::TunnelProvider::stop(&provider).await;
-                crate::tunnel::TunnelProvider::status(&provider).await
-            }
-        }
         "cloudflare" => {
             // Cloudflare: POST /api/tunnel/cloudflare/start
             // Body: { token?, hostname? }. `token` overrides whatever is in
@@ -3200,13 +3143,13 @@ async fn run_tunnel_action(
             // "via Headscale" instead of assuming Tailscale.com.
             let via = if matches!(
                 info.kind,
-                crate::tunnel::TunnelKind::Tailscale | crate::tunnel::TunnelKind::Headscale
+                crate::tunnel::TunnelKind::Tailscale
             ) {
                 crate::tunnel::tailscale::control_plane_label().await
             } else {
                 None
             };
-            // Extract the structured error kind that the headscale provider
+            // Extract the structured error kind that the tailscale provider
             // embeds as `"<kind>:<message>"` (kept in-band so the existing
             // TunnelStatus::Error(String) shape still owns the human text).
             let (status_string, error_message, error_kind) =
@@ -3236,7 +3179,7 @@ async fn run_tunnel_action(
     }
 }
 
-/// Split the `<kind>:<message>` shape produced by the headscale provider's
+/// Split the `<kind>:<message>` shape produced by the tailscale provider's
 /// `start()` failure path. Unknown kinds fall back to `tailscale_failed`.
 fn split_kind_and_message(message: &str) -> (&str, &str) {
     let known = [
@@ -3252,103 +3195,6 @@ fn split_kind_and_message(message: &str) -> (&str, &str) {
         }
     }
     ("tailscale_failed", message)
-}
-
-/// POST /api/tunnel/headscale/authorize — promote the current user to
-/// tailscale operator (pkexec/sudo). Used by the dashboard's "Authorize"
-/// button to unblock the `tailscale up` path.
-pub async fn tunnel_authorize_headscale(
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    match crate::tunnel::tailscale::ensure_operator().await {
-        Ok(true) => Json(json!({ "ok": true })).into_response(),
-        Ok(false) => Json(json!({
-            "ok": false,
-            "error": "Could not find a working privilege elevator (pkexec/sudo/doas). Open a terminal and run `sudo tailscale set --operator=$USER` once.",
-        }))
-        .into_response(),
-        Err(error) => Json(json!({ "ok": false, "error": error.to_string() })).into_response(),
-    }
-}
-
-/// POST /api/tunnel/headscale/preauth — mint a fresh preauth key without
-/// re-running `tailscale up`. Lets the dashboard rotate the QR after the
-/// initial login without making the user reconnect.
-pub async fn tunnel_preauth_headscale(
-    State(state): State<Arc<AppState>>,
-    body: Option<Json<serde_json::Value>>,
-) -> Response {
-    let cfg = state.config.read().await;
-    let settings = cfg.settings().tunnel.clone();
-    drop(cfg);
-
-    let api_key = body
-        .as_ref()
-        .and_then(|b| b.get("api_key").or_else(|| b.get("apiKey")))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| settings.headscale.api_key.clone());
-    let Some(api_key) = api_key else {
-        return Json(json!({
-            "ok": false,
-            "error": "No Headscale API key configured. Paste it into the Headscale row above.",
-        }))
-        .into_response();
-    };
-    let login_server = body
-        .as_ref()
-        .and_then(|b| b.get("login_server").or_else(|| b.get("loginServer")))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.trim().is_empty());
-    let user = body
-        .as_ref()
-        .and_then(|b| b.get("user"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| settings.headscale.user.clone());
-
-    let Some(login_server) = login_server else {
-        return Json(json!({
-            "ok": false,
-            "error": "Need a Headscale control URL — fill in the field above first.",
-        }))
-        .into_response();
-    };
-
-    let client = crate::headscale::HeadscaleClient::new(login_server.trim(), api_key.trim());
-    match client
-        .create_preauth_key(&user, true, false, None)
-        .await
-    {
-        Ok(preauth) => {
-            let payload = crate::headscale::pair_payload(
-                login_server.trim(),
-                &settings.tailscale.hostname,
-                &preauth.key,
-            );
-            Json(json!({
-                "ok": true,
-                "key": preauth.key,
-                "expires_at": preauth.expires_at,
-                "qr_payload": payload.qr_payload,
-                "fallback_url": payload.fallback_url,
-                "tailnet": payload.tailnet,
-            }))
-            .into_response()
-        }
-        Err(error) => {
-            let kind = match &error {
-                crate::headscale::HeadscaleError::InvalidApiKey => "invalid_api_key",
-                crate::headscale::HeadscaleError::Unreachable(_) => "unreachable_control_plane",
-                _ => "preauth_failed",
-            };
-            Json(json!({ "ok": false, "error_kind": kind, "error": error.to_string() }))
-                .into_response()
-        }
-    }
 }
 
 pub async fn tunnel_status(
@@ -3388,33 +3234,6 @@ pub async fn tunnel_status(
         json!({ "enabled": false })
     };
 
-    // Headscale is live state, not a config flag: report the control plane
-    // whenever tailscale runs, so the UI can offer login or show status.
-    let headscale_status = {
-        let via = crate::tunnel::tailscale::control_plane_label().await;
-        let ip = tokio::process::Command::new("ip")
-            .args(["-4", "-o", "addr", "show", "dev", "tailscale0"])
-            .output()
-            .await
-            .ok()
-            .and_then(|o| {
-                if !o.status.success() {
-                    return None;
-                }
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                for line in stdout.lines() {
-                    for token in line.split_whitespace() {
-                        let addr = token.split('/').next().unwrap_or(token);
-                        if addr.parse::<std::net::Ipv4Addr>().is_ok() && !addr.starts_with("127.") {
-                            return Some(addr.to_string());
-                        }
-                    }
-                }
-                None
-            });
-        json!({ "via": via, "ip": ip, "connected": ip.is_some() })
-    };
-
     // Check Cloudflare — named tunnels expose their hostname from settings;
     // quick tunnels (trycloudflare) write their URL to a cache file that we
     // read here so the URL survives the original process detaching.
@@ -3438,7 +3257,6 @@ pub async fn tunnel_status(
 
     Json(json!({
         "tailscale": tailscale_status,
-        "headscale": headscale_status,
         "cloudflare": cloudflare_status,
     }))
 }

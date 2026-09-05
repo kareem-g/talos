@@ -4,7 +4,6 @@ pub mod browser;
 pub mod config;
 pub mod context_assembler;
 pub mod daemon;
-pub mod headscale;
 pub mod hooks;
 pub mod prompts;
 pub mod mcp;

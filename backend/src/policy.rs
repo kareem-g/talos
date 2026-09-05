@@ -82,6 +82,19 @@ pub struct PolicyFile {
     pub paths: Vec<PathRule>,
     #[serde(default)]
     pub network: Vec<NetworkRule>,
+    /// When true, every WebFetch / WebSearch / network tool call is
+    /// auto-allowed regardless of host. Bypasses the per-host allowlist
+    /// under `[network]` but does NOT bypass the permission card or the
+    /// session's `permission_mode` — the card still shows unless the
+    /// session is in `auto_edit` or `full`.
+    #[serde(default)]
+    pub skip_network_policy: bool,
+    /// When true, every tool call in this workspace is auto-allowed.
+    /// Short-circuits the network / path / tool rules in
+    /// `decide_input` so a session with `permission_mode = "ask"`
+    /// inside this workspace runs as if it were `full`. Use with care.
+    #[serde(default)]
+    pub full_access: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -89,6 +102,8 @@ pub struct ToolPolicy {
     rules: Vec<ToolRule>,
     paths: Vec<PathRule>,
     network: Vec<NetworkRule>,
+    skip_network_policy: bool,
+    full_access: bool,
 }
 
 impl ToolPolicy {
@@ -109,7 +124,22 @@ impl ToolPolicy {
             rules: file.rules,
             paths: file.paths,
             network: file.network,
+            skip_network_policy: file.skip_network_policy,
+            full_access: file.full_access,
         }
+    }
+
+    /// True when the policy file has `skip_network_policy = true`. WebFetch
+    /// / WebSearch / network tools are auto-approved for any host.
+    pub fn is_skip_network(&self) -> bool {
+        self.skip_network_policy
+    }
+
+    /// True when the policy file has `full_access = true`. Every tool call
+    /// in the workspace is auto-allowed regardless of session permission
+    /// mode or any rule below.
+    pub fn is_full_access(&self) -> bool {
+        self.full_access
     }
 
     /// Decide a tool call. First matching rule wins; `"all"` matches anything.
@@ -133,7 +163,13 @@ impl ToolPolicy {
 
     /// Decide a network access by host. **Deny-by-default**: a host matching
     /// an explicit allow rule is auto-approved; anything else is denied.
+    /// When `skip_network_policy` is set on the workspace, the host is
+    /// auto-approved regardless of the rule list — that's the point of the
+    /// bypass toggle.
     pub fn decide_network(&self, host: &str) -> PolicyDecision {
+        if self.skip_network_policy {
+            return PolicyDecision::Allow;
+        }
         let host = host.to_lowercase();
         let host = host.strip_suffix('.').unwrap_or(&host);
         for rule in &self.network {
@@ -187,6 +223,14 @@ impl ToolPolicy {
     /// `WebSearch`, an ACP agent's fetch) are gated by the same network rules
     /// as ours.
     pub fn decide_input(&self, tool_name: &str, input: &Value) -> InputDecision {
+        // Workspace "full access" is the strongest signal: every tool call in
+        // this workspace is auto-allowed, regardless of the session's
+        // permission mode and regardless of any rules below. The session's
+        // mode is still consulted for things outside this code path
+        // (questions, etc.); for the tool pipeline this is a hard allow.
+        if self.full_access {
+            return InputDecision::Allow("Auto-approved (workspace full access)");
+        }
         if crate::tools::classify(tool_name).0 == crate::tools::ToolCategory::Network {
             let url = input.get("url").and_then(Value::as_str).unwrap_or("");
             if let Some(host) = url_host(url) {
@@ -243,8 +287,7 @@ mod tests {
                     action: action.to_string(),
                 })
                 .collect(),
-            paths: Vec::new(),
-            network: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -287,16 +330,15 @@ mod tests {
 
     #[test]
     fn network_is_deny_by_default() {
-        let p = ToolPolicy { rules: Vec::new(), paths: Vec::new(), network: Vec::new() };
+        let p = ToolPolicy::default();
         assert_eq!(p.decide_network("example.com"), PolicyDecision::Deny);
     }
 
     #[test]
     fn network_allowlist_auto_approves() {
         let p = ToolPolicy {
-            rules: Vec::new(),
-            paths: Vec::new(),
             network: vec![NetworkRule { domain: "example.com".to_string(), action: "allow".to_string() }],
+            ..Default::default()
         };
         assert_eq!(p.decide_network("example.com"), PolicyDecision::Allow);
         assert_eq!(p.decide_network("www.example.com"), PolicyDecision::Allow);
@@ -307,9 +349,8 @@ mod tests {
     #[test]
     fn network_explicit_deny_wins() {
         let p = ToolPolicy {
-            rules: Vec::new(),
-            paths: Vec::new(),
             network: vec![NetworkRule { domain: "internal.corp".to_string(), action: "deny".to_string() }],
+            ..Default::default()
         };
         assert_eq!(p.decide_network("internal.corp"), PolicyDecision::Deny);
     }
@@ -317,7 +358,6 @@ mod tests {
     #[test]
     fn path_rules_allow_override_deny_by_order() {
         let p = ToolPolicy {
-            rules: Vec::new(),
             paths: vec![
                 PathRule {
                     prefix: "/home/kareem/.ssh".to_string(),
@@ -328,7 +368,7 @@ mod tests {
                     action: "allow".to_string(),
                 },
             ],
-            network: Vec::new(),
+            ..Default::default()
         };
         // First match wins: the deny prefix comes first, so it wins.
         assert_eq!(p.decide_path("/home/kareem/.ssh/authorized_keys"), PolicyDecision::Deny);
@@ -343,6 +383,7 @@ mod tests {
                 action: "deny".to_string(),
             }],
             network: vec![NetworkRule { domain: "example.com".to_string(), action: "allow".to_string() }],
+            ..Default::default()
         };
         // Path deny wins over the catch-all tool allow.
         assert_eq!(

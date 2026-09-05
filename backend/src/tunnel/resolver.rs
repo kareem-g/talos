@@ -127,6 +127,29 @@ fn bracket_host(host: &str) -> String {
     }
 }
 
+/// Pick the single row to surface for the tailnet. Preference:
+/// `TailnetMagicDns` > `TailnetIpv4` > `TailnetIpv6` (by source), and an
+/// entry the probe marked `reachable: true` wins over one it didn't. If
+/// everything is unreachable, return the highest-priority candidate anyway
+/// so the picker still shows the row with its `down` hint.
+fn pick_best_tailnet(mut candidates: Vec<ReachableEndpoint>) -> Option<ReachableEndpoint> {
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort_by_key(|ep| {
+        let source_rank = match ep.source {
+            EndpointSource::TailnetMagicDns => 0,
+            EndpointSource::TailnetIpv4 => 1,
+            EndpointSource::TailnetIpv6 => 2,
+            _ => 3,
+        };
+        // `reachable: false` is sorted *after* reachable entries of the same
+        // source by adding a small penalty. We compare source rank first.
+        (source_rank, !ep.reachable)
+    });
+    Some(candidates.remove(0))
+}
+
 /// Resolve a reachable endpoint for this daemon.
 ///
 /// `port` is the daemon's listening port. `cloudflare_host` when Some wins over
@@ -307,8 +330,16 @@ pub async fn list_endpoints(
 
     if tailscale_enabled {
         let via = super::tailscale::control_plane_label().await;
+        // Collect every viable tailnet row, then keep exactly one. The QR
+        // picker used to show all three (MagicDNS / IPv4 / IPv6) for the
+        // same machine, which read as duplicate entries. Prefer the address
+        // the phone is most likely to reach: MagicDNS first (HTTPS-proxied
+        // through Tailscale, works on every phone), then IPv4, then IPv6.
+        // Skip an entry the probe marked unreachable; if all are unreachable
+        // we still surface one so the user sees the row with a "down" hint.
+        let mut tailnet_candidates: Vec<ReachableEndpoint> = Vec::new();
         if let Some(dns) = magic_dns().await {
-            out.push(ReachableEndpoint {
+            tailnet_candidates.push(ReachableEndpoint {
                 base_url: format!("http://{dns}:{port}"),
                 source: EndpointSource::TailnetMagicDns,
                 host: dns,
@@ -319,7 +350,7 @@ pub async fn list_endpoints(
             });
         }
         if let Some(ip) = tailscale_ip_v4().await {
-            out.push(ReachableEndpoint {
+            tailnet_candidates.push(ReachableEndpoint {
                 base_url: format!("http://{ip}:{port}"),
                 source: EndpointSource::TailnetIpv4,
                 host: ip,
@@ -331,7 +362,7 @@ pub async fn list_endpoints(
         }
         if let Some(ip) = tailscale_ip_v6().await {
             let bh = bracket_host(&ip);
-            out.push(ReachableEndpoint {
+            tailnet_candidates.push(ReachableEndpoint {
                 base_url: format!("http://{bh}:{port}"),
                 source: EndpointSource::TailnetIpv6,
                 host: ip,
@@ -348,21 +379,24 @@ pub async fn list_endpoints(
         // to load — surfaced by the existing error path. Skip if a live
         // probe already produced the same row, to avoid dupes.
         if let Some(hostname) = tailscale_hostname.map(str::trim).filter(|h| !h.is_empty() && h.contains('.')) {
-            let already_listed = out.iter().any(|ep| {
+            let already_listed = tailnet_candidates.iter().any(|ep| {
                 ep.source == EndpointSource::TailnetMagicDns
                     && ep.host.eq_ignore_ascii_case(hostname)
             });
             if !already_listed {
-                out.push(ReachableEndpoint {
+                tailnet_candidates.push(ReachableEndpoint {
                     base_url: format!("http://{hostname}:{port}"),
                     source: EndpointSource::TailnetMagicDns,
                     host: hostname.to_string(),
                     port,
                     secure: false,
                     reachable: true,
-                    via,
+                    via: via.clone(),
                 });
             }
+        }
+        if let Some(pick) = pick_best_tailnet(tailnet_candidates) {
+            out.push(pick);
         }
     }
 
