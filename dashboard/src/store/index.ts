@@ -150,6 +150,12 @@ interface StoreState {
   refreshConfigs: () => Promise<void>
   /** Restart the agent so a stopped or imported session can continue. */
   resumeSession: (sessionId: string) => Promise<boolean>
+  /**
+   * Switch the engine backing a session to another ready CLI/API provider,
+   * keeping the same session row and transcript. Returns whether the switch
+   * succeeded; failures surface as a session notice.
+   */
+  switchSessionEngine: (sessionId: string, agent: string, model?: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<void>
   /**
    * Archive a session: stops it first (the backend refuses live sessions),
@@ -708,6 +714,30 @@ export const useStore = create<StoreState>((set, get) => ({
       set((state) => ({ sessions: upsertSession(state.sessions, session) }))
     } catch {
       /* unreachable session — the card still renders from events alone */
+    }
+  },
+
+  async switchSessionEngine(sessionId, agent, model) {
+    try {
+      const result = await sessionsApi.switchEngine(sessionId, agent, model)
+      if (!result.switched || !result.session) {
+        setNotice(set, sessionId, result.error ?? `Could not switch this session to ${agent}`)
+        return false
+      }
+      set((state) => ({ sessions: upsertSession(state.sessions, result.session as Session) }))
+      // The new engine brings its own config surface — refresh so chips show
+      // the right model/mode/effort instead of the previous provider's.
+      try {
+        const config = await configApi.get(sessionId)
+        set((state) => ({ configs: { ...state.configs, [sessionId]: config } }))
+      } catch {
+        /* next openSession refreshes the config */
+      }
+      return true
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : `Could not switch this session to ${agent}`
+      setNotice(set, sessionId, reason)
+      return false
     }
   },
 

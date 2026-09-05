@@ -243,6 +243,19 @@ export const sessionsApi = {
       { method: 'POST', body: JSON.stringify({ session_id: id }) },
     ),
 
+  /**
+   * Switch the engine backing an existing session to another ready CLI/API
+   * provider, keeping the same session row and transcript. The current engine
+   * is stopped and the new one is launched with a digest of the prior
+   * conversation. Model changes inside the same engine go through the config
+   * PATCH instead.
+   */
+  switchEngine: (id: string, agent: string, model?: string) =>
+    request<{ switched: boolean; session?: Session; digest_chars?: number; error?: string }>(
+      `/api/sessions/${encodeURIComponent(id)}/engine`,
+      { method: 'POST', body: JSON.stringify(model ? { agent, model } : { agent }) },
+    ),
+
   archive: (id: string) =>
     request<{ archived: boolean }>(`/api/sessions/${encodeURIComponent(id)}/archive`, {
       method: 'POST',
