@@ -158,6 +158,41 @@ export function createSessionSendHandlers(
       )
       return true
     }
+    const builtinMatch = /^\/(summarize|review|plan|worker)(?:\s+([\s\S]+))?$/.exec(trimmed)
+    if (builtinMatch) {
+      const command = builtinMatch[1]
+      const task = builtinMatch[2]?.trim() ?? ''
+      if (command === 'summarize') {
+        seedNotice(
+          session.id,
+          '/summarize runs automatically when a session history gets long; it compresses context into project memory.',
+        )
+        return true
+      }
+      if (command === 'review') {
+        const prompt =
+          task ||
+          'Review the current uncommitted changes in this repository (use git status and git diff to see them) and report concrete findings with file references.'
+        seedNotice(session.id, 'Starting a code review…')
+        void sessionsApi
+          .spawnSubagent(session.id, { prompt, role: 'reviewer' })
+          .catch(() => seedNotice(session.id, 'Could not start the reviewer agent.'))
+        return true
+      }
+      if (!task) {
+        seedNotice(
+          session.id,
+          `Give /${command} a task — e.g. "/${command} ${command === 'plan' ? 'add user auth to the API' : 'fix the flaky tests in ./tests'}".`,
+        )
+        return false
+      }
+      const role = command === 'plan' ? 'planner' : 'worker'
+      seedNotice(session.id, `Starting the ${role}…`)
+      void sessionsApi
+        .spawnSubagent(session.id, { prompt: task, role })
+        .catch(() => seedNotice(session.id, `Could not start the ${role} agent.`))
+      return true
+    }
     if (orchestratorMatch) {
       const task = orchestratorMatch[1]?.trim()
       const target = dispatchTarget(session.id)
@@ -217,7 +252,8 @@ export function createSessionSendHandlers(
     const trimmed = text.trim()
     const dispatchesRoom =
       /^\/orchestrator(?:\s|$)/.test(trimmed) || findRoomMention(trimmed, session.project ?? null) !== null
-    if (dispatchesRoom || /^\/side\s+/.test(trimmed) || /^\/btw\s+/.test(trimmed)) {
+    const dispatchesBuiltin = /^\/(review|plan|worker|summarize)(?:\s|$)/.test(trimmed)
+    if (dispatchesRoom || dispatchesBuiltin || /^\/side\s+/.test(trimmed) || /^\/btw\s+/.test(trimmed)) {
       return send(text, attachments)
     }
     useStore.getState().queueMessage(session.id, text, attachments)

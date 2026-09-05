@@ -154,6 +154,7 @@ export function Composer({
   summary,
   compactControls,
   onSummaryClick,
+  header,
 }: {
   /**
    * Send the draft. Returns `false` to reject it (an incomplete command) and
@@ -231,6 +232,12 @@ export function Composer({
    * opens the engine/model switch — the model name IS the switch on mobile.
    */
   onSummaryClick?: () => void
+  /**
+   * Status strip merged into the top of the composer card (session state,
+   * approval pointer, …). Rendered inside the same rounded border as the
+   * field — one dock, not a floating bar above a separate card.
+   */
+  header?: ReactNode
 }) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
@@ -272,6 +279,10 @@ export function Composer({
     }))
     const custom: MenuItem[] = [
       { insert: 'orchestrator', label: 'orchestrator', hint: 'fan the task out to a room of agents' },
+      { insert: 'review', label: 'review', hint: 'review current changes' },
+      { insert: 'plan', label: 'plan', hint: 'plan a task' },
+      { insert: 'worker', label: 'worker', hint: 'run a bounded subtask' },
+      { insert: 'summarize', label: 'summarize', hint: 'compress long history' },
       { insert: 'side', label: 'side', hint: 'open side session' },
       { insert: 'btw', label: 'btw', hint: 'note to side session' },
     ]
@@ -549,87 +560,6 @@ export function Composer({
       style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
     >
       <div className={cn('relative mx-auto w-full', !wide && 'max-w-[46rem]')}>
-        {/* Queued follow-ups — editable rows above the field while the agent works. */}
-        {queue && queue.length > 0 ? (
-          <div className="mb-1.5 flex flex-col gap-1">
-            {queue.map((item, index) => (
-              <div
-                key={item.id}
-                draggable
-                onDragStart={() => {
-                  dragFrom.current = index
-                }}
-                onDragOver={(event) => {
-                  if (dragFrom.current !== null) event.preventDefault()
-                }}
-                onDrop={() => {
-                  if (dragFrom.current !== null && dragFrom.current !== index) {
-                    onReorderQueued?.(dragFrom.current, index)
-                  }
-                  dragFrom.current = null
-                }}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-xl border border-line/50 bg-surface/80 px-2 py-1.5',
-                  'shadow-raised backdrop-blur-sm transition-colors',
-                )}
-              >
-                <span
-                  aria-hidden
-                  title="Drag to reorder"
-                  className="shrink-0 cursor-grab text-ink-3 active:cursor-grabbing"
-                >
-                  <GripVertical size={13} />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">
-                  {item.text || (item.attachments.length > 0 ? `${item.attachments.length} attachment(s)` : '')}
-                  {item.attachments.length > 0 && item.text ? (
-                    <span className="ml-1.5 font-mono text-[10px] text-ink-3">
-                      +{item.attachments.length}
-                    </span>
-                  ) : null}
-                </span>
-                {onSteer ? (
-                  <button
-                    type="button"
-                    onClick={() => onSteer(item.id)}
-                    aria-label="Steer the agent with this message now"
-                    title="Send now, without waiting for the turn to end"
-                    className={cn(
-                      'flex shrink-0 items-center gap-1 rounded-lg border border-line/50 bg-inset px-2 py-1',
-                      'text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink',
-                    )}
-                  >
-                    <CornerUpLeft size={12} />
-                    Steer
-                  </button>
-                ) : null}
-                {onEditQueued ? (
-                  <button
-                    type="button"
-                    onClick={() => onEditQueued(item.id)}
-                    aria-label="Edit this queued message"
-                    title="Edit"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                ) : null}
-                {onRemoveQueued ? (
-                  <button
-                    type="button"
-                    onClick={() => onRemoveQueued(item.id)}
-                    aria-label="Delete this queued message"
-                    title="Delete"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-red-tint hover:text-red"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
         {/* Completion menu — IDE-style floating popup with sections. */}
         {menu && menuItems.length > 0 ? (
           <div
@@ -718,6 +648,97 @@ export function Composer({
             }
           }}
         >
+          {/* Merged dock header — session state strip as part of the composer
+              card, not a separate floating bar above it. */}
+          {header ? (
+            <div className="rounded-t-xl border-b border-line/50 bg-inset/40 px-3 py-2">{header}</div>
+          ) : null}
+          {/* Queued follow-ups — rows docked to the top of the composer card
+              so the queue reads as part of the composer. */}
+          {queue && queue.length > 0 ? (
+            <div className="border-b border-line/50 bg-inset/40 px-2 py-1.5">
+              <p className="px-1 pb-1 font-mono text-[9.5px] uppercase tracking-[0.12em] text-ink-3">
+                Queued · {queue.length}
+              </p>
+              <div className="flex flex-col gap-1">
+                {queue.map((item, index) => (
+                  <div
+                    key={item.id}
+                    draggable
+                    onDragStart={() => {
+                      dragFrom.current = index
+                    }}
+                    onDragOver={(event) => {
+                      if (dragFrom.current !== null) event.preventDefault()
+                    }}
+                    onDrop={() => {
+                      if (dragFrom.current !== null && dragFrom.current !== index) {
+                        onReorderQueued?.(dragFrom.current, index)
+                      }
+                      dragFrom.current = null
+                    }}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-lg border border-line/50 bg-surface/80 px-2 py-1.5',
+                      'transition-colors',
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      title="Drag to reorder"
+                      className="shrink-0 cursor-grab text-ink-3 active:cursor-grabbing"
+                    >
+                      <GripVertical size={13} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">
+                      {item.text || (item.attachments.length > 0 ? `${item.attachments.length} attachment(s)` : '')}
+                      {item.attachments.length > 0 && item.text ? (
+                        <span className="ml-1.5 font-mono text-[10px] text-ink-3">
+                          +{item.attachments.length}
+                        </span>
+                      ) : null}
+                    </span>
+                    {onSteer ? (
+                      <button
+                        type="button"
+                        onClick={() => onSteer(item.id)}
+                        aria-label="Steer the agent with this message now"
+                        title="Send now, without waiting for the turn to end"
+                        className={cn(
+                          'flex shrink-0 items-center gap-1 rounded-lg border border-line/50 bg-inset px-2 py-1',
+                          'text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink',
+                        )}
+                      >
+                        <CornerUpLeft size={12} />
+                        Steer
+                      </button>
+                    ) : null}
+                    {onEditQueued ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditQueued(item.id)}
+                        aria-label="Edit this queued message"
+                        title="Edit"
+                        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    ) : null}
+                    {onRemoveQueued ? (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveQueued(item.id)}
+                        aria-label="Delete this queued message"
+                        title="Delete"
+                        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-red-tint hover:text-red"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {/* Attachment previews — images as thumbnails, files as chips. */}
           {attachments.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">

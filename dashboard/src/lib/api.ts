@@ -256,6 +256,27 @@ export const sessionsApi = {
       { method: 'POST', body: JSON.stringify(model ? { agent, model } : { agent }) },
     ),
 
+  /**
+   * Spawn a subagent (generic, or a built-in role: summarizer/planner/reviewer/
+   * worker) as a hidden child of this session. The child's engine comes from
+   * the configured `[agents.builtin]` default unless `agent` is given.
+   */
+  spawnSubagent: (
+    id: string,
+    body: { prompt: string; role?: string; agent?: string; max_cost_usd?: number; timeout_secs?: number },
+  ) =>
+    request<{
+      child_session_id?: string
+      agent?: string
+      completed?: boolean
+      status?: string
+      reply?: string
+      error?: string
+    }>(`/api/sessions/${encodeURIComponent(id)}/subagents`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   archive: (id: string) =>
     request<{ archived: boolean }>(`/api/sessions/${encodeURIComponent(id)}/archive`, {
       method: 'POST',
