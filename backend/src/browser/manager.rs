@@ -50,6 +50,15 @@ impl BrowserManager {
                 return Ok(inst.clone());
             }
         }
+        // Adopt the agent-spawned engine when one is live. The agent (claude
+        // `--mcp-config`, ACP `mcpServers`) spawns `__browser-mcp` as its own
+        // child; that engine registers nothing but the port file, so it is
+        // invisible to `instances` here. Spawning a second engine for the
+        // same session would clobber that file while both contend for the
+        // same browser dir — the agent's browser tool calls then hang forever.
+        if let Some(inst) = self.adopt_agent_spawned(session_id).await {
+            return Ok(inst);
+        }
 
         let browser_dir = std::env::temp_dir().join(format!("agentdeck-browser-{session_id}"));
         std::fs::create_dir_all(&browser_dir)?;
@@ -103,12 +112,17 @@ impl BrowserManager {
         );
         if let Some(inst) = self.instances.write().await.remove(session_id) {
             // Closing the pipe asks for a graceful exit (stdin EOF); SIGTERM
-            // follows for engines that never read stdin.
+            // follows for engines that never read stdin. An adopted engine
+            // whose pid could not be resolved registers 0 — signaling 0 would
+            // target the whole process group, so only the port-file removal
+            // applies and the engine dies with its parent agent.
             self.stdin_holders.lock().await.remove(session_id);
-            let _ = tokio::process::Command::new("kill")
-                .args(["-TERM", &inst.pid.to_string()])
-                .output()
-                .await;
+            if inst.pid > 0 {
+                let _ = tokio::process::Command::new("kill")
+                    .args(["-TERM", &inst.pid.to_string()])
+                    .output()
+                    .await;
+            }
         }
         Ok(())
     }
@@ -208,6 +222,50 @@ impl BrowserManager {
         let content = std::fs::read_to_string(&port_file).ok()?;
         content.trim().parse::<u16>().ok()
     }
+
+    /// Adopt the agent-spawned browser engine for a session, when one is
+    /// live. Registration here makes `start` reuse it instead of spawning a
+    /// duplicate, and gives `stop` the pid to terminate. A port file whose
+    /// port no longer answers is stale and must not be adopted.
+    async fn adopt_agent_spawned(&self, session_id: &str) -> Option<BrowserInstance> {
+        let port_file = std::env::temp_dir().join(format!("agentdeck-browser-http.{session_id}.port"));
+        let port: u16 = std::fs::read_to_string(&port_file).ok()?.trim().parse().ok()?;
+        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err() {
+            return None;
+        }
+        let instance = BrowserInstance {
+            pid: find_browser_mcp_pid(session_id).unwrap_or(0),
+            http_port: port,
+            session_id: session_id.to_string(),
+        };
+        self.instances.write().await.insert(session_id.to_string(), instance.clone());
+        tracing::info!(session_id = %session_id, port, "adopted agent-spawned browser engine");
+        Some(instance)
+    }
+}
+
+/// Find the pid of the `__browser-mcp` process serving a session by scanning
+/// /proc: the cmdline carries the binary mode, the environ the session id.
+/// Both are null-separated, so read bytes and scan lossily. Returns None when
+/// the scan finds nothing (adoption then registers pid 0, which `stop` treats
+/// as "nothing of ours to signal" — the port file removal still applies).
+fn find_browser_mcp_pid(session_id: &str) -> Option<u32> {
+    let entries = std::fs::read_dir("/proc").ok()?;
+    let needle = format!("AGENTDECK_SESSION={session_id}");
+    for entry in entries.flatten() {
+        // /proc mixes numeric pids with kernel files (cpuinfo, self, …) —
+        // skip those, don't abort the scan.
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else { continue };
+        if !cmdline.windows(b"__browser-mcp".len()).any(|w| w == b"__browser-mcp") {
+            continue;
+        }
+        let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
+        if environ.windows(needle.len()).any(|w| w == needle.as_bytes()) {
+            return Some(pid);
+        }
+    }
+    None
 }
 
 async fn wait_for_port_file(path: &PathBuf) -> crate::Result<u16> {
