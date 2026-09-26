@@ -843,7 +843,7 @@ export function Composer({
               aria-hidden
               className={cn(
                 'composer-backdrop pointer-events-none absolute inset-0 overflow-hidden px-3.5 pt-3',
-                'whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink',
+                'whitespace-pre-wrap break-words text-left text-[13px] leading-[1.6] text-ink',
               )}
               ref={backdropRef}
             >
@@ -911,7 +911,7 @@ export function Composer({
               aria-label="Message"
               className={cn(
                 'scroll-thin relative block w-full resize-none bg-transparent px-3.5 pt-3',
-                'text-[13px] leading-[1.6] text-transparent caret-white outline-none',
+                'text-left text-[13px] leading-[1.6] text-transparent caret-white outline-none',
                 'placeholder:text-ink-3 disabled:opacity-50',
               )}
               style={{ maxHeight: MAX_HEIGHT_PX }}
