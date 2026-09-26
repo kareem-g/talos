@@ -29,7 +29,7 @@ export function PairingModal({ open, onClose }: { open: boolean; onClose: () => 
         onClick={onClose}
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
       />
-      <div className="animate-up relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-overlay">
+      <div className="animate-up relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-overlay">
         <header className="flex shrink-0 items-center gap-2 border-b border-line/50 px-4 py-3">
           <span className="flex size-7 items-center justify-center rounded-lg bg-accent-tint">
             <Smartphone size={14} className="text-accent" />
@@ -48,8 +48,10 @@ export function PairingModal({ open, onClose }: { open: boolean; onClose: () => 
         </header>
 
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-          {/* QR + route picker — the phone scans, this side shows live expiry. */}
-          <PairDeviceLayerContent />
+          {/* QR + route picker — the phone scans, this side shows live expiry.
+              Stacked: the modal is narrower than the wide home card the
+              two-column layout was designed for. */}
+          <PairDeviceLayerContent stacked />
 
           <div className="border-t border-line/50 px-3 py-3">
             <SectionLabel>Paired devices</SectionLabel>

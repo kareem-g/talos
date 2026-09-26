@@ -270,15 +270,16 @@ export function AppNav({
                   {isPaired() ? 'Paired · this machine' : 'Not paired'}
                 </span>
               </span>
-              {/* Phone — opens the pairing modal to connect a device. */}
+              {/* Phone — opens the pairing modal to connect a device. A circle
+                  to echo the avatar it sits beside. */}
               <button
                 type="button"
                 onClick={() => setPairingOpen(true)}
                 title="Pair a device"
                 aria-label="Pair a device"
-                className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-inset text-ink-2 transition-colors hover:border-line-strong hover:bg-hover-2 hover:text-ink"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line/60 bg-inset text-ink-2 transition-all duration-150 hover:border-line-strong hover:bg-hover-2 hover:text-ink active:scale-95"
               >
-                <Smartphone size={14} />
+                <Smartphone size={15} />
               </button>
             </div>
             <div className="mt-2 flex items-center gap-1.5 border-t border-line/50 pt-2">

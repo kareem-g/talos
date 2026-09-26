@@ -109,8 +109,8 @@ function transportDot(opt: EndpointOption): string {
  * The offer expires in two minutes; the right column counts down and
  * mints a fresh offer when it hits zero.
  */
-export function PairDeviceLayerContent() {
-  return <ConnectPhoneCard />
+export function PairDeviceLayerContent({ stacked }: { stacked?: boolean }) {
+  return <ConnectPhoneCard stacked={stacked} />
 }
 
 /** Stable id for a transport row — used to compare picker state across
@@ -145,7 +145,7 @@ function transportPriority(opt: EndpointOption): number {
   }
 }
 
-function ConnectPhoneCard() {
+function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
   // Transport list — fetched once on mount, refreshed when tunnels change.
   const [endpoints, setEndpoints] = useState<EndpointOption[]>([])
   const [endpointsError, setEndpointsError] = useState<string>()
@@ -311,7 +311,15 @@ function ConnectPhoneCard() {
   const expired = offer !== null && remaining === 0
 
   return (
-    <div className="flex flex-col gap-4 px-3 py-3 lg:grid lg:grid-cols-[minmax(180px,240px)_1fr] lg:items-start lg:gap-5">
+    <div
+      className={cn(
+        'flex flex-col gap-4 px-3 py-3',
+        // The home Pair section is wide enough for the two-column layout;
+        // the pairing modal is not, so it stacks (the lg: variants are
+        // viewport-wide and would otherwise squeeze the narrow modal).
+        !stacked && 'lg:grid lg:grid-cols-[minmax(180px,240px)_1fr] lg:items-start lg:gap-5',
+      )}
+    >
       {/* ── Transport list (left) ────────────────────────────────────── */}
       <div className="flex flex-col gap-2">
         <p className="text-[9.5px] font-medium uppercase tracking-[0.14em] text-ink-3">
@@ -425,8 +433,11 @@ function ConnectPhoneCard() {
       </div>
 
       {/* ── QR card (right on desktop, FIRST on phones so the code is
-          visible without scrolling past the route list) ─────────────── */}
-      <div className="flex flex-col items-center gap-3 max-lg:-order-1 max-lg:pb-16">
+          visible without scrolling past the route list; natural order when
+          stacked in the modal) ─────────────────────────────────────── */}
+      <div
+        className={cn('flex flex-col items-center gap-3', !stacked && 'max-lg:-order-1 max-lg:pb-16')}
+      >
         {offerError ? (
           <div className="flex w-full flex-col items-center gap-2 py-6">
             <p className="text-center text-[12px] leading-[1.6] text-red">{offerError}</p>
