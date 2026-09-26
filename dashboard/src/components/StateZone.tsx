@@ -252,6 +252,7 @@ export function StateZone({
   rooms,
   workers,
   compact,
+  wide = true,
 }: {
   session: Session
   conversation: Conversation
@@ -271,6 +272,9 @@ export function StateZone({
   workers?: string[]
   /** Mobile compact mode: hide the in-line config chips in the composer. */
   compact?: boolean
+  /** Full-width composer (default). False caps the bar at the reading
+   *  column width and centers it, matching the reference's composer. */
+  wide?: boolean
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -396,7 +400,7 @@ export function StateZone({
 
   const composer = (
     <Composer
-      wide
+      wide={wide}
       compact={compact}
       summary={summary}
       header={dockHeader}

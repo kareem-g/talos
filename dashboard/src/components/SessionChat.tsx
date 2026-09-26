@@ -319,6 +319,7 @@ export function SessionChat({
         onSetConfig={(id, v) => void setConfig(session.id, id, v)}
         rooms={rooms.map((r) => r.name)}
         workers={roomOfSession?.workers.map((w) => w.name)}
+        wide={false}
       />
     </div>
   )
