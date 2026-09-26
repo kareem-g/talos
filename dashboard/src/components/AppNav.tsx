@@ -19,8 +19,10 @@ import {
   KeyRound,
   Plus,
   SlidersHorizontal,
+  Smartphone,
   Wrench,
 } from 'lucide-react'
+import { PairingModal } from './PairingModal'
 import { cn } from '@/lib/format'
 import { isPaired } from '@/lib/pairing'
 import { isInternalSession } from '@/lib/sessionState'
@@ -104,6 +106,7 @@ export function AppNav({
   const sessions = useStore((state) => state.sessions)
   const connection = useStore((state) => state.connection)
   const [copied, setCopied] = useState(false)
+  const [pairingOpen, setPairingOpen] = useState(false)
 
   const history = sessions
     .filter((session) => session.status !== 'archived' && !isInternalSession(session))
@@ -249,24 +252,34 @@ export function AppNav({
           />
         </div>
 
-        {/* Device profile — this app is local-first; the card names the machine,
-            not an account. The connection state lives here too: it is the
-            device's link to the daemon, so it belongs on the device. */}
+        {/* Device profile — this app is local-first; the card names the
+            machine, not an account. It carries the device's two links: the
+            daemon connection (status row) and the phone (pairing modal). */}
         <div className="px-3 py-3">
-          <div className="rounded-control border border-line/60 bg-surface px-2.5 py-2 shadow-hairline">
-            <div className="flex items-center gap-2.5">
+          <div className="rounded-control border border-line/60 bg-surface px-2.5 py-2.5 shadow-hairline">
+            <div className="flex items-center gap-2">
               <span
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/15 font-mono text-[11px] font-semibold text-accent"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/15 font-mono text-[12px] font-semibold text-accent"
                 aria-hidden
               >
                 A
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] font-medium text-ink">Local device</span>
+                <span className="block truncate text-[12.5px] font-medium text-ink">Local device</span>
                 <span className="block truncate text-[10px] text-ink-3">
                   {isPaired() ? 'Paired · this machine' : 'Not paired'}
                 </span>
               </span>
+              {/* Phone — opens the pairing modal to connect a device. */}
+              <button
+                type="button"
+                onClick={() => setPairingOpen(true)}
+                title="Pair a device"
+                aria-label="Pair a device"
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-inset text-ink-2 transition-colors hover:border-line-strong hover:bg-hover-2 hover:text-ink"
+              >
+                <Smartphone size={14} />
+              </button>
             </div>
             <div className="mt-2 flex items-center gap-1.5 border-t border-line/50 pt-2">
               <span className={cn('size-1.5 shrink-0 rounded-full', connectionDot(connection))} aria-hidden />
@@ -277,6 +290,9 @@ export function AppNav({
           </div>
         </div>
       </div>
+
+      {/* Pairing — the phone-side onboarding flow, one tap from the device card. */}
+      <PairingModal open={pairingOpen} onClose={() => setPairingOpen(false)} />
     </div>
   )
 }

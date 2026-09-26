@@ -114,7 +114,7 @@ function EndpointCard() {
 }
 
 /** Card 3: every remote control allowed to touch this machine. */
-function DevicesCard() {
+export function DevicesCard() {
   const [devices, setDevices] = useState<PairedDeviceInfo[]>()
   const [error, setError] = useState<string>()
   const [revoking, setRevoking] = useState<string>()
