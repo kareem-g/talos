@@ -276,9 +276,9 @@ export const Prose = memo(function Prose({
                     key={blockIndex}
                     className={cn(
                       'font-semibold tracking-[-0.01em] text-ink',
-                      block.level === 1 && 'text-[15px]',
-                      block.level === 2 && 'text-[13.5px]',
-                      block.level >= 3 && 'text-[12.5px]',
+                      block.level === 1 && 'text-[16px]',
+                      block.level === 2 && 'text-[14.5px]',
+                      block.level >= 3 && 'text-[13.5px]',
                     )}
                   >
                     {inlineMarkdown(block.text)}
@@ -289,8 +289,8 @@ export const Prose = memo(function Prose({
                 return (
                   <ul key={blockIndex} className="flex min-w-0 flex-col gap-1.5">
                     {block.items.map((item, itemIndex) => (
-                      <li key={itemIndex} className="flex min-w-0 gap-2 text-[13px] leading-[1.65] text-ink">
-                        <span className="shrink-0 select-none font-mono text-[11px] leading-[1.9] text-ink-3" aria-hidden>
+                      <li key={itemIndex} className="flex min-w-0 gap-2 text-[14px] leading-[1.65] text-ink">
+                        <span className="shrink-0 select-none font-mono text-[11.5px] leading-[1.9] text-ink-3" aria-hidden>
                           {block.kind === 'ul' ? '•' : `${itemIndex + 1}.`}
                         </span>
                         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{inlineMarkdown(item)}</span>
@@ -303,7 +303,7 @@ export const Prose = memo(function Prose({
                 <p
                   key={blockIndex}
                   className={cn(
-                    'whitespace-pre-wrap break-words text-[13px] leading-[1.7] text-ink',
+                    'whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-ink',
                     streaming && blockIsLast && 'caret',
                   )}
                 >

@@ -559,7 +559,7 @@ export function Composer({
       className="shrink-0 px-3 pb-3 pt-1.5"
       style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
     >
-      <div className={cn('relative mx-auto w-full', !wide && 'max-w-[46rem]')}>
+      <div className={cn('relative mx-auto w-full', !wide && 'max-w-[58rem]')}>
         {/* Completion menu — IDE-style floating popup with sections. */}
         {menu && menuItems.length > 0 ? (
           <div

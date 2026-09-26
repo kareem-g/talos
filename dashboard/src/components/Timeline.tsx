@@ -245,7 +245,7 @@ const Turn = memo(function Turn({
         className="group flex justify-end transition-opacity duration-200 hover:!opacity-100"
         style={dim !== undefined ? { opacity: dim } : undefined}
       >
-        <div className="flex max-w-[82%] flex-col items-end">
+        <div className="flex max-w-[85%] flex-col items-end">
           <time
             dateTime={message.createdAt}
             title={Number.isNaN(time.getTime()) ? undefined : time.toLocaleString()}
@@ -255,11 +255,11 @@ const Turn = memo(function Turn({
           </time>
           <div
             className={cn(
-              'rounded-2xl rounded-br-md border border-accent/[0.12] bg-accent/[0.08] px-3 py-2',
+              'rounded-2xl rounded-br-md border border-accent/[0.12] bg-accent/[0.08] px-3.5 py-2.5',
               message.optimistic && 'opacity-60',
             )}
           >
-            <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.6] text-ink">
+            <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.6] text-ink">
               <Chips text={text} />
             </p>
           </div>
@@ -530,7 +530,7 @@ export function Timeline({
         }}
         className="scroll-thin h-full overflow-y-auto overscroll-contain"
       >
-        <div className="mx-auto flex w-full max-w-[48rem] flex-col gap-6 px-4 py-5 pl-10">
+        <div className="mx-auto flex w-full max-w-[60rem] flex-col gap-6 px-4 py-5 pl-10">
           {empty ? (
             <div className="mx-auto flex w-full max-w-[26rem] flex-col items-center gap-2 rounded-2xl border border-dashed border-line/70 bg-surface/30 px-6 py-10 text-center">
               <span className="flex size-9 items-center justify-center rounded-xl bg-accent/10 text-[15px]" aria-hidden>
