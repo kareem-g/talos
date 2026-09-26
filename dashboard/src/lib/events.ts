@@ -639,14 +639,14 @@ export function applyAgentEvent(
       return true
     }
 
-    /** A config change the agent applied mid-session (recorded in the timeline). */
-    case 'session_config_changed': {
-      const turn = currentTurn(conversation, event)
-      const key = strAny(payload, 'key', 'option_id', 'config_id') ?? 'config'
-      const value = strAny(payload, 'value', 'new_value') ?? 'changed'
-      turn.parts.push({ kind: 'config_changed', key, value })
-      return true
-    }
+    /** A config change (model/mode/effort/permission/…) was applied.
+     *
+     * The authoritative option set is handled live in the store (composer chips,
+     * cross-device sync), and the change itself arrives in the timeline as a
+     * role="system" transcript message so it reads as a centered divider, not an
+     * inline part. Nothing to fold here — replay must not duplicate the marker. */
+    case 'session_config_changed':
+      return false
 
     /** A subagent the agent spawned — first-class lifecycle event. */
     case 'subagent_started': {
@@ -1056,6 +1056,32 @@ function attachPendingContext(message: Message, conversation: Conversation): voi
 }
 
 /**
+ * A lifecycle marker an OLDER daemon broadcast with role "user" (the engine
+ * switch notice). New daemons send role "system"; this catches persisted rows
+ * and live frames from before that fix so they still render as dividers.
+ */
+function isLegacyLifecycleMarker(content: string): boolean {
+  const text = content.trim()
+  return text.startsWith('Engine switched from ') && text.includes('continuing the same session.')
+}
+
+/** Record a lifecycle notice as a standalone system divider row. */
+function pushSystemRow(conversation: Conversation, message: AgentMessage): void {
+  // Close any assistant turn the previous engine left streaming so the marker
+  // reads as its own row and the next engine's output starts a fresh turn.
+  const last = conversation.messages[conversation.messages.length - 1]
+  if (last?.role === 'assistant' && last.streaming) finishTurn(last)
+  conversation.messages.push({
+    id: message.id,
+    role: 'system',
+    parts: [{ kind: 'text', text: message.content, streaming: false }],
+    sequence: 0,
+    createdAt: message.timestamp,
+    streaming: false,
+  })
+}
+
+/**
  * Apply a `Message` frame.
  *
  * The server echoes user input back, so a matching optimistic message is
@@ -1078,6 +1104,13 @@ export function applyMessage(conversation: Conversation, message: AgentMessage):
       attachPendingContext(pending, conversation)
       return true
     }
+    // A lifecycle marker written by an older daemon as a user row — a real,
+    // confirmed echo of typed text always matches an optimistic message above,
+    // so reaching here means it is backend chrome, not user input.
+    if (isLegacyLifecycleMarker(message.content)) {
+      pushSystemRow(conversation, message)
+      return true
+    }
     const row: Message = {
       id: message.id,
       role: 'user',
@@ -1088,6 +1121,13 @@ export function applyMessage(conversation: Conversation, message: AgentMessage):
     }
     attachPendingContext(row, conversation)
     conversation.messages.push(row)
+    return true
+  }
+
+  // A `system` row is a lifecycle notice (engine/model switch, config change,
+  // context compression) that the backend broadcasts alongside its own events.
+  if (message.role === 'system') {
+    pushSystemRow(conversation, message)
     return true
   }
 

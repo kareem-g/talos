@@ -36,15 +36,18 @@ fn discovery_cwd() -> String {
 ///
 /// Every known provider, ready or not. Ready ones sort first.
 pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let custom = {
+    let (custom, api_providers, context_windows) = {
         let config = state.config.read().await;
-        config.settings().agents.providers.clone()
+        (
+            config.settings().agents.providers.clone(),
+            config.settings().agents.api_providers.clone(),
+            config.settings().agents.context_windows.clone(),
+        )
     };
-    let api_providers = {
-        let config = state.config.read().await;
-        config.settings().agents.api_providers.clone()
-    };
-    let providers = state.providers.list(&custom, &discovery_cwd(), &api_providers).await;
+    let providers = state
+        .providers
+        .list(&custom, &discovery_cwd(), &api_providers, &context_windows)
+        .await;
     Json(providers_response(providers))
 }
 
@@ -54,15 +57,18 @@ pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResp
 /// a newly installed CLI or a credential change without restarting the daemon.
 pub async fn refresh_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     state.providers.invalidate().await;
-    let custom = {
+    let (custom, api_providers, context_windows) = {
         let config = state.config.read().await;
-        config.settings().agents.providers.clone()
+        (
+            config.settings().agents.providers.clone(),
+            config.settings().agents.api_providers.clone(),
+            config.settings().agents.context_windows.clone(),
+        )
     };
-    let api_providers = {
-        let config = state.config.read().await;
-        config.settings().agents.api_providers.clone()
-    };
-    let providers = state.providers.list(&custom, &discovery_cwd(), &api_providers).await;
+    let providers = state
+        .providers
+        .list(&custom, &discovery_cwd(), &api_providers, &context_windows)
+        .await;
     Json(providers_response(providers))
 }
 
@@ -71,15 +77,19 @@ pub async fn get_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let custom = {
+    let (custom, api_providers, context_windows) = {
         let config = state.config.read().await;
-        config.settings().agents.providers.clone()
+        (
+            config.settings().agents.providers.clone(),
+            config.settings().agents.api_providers.clone(),
+            config.settings().agents.context_windows.clone(),
+        )
     };
-    let api_providers = {
-        let config = state.config.read().await;
-        config.settings().agents.api_providers.clone()
-    };
-    match state.providers.get(&id, &custom, &discovery_cwd(), &api_providers).await {
+    match state
+        .providers
+        .get(&id, &custom, &discovery_cwd(), &api_providers, &context_windows)
+        .await
+    {
         Some(provider) => (StatusCode::OK, Json(json!({ "provider": provider }))),
         None => (
             StatusCode::NOT_FOUND,
@@ -348,7 +358,7 @@ mod tests {
         }];
 
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&custom, ".", &[]).await;
+        let providers = registry.list(&custom, ".", &[], &HashMap::new()).await;
         let payload = serde_json::to_string(&super::providers_response(providers)).expect("serialize");
 
         assert!(
@@ -366,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn unavailable_providers_are_reported_with_a_remedy() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".", &[]).await;
+        let providers = registry.list(&[], ".", &[], &HashMap::new()).await;
         let response = super::providers_response(providers);
 
         let listed = response["providers"].as_array().expect("providers array");

@@ -1481,8 +1481,6 @@ export function Part({
       return <SearchRow part={part} />
     case 'git_commit':
       return <GitCommitRow part={part} />
-    case 'config_changed':
-      return <ConfigRow part={part} />
     case 'context':
       return <ContextChip part={part} />
     case 'verification':
@@ -1623,19 +1621,6 @@ function GitCommitRow({ part }: { part: Extract<MessagePart, { kind: 'git_commit
         Committed{part.message ? ` — ${part.message}` : simple ? '' : ` ${part.sha}`}
       </span>
       {part.files && part.files.length > 0 ? <span className="shrink-0 font-mono text-[9px] text-ink-3">{part.files.length} files</span> : null}
-    </div>
-  )
-}
-
-function ConfigRow({ part }: { part: Extract<MessagePart, { kind: 'config_changed' }> }) {
-  const simple = useStore((s) => s.timelineDetail === 'simple')
-  if (simple) return null
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
-      <span className="shrink-0 text-ink-3" aria-hidden>⚙</span>
-      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-2">
-        {part.key} → <span className="font-mono text-ink">{part.value}</span>
-      </span>
     </div>
   )
 }

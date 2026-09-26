@@ -408,8 +408,6 @@ function activityFromPart(part: Message['parts'][number]): ActivityEvent | null 
       return { timestamp: '', label: `Search: ${part.query}`, detail: part.results?.[0], kind: 'tool' }
     case 'git_commit':
       return { timestamp: '', label: `Commit ${part.sha}`, detail: part.message, kind: 'file' }
-    case 'config_changed':
-      return { timestamp: '', label: `Config: ${part.key} → ${part.value}`, kind: 'started' }
     default:
       return null
   }

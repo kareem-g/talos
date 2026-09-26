@@ -99,6 +99,7 @@ export async function expandSessionMentions(sessionId: string, text: string): Pr
     try {
       const history = await sessionsApi.history(id)
       const lines = history.messages
+        .filter((m) => m.role !== 'system')
         .map((m) => `${m.role === 'user' ? 'You' : 'Agent'}: ${(m.content ?? '').slice(0, 400)}`)
         .filter((line) => line.length > 3)
       if (lines.length) blocks.push(`[Context from session ${id}:\n${lines.slice(-10).join('\n')}\n]`)

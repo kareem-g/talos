@@ -207,6 +207,34 @@ const Turn = memo(function Turn({
   dim?: number
 }) {
   const simple = useStore((s) => s.timelineDetail === 'simple')
+
+  // A `system` row is a lifecycle notice (engine/model switch, config change,
+  // context compression): one centered line between rules, not a chat bubble.
+  if (message.role === 'system') {
+    const text = message.parts
+      .map((part) => (part.kind === 'text' ? part.text : ''))
+      .join('')
+      .trim()
+    if (!text) return null
+    const time = new Date(message.createdAt)
+    return (
+      <div className="group flex items-center gap-3 py-1">
+        <span aria-hidden className="h-px min-w-8 flex-1 rounded-full bg-line-strong/60" />
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="min-w-0 text-center text-[11px] leading-snug text-ink-3">{text}</span>
+          <time
+            dateTime={message.createdAt}
+            title={Number.isNaN(time.getTime()) ? undefined : time.toLocaleString()}
+            className="shrink-0 font-mono text-[9px] tabular-nums text-ink-3/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          >
+            {Number.isNaN(time.getTime()) ? '' : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </time>
+        </span>
+        <span aria-hidden className="h-px min-w-8 flex-1 rounded-full bg-line-strong/60" />
+      </div>
+    )
+  }
+
   if (message.role === 'user') {
     const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('')
     // Context enrichment stays in the data model (the agent still receives
@@ -532,7 +560,7 @@ export function Timeline({
                 project={project}
                 sessionId={sessionId}
                 onViewPlan={onViewPlan}
-                dim={fadeFor(index)}
+                dim={message.role === 'system' ? undefined : fadeFor(index)}
               />
             </div>
           ))}

@@ -67,8 +67,16 @@ struct Candidate {
     user_defined: bool,
 }
 
+/// One cached sweep: when it ran, the fingerprint of the inputs it ran with,
+/// and its results.
+struct CacheEntry {
+    probed_at: Instant,
+    fingerprint: u64,
+    providers: Vec<ProviderDescriptor>,
+}
+
 pub struct ProviderRegistry {
-    cache: Arc<RwLock<Option<(Instant, Vec<ProviderDescriptor>)>>>,
+    cache: Arc<RwLock<Option<CacheEntry>>>,
 }
 
 impl Default for ProviderRegistry {
@@ -82,15 +90,33 @@ impl ProviderRegistry {
         Self { cache: Arc::new(RwLock::new(None)) }
     }
 
-    /// All known providers, ready or not. Served from cache when fresh.
-    pub async fn list(&self, custom: &[CustomProvider], cwd: &str, api_providers: &[api::ApiProvider]) -> Vec<ProviderDescriptor> {
-        if let Some((probed_at, cached)) = self.cache.read().await.as_ref() {
-            if probed_at.elapsed() < CACHE_TTL {
-                return cached.clone();
+    /// All known providers, ready or not. Served from cache when fresh *and*
+    /// swept with the same inputs.
+    ///
+    /// `context_windows` comes from `[agents.context_windows]` settings and is
+    /// baked into the swept descriptors. The fingerprint check below makes a
+    /// settings edit take effect even when a sweep that started before the
+    /// edit finishes afterwards — without it, that late sweep would
+    /// repopulate the cache with descriptors built from the old map.
+    pub async fn list(
+        &self,
+        custom: &[CustomProvider],
+        cwd: &str,
+        api_providers: &[api::ApiProvider],
+        context_windows: &HashMap<String, u64>,
+    ) -> Vec<ProviderDescriptor> {
+        let fingerprint = sweep_fingerprint(custom, api_providers, context_windows);
+        if let Some(entry) = self.cache.read().await.as_ref() {
+            if entry.probed_at.elapsed() < CACHE_TTL && entry.fingerprint == fingerprint {
+                return entry.providers.clone();
             }
         }
-        let discovered = self.sweep(custom, cwd, api_providers).await;
-        *self.cache.write().await = Some((Instant::now(), discovered.clone()));
+        let discovered = self.sweep(custom, cwd, api_providers, context_windows).await;
+        *self.cache.write().await = Some(CacheEntry {
+            probed_at: Instant::now(),
+            fingerprint,
+            providers: discovered.clone(),
+        });
         discovered
     }
 
@@ -107,14 +133,21 @@ impl ProviderRegistry {
         custom: &[CustomProvider],
         cwd: &str,
         api_providers: &[api::ApiProvider],
+        context_windows: &HashMap<String, u64>,
     ) -> Option<ProviderDescriptor> {
-        self.list(custom, cwd, api_providers)
+        self.list(custom, cwd, api_providers, context_windows)
             .await
             .into_iter()
             .find(|provider| provider.id == id)
     }
 
-    async fn sweep(&self, custom: &[CustomProvider], cwd: &str, api_providers: &[api::ApiProvider]) -> Vec<ProviderDescriptor> {
+    async fn sweep(
+        &self,
+        custom: &[CustomProvider],
+        cwd: &str,
+        api_providers: &[api::ApiProvider],
+        context_windows: &HashMap<String, u64>,
+    ) -> Vec<ProviderDescriptor> {
         let candidates = build_candidates(custom);
         let cwd = cwd.to_string();
 
@@ -137,6 +170,12 @@ impl ProviderRegistry {
         ).await;
         providers.extend(api_descriptors);
 
+        // Backfill the meter's context window for providers that don't report
+        // one — user overrides first, then builtin defaults for known CLIs.
+        for provider in &mut providers {
+            super::context_windows::apply_to_descriptor(provider, context_windows);
+        }
+
         // Ready first, then alphabetical, so the UI's default ordering is useful
         // without the client having to sort.
         providers.sort_by(|a, b| {
@@ -147,6 +186,55 @@ impl ProviderRegistry {
         });
         providers
     }
+}
+
+/// Deterministic fingerprint of the sweep inputs — enough of the provider
+/// config to detect any edit that could change descriptors. Keys are sorted
+/// first so HashMap iteration order can't produce false mismatches.
+fn sweep_fingerprint(
+    custom: &[CustomProvider],
+    api_providers: &[api::ApiProvider],
+    context_windows: &HashMap<String, u64>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut custom_entries: Vec<_> = custom
+        .iter()
+        .map(|p| (p.id.as_str(), p.executable.as_str(), format!("{:?}", p.transport)))
+        .collect();
+    custom_entries.sort();
+    for (id, executable, transport) in custom_entries {
+        id.hash(&mut hasher);
+        executable.hash(&mut hasher);
+        transport.hash(&mut hasher);
+    }
+    let mut api_entries: Vec<_> = api_providers
+        .iter()
+        .map(|p| {
+            (
+                p.id.as_str(),
+                p.api_url.as_str(),
+                format!("{:?}", p.transport),
+                p.models.clone(),
+                p.default_model.clone().unwrap_or_default(),
+            )
+        })
+        .collect();
+    api_entries.sort();
+    for (id, api_url, transport, models, default_model) in api_entries {
+        id.hash(&mut hasher);
+        api_url.hash(&mut hasher);
+        transport.hash(&mut hasher);
+        models.hash(&mut hasher);
+        default_model.hash(&mut hasher);
+    }
+    let mut window_keys: Vec<_> = context_windows.keys().map(String::as_str).collect();
+    window_keys.sort_unstable();
+    for key in window_keys {
+        key.hash(&mut hasher);
+        context_windows[key].hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Merge config-declared providers with the catalog. A user id shadows a catalog
@@ -560,7 +648,7 @@ mod tests {
     #[tokio::test]
     async fn missing_binaries_are_reported_with_a_remedy_not_dropped() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".", &[]).await;
+        let providers = registry.list(&[], ".", &[], &Default::default()).await;
 
         assert_eq!(
             providers.len(),
@@ -585,7 +673,7 @@ mod tests {
     #[tokio::test]
     async fn ready_providers_sort_first() {
         let registry = ProviderRegistry::new();
-        let providers = registry.list(&[], ".", &[]).await;
+        let providers = registry.list(&[], ".", &[], &Default::default()).await;
         let first_unready = providers.iter().position(|p| !p.state.is_ready());
         let last_ready = providers.iter().rposition(|p| p.state.is_ready());
         if let (Some(first_unready), Some(last_ready)) = (first_unready, last_ready) {
@@ -604,11 +692,11 @@ mod tests {
     #[tokio::test]
     async fn cache_is_reused_then_invalidated() {
         let registry = ProviderRegistry::new();
-        let first = registry.list(&[], ".", &[]).await;
+        let first = registry.list(&[], ".", &[], &Default::default()).await;
         assert!(registry.cache.read().await.is_some());
 
         // Second call must not re-probe: identical probe timestamps prove it.
-        let second = registry.list(&[], ".", &[]).await;
+        let second = registry.list(&[], ".", &[], &Default::default()).await;
         assert_eq!(
             first.first().map(|p| p.probed_at),
             second.first().map(|p| p.probed_at),

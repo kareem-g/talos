@@ -216,13 +216,6 @@ export interface GitCommitPart {
   files?: string[]
 }
 
-/** A live config change (model/mode/permission) the agent applied mid-session. */
-export interface ConfigChangedPart {
-  kind: 'config_changed'
-  key: string
-  value: string
-}
-
 /**
  * What the harness injected into a prompt (environment facts, project skills,
  * similar past runs) before it reached the agent. Rendered as a small chip
@@ -285,7 +278,6 @@ export type MessagePart =
   | ProgressPart
   | SearchPart
   | GitCommitPart
-  | ConfigChangedPart
   | BrowserStepPart
   | ImagePart
   | ContextPart
@@ -317,7 +309,11 @@ export interface QueuedMessage {
   createdAt: string
 }
 
-export type MessageRole = 'user' | 'assistant'
+/**
+ * `system` rows are lifecycle notices (engine switch, config change, context
+ * compression) — standalone transcript entries rendered as centered dividers.
+ */
+export type MessageRole = 'user' | 'assistant' | 'system'
 
 /**
  * One turn. An assistant turn accumulates many parts as the agent works;

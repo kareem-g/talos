@@ -432,7 +432,7 @@ function InstallDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-line/60 bg-surface shadow-overlay">
         <div className="flex items-center gap-2 border-b border-white/10 px-5 py-4">
           <div className="flex-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Skill library</p>
@@ -645,7 +645,7 @@ function EditDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-line/60 bg-surface shadow-overlay">
         <div className="flex items-center gap-2 border-b border-white/10 px-5 py-4">
           <div className="flex-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Edit skill</p>

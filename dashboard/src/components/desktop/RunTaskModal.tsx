@@ -50,7 +50,7 @@ export function RunTaskModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Run task in ${room.name}`}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl animate-sheet">
+      <div className="relative flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-line/60 bg-surface shadow-overlay animate-sheet">
         <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.08] px-5 py-4">
           <div className="min-w-0 flex-1">
             <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-white">

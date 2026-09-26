@@ -31,7 +31,9 @@ export interface AgentEvent {
 export interface AgentMessage {
   id: string
   session_id: string
-  role: 'user' | 'assistant'
+  /** `system` rows are lifecycle notices (engine switch, config change, context
+   *  compression) — rendered as centered transcript dividers, not chat bubbles. */
+  role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: string
 }

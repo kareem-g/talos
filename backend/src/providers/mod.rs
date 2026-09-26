@@ -22,6 +22,7 @@
 pub mod acp_probe;
 pub mod api;
 pub mod catalog;
+pub mod context_windows;
 pub mod discovery;
 pub mod native;
 pub mod registry;

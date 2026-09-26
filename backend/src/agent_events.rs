@@ -35,3 +35,15 @@ impl AgentEvent {
         }
     }
 }
+
+/// True when a message is a backend-written lifecycle marker (an engine-switch
+/// notice) rather than something the user typed.
+///
+/// Older daemons broadcast these with role `"user"`, so they were persisted as
+/// user rows in the messages table and the trajectory log. Callers use this to
+/// keep such rows off the model and out of the user-bubble rendering — they are
+/// UI chrome that belongs between turns, not conversation turns.
+pub fn is_lifecycle_marker(content: &str) -> bool {
+    let content = content.trim();
+    content.starts_with("Engine switched from ") && content.contains("continuing the same session.")
+}

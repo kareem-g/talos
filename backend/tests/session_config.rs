@@ -26,7 +26,7 @@ async fn opencode_launch() -> Option<(String, Vec<String>)> {
         return None;
     }
     let provider = ProviderRegistry::new()
-        .list(&[], ".", &[])
+        .list(&[], ".", &[], &Default::default())
         .await
         .into_iter()
         .find(|provider| provider.id == "opencode")?;

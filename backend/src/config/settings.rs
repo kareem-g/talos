@@ -127,6 +127,12 @@ pub struct AgentsConfig {
     /// "follow the parent session's engine".
     #[serde(default)]
     pub builtin: BuiltinEngineDefaults,
+    /// Context-window overrides for providers that don't report one — the
+    /// composer's usage meter has no denominator without them. Keys are
+    /// provider ids, or `provider/model` for per-model granularity; values
+    /// are token counts. Provider-reported windows always win.
+    #[serde(default)]
+    pub context_windows: std::collections::HashMap<String, u64>,
 }
 
 /// Default engines for the built-in harness agents (summarizer, planner,
@@ -426,6 +432,7 @@ impl Default for Settings {
                 providers: vec![],
                 api_providers: vec![],
                 builtin: BuiltinEngineDefaults::default(),
+                context_windows: std::collections::HashMap::new(),
             },
             worktree: WorktreeConfig {
                 enabled: true,

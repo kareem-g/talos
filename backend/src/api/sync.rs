@@ -38,13 +38,17 @@ async fn ready_executables(state: &AppState) -> Vec<(String, String)> {
         let config = state.config.read().await;
         config.settings().agents.api_providers.clone()
     };
+    let context_windows = {
+        let config = state.config.read().await;
+        config.settings().agents.context_windows.clone()
+    };
     let cwd = std::env::current_dir()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
 
     state
         .providers
-        .list(&custom, &cwd, &api_providers)
+        .list(&custom, &cwd, &api_providers, &context_windows)
         .await
         .into_iter()
         .filter(|provider| provider.state.is_ready())

@@ -684,6 +684,15 @@ impl SessionManager {
         .await?
         .into_iter()
         .map(Into::into)
+        // Legacy engine-switch markers were persisted as role "user". Classify
+        // them as system rows on read so they never reach the model or the
+        // user-bubble rendering of a replay — they are timeline chrome.
+        .map(|mut message: AgentMessage| {
+            if message.role == "user" && crate::agent_events::is_lifecycle_marker(&message.content) {
+                message.role = "system".to_string();
+            }
+            message
+        })
         .collect())
     }
 

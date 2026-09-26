@@ -240,6 +240,16 @@ pub async fn get_session_transcripts(
                     .chain(log_events)
                     .collect();
             }
+            // Older daemons recorded engine-switch markers as role "user" in the
+            // trajectory log. Reclassify them as system rows on replay so they
+            // render as centered dividers, not as user bubbles.
+            for message in messages.iter_mut() {
+                if message.role == "user"
+                    && crate::agent_events::is_lifecycle_marker(&message.content)
+                {
+                    message.role = "system".to_string();
+                }
+            }
             // Pending questions/approvals are not in the event log (question_started
             // is broadcast-only), so attach them here to survive a replay.
             let questions = state.session_manager.get_pending_questions(&id).await.unwrap_or_default();
@@ -755,8 +765,8 @@ pub async fn switch_session_engine(
     };
 
     // Relaunch on the same row. `launch_session_engine` broadcasts `marker` as
-    // the chat bubble and sends `prompt` (which carries the digest) to the new
-    // engine, keeping the transcript readable.
+    // a system-divider row (not a user bubble) and sends `prompt` (which
+    // carries the digest) to the new engine, keeping the transcript readable.
     //
     // Re-fetch the row AFTER set_agent: the launcher reads `session.agent` to
     // resolve the provider (API transports resolve from it), so passing the
@@ -2078,11 +2088,12 @@ async fn apply_spawn_body_flags(state: &AppState, session: &crate::sessions::Ses
 /// in-session engine switch, which stops the old engine, rebinds the row to a
 /// new agent, then relaunches through here.
 ///
-/// `initial_user_text`, when given, is what lands in the chat timeline as the
-/// user bubble — distinct from `prompt`, which is the text actually sent to the
-/// engine. The engine switch broadcasts a short "engine changed" marker while
-/// sending the full context digest as the engine prompt, so the transcript
-/// doesn't swallow a giant digest-shaped bubble.
+/// `initial_user_text`, when given, is a backend-written lifecycle marker and
+/// is broadcast to the timeline as a role="system" divider — distinct from
+/// `prompt`, which is the text actually sent to the engine. The engine switch
+/// broadcasts a short "engine changed" marker while sending the full context
+/// digest as the engine prompt, so the transcript doesn't swallow a giant
+/// digest-shaped bubble.
 async fn launch_session_engine(
     state: &AppState,
     session: crate::sessions::Session,
@@ -2104,11 +2115,17 @@ async fn launch_session_engine(
         .or(prompt)
         .filter(|p| !p.trim().is_empty());
     if let Some(raw) = broadcast_text {
+        // `initial_user_text` is a backend-written lifecycle marker (the engine
+        // switch notice), not something the user typed — broadcast it with the
+        // `system` role so the dashboard renders it as a centered transcript
+        // divider instead of a user bubble. Create-with-prompt falls through to
+        // `prompt`, which keeps role `user`.
+        let role = if initial_user_text.is_some() { "system" } else { "user" };
         state.broadcast.broadcast(crate::websocket::WsMessage::Message {
             message: crate::agent_events::AgentMessage {
                 id: uuid::Uuid::new_v4().to_string(),
                 session_id: session.id.clone(),
-                role: "user".to_string(),
+                role: role.to_string(),
                 content: raw.trim().to_string(),
                 timestamp: chrono::Utc::now(),
             },
@@ -2722,9 +2739,10 @@ pub(crate) async fn respawn_claude_with_model(
         let cfg = state.config.read().await;
         let custom = cfg.settings().agents.providers.clone();
         let api_providers = cfg.settings().agents.api_providers.clone();
+        let context_windows = cfg.settings().agents.context_windows.clone();
         drop(cfg);
         let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-        if let Some(provider) = state.providers.get("claude", &custom, &cwd, &api_providers).await {
+        if let Some(provider) = state.providers.get("claude", &custom, &cwd, &api_providers, &context_windows).await {
             let known: std::collections::HashSet<String> = provider
                 .config_options
                 .iter()
@@ -2841,6 +2859,16 @@ pub(crate) async fn respawn_claude_with_model(
             if let Ok(Some(current)) = state.session_manager.get_session(session_id).await {
                 state.broadcast.broadcast(crate::websocket::WsMessage::SessionUpdate { session: current });
             }
+            // The change is real and live: record it in the timeline as a system
+            // marker (and sync the config chips on every device) via the shared
+            // config broadcast.
+            crate::sessions::config::broadcast_config(
+                state,
+                session_id,
+                &crate::providers::types::ConfigApplied::Immediate,
+                &config,
+                Some(("model", model)),
+            );
             tracing::info!(session_id = %session_id, %model, "Claude restarted with new model");
             Ok((crate::providers::types::ConfigApplied::Immediate, config))
         }
@@ -2929,6 +2957,15 @@ pub(crate) async fn respawn_claude_with_effort(
                         option.current_value = Some(level.clone());
                     }
                 }
+                // Live change: record it in the timeline as a system marker and
+                // sync the config chips on every device.
+                crate::sessions::config::broadcast_config(
+                    state,
+                    session_id,
+                    &crate::providers::types::ConfigApplied::Immediate,
+                    &config,
+                    Some((crate::providers::thought::THOUGHT_ID, &level)),
+                );
             }
             state.broadcast.broadcast(crate::websocket::WsMessage::StateChange {
                 session_id: session_id.to_string(),
@@ -4127,6 +4164,7 @@ pub async fn update_settings(
 
     // Built-in agent default engines: agents.builtin.{role} → provider id or
     // null to follow the parent session's engine.
+    let mut providers_stale = false;
     if let Some(agents) = body.get("agents") {
         if let Some(builtin) = agents.get("builtin") {
             let b = &mut cfg.settings_mut().agents.builtin;
@@ -4146,14 +4184,37 @@ pub async fn update_settings(
                 }
             }
         }
+        // Context-window overrides: agents.context_windows → map of
+        // `provider` (or `provider/model`) → tokens. Replaces the whole map,
+        // so an empty object clears every override. Values ≤ 0 are ignored —
+        // a zero window would make the meter divide by nothing. Accepts the
+        // camelCase spelling the dashboard's SettingsPayload serializes to.
+        if let Some(windows) = agents.get("context_windows").or_else(|| agents.get("contextWindows")) {
+            let mut map = std::collections::HashMap::new();
+            if let Some(entries) = windows.as_object() {
+                for (key, value) in entries {
+                    if let Some(tokens) = value.as_u64().filter(|t| *t > 0) {
+                        map.insert(key.clone(), tokens);
+                    }
+                }
+            }
+            cfg.settings_mut().agents.context_windows = map;
+            // Descriptors bake the map in at sweep time; drop the cache so
+            // the next providers read reflects the new windows.
+            providers_stale = true;
+        }
     }
 
     let save_result = cfg.save().await;
-
-    Json(json!({
+    let response = Json(json!({
         "saved": save_result.is_ok(),
         "settings": cfg.settings(),
-    }))
+    }));
+    drop(cfg);
+    if providers_stale {
+        state.providers.invalidate().await;
+    }
+    response
 }
 
 // ===== ATTACHMENTS =====

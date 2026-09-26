@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Check, ChevronDown, Chip, Dots, DropdownList, Search, SectionLabel, TextField } from '../ui'
-import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type BuiltinEngineSettings, type CloudflareSettings } from '@/lib/api'
+import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type BuiltinEngineSettings, type CloudflareSettings, type ContextWindowSettings } from '@/lib/api'
 import { ACCENT_PRESETS, applyTheme, readStoredTheme, type ThemeMode } from '@/lib/theme'
 import { useStore } from '@/store'
 import { cn } from '@/lib/format'
@@ -123,6 +123,8 @@ export function SettingsSection() {
       <ApiProvidersSection />
 
       <BuiltinAgentsSection />
+
+      <ContextWindowsSection />
 
       <AppearanceSection />
 
@@ -881,6 +883,113 @@ function BuiltinAgentsSection() {
         <div className="mt-3 flex items-center gap-2">
           <Button variant="primary" onClick={() => void save()} disabled={saving} className="flex-1">
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save engines'}
+          </Button>
+        </div>
+      </section>
+    </>
+  )
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${+(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`
+  return String(tokens)
+}
+
+/**
+ * Context-window fallbacks. The usage meter divides live token usage by the
+ * model's window; providers that report one (most API model endpoints) are
+ * used as-is, and this card fills the gap for the rest — user overrides on
+ * top of the built-in CLI defaults the backend already applies.
+ */
+function ContextWindowsSection() {
+  const providers = useStore((s) => s.providers)
+  const loadProviders = useStore((s) => s.loadProviders)
+  const ready = providers.filter((p) => p.state === 'ready')
+  const [overrides, setOverrides] = useState<ContextWindowSettings>({})
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    settingsApi
+      .get()
+      .then((res) => {
+        if (cancelled) return
+        const map = res.settings.agents?.context_windows ?? {}
+        setOverrides(map)
+        setDrafts(Object.fromEntries(Object.entries(map).map(([key, tokens]) => [key, String(tokens)])))
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function save() {
+    setSaving(true)
+    try {
+      const map: ContextWindowSettings = {}
+      for (const [key, raw] of Object.entries(drafts)) {
+        const tokens = Number.parseInt(raw.replace(/[,\s_]/g, ''), 10)
+        if (Number.isFinite(tokens) && tokens > 0) map[key] = tokens
+      }
+      await settingsApi.update({ agents: { context_windows: map } })
+      setOverrides(map)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+      // Descriptors bake the map in at probe time — re-probe so the meters
+      // reflect the new windows without a daemon restart.
+      void loadProviders(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <SectionLabel>Context windows</SectionLabel>
+      <section className="rounded-card border border-line bg-surface p-3.5 shadow-card">
+        <p className="text-[11px] leading-[1.6] text-ink-3">
+          The session meter measures usage against the model's context window. Providers that
+          report one are used as-is; well-known CLIs get a built-in default. Set a fallback for
+          the rest so their meter has a size to measure against.
+        </p>
+        <div className="mt-3 flex flex-col gap-2.5">
+          {ready.map((provider) => {
+            const effective = provider.configOptions.find((o) => o.id === 'context_window')?.currentValue
+            const tokens = effective ? Number.parseInt(effective, 10) : NaN
+            const overridden = overrides[provider.id] !== undefined
+            return (
+              <label key={provider.id} className="flex items-center gap-3">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] text-ink">{provider.name}</span>
+                  <span className="text-[10px] text-zinc-600">
+                    {Number.isFinite(tokens) && tokens > 0
+                      ? `${overridden ? 'Override' : 'Default'} · ${formatTokens(tokens)} tokens`
+                      : 'No window reported'}
+                  </span>
+                </span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  step={1000}
+                  value={drafts[provider.id] ?? ''}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [provider.id]: e.target.value }))}
+                  placeholder="Auto"
+                  aria-label={`Context window override for ${provider.name}`}
+                  className="h-9 w-32 shrink-0 rounded-xl border border-white/10 bg-black/30 px-3 text-right font-mono text-[12px] text-white outline-none transition-colors placeholder:text-zinc-600 hover:border-white/15 focus:border-white/20 focus:bg-black/40"
+                />
+              </label>
+            )
+          })}
+          {ready.length === 0 ? <p className="text-[11px] text-zinc-600">No ready providers.</p> : null}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Button variant="primary" onClick={() => void save()} disabled={saving} className="flex-1">
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save windows'}
           </Button>
         </div>
       </section>

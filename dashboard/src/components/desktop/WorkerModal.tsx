@@ -114,7 +114,7 @@ export function WorkerModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title ?? 'New worker'}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#241f1a] shadow-2xl animate-sheet">
+      <div className="relative flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-line/60 bg-surface shadow-overlay animate-sheet">
         {/* Header */}
         <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.08] px-5 py-4">
           <WorkerAvatar name={trimmed || '?'} avatar={{ gradient, ...(emoji ? { emoji } : {}) }} size={44} ring />

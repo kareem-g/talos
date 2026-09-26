@@ -64,6 +64,18 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
 
     if let Some(mut options) = state.acp_manager.config_options(session_id).await {
         crate::providers::thought::collapse_reasoning(&mut options);
+        // ACP agents never report a context window — backfill it so the
+        // meter has a denominator (user override, else builtin default).
+        let context_windows = {
+            let config = state.config.read().await;
+            config.settings().agents.context_windows.clone()
+        };
+        crate::providers::context_windows::ensure_session_option(
+            &mut options,
+            &session.agent,
+            None,
+            &context_windows,
+        );
         return Ok(SessionConfig {
             session_id: session_id.to_string(),
             agent: session.agent,
@@ -91,16 +103,21 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
         false
     };
     if is_claude_live {
-        let custom = {
+        let (custom, api_providers, context_windows) = {
             let config = state.config.read().await;
-            config.settings().agents.providers.clone()
-        };
-        let api_providers = {
-            let config = state.config.read().await;
-            config.settings().agents.api_providers.clone()
+            (
+                config.settings().agents.providers.clone(),
+                config.settings().agents.api_providers.clone(),
+                config.settings().agents.context_windows.clone(),
+            )
         };
         let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-        if let Some(mut provider) = state.providers.get(&session.agent, &custom, &cwd, &api_providers).await {
+        if let Some(mut provider) =
+            state
+                .providers
+                .get(&session.agent, &custom, &cwd, &api_providers, &context_windows)
+                .await
+        {
             // Overlay any pending model choice so the chip shows what will run next,
             // and mark it live so the UI doesn't show "applies next turn".
             if let Ok(pending) = state.session_manager.pending_config(session_id).await {
@@ -116,6 +133,12 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
             let transport = provider.transport;
             let mut options = provider.config_options;
             crate::providers::thought::collapse_reasoning(&mut options);
+            crate::providers::context_windows::ensure_session_option(
+                &mut options,
+                &session.agent,
+                None,
+                &context_windows,
+            );
             return Ok(SessionConfig {
                 session_id: session_id.to_string(),
                 agent: session.agent.clone(),
@@ -130,16 +153,19 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
     // Not a live ACP or Claude session: describe what the provider offers so a picker can
     // still be rendered, honestly labelled as not-live.
     // Overlay any pending choices so a model set while stopped survives a refresh.
-    let custom = {
+    let (custom, api_providers, context_windows) = {
         let config = state.config.read().await;
-        config.settings().agents.providers.clone()
-    };
-    let api_providers = {
-        let config = state.config.read().await;
-        config.settings().agents.api_providers.clone()
+        (
+            config.settings().agents.providers.clone(),
+            config.settings().agents.api_providers.clone(),
+            config.settings().agents.context_windows.clone(),
+        )
     };
     let cwd = session.project.clone().unwrap_or_else(|| ".".to_string());
-    let provider_opt = state.providers.get(&session.agent, &custom, &cwd, &api_providers).await;
+    let provider_opt = state
+        .providers
+        .get(&session.agent, &custom, &cwd, &api_providers, &context_windows)
+        .await;
     let transport = provider_opt.as_ref().map(|p| p.transport).unwrap_or(Transport::Pty);
     let mut options = provider_opt.map(|p| p.config_options).unwrap_or_default();
     if let Ok(pending) = state.session_manager.pending_config(session_id).await {
@@ -173,6 +199,12 @@ pub async fn read_config(state: &AppState, session_id: &str) -> Result<SessionCo
         }
     }
     crate::providers::thought::collapse_reasoning(&mut options);
+    crate::providers::context_windows::ensure_session_option(
+        &mut options,
+        &session.agent,
+        None,
+        &context_windows,
+    );
     Ok(SessionConfig {
         session_id: session_id.to_string(),
         agent: session.agent,
@@ -230,7 +262,7 @@ pub async fn apply_config(
             option.current_value = Some(value.to_string());
         }
         let applied = ConfigApplied::Immediate;
-        broadcast_config(state, session_id, &applied, &config);
+        broadcast_config(state, session_id, &applied, &config, Some(("permission_mode", value)));
         return Ok((applied, config));
     }
 
@@ -256,7 +288,7 @@ pub async fn apply_config(
         let applied = crate::providers::types::ConfigApplied::NextRun {
             reason: "Model applies the next time this session starts (press Resume).".to_string(),
         };
-        broadcast_config(state, session_id, &applied, &config);
+        broadcast_config(state, session_id, &applied, &config, Some(("model", value)));
         return Ok((applied, config));
     }
 
@@ -340,7 +372,7 @@ pub async fn apply_config(
         }
     }
 
-    broadcast_config(state, session_id, &applied, &config);
+    broadcast_config(state, session_id, &applied, &config, Some((config_id, value)));
     Ok((applied, config))
 }
 
@@ -361,7 +393,7 @@ async fn apply_thought(
                 session.agent
             ),
         };
-        broadcast_config(state, session_id, &applied, &current);
+        broadcast_config(state, session_id, &applied, &current, None);
         return Ok((applied, current));
     }
 
@@ -387,7 +419,7 @@ async fn apply_thought(
         let applied = ConfigApplied::Unsupported {
             reason: format!("{} does not support a Thought level.", current.agent),
         };
-        broadcast_config(state, session_id, &applied, &current);
+        broadcast_config(state, session_id, &applied, &current, None);
         return Ok((applied, current));
     }
 
@@ -408,7 +440,7 @@ async fn apply_thought(
     if let Some(option) = config.options.iter_mut().find(|option| option.id == thought_id) {
         option.current_value = Some(value.to_string());
     }
-    broadcast_config(state, session_id, &applied, &config);
+    broadcast_config(state, session_id, &applied, &config, Some((thought_id, value)));
     Ok((applied, config))
 }
 
@@ -484,7 +516,7 @@ async fn apply_acp_thought(
         Ok(_) => {
             let config = read_config(state, session_id).await?;
             let applied = ConfigApplied::Immediate;
-            broadcast_config(state, session_id, &applied, &config);
+            broadcast_config(state, session_id, &applied, &config, Some((&native.id, &native_value)));
             Ok((applied, config))
         }
         Err(error) => {
@@ -496,7 +528,7 @@ async fn apply_acp_thought(
             };
             let applied = ConfigApplied::Unsupported { reason };
             let config = read_config(state, session_id).await?;
-            broadcast_config(state, session_id, &applied, &config);
+            broadcast_config(state, session_id, &applied, &config, None);
             Ok((applied, config))
         }
     }
@@ -541,7 +573,10 @@ async fn apply_acp_config(
                 // into. Output is still recorded and viewable.
                 interactive_terminal: false,
             };
-            broadcast_config(state, session_id, &applied, &config);
+            // The marker shows what the agent reports as active — the real
+            // value, which may differ from what we requested.
+            let actual_value = actual.as_deref().unwrap_or(value);
+            broadcast_config(state, session_id, &applied, &config, Some((config_id, actual_value)));
             Ok((applied, config))
         }
         Err(error) => {
@@ -549,7 +584,7 @@ async fn apply_acp_config(
             // request was well-formed, the provider declined.
             let applied = ConfigApplied::Unsupported { reason: agent_message(&error) };
             let config = read_config(state, session_id).await?;
-            broadcast_config(state, session_id, &applied, &config);
+            broadcast_config(state, session_id, &applied, &config, None);
             Ok((applied, config))
         }
     }
@@ -570,16 +605,61 @@ fn agent_message(error: &crate::AgentDeckError) -> String {
     }
 }
 
+/// Turn a config id like `permission_mode` into a readable dimension name.
+fn pretty_config_id(id: &str) -> String {
+    id.split(['_', '-'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One line for the timeline when a config dimension changes, e.g.
+/// "Mode changed to Plan" — mirrors the engine-switch system marker so the
+/// two read as the same kind of event. `value` is shown as the option's own
+/// choice label when one exists, falling back to the raw value (booleans
+/// read as on/off).
+fn config_notice_text(config: &SessionConfig, id: &str, value: &str) -> String {
+    let option = config.options.iter().find(|option| option.id == id);
+    let dimension = option
+        .filter(|option| !option.name.trim().is_empty())
+        .map(|option| option.name.trim().to_string())
+        .unwrap_or_else(|| pretty_config_id(id));
+    let shown = option
+        .and_then(|option| option.choices.iter().find(|choice| choice.value == value))
+        .filter(|choice| !choice.name.trim().is_empty())
+        .map(|choice| choice.name.trim().to_string())
+        .unwrap_or_else(|| match value {
+            "true" => "on".to_string(),
+            "false" => "off".to_string(),
+            other => other.to_string(),
+        });
+    format!("{dimension} changed to {shown}")
+}
+
 /// Tell every connected client about the change.
 ///
 /// This is what makes a model switch on a phone appear on a desktop already
 /// viewing the same session — the backend stays the single source of truth and
 /// clients react rather than poll.
-fn broadcast_config(
+///
+/// When `change` is given and the change actually applied (`applied` is not
+/// `Unsupported`), a second broadcast follows as a role="system" transcript
+/// message so the timeline records the change as a centered divider row — the
+/// same shape the engine-switch marker uses. The daemon persists that message,
+/// so reopened sessions replay it in place.
+pub(crate) fn broadcast_config(
     state: &AppState,
     session_id: &str,
     applied: &ConfigApplied,
     config: &SessionConfig,
+    change: Option<(&str, &str)>,
 ) {
     state.broadcast.broadcast_agent_event(crate::agent_events::AgentEvent::new(
         session_id,
@@ -591,6 +671,23 @@ fn broadcast_config(
             "source": "agentdeck",
         }),
     ));
+    if matches!(applied, ConfigApplied::Unsupported { .. }) {
+        return;
+    }
+    if let Some((id, value)) = change {
+        let text = config_notice_text(config, id, value);
+        if !text.trim().is_empty() {
+            state.broadcast.broadcast(crate::websocket::WsMessage::Message {
+                message: crate::agent_events::AgentMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    session_id: session_id.to_string(),
+                    role: "system".to_string(),
+                    content: text,
+                    timestamp: chrono::Utc::now(),
+                },
+            });
+        }
+    }
 }
 
 #[cfg(test)]

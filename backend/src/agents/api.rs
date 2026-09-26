@@ -268,12 +268,16 @@ async fn run_api_turn(
     // Build messages array from history + current prompt. History is read
     // *after* the broadcast above, but persistence is async, so the current
     // prompt will not yet be in `get_messages` — ensure it is appended.
+    // role="system" rows are transcript-only lifecycle markers (engine switch,
+    // config change) — they must not ship to the model, where an Anthropic
+    // endpoint would fold them into the top-level system prompt.
     let mut messages: Vec<Value> = state
         .session_manager
         .get_messages(&session.id)
         .await
         .unwrap_or_default()
         .into_iter()
+        .filter(|m| m.role != "system")
         .map(|m| json!({ "role": m.role, "content": m.content }))
         .collect();
     // Long chats: keep the newest prompts, fold the rest into one note, so a

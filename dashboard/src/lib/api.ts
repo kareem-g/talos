@@ -1014,6 +1014,9 @@ export interface BuiltinEngineSettings {
   worker?: string | null
 }
 
+/** `[agents.context_windows]` — provider (or `provider/model`) → token budget. */
+export type ContextWindowSettings = Record<string, number>
+
 export interface SettingsPayload {
   tunnel?: {
     cloudflare?: {
@@ -1024,12 +1027,19 @@ export interface SettingsPayload {
   }
   agents?: {
     builtin?: BuiltinEngineSettings
+    /** Serialized snake_case, matching the backend's Settings struct. */
+    context_windows?: ContextWindowSettings
   }
 }
 
 export const settingsApi = {
   get: () =>
-    request<{ settings: { tunnel: TunnelSettings; agents?: { builtin?: BuiltinEngineSettings } } }>('/api/settings'),
+    request<{
+      settings: {
+        tunnel: TunnelSettings
+        agents?: { builtin?: BuiltinEngineSettings; context_windows?: ContextWindowSettings }
+      }
+    }>('/api/settings'),
   update: (body: SettingsPayload) =>
     request<{ ok: boolean }>('/api/settings', {
       method: 'PUT',
