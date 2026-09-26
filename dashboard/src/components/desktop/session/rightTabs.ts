@@ -7,7 +7,7 @@
  */
 
 import type { LucideIcon } from 'lucide-react'
-import { Bot, FileCode2, FileDiff, Files, Flag, Globe2, Map as MapIcon, MessagesSquare, SquareTerminal, Users, Waypoints } from 'lucide-react'
+import { Bot, FileDiff, Files, Flag, Folder, Globe2, Map as MapIcon, MessagesSquare, SquareTerminal, Users, Waypoints } from 'lucide-react'
 
 export type RightTabType =
   | 'browser'
@@ -16,11 +16,12 @@ export type RightTabType =
   | 'git-diff'
   | 'git-files'
   | 'goal'
+  | 'files'
+  | 'projects'
   | 'subsessions'
   | 'side'
   | 'rooms'
   | 'terminal'
-  | 'file'
 
 export interface RightTabMeta {
   id: RightTabType
@@ -37,11 +38,12 @@ export const RIGHT_TABS: RightTabMeta[] = [
   { id: 'git-files', label: 'Git files', description: 'Changed files, statuses and worktrees.', defaultOpen: false, icon: Files },
   { id: 'goal', label: 'Goal', description: 'Session objective and plan progress.', defaultOpen: true, icon: Flag },
   { id: 'browser', label: 'Browser', description: 'Inline webview for a URL.', defaultOpen: false, icon: Globe2 },
+  { id: 'files', label: 'Files', description: 'The workspace file tree — pick a file to preview it.', defaultOpen: false, icon: Files },
+  { id: 'projects', label: 'Projects', description: 'Every workspace and the sessions in it — switch from here.', defaultOpen: false, icon: Folder },
   { id: 'subsessions', label: 'Sub-sessions', description: 'Other sessions in this workspace — switch here.', defaultOpen: false, icon: Users },
   { id: 'side', label: 'Side', description: 'A side session you chat with in parallel (/side, /btw).', defaultOpen: false, icon: MessagesSquare },
   { id: 'rooms', label: 'Rooms', description: 'Rooms of same-config workers you can fan tasks out to (/orchestrator).', defaultOpen: false, icon: Waypoints },
   { id: 'terminal', label: 'Terminal', description: 'Live terminal for sessions with an interactive shell.', defaultOpen: false, icon: SquareTerminal },
-  { id: 'file', label: 'Files', description: 'Preview a workspace file picked in the sidebar explorer.', defaultOpen: false, icon: FileCode2 },
 ]
 
 export const RIGHT_TAB_BY_ID: Record<RightTabType, RightTabMeta> = Object.fromEntries(

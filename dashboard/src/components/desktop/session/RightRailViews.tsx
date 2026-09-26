@@ -17,8 +17,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity as ActivityIcon,
+  ChevronRight,
   FileText,
   Flag,
+  Folder,
   Globe2,
   Loader2,
   MessagesSquare,
@@ -29,11 +31,13 @@ import {
 } from 'lucide-react'
 import { useStore, getConversation, useConversation } from '@/store'
 import { serveApi, workspaceApi } from '@/lib/api'
-import { closeFile, useOpenFile } from '@/lib/fileViewer'
-import { cn } from '@/lib/format'
+import { closeFile, openFile, useOpenFile } from '@/lib/fileViewer'
+import { basename, cn, relativeTime } from '@/lib/format'
 import { mentionedWorkers, useActiveRoomId, useRooms, runRoomTask } from '@/lib/rooms'
 import { getSideSessionId } from '@/lib/sideSession'
 import { RoomAvatarStack, WorkerAvatar } from '../RoomAvatars'
+import { FileExplorer } from '../FileExplorer'
+import { isInternalSession } from '@/lib/sessionState'
 import type { Session } from '@/types/session'
 import { GitWorkspaceView } from './GitWorkspaceView'
 import { Timeline } from '@/components/Timeline'
@@ -1324,6 +1328,181 @@ export function FileView({ session }: { session: Session }) {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/* ── Files ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Files — the workspace file tree with inline preview, the old sidebar
+ * Explorer + right-pane File tab restructured into one tab: browse the tree,
+ * and picking a file previews it in place (back returns to the tree).
+ */
+export function FilesView({ session }: { session: Session }) {
+  const open = useOpenFile()
+  const root = session.project ?? ''
+
+  if (!root) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-6 text-center">
+        <FileText size={18} className="text-ink-3" />
+        <p className="text-[12px] font-medium text-ink-2">No workspace</p>
+        <p className="max-w-[26ch] text-[11px] leading-[1.6] text-ink-3">
+          Files appear here once this session is tied to a project folder.
+        </p>
+      </div>
+    )
+  }
+
+  if (open) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <button
+          type="button"
+          onClick={closeFile}
+          className="flex shrink-0 items-center gap-1.5 border-b border-line/40 bg-inset px-3 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
+        >
+          <ChevronRight size={11} className="rotate-180 text-ink-3" aria-hidden />
+          Files
+          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">{open.name}</span>
+        </button>
+        <FileView session={session} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ViewHeader
+        eyebrow={`Files · ${basename(root)}`}
+        right={
+          <span className="font-mono text-[9.5px] tabular-nums text-ink-3">{root}</span>
+        }
+      />
+      <div className="scroll-thin min-h-0 flex-1 overflow-auto">
+        <FileExplorer
+          root={root}
+          selectedPath={null}
+          onOpenFile={(path) => openFile(root, path)}
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ── Projects ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Projects — every workspace and the sessions in it, the old sidebar's
+ * workspace picker as a rail tab: pick a project to see its sessions, open
+ * one to jump straight into it.
+ */
+export function ProjectsView({
+  session,
+  onOpenSession,
+}: {
+  session: Session
+  onOpenSession?: (sessionId: string) => void
+}) {
+  const sessions = useStore((state) => state.sessions)
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(session.project ? [session.project] : ['__inbox__']),
+  )
+
+  const workspaces = useMemo(() => {
+    const grouped = new Map<string, Session[]>()
+    for (const candidate of sessions) {
+      if (candidate.status === 'archived' || isInternalSession(candidate)) continue
+      const key = candidate.project ?? '__inbox__'
+      const list = grouped.get(key) ?? []
+      list.push(candidate)
+      grouped.set(key, list)
+    }
+    return [...grouped.entries()]
+      .map(([key, list]) => ({
+        key,
+        name: key === '__inbox__' ? 'Inbox' : basename(key),
+        full: key === '__inbox__' ? 'No folder — inbox' : key,
+        count: list.length,
+        sessions: list.sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+      }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  }, [sessions])
+
+  function toggle(key: string) {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ViewHeader
+        eyebrow="Projects"
+        right={<span className="font-mono text-[9.5px] tabular-nums text-ink-3">{workspaces.length}</span>}
+      />
+      <div className="scroll-thin min-h-0 flex-1 overflow-auto p-1.5">
+        {workspaces.length === 0 ? (
+          <p className="px-2 py-4 text-center text-[11px] text-ink-3">
+            No projects yet. Create a task to start one.
+          </p>
+        ) : (
+          workspaces.map((workspace) => {
+            const open = expanded.has(workspace.key)
+            return (
+              <div key={workspace.key} className="mb-1">
+                <button
+                  type="button"
+                  onClick={() => toggle(workspace.key)}
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-hover-2"
+                >
+                  <ChevronRight
+                    size={12}
+                    className={cn('shrink-0 text-ink-3 transition-transform duration-150', open && 'rotate-90')}
+                    aria-hidden
+                  />
+                  <Folder size={13} className="shrink-0 text-ink-3" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+                    {workspace.name}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink-3">
+                    {workspace.count}
+                  </span>
+                </button>
+                {open ? (
+                  <div className="mb-1 ml-[22px] border-l border-line/50 pl-2">
+                    {workspace.sessions.map((candidate) => {
+                      const active = candidate.id === session.id
+                      return (
+                        <button
+                          key={candidate.id}
+                          type="button"
+                          onClick={() => onOpenSession?.(candidate.id)}
+                          title={candidate.name}
+                          className={cn(
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                            active ? 'bg-hover text-ink' : 'text-ink-2 hover:bg-hover-2 hover:text-ink',
+                          )}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[11.5px]">{candidate.name}</span>
+                          <span className="shrink-0 font-mono text-[9px] text-ink-3">
+                            {relativeTime(candidate.updated_at).replace(' ago', '')}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 }

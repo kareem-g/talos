@@ -17,6 +17,7 @@ import {
   History as HistoryIcon,
   Home,
   KeyRound,
+  Plus,
   SlidersHorizontal,
   Wrench,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ import { cn } from '@/lib/format'
 import { isPaired } from '@/lib/pairing'
 import { isInternalSession } from '@/lib/sessionState'
 import { useStore } from '@/store'
+import type { ConnectionState } from '@/types/protocol'
 import type { Session } from '@/types/session'
 
 export type NavPage = 'home' | 'agents' | 'browsers' | 'history' | 'usage' | 'config'
@@ -88,15 +90,19 @@ export function AppNav({
   selection,
   onNavigate,
   onOpenSession,
+  onNewTask,
   activeSessionId,
 }: {
   selection: NavSelection
   onNavigate: (page: NavPage) => void
   onOpenSession: (sessionId: string) => void
+  /** Start a new session and open it. */
+  onNewTask: () => void
   /** Session open in the center pane — the History row highlights instead. */
   activeSessionId?: string
 }) {
   const sessions = useStore((state) => state.sessions)
+  const connection = useStore((state) => state.connection)
   const [copied, setCopied] = useState(false)
 
   const history = sessions
@@ -121,6 +127,18 @@ export function AppNav({
       {/* Brand */}
       <div className="flex h-14 shrink-0 items-center border-b border-line/50 px-3">
         <BrandMark />
+      </div>
+
+      {/* New task — the rail's primary action, always one tap away. */}
+      <div className="shrink-0 px-3 pt-3">
+        <button
+          type="button"
+          onClick={onNewTask}
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-line/60 bg-surface text-[12.5px] font-medium text-ink shadow-hairline transition-colors hover:bg-hover-2"
+        >
+          <Plus size={14} strokeWidth={2.2} />
+          New task
+        </button>
       </div>
 
       {/* Destinations */}
@@ -232,26 +250,59 @@ export function AppNav({
         </div>
 
         {/* Device profile — this app is local-first; the card names the machine,
-            not an account. */}
+            not an account. The connection state lives here too: it is the
+            device's link to the daemon, so it belongs on the device. */}
         <div className="px-3 py-3">
-          <div className="flex items-center gap-2.5 rounded-control border border-line/60 bg-surface px-2.5 py-2 shadow-hairline">
-            <span
-              className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/15 font-mono text-[11px] font-semibold text-accent"
-              aria-hidden
-            >
-              A
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-medium text-ink">Local device</span>
-              <span className="block truncate text-[10px] text-ink-3">
-                {isPaired() ? 'Paired · this machine' : 'Not paired'}
+          <div className="rounded-control border border-line/60 bg-surface px-2.5 py-2 shadow-hairline">
+            <div className="flex items-center gap-2.5">
+              <span
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/15 font-mono text-[11px] font-semibold text-accent"
+                aria-hidden
+              >
+                A
               </span>
-            </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] font-medium text-ink">Local device</span>
+                <span className="block truncate text-[10px] text-ink-3">
+                  {isPaired() ? 'Paired · this machine' : 'Not paired'}
+                </span>
+              </span>
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 border-t border-line/50 pt-2">
+              <span className={cn('size-1.5 shrink-0 rounded-full', connectionDot(connection))} aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink-3">
+                {connectionLabel(connection)}
+              </span>
+            </div>
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+/** Connection tone: green when live, orange while connecting, red otherwise. */
+function connectionDot(state: ConnectionState): string {
+  if (state === 'connected') return 'bg-green'
+  if (state === 'connecting' || state === 'reconnecting') return 'bg-orange breathe'
+  return 'bg-red/70'
+}
+
+function connectionLabel(state: ConnectionState): string {
+  switch (state) {
+    case 'connected':
+      return 'Connected to daemon'
+    case 'connecting':
+      return 'Connecting…'
+    case 'reconnecting':
+      return 'Reconnecting…'
+    case 'unauthorized':
+      return 'Not paired'
+    case 'error':
+      return 'Connection error'
+    default:
+      return 'Offline'
+  }
 }
 
 /** Compact day label for the rail's History rows: Today / Yesterday / date. */

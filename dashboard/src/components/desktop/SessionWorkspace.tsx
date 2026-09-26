@@ -255,7 +255,7 @@ export function SessionWorkspace({
             onOpenFile={(project, path) => {
               openFile(project, path)
               if (!rightOpen) toggleRight()
-              rightRailRef.current?.openTab('file')
+              rightRailRef.current?.openTab('files')
             }}
             searchRef={searchRef}
           />

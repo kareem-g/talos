@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { SlidersHorizontal } from 'lucide-react'
 import { Button, Check, ChevronDown, Chip, Dots, DropdownList, Search, SectionLabel, TextField } from '../ui'
 import { apiProvidersApi, settingsApi, tunnelApi, type ApiProviderConfig, type BuiltinEngineSettings, type CloudflareSettings, type ContextWindowSettings } from '@/lib/api'
 import { ACCENT_PRESETS, applyTheme, readStoredTheme, type ThemeMode } from '@/lib/theme'
@@ -93,10 +94,10 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Esc', 'Close panel / back'],
 ]
 
-export function SettingsSection() {
+export function SettingsSection({ page = false }: { page?: boolean }) {
   const info = useSettings()
 
-  return (
+  const content = (
     <div className="flex flex-col gap-4">
       <SectionLabel>How it works</SectionLabel>
       <section className="rounded-card border border-line bg-surface p-3.5 shadow-card">
@@ -155,6 +156,26 @@ export function SettingsSection() {
           file — see docs/TUNNELS.md and docs/MCP.md in the repository.
         </p>
       </section>
+    </div>
+  )
+
+  /* Home page: content only — StationHome supplies its own section heading
+     and the 1280px grid. The Configuration destination: the same centered
+     column as every other nav page, with a matching header. */
+  if (!page) return content
+  return (
+    <div className="mx-auto w-full max-w-[720px] px-4 py-6 sm:px-6">
+      <header className="mb-5 flex items-center gap-2">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-accent-tint">
+          <SlidersHorizontal size={14} className="text-accent" />
+        </span>
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Configuration</h1>
+      </header>
+      <p className="-mt-3 mb-5 text-[12.5px] leading-relaxed text-ink-3">
+        Tunnels, providers, helper agents, context windows, and how the station
+        looks and behaves. Everything saves to the config file on this machine.
+      </p>
+      {content}
     </div>
   )
 }

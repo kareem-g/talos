@@ -13,7 +13,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Menu } from 'lucide-react'
-import { Dot } from './ui'
 import LoadingState from './LoadingState'
 import { AppNav, type NavPage } from './AppNav'
 import { SessionChat } from './SessionChat'
@@ -29,7 +28,6 @@ import { ensureSessionLoaded } from '@/lib/rooms'
 import { useStore } from '@/store'
 import type { Route } from '@/lib/route'
 import type { Session } from '@/types/session'
-import type { ConnectionState } from '@/types/protocol'
 
 /** Matches Tailwind's `lg` breakpoint. */
 function useIsDesktop(): boolean {
@@ -58,33 +56,6 @@ function BrandMark({ compact }: { compact?: boolean }) {
   )
 }
 
-/** Connection indicator — every state is named. */
-function ConnectionPill({ state }: { state: ConnectionState }) {
-  const labels: Record<ConnectionState, string> = {
-    idle: 'Offline',
-    connecting: 'Connecting',
-    connected: 'Connected',
-    reconnecting: 'Reconnecting',
-    disconnected: 'Disconnected',
-    offline: 'Offline',
-    unauthorized: 'Not paired',
-    error: 'Connection error',
-  }
-  const tone =
-    state === 'connected' ? 'green' : state === 'connecting' || state === 'reconnecting' ? 'orange' : 'red'
-  const pulse = state === 'connecting' || state === 'reconnecting'
-  return (
-    <span
-      role="status"
-      title={labels[state]}
-      className="inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface/80 px-2.5 py-1 text-[11px] text-ink-2"
-    >
-      <Dot tone={tone} pulse={pulse} />
-      {labels[state]}
-    </span>
-  )
-}
-
 export function AppShell({
   route,
   navigate,
@@ -96,7 +67,6 @@ export function AppShell({
 }) {
   const sessions = useStore((state) => state.sessions)
   const sessionsLoading = useStore((state) => state.sessionsLoading)
-  const connection = useStore((state) => state.connection)
   const isDesktop = useIsDesktop()
 
   const [page, setPage] = useState<NavPage>('home')
@@ -168,6 +138,17 @@ export function AppShell({
     })
   }, [])
 
+  /** The rail's "+ New task": first ready provider, then straight into it. */
+  const newTask = useCallback(() => {
+    const state = useStore.getState()
+    const provider = state.providers.find((candidate) => candidate.state === 'ready') ?? state.providers[0]
+    if (!provider) return
+    void state.createSession({ agent: provider.id }).then((session) => {
+      setPage('home')
+      navigate({ name: 'session', sessionId: session.id })
+    })
+  }, [navigate])
+
   /* ── Center pane content ─────────────────────────────────────────────── */
   const center = inSession && selected ? (
     <SessionChat
@@ -196,6 +177,7 @@ export function AppShell({
             selection={inSession ? 'session' : page}
             onNavigate={goPage}
             onOpenSession={openSession}
+            onNewTask={newTask}
             activeSessionId={sessionRoute}
           />
         </aside>
@@ -239,7 +221,7 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-line/50 px-3">
+      <header className="flex h-14 shrink-0 items-center border-b border-line/50 px-3">
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -251,12 +233,12 @@ export function AppShell({
           </button>
           <BrandMark compact />
         </div>
-        <ConnectionPill state={connection} />
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{center}</main>
 
-      {/* Nav drawer — the rail's destinations as an overlay sheet. */}
+      {/* Nav drawer — the rail's destinations as an overlay sheet. The device
+          card at its bottom carries the connection state. */}
       {drawerOpen ? (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Navigation">
           <button
@@ -270,6 +252,7 @@ export function AppShell({
               selection={page}
               onNavigate={goPage}
               onOpenSession={openSession}
+              onNewTask={newTask}
             />
           </div>
         </div>
@@ -320,7 +303,7 @@ function PageView({
     case 'config':
       return (
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-          <SettingsSection />
+          <SettingsSection page />
         </div>
       )
   }

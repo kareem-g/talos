@@ -23,11 +23,12 @@ import { RightRailTabs } from './RightRailTabs'
 import {
   AgentsView,
   BrowserView,
-  FileView,
+  FilesView,
   GitDiffView,
   GitFilesView,
   GoalView,
   PlanView,
+  ProjectsView,
   RoomChannelView,
   SideSessionView,
   SubSessionsView,
@@ -261,8 +262,10 @@ export const RightRail = forwardRef<RightRailHandle, {
             onResize={(c, r) => socket.resizeTerminal(session.id, c, r)}
           />
         )
-      case 'file':
-        return <FileView session={session} />
+      case 'files':
+        return <FilesView session={session} />
+      case 'projects':
+        return <ProjectsView session={session} onOpenSession={onOpenSession} />
       default:
         return null
     }

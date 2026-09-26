@@ -248,7 +248,7 @@ export function SessionView({
               openFile(project, path)
               // Close the navigator and open the file in the right rail.
               setPane('details')
-              window.setTimeout(() => rightRailRef.current?.openTab('file'), 0)
+              window.setTimeout(() => rightRailRef.current?.openTab('files'), 0)
             }}
           />
         </div>
