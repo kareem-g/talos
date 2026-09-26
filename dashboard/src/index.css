@@ -18,6 +18,7 @@
   :root {
     /* Surfaces — warm charcoal/espresso, no cool blue or green. */
     --canvas: #131315;
+    --sidebar: #17171b;
     --inset: #19191c;
     --field: #202024;
     --surface: #26262b;
@@ -131,6 +132,7 @@
      [data-theme='light'] on <html> (lib/theme.ts). */
   [data-theme='light'] {
     --canvas: #f8f8fa;
+    --sidebar: #eeeeF1;
     --inset: #f1f1f4;
     --field: #ececf0;
     --surface: #ffffff;

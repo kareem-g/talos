@@ -1,90 +1,20 @@
 /**
- * App shell — one control station, two surfaces.
- *
- * Desktop: a HomeSidebar beside the home page; a session opens into the
- * two-pane workspace. Mobile: same content under a header and a home page
- * that fills the screen — there are no sub-screens anymore, every section
- * lives on the home page.
- *
- * The redesign rule this shell enforces: the *home screen* is a control
- * station (what's running, what needs me), not a file manager for sessions.
+ * App — the shell host. All layout lives in AppShell; this file owns the
+ * global route, the background notification wiring, and the two overlays
+ * that float above any screen: the ⌘K command palette and the attention
+ * pager (the "an agent is blocked on you" cue).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PairingScreen } from './components/Pairing'
-import { StationHome } from './components/home/StationHome'
-import { HomeSidebar } from './components/home/HomeSidebar'
-import { AddToHomeButton } from './components/home/AddToHomeButton'
-import { SessionView } from './components/SessionView'
-import { SessionWorkspace } from './components/desktop/SessionWorkspace'
-import { Dot } from './components/ui'
-import LoadingState from './components/LoadingState'
+import { AppShell } from './components/AppShell'
 import { useRoute } from './lib/route'
 import { roomOpenApproval, useRooms } from './lib/rooms'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
-import { ensureSessionLoaded } from './lib/rooms'
-import { cn } from './lib/format'
 import { notifyOnBackground } from './lib/notify'
 import { socket } from './lib/socket'
-import type { ConnectionState } from '@/types/protocol'
-
-/** Matches Tailwind's `lg` breakpoint. */
-function useIsDesktop(): boolean {
-  const [isDesktop, setIsDesktop] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
-  )
-  useEffect(() => {
-    const query = window.matchMedia('(min-width: 1024px)')
-    const onChange = (queryEvent: MediaQueryListEvent) => setIsDesktop(queryEvent.matches)
-    query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
-  }, [])
-  return isDesktop
-}
-
-function BrandMark({ compact }: { compact?: boolean }) {
-  return (
-    <span className="flex items-center gap-2">
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/15">
-        <span className="font-mono text-[12px] font-bold text-accent-ink">A</span>
-      </span>
-      {compact ? null : (
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
-      )}
-    </span>
-  )
-}
-
-/**
- * Connection indicator. Every state is named; `reconnecting` stays distinct
- * from `connecting` because during a reconnect the UI still shows its state.
- */
-function ConnectionPill({ state }: { state: ConnectionState }) {
-  const labels: Record<ConnectionState, string> = {
-    idle: 'Offline',
-    connecting: 'Connecting',
-    connected: 'Connected',
-    reconnecting: 'Reconnecting',
-    disconnected: 'Disconnected',
-    offline: 'Offline',
-    unauthorized: 'Not paired',
-    error: 'Connection error',
-  }
-  const tone =
-    state === 'connected' ? 'green' : state === 'connecting' || state === 'reconnecting' ? 'orange' : 'red'
-  const pulse = state === 'connecting' || state === 'reconnecting'
-  return (
-    <span
-      role="status"
-      title={labels[state]}
-      className="inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface/80 px-2.5 py-1 text-[11px] text-ink-2"
-    >
-      <Dot tone={tone} pulse={pulse} />
-      {labels[state]}
-    </span>
-  )
-}
+import { cn } from './lib/format'
 
 /** Floating cue when any agent is blocked on you — the station's pager. */
 function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
@@ -98,8 +28,6 @@ function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
   // fresh array every call, which useSyncExternalStore reads as "changed" on
   // every render — an infinite update loop. Selecting the stable `sessions`
   // reference and filtering here renders exactly once per real change.
-  // Include transcript-level approvals: a session can hold a permission card
-  // while status is still `running`.
   const blocked = useMemo(
     () =>
       sessions.filter((session) => {
@@ -151,32 +79,99 @@ function AttentionPill({ onOpen }: { onOpen: (sessionId: string) => void }) {
   )
 }
 
+/** ⌘K palette — jump to a session by name. */
+function CommandPalette({
+  open,
+  onClose,
+  onOpenSession,
+}: {
+  open: boolean
+  onClose: () => void
+  onOpenSession: (sessionId: string) => void
+}) {
+  const sessions = useStore((state) => state.sessions)
+  const [query, setQuery] = useState('')
+
+  const matches = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const list = sessions.filter(
+      (session) => session.status !== 'archived' && (!needle || session.name.toLowerCase().includes(needle)),
+    )
+    return list.slice(0, 8)
+  }, [sessions, query])
+
+  if (!open) return null
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[14vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-line bg-surface p-2 shadow-overlay"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-label="Command palette"
+      >
+        <input
+          autoFocus
+          type="search"
+          placeholder="Search sessions…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && matches.length > 0) {
+              onOpenSession(matches[0].id)
+              onClose()
+            }
+          }}
+          className="w-full rounded-xl bg-inset px-3 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-3"
+        />
+        <div className="mt-1 max-h-64 overflow-y-auto scroll-thin">
+          {matches.length === 0 ? (
+            <p className="px-3 py-2 text-[12px] text-ink-3">No sessions match.</p>
+          ) : (
+            matches.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => {
+                  onOpenSession(session.id)
+                  onClose()
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
+              >
+                <span className="min-w-0 flex-1 truncate">{session.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-ink-3">{session.agent}</span>
+              </button>
+            ))
+          )}
+        </div>
+        <p className="px-2 py-1 text-[11px] text-ink-3">Enter opens the first match · Esc to close</p>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const { route, navigate, replace } = useRoute()
   const start = useStore((state) => state.start)
-  const connection = useStore((state) => state.connection)
-  const sessions = useStore((state) => state.sessions)
-  const sessionsLoading = useStore((state) => state.sessionsLoading)
-  const isDesktop = useIsDesktop()
-  const [homeSearch, setHomeSearch] = useState('')
-  const [showCommandPalette, setShowCommandPalette] = useState(false)
-  const [homeNewTaskTick, setHomeNewTaskTick] = useState(0)
-
-  useEffect(() => {
-    function onPaletteKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setShowCommandPalette((v) => !v)
-      }
-    }
-    window.addEventListener('keydown', onPaletteKey)
-    return () => window.removeEventListener('keydown', onPaletteKey)
-  }, [])
+  const [showPalette, setShowPalette] = useState(false)
 
   useEffect(() => {
     if (route.name === 'pair') return
     start()
   }, [start, route.name])
+
+  useEffect(() => {
+    function onPaletteKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setShowPalette((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onPaletteKey)
+    return () => window.removeEventListener('keydown', onPaletteKey)
+  }, [])
 
   /** System alerts while backgrounded: approvals and completions page you. */
   useEffect(() => {
@@ -212,38 +207,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onGlobalKey)
   }, [navigate])
 
-  // Route → home: opening a session from anywhere lands on its view.
-  const openSessionFrom = useCallback(
-    (sessionId: string) => navigate({ name: 'session', sessionId }),
-    [navigate],
-  )
-
-  const selectedId = route.name === 'session' ? route.sessionId : undefined
-  // Look the session up live so updates re-render with fresh data.
-  const selected = sessions.find((session) => session.id === selectedId)
-  // True while we try to resolve a route naming a session the list doesn't
-  // know (room channels and workers are `hidden`, so a deep link or reload
-  // needs a one-off fetch before it can open — never bounce straight home).
-  const [resolvingHidden, setResolvingHidden] = useState(false)
-
-  // A URL naming a missing session must not blank-screen or bounce to home:
-  // first try loading it directly (it may be a hidden room/worker session),
-  // and only redirect when the id genuinely no longer exists.
-  useEffect(() => {
-    if (!selectedId || selected) return
-    if (sessionsLoading) return
-    let cancelled = false
-    setResolvingHidden(true)
-    void ensureSessionLoaded(selectedId).then((loaded) => {
-      if (cancelled) return
-      setResolvingHidden(false)
-      if (!loaded) replace({ name: 'list' })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId, selected, sessionsLoading, replace])
-
   /* ── Pairing takeover ──────────────────────────────────────────────────── */
   if (route.name === 'pair') {
     return (
@@ -255,128 +218,13 @@ export default function App() {
     )
   }
 
-  /* ── Session screens ───────────────────────────────────────────────────── */
-  if (route.name === 'session' && selected) {
-    if (!isDesktop) {
-      return (
-        <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
-          <SessionView
-            key={selected.id}
-            session={selected}
-            onBack={() => navigate({ name: 'list' })}
-          />
-        </div>
-      )
-    }
-    return (
-      // A session is a full-screen takeover: no shell chrome, the whole
-      // viewport is the workspace. Switching sessions happens inside its own
-      // left rail, not by leaving to the dashboard.
-      <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
-        <SessionWorkspace
-          key={selected.id}
-          session={selected}
-          onBack={() => navigate({ name: 'list' })}
-          onOpenSession={(id) => navigate({ name: 'session', sessionId: id })}
-        />
-      </div>
-    )
-  }
-  if (route.name === 'session' && sessionsLoading) {
-    return (
-      <div className="flex h-dvh items-center justify-center bg-canvas">
-        <LoadingState label="Opening session" variant="Drive" />
-      </div>
-    )
-    // A stale id falls through to the shell while the effect redirects.
-  }
-  if (route.name === 'session' && resolvingHidden && !selected) {
-    return (
-      <div className="flex h-dvh items-center justify-center bg-canvas">
-        <LoadingState label="Opening session" variant="Drive" />
-      </div>
-    )
-  }
-
-  /* ── Home shell ──────────────────────────────────────────────────────────
-   *  One page, two shapes. Desktop: a sidebar beside the home. Mobile: a
-   *  compact top bar (brand + connection pill) above the home. The home
-   *  itself owns the Sessions / Pair / Automations / Skills / Settings
-   *  sections via the anchor strip. */
-  const homeProps = {
-    onOpenSession: (session: { id: string }) => openSessionFrom(session.id),
-    searchQuery: homeSearch,
-    onSearchQueryChange: setHomeSearch,
-    newTaskTick: homeNewTaskTick,
-  } as const
-
-  if (isDesktop) {
-    return (
-      <div className="home-scope flex h-dvh overflow-hidden bg-canvas text-ink">
-        <HomeSidebar
-          onNewTask={() => setHomeNewTaskTick((x) => x + 1)}
-          onSearch={() => setShowCommandPalette(true)}
-          onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
-          selectedId={selectedId}
-          searchQuery={homeSearch}
-        />
-        <main className="flex min-w-0 flex-1 flex-col bg-canvas">
-          <StationHome {...homeProps} />
-        </main>
-        <AttentionPill onOpen={openSessionFrom} />
-        {showCommandPalette ? (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-hover-2 p-2 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <input autoFocus placeholder="Search sessions, projects, agents…" value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
-              <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter • Esc to close</p>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    )
-  }
+  const openSession = (sessionId: string) => navigate({ name: 'session', sessionId })
 
   return (
-    <div className="home-scope flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
-      <header
-        className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3"
-        style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
-      >
-        <BrandMark compact />
-        <div className="flex items-center gap-1.5">
-          <AddToHomeButton />
-          <ConnectionPill state={connection} />
-        </div>
-      </header>
-
-      {route.name === 'session' && !selected && sessionsLoading ? (
-        <div className="flex flex-1 items-center justify-center">
-          <LoadingState label="Opening session" variant="Drive" />
-        </div>
-      ) : (
-        <main className="flex min-h-0 flex-1 flex-col">
-          <StationHome {...homeProps} />
-        </main>
-      )}
-
-      <HomeSidebar
-        onNewTask={() => setHomeNewTaskTick((value) => value + 1)}
-        onSearch={() => setShowCommandPalette(true)}
-        onSelectSession={(id) => navigate({ name: 'session', sessionId: id })}
-        selectedId={selectedId}
-        searchQuery={homeSearch}
-      />
-
-      <AttentionPill onOpen={openSessionFrom} />
-
-      {showCommandPalette ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[14vh] backdrop-blur-sm" onClick={() => setShowCommandPalette(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-hover-2 p-2 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <input autoFocus type="search" placeholder="Search sessions, projects, agents..." value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} className="w-full rounded-xl bg-white/[0.06] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-zinc-500" />
-            <p className="px-2 py-1 text-[11px] text-zinc-500">Type to filter. Press Esc to close.</p>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <>
+      <AppShell route={route} navigate={navigate} replace={replace} />
+      <AttentionPill onOpen={openSession} />
+      <CommandPalette open={showPalette} onClose={() => setShowPalette(false)} onOpenSession={openSession} />
+    </>
   )
 }

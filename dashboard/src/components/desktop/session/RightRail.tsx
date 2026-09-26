@@ -14,9 +14,11 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
 import { Maximize2, RotateCw, X } from 'lucide-react'
-import { useStore } from '@/store'
+import { socket } from '@/lib/socket'
+import { useConversation, useStore } from '@/store'
 import { cn } from '@/lib/format'
 import type { Session } from '@/types/session'
+import { TerminalView } from '../../TerminalView'
 import { RightRailTabs } from './RightRailTabs'
 import {
   AgentsView,
@@ -121,12 +123,17 @@ export const RightRail = forwardRef<RightRailHandle, {
   /** Surface operation results; errors bubble up as session notices. */
   notify?: (message: string, tone?: 'ok' | 'error') => void
   /** Fit the panel to its container instead of a fixed 380/680px width.
-   *  Used when the rail is embedded in a constrained surface (the mobile
-   *  side sheet), where a fixed width would overflow and the widen control
-   *  would make no sense. */
+   * Used when the rail is embedded in a constrained surface ( the mobile
+   * side sheet), where a fixed width would overflow and the widen control
+   * would make no sense. */
   fill?: boolean
-}>(function RightRail({ session, onOpenSession, notify, fill }, ref) {
+  /** Drop the rail's own canvas background — the host surface already
+   * paints one (the unified shell's card wrapper). */
+  bare?: boolean
+}>(function RightRail({ session, onOpenSession, notify, fill, bare }, ref) {
   const connection = useStore((s) => s.connection)
+  const config = useStore((s) => s.configs[session.id])
+  const conversation = useConversation(session.id)
 
   /* ── Width preference ─────────────────────────────────────────────────── */
   const [wide, setWide] = useState(() => {
@@ -242,6 +249,18 @@ export const RightRail = forwardRef<RightRailHandle, {
         return <SideSessionView session={session} />
       case 'rooms':
         return <RoomChannelView session={session} />
+      case 'terminal':
+        return (
+          <TerminalView
+            output={conversation.terminal}
+            interactive={config?.interactiveTerminal === true}
+            transport={config?.transport}
+            connectionState={connection}
+            fontSize={13}
+            onInput={(d) => socket.sendTerminalInput(session.id, d)}
+            onResize={(c, r) => socket.resizeTerminal(session.id, c, r)}
+          />
+        )
       case 'file':
         return <FileView session={session} />
       default:
@@ -253,9 +272,10 @@ export const RightRail = forwardRef<RightRailHandle, {
   return (
     <div
       className={cn(
-        'flex h-full flex-col bg-canvas transition-[width] duration-200',
+        'flex h-full flex-col transition-[width] duration-200',
         // Desktop: fixed-width panel next to the fluid chat column. Sheet:
         // fill whatever width the host surface gives us.
+        !bare && 'bg-canvas',
         fill ? 'w-full min-w-0' : 'shrink-0',
         !fill && wide ? 'w-[680px]' : '',
         !fill && !wide ? 'w-[380px]' : '',

@@ -112,11 +112,15 @@ export function StationHome({
   searchQuery,
   onSearchQueryChange,
   newTaskTick,
+  anchorTop = 'top-[57px]',
 }: {
   onOpenSession: (s: Session) => void
   searchQuery?: string
   onSearchQueryChange?: (v: string) => void
   newTaskTick?: number
+  /** Sticky offset for the section anchor strip — matches whatever chrome
+   * sits above the home page in the current shell. */
+  anchorTop?: string
 }) {
   const sessions = useStore((s) => s.sessions)
   const loading = useStore((s) => s.sessionsLoading)
@@ -285,7 +289,7 @@ export function StationHome({
       </header>
 
       {/* Anchor strip — jumps to each section without leaving the page. */}
-      <nav aria-label="Home sections" className="sticky top-[57px] z-10 border-b border-white/[0.06] bg-inset/85 backdrop-blur-xl">
+      <nav aria-label="Home sections" className={`sticky ${anchorTop} z-10 border-b border-white/[0.06] bg-inset/85 backdrop-blur-xl`}>
         <ul className="mx-auto flex w-full max-w-[1280px] items-center gap-1 overflow-x-auto px-4 py-2 sm:gap-2 sm:px-6 lg:px-8">
           {HOME_SECTIONS.map((entry) => (
             <li key={entry.id}>
