@@ -115,7 +115,12 @@ fn thought_option_from(raw: &ConfigOption) -> ConfigOption {
         } else if value == "off" {
             has("off") || has("none")
         } else if value == "on" {
-            has("low") || has("medium") || tokens.is_empty()
+            // `low`/`medium` collapse to On. A literal `on` token must count
+            // too: the registry sweep collapses descriptors once, and
+            // `read_config` collapses again when serving a session — without
+            // this, the rebuild drops "On" (low/medium no longer exist as
+            // tokens) and a live session can't select default reasoning.
+            has("low") || has("medium") || has("on") || tokens.is_empty()
         } else if value == "high" {
             has("high") || has("xhigh")
         } else {
@@ -261,5 +266,22 @@ mod tests {
         let before = options.clone();
         collapse_reasoning(&mut options);
         assert_eq!(options, before);
+    }
+
+    /// The registry sweep collapses a descriptor once; `read_config` collapses
+    /// again when serving a session. The second pass must not drop "On" —
+    /// rebuilding from already-canonical tokens keeps every level.
+    #[test]
+    fn collapse_is_idempotent() {
+        let mut options = vec![enumerated(&["low", "medium", "high", "max"], Some("medium"))];
+        collapse_reasoning(&mut options);
+        let once = options.clone();
+        collapse_reasoning(&mut options);
+        assert_eq!(
+            options, once,
+            "re-collapsing a unified Thought option must be a no-op"
+        );
+        let values: Vec<&str> = options[0].choices.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(values, vec!["on", "high", "max"]);
     }
 }
