@@ -17,6 +17,7 @@ import {
   History as HistoryIcon,
   Home,
   KeyRound,
+  Monitor,
   Plus,
   SlidersHorizontal,
   Smartphone,
@@ -24,7 +25,6 @@ import {
 } from 'lucide-react'
 import { PairingModal } from './PairingModal'
 import { cn } from '@/lib/format'
-import { isPaired } from '@/lib/pairing'
 import { isInternalSession } from '@/lib/sessionState'
 import { useStore } from '@/store'
 import type { ConnectionState } from '@/types/protocol'
@@ -252,39 +252,43 @@ export function AppNav({
           />
         </div>
 
-        {/* Device profile — this app is local-first; the card names the
-            machine, not an account. It carries the device's two links: the
-            daemon connection (status row) and the phone (pairing modal). */}
+        {/* Device identity — this app is local-first, so the card names the
+            machine rather than an account. Three things read at a glance:
+            what this is (device icon), its link to the daemon (status dot
+            + row), and the one action it offers (pair a phone). */}
         <div className="px-3 py-3">
-          <div className="rounded-control border border-line/60 bg-surface px-2.5 py-2.5 shadow-hairline">
-            <div className="flex items-center gap-2">
-              <span
-                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/15 font-mono text-[12px] font-semibold text-accent"
-                aria-hidden
-              >
-                A
+          <div className="rounded-card border border-line/60 bg-surface p-3 shadow-hairline">
+            <div className="flex items-center gap-2.5">
+              {/* The machine itself — a device glyph, not a person, in a
+                  squircle. The dot on its corner is the daemon link. */}
+              <span className="relative flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-tint text-accent">
+                <Monitor size={17} strokeWidth={1.8} aria-hidden />
+                <span
+                  className={cn('absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-surface', connectionDot(connection))}
+                  aria-hidden
+                />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-medium text-ink">Local device</span>
-                <span className="block truncate text-[10px] text-ink-3">
-                  {isPaired() ? 'Paired · this machine' : 'Not paired'}
+                <span className="block truncate text-[13px] font-semibold tracking-[-0.01em] text-ink">
+                  Local device
                 </span>
+                <span className="block truncate text-[10.5px] text-ink-3">This machine</span>
               </span>
-              {/* Phone — opens the pairing modal to connect a device. A circle
-                  to echo the avatar it sits beside. */}
+              {/* The one action: pair a phone. Accent-tinted so it reads as
+                  the card's primary move. */}
               <button
                 type="button"
                 onClick={() => setPairingOpen(true)}
                 title="Pair a device"
                 aria-label="Pair a device"
-                className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line/60 bg-inset text-ink-2 transition-all duration-150 hover:border-line-strong hover:bg-hover-2 hover:text-ink active:scale-95"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-tint text-accent transition-all duration-150 hover:brightness-110 active:scale-95"
               >
-                <Smartphone size={15} />
+                <Smartphone size={14} />
               </button>
             </div>
-            <div className="mt-2 flex items-center gap-1.5 border-t border-line/50 pt-2">
+            <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-line/40 bg-inset px-2 py-1.5">
               <span className={cn('size-1.5 shrink-0 rounded-full', connectionDot(connection))} aria-hidden />
-              <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink-3">
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">
                 {connectionLabel(connection)}
               </span>
             </div>
