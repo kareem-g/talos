@@ -35,7 +35,7 @@ export class ApiError extends Error {
 }
 
 /** Bearer token for a paired device, when present. */
-const TOKEN_KEY = 'agentdeck-device-token'
+export const TOKEN_KEY = 'agentdeck-device-token'
 
 export function deviceToken(): string | null {
   try {

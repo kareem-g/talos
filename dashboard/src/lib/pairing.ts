@@ -8,6 +8,7 @@
 
 import { deviceToken, setDeviceToken } from './api'
 import { deviceBaseUrl, setDeviceBaseUrl } from './native'
+import { clearCredentials, persistCredentials } from './secureStore'
 
 export const TOKEN_KEY = 'agentdeck-device-token'
 
@@ -17,6 +18,9 @@ export function getPairingToken(): string | null {
 
 export function setPairingToken(token: string | null): void {
   setDeviceToken(token)
+  // Mirror into the Keychain on a real device; the write is deliberately not
+  // awaited — the synchronous value in web storage is the live one.
+  void (token === null ? clearCredentials() : persistCredentials())
 }
 
 /** The daemon origin this device is paired with (native shell); `''` = same-origin. */
@@ -28,6 +32,7 @@ export function clearPairing(): void {
   setDeviceToken(null)
   // Drop the daemon origin too, so re-pairing can point at a different machine.
   setDeviceBaseUrl(null)
+  void clearCredentials()
 }
 
 export function isPaired(): boolean {

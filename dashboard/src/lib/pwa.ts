@@ -9,7 +9,22 @@
  * browsing, unsupported browsers) because everything else still works.
  */
 
+import { isNativeApp } from './native'
+
 export function registerSW(): void {
+  // A native shell ships its bundle inside the app, so a service worker can
+  // only ever serve a *stale* copy of it — and because the shell's origin is
+  // `capacitor://localhost`, the localhost exemption below would otherwise let
+  // it register. Unregister anything left over from an earlier build.
+  if (isNativeApp()) {
+    if ('serviceWorker' in navigator) {
+      void navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => registrations.forEach((registration) => void registration.unregister()))
+        .catch(() => {})
+    }
+    return
+  }
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
   if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
     // Service workers need a secure context. Over LAN HTTP the app still works

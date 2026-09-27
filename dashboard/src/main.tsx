@@ -4,6 +4,7 @@ import App from './App'
 import { registerSW } from './lib/pwa'
 import { initTheme } from './lib/theme'
 import { initNativeUX } from './lib/nativeUX'
+import { hydrateCredentials } from './lib/secureStore'
 import './index.css'
 
 // Theme is applied pre-paint by the inline script in index.html; this re-applies
@@ -24,8 +25,18 @@ window.addEventListener('error', (errorEvent) => {
 
 registerSW()
 
-ReactDOM.createRoot(root).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+/**
+ * Restore Keychain credentials before the first render, so a paired device
+ * never flashes the pairing screen on launch. In the browser (and on a first
+ * launch) this resolves immediately.
+ */
+async function bootstrap(): Promise<void> {
+  await hydrateCredentials().catch(() => {})
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+}
+
+void bootstrap()

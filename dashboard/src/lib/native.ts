@@ -11,7 +11,7 @@
  * when it pairs.
  */
 
-const BASE_URL_KEY = 'agentdeck-device-base-url'
+export const BASE_URL_KEY = 'agentdeck-device-base-url'
 
 /** True when running inside the Capacitor shell rather than a browser tab. */
 export function isNativeApp(): boolean {
