@@ -122,7 +122,7 @@ jobs:
               <true/>
             </dict>
             </plist>
-            PLIST
+          PLIST
 
             xcodebuild -exportArchive \
               -archivePath build/AgentDeck.xcarchive \
