@@ -221,6 +221,84 @@ final class AppState {
         }
     }
 
+    // MARK: Shared REST surface
+    //
+    // The device token authenticates every `/api/*` route — the dashboard
+    // itself sends it as `Authorization: Bearer` — so the inspector panels
+    // can reuse the desktop endpoints (git, workspace files) directly.
+
+    @MainActor
+    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        guard let api else { throw APIError(message: "Not paired", status: nil) }
+        do {
+            return try await api.get(path, query: query)
+        } catch {
+            if Self.isRevoked(error) {
+                phase = .revoked
+            }
+            throw error
+        }
+    }
+
+    @MainActor
+    func postEmpty(_ path: String, query: [URLQueryItem] = []) async throws {
+        guard let api else { throw APIError(message: "Not paired", status: nil) }
+        do {
+            _ = try await api.post(path, query: query)
+        } catch {
+            if Self.isRevoked(error) {
+                phase = .revoked
+            }
+            throw error
+        }
+    }
+
+    /// Raw bytes from an authenticated GET (browser screenshots).
+    @MainActor
+    func getData(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        guard let api else { throw APIError(message: "Not paired", status: nil) }
+        do {
+            return try await api.getData(path, query: query)
+        } catch {
+            if Self.isRevoked(error) {
+                phase = .revoked
+            }
+            throw error
+        }
+    }
+
+    /// Authenticated POST with a JSON body, response ignored.
+    @MainActor
+    func postJSON<B: Encodable>(_ path: String, body: B) async throws {
+        guard let api else { throw APIError(message: "Not paired", status: nil) }
+        do {
+            let _: JSONValue = try await api.post(path, body: body)
+        } catch {
+            if Self.isRevoked(error) {
+                phase = .revoked
+            }
+            throw error
+        }
+    }
+
+    /// Authenticated POST with query parameters and a JSON body.
+    @MainActor
+    func postJSONResult<T: Decodable, B: Encodable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        body: B
+    ) async throws -> T {
+        guard let api else { throw APIError(message: "Not paired", status: nil) }
+        do {
+            return try await api.post(path, query: query, body: body)
+        } catch {
+            if Self.isRevoked(error) {
+                phase = .revoked
+            }
+            throw error
+        }
+    }
+
     // MARK: Live controls (WebSocket)
 
     func sendInput(sessionId: String, text: String) {

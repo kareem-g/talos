@@ -50,13 +50,14 @@ struct RevokedView: View {
         VStack(spacing: 16) {
             Image(systemName: "person.crop.circle.badge.exclamationmark")
                 .font(.system(size: 52))
-                .foregroundStyle(.red)
+                .foregroundStyle(Theme.red)
                 .accessibilityHidden(true)
             Text("Device unpaired")
                 .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.ink)
             Text("This device was revoked from your desktop's device list. Generate a new pairing code and scan it to reconnect.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button("Unpair and start over") {
@@ -76,10 +77,11 @@ struct ToastView: View {
     var body: some View {
         Text(text)
             .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.ink)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
-            .shadow(radius: 8, y: 2)
+            .background(Theme.surface.opacity(0.95), in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.line))
+            .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
     }
 }

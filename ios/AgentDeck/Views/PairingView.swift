@@ -44,26 +44,27 @@ struct PairingView: View {
     private var brand: some View {
         VStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18)
+                RoundedRectangle(cornerRadius: 20)
                     .fill(
                         LinearGradient(
-                            colors: [.indigo, Color(uiColor: UIColor(red: 0.98, green: 0.35, blue: 0.36, alpha: 1))],
+                            colors: [Theme.accent, Theme.accentHover],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 84, height: 84)
-                    .shadow(radius: 12, y: 6)
+                    .shadow(color: Theme.accent.opacity(0.35), radius: 12, y: 6)
                 Text("AD")
                     .font(.system(size: 30, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.accentInk)
             }
             .accessibilityHidden(true)
             Text("AgentDeck")
                 .font(.largeTitle.weight(.bold))
+                .foregroundStyle(Theme.ink)
             Text("Control the agents on your machine from anywhere.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
         }
     }
@@ -82,7 +83,7 @@ struct PairingView: View {
             if let parseError {
                 Text(parseError)
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.red)
                     .multilineTextAlignment(.center)
             }
             Button {
@@ -128,10 +129,12 @@ private struct InstructionRow: View {
             Text(number)
                 .font(.subheadline.weight(.bold))
                 .frame(width: 26, height: 26)
-                .background(Circle().fill(Color.accentColor.opacity(0.15)))
-                .foregroundStyle(Color.accentColor)
+                .background(Circle().fill(Theme.accentTint))
+                .overlay(Circle().stroke(Theme.accent.opacity(0.3), lineWidth: 1))
+                .foregroundStyle(Theme.accent)
             Text(text)
                 .font(.subheadline)
+                .foregroundStyle(Theme.ink2)
         }
     }
 }
@@ -196,23 +199,24 @@ private struct PairingConfirmSheet: View {
             VStack(spacing: 20) {
                 Image(systemName: "desktopcomputer.and.iphone")
                     .font(.system(size: 44))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accent)
                     .accessibilityHidden(true)
                 Text("Pair with your desktop?")
                     .font(.title3.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
                 Text(offer.baseURL.absoluteString)
                     .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.ink2)
                     .textSelection(.enabled)
                 Text("This device will be able to start, watch, and stop agents on that machine.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.ink2)
                     .multilineTextAlignment(.center)
 
                 if let error {
                     Text(error)
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.red)
                         .multilineTextAlignment(.center)
                 }
 

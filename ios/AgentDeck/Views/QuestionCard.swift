@@ -25,14 +25,15 @@ struct QuestionCard: View {
             Label {
                 Text(question.title.isEmpty ? "Question" : question.title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(Theme.orange)
             } icon: {
                 Image(systemName: "questionmark.bubble.fill")
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(Theme.orange)
             }
 
             Text(question.question)
                 .font(.subheadline)
+                .foregroundStyle(Theme.ink)
 
             VStack(spacing: 6) {
                 ForEach(question.options) { option in
@@ -43,16 +44,16 @@ struct QuestionCard: View {
                             Image(systemName: selected.contains(option.id)
                                 ? (allowsMultiple ? "checkmark.square.fill" : "largecircle.fill.circle")
                                 : (allowsMultiple ? "square" : "circle"))
-                                .foregroundStyle(selected.contains(option.id) ? Color.accentColor : Color.secondary)
+                                .foregroundStyle(selected.contains(option.id) ? Theme.accent : Theme.ink3)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(option.label)
                                     .font(.subheadline)
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(Theme.ink)
                                     .multilineTextAlignment(.leading)
                                 if let detail = option.description, !detail.isEmpty {
                                     Text(detail)
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Theme.ink2)
                                         .multilineTextAlignment(.leading)
                                 }
                             }
@@ -60,8 +61,8 @@ struct QuestionCard: View {
                         }
                         .padding(10)
                         .background(
-                            selected.contains(option.id) ? Color.accentColor.opacity(0.08) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 10)
+                            selected.contains(option.id) ? Theme.accentTint : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Theme.controlRadius)
                         )
                     }
                     .buttonStyle(.plain)
@@ -73,7 +74,7 @@ struct QuestionCard: View {
                     .font(.subheadline)
                     .lineLimit(1...4)
                     .padding(10)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                     .autocorrectionDisabled()
             }
 
@@ -89,10 +90,10 @@ struct QuestionCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.orange.opacity(0.35), lineWidth: 1)
         )
     }
 

@@ -28,6 +28,7 @@ struct ApprovalCard: View {
 
             Text(approval.prompt)
                 .font(.subheadline)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(6)
 
             if approval.options.isEmpty {
@@ -49,9 +50,9 @@ struct ApprovalCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.riskColor(approval.riskLevel).opacity(0.35), lineWidth: 1)
         )
     }

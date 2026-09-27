@@ -244,6 +244,8 @@ struct MobileTask: Codable, Identifiable, Equatable {
     var updatedAt: Date?
     var cost: Double?
     var tokensUsed: UInt64?
+    var parentId: String?
+    var worktreePath: String?
     var capabilities: AgentCapabilities?
 
     enum CodingKeys: String, CodingKey {
@@ -258,7 +260,20 @@ struct MobileTask: Codable, Identifiable, Equatable {
         case updatedAt = "updated_at"
         case cost
         case tokensUsed = "tokens_used"
+        case parentId = "parent_id"
+        case worktreePath = "worktree_path"
         case capabilities
+    }
+
+    /// Only non-error states count as "needs you" — mirrors the desktop's
+    /// pinned attention group.
+    var needsYou: Bool {
+        switch status {
+        case "waiting_for_approval", "waiting_for_input", "error", "needs_resume":
+            return true
+        default:
+            return false
+        }
     }
 }
 

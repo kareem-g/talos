@@ -184,6 +184,56 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(SessionState.stripANSI("a\u{1b}]0;title\u{07}b"), "ab")
         XCTAssertEqual(SessionState.stripANSI("plain"), "plain")
     }
+
+    // MARK: Plan and subagents (inspector tabs)
+
+    func testPlanEventReplacesEntriesAndTracksProgress() throws {
+        var state = makeState()
+        state.apply(try eventFrame(
+            kind: "plan",
+            payload: #"{"title":"Plan","entries":[{"content":"Read files","status":"completed"},{"content":"Write patch","status":"in_progress"}]}"#
+        ))
+        XCTAssertEqual(state.planEntries.count, 2)
+        XCTAssertEqual(state.planEntries.first?.content, "Read files")
+        XCTAssertEqual(state.planProgress.done, 1)
+        XCTAssertEqual(state.planProgress.total, 2)
+
+        // A newer plan supersedes the previous one entirely.
+        state.apply(try eventFrame(
+            kind: "plan",
+            payload: #"{"title":"Plan","entries":[{"content":"Only step","status":"pending"}]}"#,
+            eventId: "e2",
+            sequence: 2
+        ))
+        XCTAssertEqual(state.planEntries.map(\.content), ["Only step"])
+        XCTAssertEqual(state.planProgress.done, 0)
+    }
+
+    func testPlanStepsWithoutStatusFallBackToPending() throws {
+        var state = makeState()
+        state.apply(try eventFrame(kind: "plan", payload: #"{"title":"Plan","steps":["First","Second"]}"#))
+        XCTAssertEqual(state.planEntries.map(\.content), ["First", "Second"])
+        XCTAssertTrue(state.planEntries.allSatisfy { $0.status == "pending" })
+    }
+
+    func testSubagentLifecycleUpdatesStatus() throws {
+        var state = makeState()
+        state.apply(try eventFrame(
+            kind: "subagent_started",
+            payload: #"{"id":"t1","name":"explorer","kind":"subagent"}"#
+        ))
+        XCTAssertEqual(state.subagents.count, 1)
+        XCTAssertEqual(state.subagents.first?.status, "working")
+
+        state.apply(try eventFrame(
+            kind: "subagent_finished",
+            payload: #"{"id":"t1","status":"failed"}"#,
+            eventId: "e2",
+            sequence: 2
+        ))
+        XCTAssertEqual(state.subagents.first?.status, "failed")
+        XCTAssertEqual(state.subagents.count, 1, "finish must update, not append")
+    }
 }
 
 final class VersionComparisonTests: XCTestCase {

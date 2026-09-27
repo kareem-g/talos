@@ -4,10 +4,13 @@ import SwiftUI
 /// questions, activity, terminal tail, and the composer.
 struct TaskView: View {
     let sessionId: String
+    /// Pushes another session (used by the inspector's Projects / Sessions
+    /// tabs). Defaulted so previews and direct pushes stay simple.
+    var onOpenSession: (String) -> Void = { _ in }
+
     @Environment(AppState.self) private var app
     @State private var draft = ""
-    @State private var showTerminal = false
-    @State private var showActivity = false
+    @State private var showInspector = false
     @State private var confirmKill = false
 
     private struct Anchor: Equatable {
@@ -140,12 +143,6 @@ struct TaskView: View {
                             }
                             .id("question-\(question.questionId)")
                         }
-                        if showActivity, !model.state.activities.isEmpty {
-                            ActivitySection(activities: model.state.activities.reversed())
-                        }
-                        if showTerminal, !model.state.terminalLines.isEmpty {
-                            TerminalSection(lines: model.state.terminalLines.suffix(60))
-                        }
                         Color.clear
                             .frame(height: 1)
                             .id("end")
@@ -173,24 +170,27 @@ struct TaskView: View {
         }
         .background(Theme.background)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 14) {
-                ToggleButton(
-                    isOn: $showActivity,
-                    icon: "clock.arrow.circlepath",
-                    label: "Activity"
-                )
-                ToggleButton(
-                    isOn: $showTerminal,
-                    icon: "terminal",
-                    label: "Terminal"
-                )
+            HStack(spacing: 10) {
+                Button {
+                    showInspector = true
+                } label: {
+                    Label("Panels", systemImage: "sidebar.right")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Theme.accentTint, in: Capsule())
+                }
+                .accessibilityLabel("Open inspector panels")
                 Spacer()
                 StatusBadge(status: model.state.session.status)
             }
-            .font(.caption2)
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
             .background(.ultraThinMaterial)
+        }
+        .sheet(isPresented: $showInspector) {
+            InspectorSheet(sessionId: sessionId, onOpenSession: onOpenSession)
         }
     }
 
@@ -210,7 +210,7 @@ private struct MessageBubble: View {
         if message.isLifecycleMarker {
             Text(message.content)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.ink3)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 2)
@@ -221,13 +221,13 @@ private struct MessageBubble: View {
                     .font(.subheadline)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.accentColor.opacity(0.9), in: BubbleShape(right: true))
-                    .foregroundStyle(.white)
+                    .background(Theme.accent, in: BubbleShape(right: true))
+                    .foregroundStyle(Theme.accentInk)
             }
         } else if message.role == "system" {
             Text(message.content)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.ink2)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
         } else {
@@ -237,6 +237,7 @@ private struct MessageBubble: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Theme.card, in: BubbleShape(right: false))
+                    .overlay(BubbleShape(right: false).stroke(Theme.line, lineWidth: 1))
                 Spacer(minLength: 48)
             }
         }
@@ -253,6 +254,7 @@ private struct StreamingBubble: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(Theme.card, in: BubbleShape(right: false))
+                .overlay(BubbleShape(right: false).stroke(Theme.line, lineWidth: 1))
                 .opacity(0.75)
             Spacer(minLength: 48)
         }
@@ -266,15 +268,16 @@ private struct WorkingIndicator: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
+                .tint(Theme.accent)
             if !thinking.isEmpty {
                 Text(thinking)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.ink3)
                     .lineLimit(1)
             } else {
                 Text("Working…")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.ink3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -303,9 +306,10 @@ private struct DeletedBanner: View {
     var body: some View {
         Label("This task was deleted", systemImage: "trash")
             .font(.footnote)
+            .foregroundStyle(Theme.red)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            .background(Color.red.opacity(0.1))
+            .background(Theme.red.opacity(0.1))
     }
 }
 
@@ -315,114 +319,10 @@ private struct ErrorBanner: View {
     var body: some View {
         Label(text, systemImage: "exclamationmark.triangle")
             .font(.footnote)
-            .foregroundStyle(.red)
+            .foregroundStyle(Theme.red)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            .background(Color.red.opacity(0.1))
-    }
-}
-
-// MARK: - Activity & terminal
-
-private struct ActivitySection: View {
-    let activities: [ActivityItem]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Activity", systemImage: "clock.arrow.circlepath")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ForEach(activities) { item in
-                ActivityRow(item: item)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-private struct ActivityRow: View {
-    let item: ActivityItem
-
-    private var icon: (String, Color) {
-        switch item.kind {
-        case "command": return ("terminal", .secondary)
-        case "browser": return ("safari", .blue)
-        case "plan": return ("list.clipboard", .purple)
-        case "error": return ("xmark.octagon", .red)
-        case "turn": return ("checkmark.circle", .green)
-        default: return ("wrench.and.screwdriver", .secondary)
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if item.isRunning {
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 16)
-            } else {
-                Image(systemName: item.isFailed ? "xmark.circle" : icon.0)
-                    .font(.caption)
-                    .foregroundStyle(item.isFailed ? .red : icon.1)
-                    .frame(width: 16)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                if let detail = item.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-            Spacer(minLength: 0)
-            if let timestamp = item.timestamp {
-                Text(Format.relativeTime(timestamp))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-}
-
-private struct TerminalSection: View {
-    let lines: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label("Terminal", systemImage: "terminal")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 6)
-            Text(lines.joined(separator: "\n"))
-                .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        }
-        .padding(12)
-        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-private struct ToggleButton: View {
-    @Binding var isOn: Bool
-    let icon: String
-    let label: String
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Label(label, systemImage: icon)
-                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
+            .background(Theme.red.opacity(0.1))
     }
 }
 
@@ -439,7 +339,8 @@ struct Composer: View {
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.line, lineWidth: 1))
                 .focused($focused)
                 .onSubmit { send() }
 
@@ -448,8 +349,8 @@ struct Composer: View {
                     .font(.system(size: 30))
                     .foregroundStyle(
                         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? Color.secondary.opacity(0.4)
-                            : Color.accentColor
+                            ? Theme.ink3.opacity(0.4)
+                            : Theme.accent
                     )
             }
             .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -457,7 +358,7 @@ struct Composer: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(Theme.canvas)
     }
 
     private func send() {

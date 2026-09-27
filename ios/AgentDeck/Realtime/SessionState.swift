@@ -16,6 +16,24 @@ struct ActivityItem: Identifiable, Equatable {
     var isFailed: Bool { status == "failed" }
 }
 
+/// One step of the agent's live plan (`plan` event entries).
+struct PlanEntry: Identifiable, Equatable {
+    var content: String
+    /// pending | in_progress | completed | blocked | failed
+    var status: String
+
+    var id: String { content }
+    var isDone: Bool { status == "completed" }
+}
+
+/// A spawned subagent tracked from `subagent_started` / `subagent_finished`.
+struct SubagentInfo: Identifiable, Equatable {
+    var id: String
+    var name: String
+    /// working | completed | failed
+    var status: String
+}
+
 /// Live, reducible state for one agent session.
 ///
 /// Kept as a value type so the reduce logic is unit-testable without mocks;
@@ -27,6 +45,10 @@ struct SessionState: Equatable {
     var approvals: [PendingApproval] = []
     var questions: [Question] = []
     var terminalLines: [String] = []
+    /// Latest plan snapshot — each `plan` event replaces the whole list,
+    /// mirroring how the desktop todo checklist follows the newest plan.
+    var planEntries: [PlanEntry] = []
+    var subagents: [SubagentInfo] = []
     /// Assistant text streamed via `assistant_text` deltas for the current
     /// turn. Cleared when the persisted assistant `Message` arrives.
     var streamingText: String = ""
@@ -37,7 +59,14 @@ struct SessionState: Equatable {
 
     /// Bumped whenever anything rendered changes, so views can scroll.
     var revision: Int {
-        messages.count + approvals.count + questions.count + activities.count + streamingText.count
+        messages.count + approvals.count + questions.count + activities.count
+            + streamingText.count + planEntries.count + subagents.count
+    }
+
+    /// Completed / total for the plan checklist — the desktop GoalView
+    /// progress numbers.
+    var planProgress: (done: Int, total: Int) {
+        (planEntries.filter(\.isDone).count, planEntries.count)
     }
 
     init(session: Session) {
@@ -60,6 +89,8 @@ struct SessionState: Equatable {
         activities = []
         approvals = []
         questions = []
+        planEntries = []
+        subagents = []
         streamingText = ""
         thinkingText = ""
         for event in detail.events.sorted(by: { $0.sequence < $1.sequence }) {
@@ -275,6 +306,38 @@ struct SessionState: Equatable {
                     status: "ok"
                 )
             )
+            // Newest plan wins; entries carry live statuses so the Plan /
+            // Goal surfaces can draw progress, same contract as the desktop.
+            if let entries = payload?["entries"]?.arrayValue, !entries.isEmpty {
+                planEntries = entries.compactMap { entry in
+                    guard let content = entry["content"]?.stringValue else { return nil }
+                    return PlanEntry(
+                        content: content,
+                        status: entry["status"]?.stringValue ?? "pending"
+                    )
+                }
+            } else if let steps = payload?["steps"]?.arrayValue, !steps.isEmpty {
+                planEntries = steps.compactMap { step in
+                    guard let content = step.stringValue else { return nil }
+                    return PlanEntry(content: content, status: "pending")
+                }
+            }
+
+        case "subagent_started":
+            let id = payload?["id"]?.stringValue ?? event.eventId
+            let name = payload?["name"]?.stringValue ?? "Subagent"
+            if let index = subagents.firstIndex(where: { $0.id == id }) {
+                subagents[index].name = name
+                subagents[index].status = "working"
+            } else {
+                subagents.append(SubagentInfo(id: id, name: name, status: "working"))
+            }
+
+        case "subagent_finished":
+            let id = payload?["id"]?.stringValue ?? event.eventId
+            if let index = subagents.firstIndex(where: { $0.id == id }) {
+                subagents[index].status = payload?["status"]?.stringValue ?? "completed"
+            }
 
         case "usage":
             if let cost = payload?["cost_usd"]?.doubleValue, cost >= 0 {

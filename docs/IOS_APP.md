@@ -129,9 +129,19 @@ TestFlight updates go through the normal TestFlight flow (push a new
 
 ## Pairing over Tailscale
 
-The desktop's pairing page shows one QR per transport. The **Tailnet** codes
-(`Tailnet · <machine>`) point at `http://<machine>.<tailnet>.ts.net:9120` and
-only work when the phone itself is on the tailnet:
+The desktop's pairing page shows one QR per transport. Two of them are
+tailnet routes, and picking the right one is what makes tailnet pairing work
+on the first try:
+
+- **Tailnet** — `http://<machine>.<tailnet>.ts.net:9120`, the MagicDNS name.
+  Requires MagicDNS to actually resolve on the phone (Tailscale app →
+  "Use Tailscale DNS" enabled, and MagicDNS on in the admin console).
+- **Tailnet IPv4** — `http://100.x.y.z:9120`, the raw tailnet address. Works
+  with the Tailscale app connected regardless of DNS, so it is the one to
+  scan when the MagicDNS code reports "can't find host".
+
+Both rows are offered because a phone can be fully connected to the tailnet
+and still fail to resolve `.ts.net` names. Steps:
 
 1. Install the **Tailscale app** on the iPhone (App Store) and sign in to the
    **same tailnet** as the machine running AgentDeck. Leave it connected (the
@@ -141,10 +151,15 @@ only work when the phone itself is on the tailnet:
 3. Desktop → pairing page → generate a **fresh** code. Offers expire after
    two minutes and are single-use — if you scanned, cancelled, and rescanned
    the same QR, it's dead; generate a new one.
-4. Pick the **Tailnet** chip and scan with the app.
-5. If it fails, read the error under the Pair button: "can't reach / can't
-   find host" means the phone isn't on the tailnet (or an ACL blocks TCP
-   9120); "invalid or expired offer" means the QR went stale — regenerate.
+4. Pick the **Tailnet** chip and scan with the app. If the app reports it
+   can't find the host, regenerate the code and pick **Tailnet IPv4**.
+5. If both fail, read the error under the Pair button: "can't reach" means
+   the phone isn't on the tailnet (or a tailnet ACL / host firewall blocks
+   TCP 9120); "invalid or expired offer" means the QR went stale — regenerate.
+
+The daemon never advertises a `.local` (Bonjour/mDNS) name as a tailnet
+route: mDNS is link-local multicast and cannot resolve across the tailnet,
+which is exactly the "LAN pairing works, tailnet doesn't" trap.
 
 The **LAN** chip works the same way but requires the phone and machine to be
 on the same Wi-Fi. The **Cloudflare** chip is https and works from anywhere
@@ -169,9 +184,20 @@ a `http://<lan-ip>:9120/mobile/pair?...` URL, and paste it in the app.
 - **Streamed vs persisted assistant text** — `assistant_text` deltas render
   a live bubble; the persisted assistant `Message` clears it. Replayed
   history (hydration) never re-populates the streaming buffer.
-- **ATS** — `NSAllowsLocalNetworking` is set because LAN/tailnet pairing
-  URLs are plain HTTP; Cloudflare endpoints are HTTPS and preferred when
-  present.
+- **ATS** — `NSAllowsLocalNetworking` alone covers plain-HTTP LAN codes but
+  *not* tailnet ones (`.ts.net` looks like a public hostname, and `100.64/10`
+  is CGNAT), so `Info.plist` also sets `NSAllowsArbitraryLoads`. Without it,
+  Tailscale pairing fails with an ATS error that used to surface as the
+  misleading "code may have expired" message.
+- **Design tokens mirror the desktop** — `Support/Theme.swift` carries the
+  palette from `dashboard/src/index.css` (accent `#5B8DEF`, canvas/surface/
+  ink/hairline values, status colors), so iOS and the web UI speak the same
+  visual language. Change a value there and here together.
+- **Inspector = the desktop right rail** — the task screen's *Panels* sheet
+  carries Activity, Plan, Agents, Goal, Files, Git, and Terminal tabs. The
+  first four reduce live socket state (`SessionState`); Files/Git call the
+  same `/api/workspace/*` and `/api/git/*` endpoints the dashboard uses,
+  authorized by the same device bearer token.
 - **Xcode project is generated** — `ios/tools/generate_project.py` mirrors
   the directory tree into a classic `project.pbxproj` (objectVersion 56,
   Xcode 14+) with deterministic object IDs and a shared scheme. Re-run it
@@ -186,6 +212,7 @@ a `http://<lan-ip>:9120/mobile/pair?...` URL, and paste it in the app.
 | Symptom | Fix |
 |---|---|
 | “Pairing failed. The code may have expired” | Generate a fresh QR — offers live 2 minutes and are single-use |
+| Tailnet code says “can't find host” while the VPN is on | The phone can't resolve `.ts.net` (MagicDNS off) — regenerate and scan the **Tailnet IPv4** chip |
 | Snapshot error but WS connected | Check the bearer token wasn’t revoked (desktop → device list) |
 | Cannot connect over LAN | Phone and machine must be on the same network; check the firewall allows TCP 9120 |
 | OTA install fails | Repo must be public, profile must include the device, Pages must serve `gh-pages` |

@@ -1706,6 +1706,8 @@ pub async fn mobile_snapshot(
             "updated_at": session.updated_at,
             "cost": session.cost,
             "tokens_used": session.tokens_used,
+            "parent_id": session.parent_id,
+            "worktree_path": session.worktree_path,
             "capabilities": {
                 "supportsStreaming": true,
                 "supportsApproval": true,

@@ -42,9 +42,11 @@ function transportName(opt: EndpointOption): string {
       return 'Cloudflare'
     case 'tailnet':
     case 'tailnet_magic_dns':
-    case 'tailnet_ipv4':
-    case 'tailnet_ipv6':
       return 'Tailnet'
+    case 'tailnet_ipv4':
+      return 'Tailnet IP'
+    case 'tailnet_ipv6':
+      return 'Tailnet IPv6'
     case 'lan':
       return 'Home LAN'
     case 'localhost':
@@ -64,9 +66,11 @@ function transportHint(opt: EndpointOption): string {
       return 'Works anywhere — routed through your Cloudflare tunnel.'
     case 'tailnet':
     case 'tailnet_magic_dns':
-    case 'tailnet_ipv4':
-    case 'tailnet_ipv6':
       return 'Works anywhere — but the phone needs the Tailscale app ON and joined.'
+    case 'tailnet_ipv4':
+      return 'Same tailnet route by raw IP — scan this if the .ts.net name does not resolve on the phone.'
+    case 'tailnet_ipv6':
+      return 'Same tailnet route over IPv6 — scan this if the other tailnet rows do not connect.'
     case 'lan':
       return 'Works at home — phone must be on the same Wi-Fi.'
     case 'localhost':

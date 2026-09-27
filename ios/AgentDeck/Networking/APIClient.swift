@@ -122,9 +122,14 @@ final class APIClient {
         }
     }
 
-    func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
+    /// Raw bytes (browser screenshots and other binary endpoints).
+    func getData(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await perform("GET", path, query: query)
+    }
+
+    func post<T: Decodable, B: Encodable>(_ path: String, query: [URLQueryItem] = [], body: B) async throws -> T {
         let bodyData = try JSONEncoder().encode(body)
-        let data = try await perform("POST", path, body: bodyData)
+        let data = try await perform("POST", path, query: query, body: bodyData)
         do {
             return try DateCoding.decoder().decode(T.self, from: data)
         } catch {
@@ -134,8 +139,8 @@ final class APIClient {
 
     /// POST without a request body; returns the raw JSON response.
     @discardableResult
-    func post(_ path: String) async throws -> JSONValue {
-        let data = try await perform("POST", path, body: nil)
+    func post(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {
+        let data = try await perform("POST", path, query: query, body: nil)
         return (try? JSONSerialization.jsonObject(with: data)).flatMap(JSONValue.from(any:)) ?? .null
     }
 

@@ -7,6 +7,7 @@ struct HomeView: View {
     @State private var path = NavigationPath()
     @State private var showNewTask = false
     @State private var showSettings = false
+    @State private var search = ""
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -32,7 +33,7 @@ struct HomeView: View {
                     }
                 }
                 .navigationDestination(for: String.self) { sessionId in
-                    TaskView(sessionId: sessionId)
+                    TaskView(sessionId: sessionId, onOpenSession: { path.append($0) })
                 }
         }
         .sheet(isPresented: $showNewTask) {
@@ -49,6 +50,33 @@ struct HomeView: View {
         }
         .refreshable {
             await app.refreshSnapshot()
+        }
+    }
+
+    /// Tasks that need a human (approval, input, failure) — pinned above the
+    /// workspace list, like the desktop's attention group.
+    private var needsYou: [MobileTask] {
+        (app.snapshot?.allTasks ?? [])
+            .filter(\.needsYou)
+            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+    }
+
+    /// Workspaces with the search filter applied and empty groups dropped.
+    private var filteredWorkspaces: [Workspace] {
+        guard let snapshot = app.snapshot else { return [] }
+        let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return snapshot.workspaces }
+        return snapshot.workspaces.compactMap { workspace in
+            let matches = workspace.tasks.filter { task in
+                task.name.lowercased().contains(needle)
+                    || task.agent.lowercased().contains(needle)
+                    || (task.project?.lowercased().contains(needle) ?? false)
+                    || (task.branch?.lowercased().contains(needle) ?? false)
+            }
+            guard !matches.isEmpty else { return nil }
+            var copy = workspace
+            copy.tasks = matches
+            return copy
         }
     }
 
@@ -83,7 +111,26 @@ struct HomeView: View {
                             .listRowInsets(EdgeInsets())
                     }
                 }
-                ForEach(snapshot.workspaces) { workspace in
+
+                // Pinned triage group — the desktop session list's "Needs you".
+                if !needsYou.isEmpty {
+                    Section {
+                        ForEach(needsYou) { task in
+                            NavigationLink(value: task.id) {
+                                TaskRow(task: task)
+                            }
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Theme.orange)
+                                .frame(width: 6, height: 6)
+                            Text("Needs you · \(needsYou.count)")
+                        }
+                    }
+                }
+
+                ForEach(filteredWorkspaces) { workspace in
                     Section(workspace.name) {
                         ForEach(workspace.tasks) { task in
                             NavigationLink(value: task.id) {
@@ -92,10 +139,19 @@ struct HomeView: View {
                         }
                     }
                 }
+
+                if filteredWorkspaces.isEmpty {
+                    Section {
+                        Text(search.isEmpty ? "No tasks yet." : "No tasks match “\(search)”.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.ink3)
+                    }
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Theme.background)
+            .searchable(text: $search, prompt: "Search tasks, projects, agents")
         } else {
             VStack(spacing: 14) {
                 Image(systemName: "square.grid.2x2")
@@ -124,10 +180,10 @@ private struct ConnectionBanner: View {
 
     private var tint: Color {
         switch state {
-        case .connected: return .green
-        case .offline: return .red
-        case .unauthorized: return .red
-        default: return .orange
+        case .connected: return Theme.green
+        case .offline: return Theme.red
+        case .unauthorized: return Theme.red
+        default: return Theme.orange
         }
     }
 
@@ -138,11 +194,12 @@ private struct ConnectionBanner: View {
                 .frame(width: 8, height: 8)
             Text(state.label)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.ink2)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(tint.opacity(0.3), lineWidth: 1))
     }
 }
 
@@ -154,6 +211,7 @@ private struct TaskRow: View {
             HStack {
                 Text(task.name)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Spacer()
                 StatusBadge(status: task.status)
@@ -171,7 +229,7 @@ private struct TaskRow: View {
                 Text(Format.relativeTime(task.updatedAt))
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.ink2)
         }
         .padding(.vertical, 2)
     }
@@ -185,7 +243,8 @@ struct StatusBadge: View {
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Theme.statusColor(status).opacity(0.15), in: Capsule())
+            .background(Theme.statusColor(status).opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(Theme.statusColor(status).opacity(0.3), lineWidth: 1))
             .foregroundStyle(Theme.statusColor(status))
     }
 }

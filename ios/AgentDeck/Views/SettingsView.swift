@@ -107,9 +107,10 @@ private struct LabeledRow: View {
     var body: some View {
         HStack {
             Text(label)
+                .foregroundStyle(Theme.ink)
             Spacer()
             Text(value)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
