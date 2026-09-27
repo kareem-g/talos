@@ -11,7 +11,10 @@ Re-run whenever Swift files are added or removed; the file references are
 mirrored from the directory tree.
 """
 
+import hashlib
 import os
+import re
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IOS_DIR = os.path.dirname(SCRIPT_DIR)
@@ -47,9 +50,23 @@ def collect_swift_files(group_dir: str) -> dict[str, list[str]]:
 
 
 def quote(value: str) -> str:
-    if all(c.isalnum() or c in "._/$(){}-+" for c in value) and value != "":
+    if re.fullmatch(r"[A-Za-z0-9_./]+", value or ""):
         return value
     return f'"{value}"'
+
+
+def plist_value(value: str) -> str:
+    """Build-setting value in old-style plist syntax.
+
+    The pbxproj parser is an OpenStep-format plist: `(`, `)`, `$`, `-`, and
+    spaces are not safe in unquoted strings, so anything that is not a plain
+    token is quoted. Xcode itself quotes every variable expansion
+    ("$(inherited)", "$(TARGET_NAME)"). Composite (parenthesized) values are
+    passed through already-formatted.
+    """
+    if value.startswith("("):
+        return value
+    return quote(value)
 
 
 class Project:
@@ -390,7 +407,7 @@ class Project:
         }
         project_release = {
             "COPY_PHASE_STRIP": "NO",
-            "DEBUG_INFORMATION_FORMAT": '"dwarf-with-dsym"',
+            "DEBUG_INFORMATION_FORMAT": "dwarf-with-dsym",
             "ENABLE_NS_ASSERTIONS": "NO",
             "GCC_OPTIMIZATION_LEVEL": "s",
             "ONLY_ACTIVE_ARCH": "NO",
@@ -408,16 +425,16 @@ class Project:
         }
         app_debug = {"ENABLE_PREVIEWS": "YES"}
         test_settings = {
-            "BUNDLE_LOADER": '"$(TEST_HOST)"',
+            "BUNDLE_LOADER": "$(TEST_HOST)",
             "GENERATE_INFOPLIST_FILE": "YES",
             "LD_RUNPATH_SEARCH_PATHS": '("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks")',
             "PRODUCT_BUNDLE_IDENTIFIER": f"{BUNDLE_ID}.tests",
-            "TEST_HOST": f'"$(BUILT_PRODUCTS_DIR)/{APP_NAME}.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/{APP_NAME}"',
+            "TEST_HOST": f"$(BUILT_PRODUCTS_DIR)/{APP_NAME}.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/{APP_NAME}",
         }
 
         def settings_lines(settings: dict[str, str]) -> str:
             return "\n".join(
-                f"\t\t\t\t\t{key} = {value};" for key, value in settings.items()
+                f"\t\t\t\t\t{key} = {plist_value(value)};" for key, value in settings.items()
             )
 
         def config(cfg_id: str, name: str, settings: dict[str, str], comment: str) -> str:
