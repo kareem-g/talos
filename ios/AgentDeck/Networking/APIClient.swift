@@ -98,7 +98,9 @@ final class APIClient {
     private static func describe(_ error: URLError, url: URL?) -> String {
         let host = url?.host ?? "the server"
         switch error.code {
-        case .appTransportSecurityFailed:
+        // NSURLErrorAppTransportSecurityFailed isn't a named URLError.Code
+        // case in Swift; match its raw value.
+        case let code where code.rawValue == -1022:
             return "iOS blocked the insecure http connection to \(host). Pair using an https (Cloudflare) endpoint, or update the app."
         case .cannotFindHost:
             return "Can't find \(host). If this is a Tailscale code, open the Tailscale app on this phone and connect to the same tailnet first."
