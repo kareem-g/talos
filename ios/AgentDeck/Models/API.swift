@@ -313,6 +313,16 @@ struct SessionDetail: Codable, Equatable {
     var terminalOutput: [TerminalLine]
     var approvals: [PendingApproval]
     var questions: [Question]
+
+    enum CodingKeys: String, CodingKey {
+        case session
+        case transcripts
+        case messages
+        case events
+        case terminalOutput = "terminal_output"
+        case approvals
+        case questions
+    }
 }
 
 // MARK: - Requests
