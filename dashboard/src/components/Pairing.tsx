@@ -649,7 +649,7 @@ export function PairingScreen({
           {state === 'paired' ? (
             <Check size={20} className="text-green" />
           ) : (
-            <span className="font-mono text-[15px] font-medium text-accent-ink">AD</span>
+            <span className="font-mono text-[15px] font-medium text-accent">AD</span>
           )}
         </span>
         <h1 className="text-[15px] font-medium text-ink">

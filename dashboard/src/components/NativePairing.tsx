@@ -101,7 +101,7 @@ export function NativePairingGate({ onPaired }: { onPaired: () => void }) {
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
-              className="w-full resize-none rounded-lg border border-line bg-field px-3 py-2 font-mono text-[16px] text-ink outline-none focus:border-accent"
+              className="w-full resize-none rounded-lg border border-line bg-field px-3 py-2 font-mono text-[16px] text-ink outline-none placeholder:text-ink-3 focus:border-accent"
             />
             <button
               type="button"

@@ -16,6 +16,11 @@
  */
 @layer base {
   :root {
+    /* Native form controls, caret, selection handles, scrollbars and the iOS
+       keyboard follow this. Without it WebKit paints them for a light page —
+       dark caret and near-black placeholder text over the dark surfaces. */
+    color-scheme: dark;
+
     /* Surfaces — warm charcoal/espresso, no cool blue or green. */
     --canvas: #131315;
     --sidebar: #17171b;
@@ -131,6 +136,7 @@
      Same accent system, light surfaces, dark ink. Selected via
      [data-theme='light'] on <html> (lib/theme.ts). */
   [data-theme='light'] {
+    color-scheme: light;
     --canvas: #f8f8fa;
     --sidebar: #eeeeF1;
     --inset: #f1f1f4;

@@ -62,13 +62,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   let response: Response
+  let target = path
   try {
     // Same-origin in the browser (resolveApiUrl returns the path unchanged);
     // absolute in the native shell, which is not served by the daemon.
-    response = await fetch(resolveApiUrl(path), { ...init, headers })
+    target = resolveApiUrl(path)
+    response = await fetch(target, { ...init, headers })
   } catch (cause) {
+    // WebKit reports blocked and unreachable requests with the identical,
+    // content-free "Load failed", which tells you nothing about which URL was
+    // even attempted. Name it, and say plainly that nothing answered — the
+    // difference between "blocked" and "server said no" is the whole diagnosis.
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    const opaque = /load failed|failed to fetch|networkerror|network request failed/i.test(reason)
     throw new ApiError(
-      cause instanceof Error ? cause.message : 'Network request failed',
+      opaque
+        ? `No response from ${target} — the request never reached the server (${reason}).`
+        : `Request to ${target} failed: ${reason}`,
       0,
       'network_error',
     )

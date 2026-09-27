@@ -138,13 +138,21 @@ jobs:
           PLIST=ios/App/App/Info.plist
           test -f "$PLIST" || { echo "Info.plist not found at $PLIST"; exit 1; }
 
-          # Plain-http daemon URLs: LAN and tailnet pairing both use http, and
-          # this is the same ATS exception the SwiftUI app ships with.
+          # Plain-http daemon URLs: LAN and tailnet pairing both use http.
+          #
+          # `NSAllowsArbitraryLoads` alone does NOT cover WKWebView — for web
+          # content iOS consults `NSAllowsArbitraryLoadsInWebContent`, and when
+          # either of the newer keys is present the legacy one is ignored. The
+          # shell loads its UI from capacitor://localhost and fetches the daemon
+          # over plain http from inside the webview, so without the *InWebContent
+          # key those requests are blocked and WebKit reports the unhelpful
+          # "Load failed" — which is exactly why the SwiftUI app (URLSession)
+          # paired against the same daemon while the shell could not.
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || \
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" 2>/dev/null || \
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$PLIST"
+          for key in NSAllowsArbitraryLoads NSAllowsArbitraryLoadsInWebContent NSAllowsLocalNetworking; do
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:$key bool true" "$PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:$key true" "$PLIST"
+          done
 
           # LocalNetwork usage prompt (bonjour/LAN discovery of the daemon).
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'AgentDeck connects to the desktop running on your local network.'" "$PLIST" 2>/dev/null || true
