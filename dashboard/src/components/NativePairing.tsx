@@ -16,6 +16,7 @@
 import { useState } from 'react'
 import { PairingScreen } from './Pairing'
 import { QrScanner } from './QrScanner'
+import { BrandMark } from './BrandMark'
 import { haptic } from '@/lib/nativeUX'
 import { parsePairingLink, setDeviceBaseUrl } from '@/lib/native'
 
@@ -57,8 +58,8 @@ export function NativePairingGate({ onPaired }: { onPaired: () => void }) {
       style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="flex size-11 items-center justify-center rounded-card bg-surface font-mono text-[13px] font-semibold text-accent shadow-card">
-          AD
+        <span className="flex size-11 items-center justify-center rounded-card bg-surface shadow-card">
+          <BrandMark className="size-9" />
         </span>
         <h1 className="text-[17px] font-semibold text-ink">Pair with your desktop</h1>
         <p className="max-w-[34ch] text-[12.5px] leading-[1.6] text-ink-3">

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Check, CopyButton, Dots, IconButton, Close } from './ui'
+import { BrandMark } from './BrandMark'
 import {
   ApiError,
   pairingApi,
@@ -649,7 +650,7 @@ export function PairingScreen({
           {state === 'paired' ? (
             <Check size={20} className="text-green" />
           ) : (
-            <span className="font-mono text-[15px] font-medium text-accent">AD</span>
+            <BrandMark className="size-9" />
           )}
         </span>
         <h1 className="text-[15px] font-medium text-ink">

@@ -23,20 +23,39 @@ window.addEventListener('error', (errorEvent) => {
   root.textContent = `Startup error: ${errorEvent.message}\n\n${errorEvent.error?.stack ?? ''}`
 })
 
+// Same reason, for a start that hangs instead of throwing: the page would sit on
+// `body`'s background — a black screen with nothing to act on. The timer is
+// cleared the moment React mounts.
+const watchdog = window.setTimeout(() => {
+  if (root.childElementCount > 0) return
+  root.textContent =
+    'AgentDeck could not start. Close and reopen the app. If it keeps happening, re-pair this device.'
+}, 6000)
+
 registerSW()
 
 /**
- * Restore Keychain credentials before the first render, so a paired device
- * never flashes the pairing screen on launch. In the browser (and on a first
- * launch) this resolves immediately.
+ * Mount first, restore credentials after.
+ *
+ * Rendering must not wait on a native call: the Keychain read can stall (device
+ * locked at launch, plugin not answering), and an unrendered page is a black
+ * screen with no way out. So the app paints immediately from web storage, and
+ * the Keychain is consulted in the background.
+ *
+ * If that background read turns out to hold credentials the first paint could
+ * not see, the app reloads once so it starts paired instead of showing the
+ * pairing screen. It cannot loop: the next pass finds the values already in web
+ * storage and restores nothing.
  */
-async function bootstrap(): Promise<void> {
-  await hydrateCredentials().catch(() => {})
-  ReactDOM.createRoot(root).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>,
-  )
-}
+ReactDOM.createRoot(root).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+window.clearTimeout(watchdog)
 
-void bootstrap()
+void hydrateCredentials()
+  .then((restored) => {
+    if (restored) window.location.reload()
+  })
+  .catch(() => {})

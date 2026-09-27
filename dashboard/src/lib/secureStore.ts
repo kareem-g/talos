@@ -41,23 +41,32 @@ async function store(): Promise<SecureStorageModule | null> {
  * Pull Keychain values into web storage when web storage has none.
  *
  * Only fills gaps: if web storage already holds a value it wins, so a user who
- * cleared the Keychain is not resurrected by a stale copy.
+ * cleared the Keychain is not resurrected by a stale copy. Resolves to whether
+ * anything was actually restored — callers use that to decide if a render that
+ * already happened needs to be redone.
+ *
+ * Never rejects, and callers must not block rendering on it: a Keychain read can
+ * stall (device locked at launch, plugin not answering), and a stalled promise
+ * awaiting before the first render is a black screen.
  */
-export async function hydrateCredentials(): Promise<void> {
-  if (!isNativeApp()) return
+export async function hydrateCredentials(): Promise<boolean> {
+  if (!isNativeApp()) return false
   const secure = await store()
-  if (!secure) return
+  if (!secure) return false
+  let restored = false
   for (const key of KEYS) {
     try {
       if (localStorage.getItem(key)) continue
       const value = await secure.get(key)
       if (typeof value === 'string' && value.length > 0) {
         localStorage.setItem(key, value)
+        restored = true
       }
     } catch {
       // Locked keychain or a first launch: nothing to restore.
     }
   }
+  return restored
 }
 
 /** Mirror the current web-storage credentials into the Keychain. */
