@@ -74,7 +74,7 @@ struct HomeView: View {
             }
             .padding(32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let snapshot, !snapshot.workspaces.isEmpty {
+        } else if let snapshot = app.snapshot, !snapshot.workspaces.isEmpty {
             List {
                 if app.connection != .connected {
                     Section {

@@ -130,7 +130,7 @@ enum UpdateChecker {
         let htmlURL: String
 
         var isNewer: Bool {
-            Self.isVersion(Self.appVersion, olderThan: version)
+            UpdateChecker.isVersion(UpdateChecker.appVersion, olderThan: version)
         }
     }
 
