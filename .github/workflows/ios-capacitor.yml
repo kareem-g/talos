@@ -49,6 +49,10 @@ jobs:
         # and this job only needs a reproducible-enough install to build once.
         run: pnpm install --no-frozen-lockfile
 
+      - name: Unit tests
+        working-directory: dashboard
+        run: pnpm test
+
       - name: Build web bundle
         working-directory: dashboard
         run: pnpm build
