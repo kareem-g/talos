@@ -8,11 +8,13 @@ on:
     branches: [main, "ios-*"]
     paths:
       - "ios/**"
-      - ".github/workflows/ios*.yml"
+      - ".github/workflows/ios-ci.yml"
+      - ".github/workflows/ios-release.yml"
   pull_request:
     paths:
       - "ios/**"
-      - ".github/workflows/ios*.yml"
+      - ".github/workflows/ios-ci.yml"
+      - ".github/workflows/ios-release.yml"
 
 permissions:
   contents: read
