@@ -64,7 +64,15 @@ final class APIClient {
         body: Data? = nil
     ) async throws -> Data {
         let request = try makeRequest(method, path, query: query, body: body)
-        let (data, response) = try await urlSession.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch let error as URLError {
+            throw APIError(message: Self.describe(error, url: request.url), status: nil)
+        } catch {
+            throw APIError(message: "Connection failed: \(error.localizedDescription)", status: nil)
+        }
         let status = (response as? HTTPURLResponse)?.statusCode
 
         if let wire = try? DateCoding.decoder().decode(WireError.self, from: data),
@@ -82,6 +90,25 @@ final class APIClient {
             throw APIError(message: "\(reason) (HTTP \(status.map(String.init) ?? "?"))", status: status)
         }
         return data
+    }
+
+    /// Translates low-level connection failures into an actionable message.
+    /// Pairing failures over a tailnet/LAN code otherwise look identical to
+    /// an expired code, which sends the user down the wrong path.
+    private static func describe(_ error: URLError, url: URL?) -> String {
+        let host = url?.host ?? "the server"
+        switch error.code {
+        case .appTransportSecurityFailed:
+            return "iOS blocked the insecure http connection to \(host). Pair using an https (Cloudflare) endpoint, or update the app."
+        case .cannotFindHost:
+            return "Can't find \(host). If this is a Tailscale code, open the Tailscale app on this phone and connect to the same tailnet first."
+        case .cannotConnectToHost, .timedOut, .networkConnectionLost:
+            return "Can't reach \(host). Check that the desktop is running and reachable from this phone — same Wi-Fi for LAN codes, Tailscale connected for tailnet codes."
+        case .notConnectedToInternet, .dataNotAllowed:
+            return "This phone has no network connection."
+        default:
+            return "\(error.localizedDescription) (\(host))"
+        }
     }
 
     func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {

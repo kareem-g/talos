@@ -127,6 +127,29 @@ opens the release page in Safari when an update exists.
 TestFlight updates go through the normal TestFlight flow (push a new
 `ios-v*` tag; the workflow uploads, you release in App Store Connect).
 
+## Pairing over Tailscale
+
+The desktop's pairing page shows one QR per transport. The **Tailnet** codes
+(`Tailnet · <machine>`) point at `http://<machine>.<tailnet>.ts.net:9120` and
+only work when the phone itself is on the tailnet:
+
+1. Install the **Tailscale app** on the iPhone (App Store) and sign in to the
+   **same tailnet** as the machine running AgentDeck. Leave it connected (the
+   VPN key icon in status bar).
+2. On the machine, Tailscale must be up (the daemon's tunnel manager or the
+   CLI) and the AgentDeck daemon running.
+3. Desktop → pairing page → generate a **fresh** code. Offers expire after
+   two minutes and are single-use — if you scanned, cancelled, and rescanned
+   the same QR, it's dead; generate a new one.
+4. Pick the **Tailnet** chip and scan with the app.
+5. If it fails, read the error under the Pair button: "can't reach / can't
+   find host" means the phone isn't on the tailnet (or an ACL blocks TCP
+   9120); "invalid or expired offer" means the QR went stale — regenerate.
+
+The **LAN** chip works the same way but requires the phone and machine to be
+on the same Wi-Fi. The **Cloudflare** chip is https and works from anywhere
+(including cellular) when a tunnel is configured.
+
 ## Testing on the simulator
 
 The simulator has no camera, so the scanner view falls back to a paste field:

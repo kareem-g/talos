@@ -26,8 +26,13 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- LAN / tailnet pairing URLs are plain http; HTTPS is used whenever
-		     the desktop exposes a Cloudflare tunnel endpoint. -->
+		<!-- The app connects to the user's own AgentDeck daemon, which serves
+		     plain http on LAN and tailnet endpoints (Tailscale MagicDNS is a
+		     public-looking .ts.net hostname, so NSAllowsLocalNetworking alone
+		     doesn't cover it). Cloudflare tunnel endpoints are https and
+		     unaffected by this exception. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
