@@ -167,7 +167,15 @@ final class SessionStateTests: XCTestCase {
 
     func testTerminalOutputStripsANSI() throws {
         var state = makeState()
-        state.apply(try frame(#"{"type":"TerminalOutput","payload":{"session_id":"s1","data":"\u{1b}[32mOK\u{1b}[0m done"},"event_id":1}"#))
+        // Built through the dictionary initializer so the payload can contain
+        // real ESC characters (raw-string literals would keep "\u{1b}" literal
+        // and produce invalid JSON).
+        let frame = ServerFrame(
+            type: "TerminalOutput",
+            payload: ["session_id": "s1", "data": "\u{1b}[32mOK\u{1b}[0m done"],
+            eventID: 1
+        )
+        state.apply(frame)
         XCTAssertEqual(state.terminalLines, ["OK done"])
     }
 
