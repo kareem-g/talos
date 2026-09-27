@@ -7,6 +7,7 @@
  */
 
 import { deviceToken, setDeviceToken } from './api'
+import { deviceBaseUrl, setDeviceBaseUrl } from './native'
 
 export const TOKEN_KEY = 'agentdeck-device-token'
 
@@ -18,8 +19,15 @@ export function setPairingToken(token: string | null): void {
   setDeviceToken(token)
 }
 
+/** The daemon origin this device is paired with (native shell); `''` = same-origin. */
+export function getPairingBaseUrl(): string {
+  return deviceBaseUrl()
+}
+
 export function clearPairing(): void {
   setDeviceToken(null)
+  // Drop the daemon origin too, so re-pairing can point at a different machine.
+  setDeviceBaseUrl(null)
 }
 
 export function isPaired(): boolean {

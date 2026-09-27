@@ -7,8 +7,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { PairingScreen } from './components/Pairing'
+import { NativePairingGate } from './components/NativePairing'
 import { AppShell } from './components/AppShell'
 import { useRoute } from './lib/route'
+import { isNativeApp } from './lib/native'
+import { isPaired } from './lib/pairing'
 import { roomOpenApproval, useRooms } from './lib/rooms'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
@@ -208,6 +211,12 @@ export default function App() {
   }, [navigate])
 
   /* ── Pairing takeover ──────────────────────────────────────────────────── */
+  // The native shell is bundled rather than served by the daemon, so it cannot
+  // arrive on a `/mobile/pair` URL — it asks for the link instead.
+  if (isNativeApp() && !isPaired()) {
+    return <NativePairingGate onPaired={() => replace({ name: 'list' })} />
+  }
+
   if (route.name === 'pair') {
     return (
       <PairingScreen

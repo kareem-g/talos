@@ -9,11 +9,16 @@
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ios:add": "cap add ios",
+    "ios:sync": "cap sync ios",
+    "ios:open": "cap open ios"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.13",
     "@assistant-ui/react-markdown": "^0.14.10",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "@monaco-editor/react": "^4.6.0",
     "@radix-ui/react-context-menu": "^2.2.0",
     "@radix-ui/react-dialog": "^1.1.0",
@@ -42,6 +47,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@eslint/js": "^9.17.0",
     "@types/babel__traverse": "^7.20.0",
     "@types/node": "^22.0.0",

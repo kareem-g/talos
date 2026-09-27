@@ -21,6 +21,7 @@ import type {
 import type { CreateSessionRequest, DiscoverResponse, Session, SyncResponse } from '@/types/session'
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
 import type { AttachmentRef } from '@/types/conversation'
+import { resolveApiUrl } from './native'
 
 export class ApiError extends Error {
   constructor(
@@ -62,7 +63,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response
   try {
-    response = await fetch(path, { ...init, headers })
+    // Same-origin in the browser (resolveApiUrl returns the path unchanged);
+    // absolute in the native shell, which is not served by the daemon.
+    response = await fetch(resolveApiUrl(path), { ...init, headers })
   } catch (cause) {
     throw new ApiError(
       cause instanceof Error ? cause.message : 'Network request failed',

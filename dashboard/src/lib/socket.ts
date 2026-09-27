@@ -22,6 +22,7 @@
 import type { ApprovalMeta, ClientFrame, ConnectionState, IncomingFrame } from '@/types/protocol'
 import { isIncomingFrame } from '@/types/protocol'
 import { deviceToken } from './api'
+import { socketOrigin } from './native'
 
 type FrameListener = (frame: IncomingFrame) => void
 type StateListener = (state: ConnectionState) => void
@@ -100,8 +101,8 @@ class SocketClient {
     // Authenticated devices use the mobile socket, which supports replay; an
     // unauthenticated local browser uses the plain socket.
     const path = token ? '/ws/mobile' : '/ws'
-    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${scheme}://${window.location.host}${path}`
+    // Browser: the page's own host. Native shell: the paired daemon origin.
+    const url = `${socketOrigin()}${path}`
 
     this.setState(this.everConnected ? 'reconnecting' : 'connecting')
 
