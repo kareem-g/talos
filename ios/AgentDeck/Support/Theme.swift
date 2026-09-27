@@ -119,7 +119,7 @@ extension UIColor {
     convenience init(hex: String) {
         var value: UInt64 = 0
         let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        Scanner(digits).scanHexInt64(&value)
+        Scanner(string: digits).scanHexInt64(&value)
         let r, g, b, a: CGFloat
         if digits.count == 8 {
             r = CGFloat((value >> 24) & 0xFF) / 255
