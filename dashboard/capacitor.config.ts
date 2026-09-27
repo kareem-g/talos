@@ -21,6 +21,31 @@ const config: CapacitorConfig = {
     contentInset: 'never',
     backgroundColor: '#131315',
   },
+  plugins: {
+    // Keyboard: shrink the webview instead of sliding it, so the composer and
+    // the message you're replying to stay visible while typing.
+    Keyboard: {
+      resize: 'native',
+      style: 'dark',
+      resizeOnFullScreen: true,
+    },
+    // Launch image matches the canvas colour, so there is no flash between the
+    // splash and the first paint of the app.
+    SplashScreen: {
+      backgroundColor: '#131315',
+      launchShowDuration: 300,
+      // Auto-hide rather than hiding by hand: a failed JS init must never
+      // leave the splash up forever. The background colour matches the canvas,
+      // so the handoff to first paint is invisible either way.
+      launchAutoHide: true,
+      showSpinner: false,
+    },
+    StatusBar: {
+      style: 'dark',
+      backgroundColor: '#131315',
+      overlaysWebView: false,
+    },
+  },
 }
 
 export default config

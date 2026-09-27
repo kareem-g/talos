@@ -5,3 +5,4 @@ DerivedData/
 build/
 *.xcarchive
 .DS_Store
+build-shell/

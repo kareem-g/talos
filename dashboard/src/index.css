@@ -653,3 +653,40 @@
     touch-action: manipulation;
   }
 }
+
+/* ── Native shell (Capacitor) ───────────────────────────────────────────────
+   Applied by `initNativeUX()` via the `native-shell` class on <html>, so none
+   of it can affect the browser build. These are the tells that make a webview
+   read as a web page rather than an app: grey tap flashes, text selection on
+   chrome, rubber-band overscroll, and long-press callouts on controls. */
+html.native-shell {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+/* Chrome is not selectable; anything holding content still is. The composer
+   and code/terminal surfaces keep selection so copying output still works. */
+html.native-shell body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html.native-shell input,
+html.native-shell textarea,
+html.native-shell [contenteditable='true'],
+html.native-shell pre,
+html.native-shell code,
+html.native-shell .selectable,
+html.native-shell [data-selectable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Hover affordances are meaningless on touch and cause sticky styles after a
+   tap; disable only under the shell so desktop stays unaffected. */
+@media (hover: none) {
+  html.native-shell [class*='hover:']:hover {
+    background-color: inherit;
+  }
+}

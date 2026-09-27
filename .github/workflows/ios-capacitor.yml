@@ -67,6 +67,66 @@ jobs:
         working-directory: dashboard
         run: pnpm exec cap sync ios
 
+      - name: Install app icon and launch image
+        working-directory: dashboard
+        # Generated rather than pulled from a tool: `cap add ios` ships the
+        # Capacitor logo, and @capacitor/assets drags in sharp (which pnpm's
+        # build-script policy rejects). This reads the asset catalog the
+        # template actually generated and overwrites the files it references,
+        # so it survives template changes.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, glob, os, shutil
+
+          ICON = 'resources/icon.png'
+          SPLASH = 'resources/splash.png'
+          SPLASH_DARK = 'resources/splash-dark.png'
+          for path in (ICON, SPLASH, SPLASH_DARK):
+              assert os.path.exists(path), f'missing {path}'
+
+          appicons = glob.glob('ios/**/Assets.xcassets/AppIcon.appiconset', recursive=True)
+          splashes = glob.glob('ios/**/Assets.xcassets/Splash.imageset', recursive=True)
+          assert appicons, 'AppIcon.appiconset not found in the generated project'
+          print('icon set:', appicons, '| splash set:', splashes)
+
+          def images_in(contents):
+              """Every filename the catalog references, light and dark."""
+              found = []
+              if isinstance(contents.get('images'), list):
+                  for image in contents['images']:
+                      if isinstance(image, dict) and image.get('filename'):
+                          found.append(image['filename'])
+                      for value in image.values() if isinstance(image, dict) else []:
+                          if isinstance(value, dict) and value.get('filename'):
+                              found.append(value['filename'])
+              return found
+
+          # App icon: Xcode 14+ single-size catalog. Overwrite every PNG it
+          # references with the 1024 source (iOS downsamples from there).
+          for directory in appicons:
+              contents_path = os.path.join(directory, 'Contents.json')
+              contents = json.load(open(contents_path)) if os.path.exists(contents_path) else {}
+              names = images_in(contents) or ['AppIcon-512@2x.png']
+              for name in names:
+                  shutil.copyfile(ICON, os.path.join(directory, name))
+              json.dump(
+                  {'images': [{'filename': names[0], 'idiom': 'universal', 'platform': 'ios', 'size': '1024x1024'}],
+                   'info': {'author': 'xcode', 'version': 1}},
+                  open(contents_path, 'w'), indent=2)
+              print('app icon ->', names)
+
+          # Launch image: Capacitor points LaunchScreen.storyboard at this set.
+          for directory in splashes:
+              contents_path = os.path.join(directory, 'Contents.json')
+              contents = json.load(open(contents_path)) if os.path.exists(contents_path) else {}
+              names = images_in(contents) or ['splash-2732x2732.png']
+              for name in names:
+                  source = SPLASH_DARK if 'dark' in name else SPLASH
+                  shutil.copyfile(source, os.path.join(directory, name))
+              print('launch images ->', names)
+          PY
+
       - name: Configure Info.plist (ATS + camera)
         working-directory: dashboard
         run: |

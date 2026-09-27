@@ -3,11 +3,15 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { registerSW } from './lib/pwa'
 import { initTheme } from './lib/theme'
+import { initNativeUX } from './lib/nativeUX'
 import './index.css'
 
 // Theme is applied pre-paint by the inline script in index.html; this re-applies
 // stored prefs (and the system-mode listener) once the app owns the document.
 initTheme()
+
+// No-op in the browser; sets up status bar/zoom/haptics in the native shell.
+void initNativeUX()
 
 const root = document.getElementById('root')!
 
