@@ -14,6 +14,7 @@
 
 import { useStore } from '@/store'
 import { sessionsApi } from '@/lib/api'
+import { haptic } from '@/lib/nativeUX'
 import {
   findRoomMention,
   getActiveRoom,
@@ -144,6 +145,8 @@ export function createSessionSendHandlers(
 
   const send = (text: string, attachments: AttachmentRef[] = []): boolean => {
     const trimmed = text.trim()
+    // Confirms the tap physically on a phone; no-op in the browser.
+    if (trimmed.length > 0) haptic('tap')
     const sideMatch = /^\/side\s+([\s\S]+)$/.exec(trimmed)
     const btwMatch = /^\/btw\s+([\s\S]+)$/.exec(trimmed)
     const orchestratorMatch = /^\/orchestrator(?:\s+([\s\S]+))?$/.exec(trimmed)
