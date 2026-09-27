@@ -14,7 +14,7 @@ enum JSONValue {
     case object([String: JSONValue])
 }
 
-extension JSONValue: Codable {
+extension JSONValue: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
