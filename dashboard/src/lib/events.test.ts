@@ -460,6 +460,9 @@ describe('GrokBot event types', () => {
 
   it('merges usage updates into one meter', () => {
     const conversation = emptyConversation('s1')
+    // Tool-calling turns send one usage report PER REQUEST; the meter
+    // accumulates the turn's cumulative totals (what was actually shipped),
+    // it does not just show the last request.
     applyAgentEvent(conversation, event('usage', { input_tokens: 100 }))
     applyAgentEvent(conversation, event('usage', { input_tokens: 150, outputTokens: 40, cost_usd: 0.02 }))
 
@@ -467,7 +470,7 @@ describe('GrokBot event types', () => {
     const meters = turn.parts.filter((part) => part.kind === 'usage')
     expect(meters).toHaveLength(1)
     const meter = meters[0] as { inputTokens?: number; outputTokens?: number; costUsd?: number }
-    expect(meter.inputTokens).toBe(150)
+    expect(meter.inputTokens).toBe(250)
     expect(meter.outputTokens).toBe(40)
     expect(meter.costUsd).toBe(0.02)
   })
