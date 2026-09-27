@@ -355,13 +355,15 @@ export interface PermissionMode {
   label: string
   subtext: string
   icon: React.ComponentType<{ size?: number; className?: string }>
+  /** Semantic colour for the icon — how much the mode lets through. */
+  tone: string
 }
 
 export const PERMISSION_MODES: PermissionMode[] = [
-  { id: 'ask', label: 'Ask before changes', subtext: 'Ask before file changes.', icon: Hand },
-  { id: 'auto_edit', label: 'Edit automatically', subtext: 'Edit files automatically.', icon: ShieldCheck },
-  { id: 'plan', label: 'Plan mode', subtext: 'Plan before editing.', icon: FileText },
-  { id: 'full', label: 'Full access', subtext: 'Run with fewer confirmations.', icon: ShieldAlert },
+  { id: 'ask', label: 'Ask before changes', subtext: 'Ask before file changes.', icon: Hand, tone: 'text-orange' },
+  { id: 'auto_edit', label: 'Edit automatically', subtext: 'Edit files automatically.', icon: ShieldCheck, tone: 'text-green' },
+  { id: 'plan', label: 'Plan mode', subtext: 'Plan before editing.', icon: FileText, tone: 'text-accent' },
+  { id: 'full', label: 'Full access', subtext: 'Run with fewer confirmations.', icon: ShieldAlert, tone: 'text-red' },
 ]
 
 const PERMISSION_KEY = 'agentdeck-permission-mode'
@@ -401,8 +403,8 @@ export function PermissionChip({
   // The config_id is 'permission_mode' (Plumb-specific), not 'mode' (agent-native).
   const toAgentMode = (id: PermissionMode['id']): string => id
 
-  // Icon-only trigger, like the reference: the orange shield IS the
-  // permission state; the label lives in the dropdown and the tooltip.
+  // Icon-only trigger: the shield's colour IS the permission state, so it
+  // tracks the selected mode rather than always reading as "caution".
   const TriggerIcon = selected.icon
 
   return (
@@ -420,7 +422,7 @@ export function PermissionChip({
           open && 'bg-hover-2',
         )}
       >
-        <TriggerIcon size={15} className="shrink-0 text-orange" />
+        <TriggerIcon size={15} className={cn('shrink-0', selected.tone)} />
       </button>
 
       {open ? (
@@ -446,7 +448,7 @@ export function PermissionChip({
                     active ? 'bg-hover' : 'hover:bg-hover-2',
                   )}
                 >
-                  <Icon size={15} className={cn('mt-0.5 shrink-0', active ? 'text-emerald-400' : 'opacity-60')} />
+                  <Icon size={15} className={cn('mt-0.5 shrink-0', option.tone, !active && 'opacity-80')} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-medium text-ink">{option.label}</span>
                     <span className="block text-[11px] leading-snug text-ink-3">{option.subtext}</span>

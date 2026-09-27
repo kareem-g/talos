@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Menu } from 'lucide-react'
 import LoadingState from './LoadingState'
+import { BrandMark } from './BrandMark'
 import { AppNav, type NavPage } from './AppNav'
 import { SessionChat } from './SessionChat'
 import { RightRail, type RightRailHandle } from './desktop/session/RightRail'
@@ -43,12 +44,10 @@ function useIsDesktop(): boolean {
   return isDesktop
 }
 
-function BrandMark({ compact }: { compact?: boolean }) {
+function Wordmark({ compact }: { compact?: boolean }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/15">
-        <span className="font-mono text-[12px] font-bold text-accent-ink">A</span>
-      </span>
+      <BrandMark className="size-7 shrink-0" />
       {compact ? null : (
         <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
       )}
@@ -112,6 +111,28 @@ export function AppShell({
     [navigate],
   )
 
+  /**
+   * Providers and their models change outside this client — a provider added on
+   * the desktop, a model enabled in another tab, a `models` list that grew after
+   * a key was rotated. Coming back to the foreground re-asks, so a newly added
+   * model is selectable without reloading the app, and the open sessions' config
+   * choices are rebuilt from the fresh provider list.
+   */
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      const state = useStore.getState()
+      void state.loadProviders(true)
+      void state.refreshConfigs()
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+
   const exitSession = useCallback(() => {
     setPage('home')
     replace({ name: 'list' })
@@ -165,7 +186,7 @@ export function AppShell({
   ) : inSession && resolvingHidden ? (
     <LoadingState label="Opening session" variant="Drive" />
   ) : (
-    <PageView page={page} onOpenSession={openSession} />
+    <PageView page={page} onOpenSession={openSession} onOpenNav={() => setDrawerOpen(true)} />
   )
 
   /* ── Desktop: the unified three-pane screen ──────────────────────────── */
@@ -223,15 +244,19 @@ export function AppShell({
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       <header className="flex h-14 shrink-0 items-center border-b border-line/50 px-3">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open navigation"
-            className="flex size-8 items-center justify-center rounded-lg text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
-          >
-            <Menu size={16} />
-          </button>
-          <BrandMark compact />
+          {/* Home renders its own header, which carries this trigger — showing
+              it here too put two identical menu buttons on one screen. */}
+          {page === 'home' ? null : (
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open navigation"
+              className="flex size-8 items-center justify-center rounded-lg text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
+            >
+              <Menu size={16} />
+            </button>
+          )}
+          <Wordmark compact />
         </div>
       </header>
 
@@ -265,15 +290,22 @@ export function AppShell({
 function PageView({
   page,
   onOpenSession,
+  onOpenNav,
 }: {
   page: NavPage
   onOpenSession: (sessionId: string) => void
+  /** Opens the drawer from inside a page (the home header's menu button). */
+  onOpenNav: () => void
 }) {
   switch (page) {
     case 'home':
       return (
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-          <StationHome onOpenSession={(session: Session) => onOpenSession(session.id)} anchorTop="top-0" />
+          <StationHome
+            onOpenSession={(session: Session) => onOpenSession(session.id)}
+            anchorTop="top-0"
+            onOpenNav={onOpenNav}
+          />
         </div>
       )
     case 'agents':

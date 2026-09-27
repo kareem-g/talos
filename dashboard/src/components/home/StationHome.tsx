@@ -24,7 +24,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, RotateCcw, Settings } from 'lucide-react'
+import { Archive, Menu, RotateCcw, Settings } from 'lucide-react'
+import { BrandMark } from '../BrandMark'
+import { useIsDesktop } from '@/lib/viewport'
 import { NewSessionLayer } from '../SessionList'
 import { SyncLayer } from '../SyncSessions'
 import { Button, ChevronDown, Dot, Dots, DropdownList, EmptyState, Plus, Search, StatusPill, TextField } from '../ui'
@@ -113,6 +115,7 @@ export function StationHome({
   onSearchQueryChange,
   newTaskTick,
   anchorTop = 'top-[57px]',
+  onOpenNav,
 }: {
   onOpenSession: (s: Session) => void
   searchQuery?: string
@@ -121,7 +124,11 @@ export function StationHome({
   /** Sticky offset for the section anchor strip — matches whatever chrome
    * sits above the home page in the current shell. */
   anchorTop?: string
+  /** Opens the shell's navigation drawer. The header shows a menu button on
+   * phones, where there is no rail to click. */
+  onOpenNav?: () => void
 }) {
+  const isDesktop = useIsDesktop()
   const sessions = useStore((s) => s.sessions)
   const loading = useStore((s) => s.sessionsLoading)
   const providers = useStore((s) => s.providers)
@@ -228,10 +235,22 @@ export function StationHome({
           <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`, backgroundSize: '24px 24px' }} aria-hidden />
           <div className="relative flex items-center gap-3 px-4 py-3.5 sm:px-6">
             <div className="flex items-center gap-3">
-              <span className="flex size-7 items-center justify-center rounded-lg bg-white text-[12px] font-bold tracking-[-0.02em] text-black">◐</span>
+              {/* Phones have no rail, so the header carries the nav trigger —
+                  the "Control Deck" wordmark would just be decoration here. */}
+              {onOpenNav ? (
+                <button
+                  type="button"
+                  onClick={onOpenNav}
+                  aria-label="Open navigation"
+                  className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-zinc-300 transition-colors hover:bg-white/[0.06] lg:hidden"
+                >
+                  <Menu size={17} />
+                </button>
+              ) : null}
+              <BrandMark className="size-7 shrink-0" />
               <div className="flex flex-col">
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400">Control Deck</span>
-                <span className="hidden text-[13px] font-semibold tracking-[-0.01em] text-white sm:block">
+                <span className="hidden font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400 lg:block">Control Deck</span>
+                <span className="text-[13px] font-semibold tracking-[-0.01em] text-white">
                   {view.workspaces[0]?.name ?? 'Workspaces'} <span className="font-normal text-zinc-500">· {view.workspaces.length} projects · {view.counts.total} sessions</span>
                 </span>
               </div>
@@ -690,17 +709,22 @@ export function StationHome({
        *  Each section sits in its own card with an id used by the anchor
        *  strip above. The Sessions section above owns the top of the page;
        *  everything below is one section per former standalone screen. */}
-      <section
-        id="home-pair"
-        className="mx-auto w-full max-w-[1280px] scroll-mt-32 px-4 pb-6 pt-4 sm:px-6 lg:px-8"
-      >
-        <SectionHeading
-          eyebrow="Phone"
-          title="Pair a device"
-          description="Scan with any phone — no app store required. The scanner pairs, gets a private token, and can install this station to its home screen."
-        />
-        <PairSection />
-      </section>
+      {/* Pairing is a desktop task: the phone scanning the code is the device
+          being paired, so showing this section in the app is telling the user
+          to scan a code with the thing they are holding. Hidden below lg. */}
+      {isDesktop ? (
+        <section
+          id="home-pair"
+          className="mx-auto w-full max-w-[1280px] scroll-mt-32 px-4 pb-6 pt-4 sm:px-6 lg:px-8"
+        >
+          <SectionHeading
+            eyebrow="Phone"
+            title="Pair a device"
+            description="Scan with any phone — no app store required. The scanner pairs, gets a private token, and can install this station to its home screen."
+          />
+          <PairSection />
+        </section>
+      ) : null}
 
       <section
         id="home-automations"

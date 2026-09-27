@@ -240,6 +240,36 @@ function lastErrorReason(conversation: Conversation | undefined): string | undef
   return undefined
 }
 
+/**
+ * The session's inline controls: model, thinking effort, permissions.
+ *
+ * One definition, two placements. On a wide composer they sit in the control
+ * row above the input; on a phone (see SessionView) they move into a sheet
+ * opened from the header, so the composer stays a single line and the keyboard
+ * keeps its room. Rendering them from here rather than duplicating keeps the
+ * two placements from drifting apart.
+ */
+export function SessionControls({
+  session,
+  config,
+  onSetConfig,
+}: {
+  session: Session
+  config?: SessionConfig
+  onSetConfig: (id: string, value: string) => void
+}) {
+  return (
+    <>
+      {!session.hidden && !session.parent_id ? <EngineModelMenu session={session} compact /> : null}
+      <ThoughtChip session={session} compact />
+      <PermissionChip
+        currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
+        onChange={onSetConfig}
+      />
+    </>
+  )
+}
+
 export function StateZone({
   session,
   conversation,
@@ -253,6 +283,7 @@ export function StateZone({
   workers,
   compact,
   wide = true,
+  hideInlineControls = false,
 }: {
   session: Session
   conversation: Conversation
@@ -275,6 +306,9 @@ export function StateZone({
   /** Full-width composer (default). False caps the bar at the reading
    *  column width and centers it, matching the reference's composer. */
   wide?: boolean
+  /** Render the compact controls somewhere else (the mobile header sheet)
+   *  instead of the composer's control row. */
+  hideInlineControls?: boolean
 }) {
   const state = sessionUIState(session, conversation, connection)
   const display = uiStateDisplay(state)
@@ -405,15 +439,8 @@ export function StateZone({
       summary={summary}
       header={dockHeader}
       compactControls={
-        compact ? (
-          <>
-            {!session.hidden && !session.parent_id ? <EngineModelMenu session={session} compact /> : null}
-            <ThoughtChip session={session} compact />
-            <PermissionChip
-              currentMode={config?.options.find((o) => o.id === 'permission_mode')?.currentValue}
-              onChange={handleSetConfig}
-            />
-          </>
+        compact && !hideInlineControls ? (
+          <SessionControls session={session} config={config} onSetConfig={handleSetConfig} />
         ) : undefined
       }
       onSend={onSend}

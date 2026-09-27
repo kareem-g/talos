@@ -13,9 +13,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { StateZone } from './StateZone'
+import { StateZone, SessionControls } from './StateZone'
 import { Timeline } from './Timeline'
-import { PanelLeft, PanelRight, List, SlidersHorizontal } from 'lucide-react'
+import { PanelLeft, PanelRight, List, SlidersHorizontal, Settings2 } from 'lucide-react'
 import { Dot, IconButton, Layer, Notice, StatusPill, ChevronLeft } from './ui'
 import { LeftSidebar } from './desktop/LeftSidebar'
 import { RightRail, type RightRailHandle } from './desktop/session/RightRail'
@@ -49,7 +49,7 @@ export function SessionView({
   // Which side panel is open, if any. The pane button in the header opens
   // a small popover to choose between them; tapping a destination sets the
   // state and the Layer renders.
-  const [pane, setPane] = useState<'sessions' | 'details' | null>(null)
+  const [pane, setPane] = useState<'sessions' | 'details' | 'controls' | null>(null)
   const timelineDetail = useStore((s) => s.timelineDetail)
   const setTimelineDetail = useStore((s) => s.setTimelineDetail)
   // Lets the explorer/left sheet open a file in the right rail's File tab.
@@ -156,6 +156,18 @@ export function SessionView({
               header used to have. */}
           {onBack ? (
             <>
+              {/* Model / thinking / permissions live in the composer on a wide
+                  screen; on a phone they move up here so the composer stays one
+                  line and the keyboard keeps its room. */}
+              <IconButton
+                label="Model and permissions"
+                onClick={() => setPane((current) => (current === 'controls' ? null : 'controls'))}
+                aria-expanded={pane === 'controls'}
+                aria-haspopup="dialog"
+                className="shrink-0"
+              >
+                <Settings2 size={15} />
+              </IconButton>
               <IconButton
                 label="Sessions"
                 onClick={() => setPane((current) => (current === 'sessions' ? null : 'sessions'))}
@@ -212,6 +224,7 @@ export function SessionView({
         rooms={rooms.map((r) => r.name)}
         workers={roomOfSession?.workers.map((w) => w.name)}
         compact={Boolean(onBack)}
+        hideInlineControls={Boolean(onBack)}
       />
 
       {/* Left sheet — the desktop session navigator reused for mobile:
@@ -250,6 +263,25 @@ export function SessionView({
               setPane('details')
               window.setTimeout(() => rightRailRef.current?.openTab('files'), 0)
             }}
+          />
+        </div>
+      </Layer>
+
+      {/* Controls sheet — the model / thinking / permission controls that the
+          composer renders inline on a wide screen. Same component, so the two
+          placements cannot drift. */}
+      <Layer
+        open={pane === 'controls'}
+        onClose={() => setPane(null)}
+        title="Model & permissions"
+        size="md"
+        side="right"
+      >
+        <div className="flex flex-wrap items-center gap-2 p-1">
+          <SessionControls
+            session={session}
+            config={config}
+            onSetConfig={(id, value) => void setConfig(session.id, id, value)}
           />
         </div>
       </Layer>
