@@ -8,7 +8,7 @@ A lightweight, native Linux control surface for AI coding agents. Built with Rus
 
 - **Multi-Agent Support**: Claude Code, Codex CLI, OpenCode, **Grok Build**, Gemini, Copilot, Kimi, and any Agent Client Protocol (ACP) agent
 - **Control-Station Dashboard**: Browser UI with streaming transcripts, plan/usage/turn-summary cards, diff viewers, and approval cards
-- **Remote Control — All in Browser**: Scan a QR with any phone; the paired browser becomes the remote control (installable PWA, offline shell, system attention alerts) — no separate iOS app
+- **Remote Control — Browser and Native iOS App**: Scan a QR with any phone; the paired browser becomes the remote control (installable PWA, offline shell, system attention alerts), and a native iOS app (`ios/`) pairs the same way, with CI-built IPAs and over-the-air updates — see [docs/IOS_APP.md](docs/IOS_APP.md)
 - **Secure Remote Access**: Built-in Tailscale and Cloudflare tunnel support with one-tap device pairing and revocation
 - **Session Management**: Create, fork, archive, resume, and monitor agent sessions across devices
 - **Git Worktrees**: Isolated branches per session with auto-merge
