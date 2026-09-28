@@ -4,7 +4,9 @@
     "strict": true,
     "paths": {
       "@/*": ["../dashboard/src/*"],
-      "@app/*": ["./src/*"]
+      "@app/*": ["./src/*"],
+      "clsx": ["./node_modules/clsx"],
+      "tailwind-merge": ["./node_modules/tailwind-merge"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],

@@ -7,6 +7,10 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/../dashboard/src/$1',
     '^@app/(.*)$': '<rootDir>/src/$1',
+    // The shared dashboard modules import these; resolve them from the mobile
+    // install so tests don't depend on dashboard/node_modules being present.
+    '^clsx$': '<rootDir>/node_modules/clsx',
+    '^tailwind-merge$': '<rootDir>/node_modules/tailwind-merge',
   },
   testMatch: ['<rootDir>/src/**/__tests__/**/*.test.ts?(x)'],
   transformIgnorePatterns: [

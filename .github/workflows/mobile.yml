@@ -61,6 +61,17 @@ jobs:
         with:
           node-version: 22
 
+      - name: Select the latest Xcode
+        # Expo SDK 57 / RN 0.86 pull SwiftPM dependencies that declare a newer
+        # swift-tools-version than the runner's default Xcode. Pick the newest
+        # installed toolchain so `xcodebuild` can resolve them.
+        run: |
+          LATEST_XCODE="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$LATEST_XCODE" ]; then sudo xcode-select -s "$LATEST_XCODE"; fi
+          xcode-select -p
+          xcodebuild -version
+          swift --version
+
       - name: Install dependencies
         working-directory: mobile
         run: npm ci || npm install
