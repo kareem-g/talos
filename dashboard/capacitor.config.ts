@@ -9,8 +9,9 @@ import type { CapacitorConfig } from '@capacitor/cli'
  *     is reached over the network instead. The paired daemon origin is stored
  *     at pairing time and prefixed onto every request (`src/lib/native.ts`).
  *
- * A distinct bundle id keeps the shell installable side by side with the
- * SwiftUI companion (`com.agentdeck.ios`).
+ * The bundle id is the shell's own; the Xcode project is generated on the CI
+ * runner by `cap add ios` (see `.github/workflows/ios-capacitor.yml`), so no
+ * native source is committed.
  */
 const config: CapacitorConfig = {
   appId: 'com.agentdeck.mobile',

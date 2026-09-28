@@ -8,12 +8,12 @@ A lightweight, native Linux control surface for AI coding agents. Built with Rus
 
 - **Multi-Agent Support**: Claude Code, Codex CLI, OpenCode, **Grok Build**, Gemini, Copilot, Kimi, and any Agent Client Protocol (ACP) agent
 - **Control-Station Dashboard**: Browser UI with streaming transcripts, plan/usage/turn-summary cards, diff viewers, and approval cards
-- **Remote Control — Browser and Native iOS App**: Scan a QR with any phone; the paired browser becomes the remote control (installable PWA, offline shell, system attention alerts), and a native iOS app (`ios/`) pairs the same way, with CI-built IPAs and over-the-air updates — see [docs/IOS_APP.md](docs/IOS_APP.md)
+- **Remote Control — Browser and iOS Shell**: Scan a QR with any phone; the paired browser becomes the remote control (installable PWA, offline shell, system attention alerts). The same React bundle ships as a Capacitor iOS shell, built as an unsigned IPA in CI (`.github/workflows/ios-capacitor.yml`) and re-signed with Sideloadly/AltStore
 - **Secure Remote Access**: Built-in Tailscale and Cloudflare tunnel support with one-tap device pairing and revocation
 - **Session Management**: Create, fork, archive, resume, and monitor agent sessions across devices
 - **Git Worktrees**: Isolated branches per session with auto-merge
 - **MCP Server Pooling**: Shared MCP processes across sessions via Unix sockets
-- **Notifications**: Telegram, Slack, Discord integration plus local browser alerts
+- **Notifications**: Web Push that pages you when an agent finishes, needs approval, or errors — even with the app closed — plus Telegram, Slack, and Discord integrations
 - **Lightweight Backend**: Pure Rust, <20MB binary, zero runtime dependencies
 - **Pairing Security**: Short-lived single-use offers, hashed device tokens, per-device revocation
 
