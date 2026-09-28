@@ -1,10 +1,14 @@
 /**
- * Navigation — the root stack, a ref for navigating from outside React (the
- * notification tap handler), and the deep-link config.
+ * Navigation — the root stack and the rail drawer.
  *
- * Three screens mirror the web app's three routes (list / session / pairing).
- * The notification system navigates through `navigationRef`, so a tap on a local
- * notification lands on the session that paged, with the approval id to focus.
+ * Mirrors the desktop shell: one rail (Get started / Products / Manage) whose
+ * destinations are `Home | Agents | History | Usage | Configuration`, with a
+ * session pushed full-screen on top of it — the same thing the desktop does when
+ * a session is open. Pairing is a gate, not a tab: it is the initial route until
+ * a device token exists, and reachable again from the device card.
+ *
+ * `navigationRef` still exists so the notification tap handler can route from
+ * outside the React tree.
  */
 
 import * as React from 'react'
@@ -12,35 +16,62 @@ import {
   createNavigationContainerRef,
   DarkTheme,
   NavigationContainer,
+  useNavigation,
 } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { createDrawerNavigator } from '@react-navigation/drawer'
 import * as Linking from 'expo-linking'
+
 import { HomeScreen } from './screens/HomeScreen'
 import { SessionScreen } from './screens/SessionScreen'
 import { PairingScreen } from './screens/PairingScreen'
+import { HistoryScreen } from './screens/HistoryScreen'
+import { AgentsScreen } from './screens/AgentsScreen'
+import { BrowsersScreen } from './screens/BrowsersScreen'
+import { UsageScreen } from './screens/UsageScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { AppNav } from './components/AppNav'
 import { isPaired } from './lib/pairing'
 
-export type RootStackParamList = {
+/** Rail destinations — the desktop's exact `NavPage` set. */
+export type DrawerParamList = {
   Home: undefined
+  Agents: undefined
+  Browsers: undefined
+  History: undefined
+  Usage: undefined
+  Config: undefined
+}
+
+export type RootStackParamList = {
+  Main: undefined
   Session: { sessionId: string; approvalId?: string }
   Pairing: undefined
-  Settings: undefined
 }
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>()
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
+const Drawer = createDrawerNavigator<DrawerParamList>()
 
 /** The URL prefix for this app's deep links (scheme `agentdeck`). */
 const linking = {
   prefixes: [Linking.createURL('/'), 'agentdeck://'],
   config: {
     screens: {
-      Home: '',
+      Main: {
+        screens: {
+          Home: '',
+          Agents: 'agents',
+          Browsers: 'browsers',
+          History: 'history',
+          Usage: 'usage',
+          Config: 'config',
+        },
+      },
       Session: 'session/:sessionId',
       Pairing: 'pair',
-      Settings: 'settings',
     } as const,
   },
 }
@@ -54,16 +85,61 @@ export function navigateToAction(data: { sessionId: string; approvalId?: string 
   navigationRef.navigate('Session', { sessionId: data.sessionId, approvalId: data.approvalId })
 }
 
+/**
+ * Open a session from inside the rail.
+ *
+ * A session is a ROOT stack screen, pushed over the drawer, while rail screens
+ * only know Home/Agents/History/Usage/Config — so the navigation has to bubble up
+ * to the parent navigator that owns `Session`.
+ */
+export function useOpenSession(): (sessionId: string, approvalId?: string) => void {
+  const navigation = useNavigation()
+  return React.useCallback(
+    (sessionId: string, approvalId?: string) => {
+      const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()
+      // `getParent` is undefined only before the drawer has mounted under the
+      // stack; falling back to the local navigator keeps the call total and
+      // simply no-ops in that window rather than throwing.
+      const target =
+        parent ?? (navigation as unknown as NativeStackNavigationProp<RootStackParamList>)
+      target.navigate('Session', { sessionId, approvalId })
+    },
+    [navigation],
+  )
+}
+
+/** The rail. Same width as the desktop aside (224px) and its own sidebar surface. */
+function MainDrawer() {
+  return (
+    <Drawer.Navigator
+      drawerContent={(props) => <AppNav {...props} />}
+      screenOptions={{
+        headerShown: false,
+        drawerType: 'front',
+        drawerStyle: { width: 264, backgroundColor: '#17171b', borderRightColor: '#34343a' },
+        overlayColor: 'rgba(0,0,0,0.65)',
+        swipeEdgeWidth: 44,
+      }}
+    >
+      <Drawer.Screen name="Home" component={HomeScreen} />
+      <Drawer.Screen name="Agents" component={AgentsScreen} />
+      <Drawer.Screen name="Browsers" component={BrowsersScreen} />
+      <Drawer.Screen name="History" component={HistoryScreen} />
+      <Drawer.Screen name="Usage" component={UsageScreen} />
+      <Drawer.Screen name="Config" component={SettingsScreen} />
+    </Drawer.Navigator>
+  )
+}
+
 export function RootNavigator() {
-  // Land on Pairing until a device token exists, then Home. Evaluated at render,
-  // which App gates on credential hydration, so the first paint is correct.
-  const initialRouteName = isPaired() ? 'Home' : 'Pairing'
+  // Land on Pairing until a device token exists, then the rail. Evaluated at
+  // render, which App gates on credential hydration, so the first paint is right.
+  const initialRouteName = isPaired() ? 'Main' : 'Pairing'
   return (
     <Stack.Navigator initialRouteName={initialRouteName} screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Main" component={MainDrawer} />
       <Stack.Screen name="Session" component={SessionScreen} />
       <Stack.Screen name="Pairing" component={PairingScreen} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
   )
 }

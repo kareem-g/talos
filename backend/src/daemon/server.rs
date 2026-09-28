@@ -25,6 +25,17 @@ pub async fn start(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../dashboard/dist").to_string());
 
+    // The authenticated surface a paired phone uses.
+    //
+    // The desktop `/api/*` routes are unauthenticated because they only ever
+    // serve a local browser. A phone is not local, so everything it can reach
+    // lives here, behind the device token — and the handlers are the same ones,
+    // delegated rather than reimplemented, so there is one implementation of
+    // every operation and no way for the two surfaces to drift.
+    //
+    // Route order matters where a static segment would otherwise be captured by
+    // a dynamic one (`/skills/available` before `/skills/{name}`,
+    // `/providers/api` before `/providers/{id}`), matching the desktop router.
     let mobile_api = Router::new()
         .route("/me", get(crate::api::routes::mobile_me))
         .route("/snapshot", get(crate::api::routes::mobile_snapshot))
@@ -35,6 +46,102 @@ pub async fn start(
         .route("/sessions/{id}/archive", post(crate::api::routes::mobile_archive_session))
         .route("/sessions/{id}/restore", post(crate::api::routes::mobile_restore_session))
         .route("/sessions/{id}/kill", post(crate::api::routes::mobile_kill_session))
+        // Session detail beyond the snapshot: config, resume, fork, engine, and
+        // the harness surfaces (subagents, orchestration, memory).
+        .route(
+            "/sessions/{id}/config",
+            get(crate::api::providers::get_session_config)
+                .patch(crate::api::providers::patch_session_config),
+        )
+        .route("/sessions/{id}/resume", post(crate::api::routes::resume_session))
+        .route("/sessions/{id}/fork", post(crate::api::routes::fork_session))
+        .route("/sessions/{id}/engine", post(crate::api::routes::switch_session_engine))
+        .route("/sessions/{id}/subagents", post(crate::api::routes::spawn_subagent))
+        .route("/sessions/{id}/orchestrate", post(crate::api::routes::orchestrate_session))
+        .route("/sessions/{id}/memory", post(crate::api::routes::save_session_memory))
+        .route("/sessions/{id}/transcripts", get(crate::api::routes::get_session_transcripts))
+        // Providers: the phone's Agents page needs the same discovery payload,
+        // including a forced re-scan of $PATH.
+        .route("/providers", get(crate::api::providers::list_providers))
+        .route("/providers/refresh", post(crate::api::providers::refresh_providers))
+        .route("/providers/api", get(crate::api::providers::list_api_providers).post(crate::api::providers::create_api_provider))
+        .route("/providers/api/test", post(crate::api::providers::test_api_provider))
+        .route("/providers/api/{id}", delete(crate::api::providers::delete_api_provider))
+        .route("/providers/{id}", get(crate::api::providers::get_provider))
+        // Git — the session rail's diff/files tabs and the commit flow.
+        .route("/git/branches", get(crate::api::routes::git_branches_handler))
+        .route("/git/diff", get(crate::api::routes::git_diff_handler))
+        .route("/git/checkout", post(crate::api::routes::git_checkout_handler))
+        .route("/git/branch", post(crate::api::routes::git_create_branch_handler))
+        .route("/git/log", get(crate::api::routes::git_log_handler))
+        .route("/git/commit", post(crate::api::routes::git_commit_handler))
+        // Workspace: worktrees, changed files, file browsing and reading, and the
+        // dev-server preview the browser tab points at.
+        .route("/worktrees", get(crate::api::routes::list_worktrees))
+        .route("/workspace/overview", get(crate::api::routes::workspace_overview))
+        .route("/workspace/file", get(crate::api::routes::workspace_file))
+        .route("/workspace/dirs", get(crate::api::routes::workspace_dirs))
+        .route("/workspace/serve", get(crate::api::routes::workspace_serve_status))
+        .route("/workspace/serve/start", post(crate::api::routes::workspace_serve_start))
+        .route("/workspace/serve/stop", post(crate::api::routes::workspace_serve_stop))
+        // Standalone PTY terminals.
+        .route(
+            "/terminals",
+            get(crate::api::routes::terminal_list).post(crate::api::routes::terminal_create),
+        )
+        .route("/terminals/{id}", delete(crate::api::routes::terminal_close))
+        // Skills.
+        .route("/skills", get(crate::api::routes::list_skills))
+        .route("/skills/available", get(crate::api::skills::list_available))
+        .route("/skills/installed", get(crate::api::skills::list_installed))
+        .route("/skills/install", post(crate::api::skills::install))
+        .route("/skills/{id}/toggle", put(crate::api::skills::toggle))
+        .route("/skills/{id}/content", get(crate::api::skills::get_content))
+        .route(
+            "/skills/{name}",
+            get(crate::api::routes::get_skill)
+                .delete(crate::api::skills::uninstall)
+                .put(crate::api::skills::update_content),
+        )
+        // Browser automation. The screenshot is fetched with the device token and
+        // rendered from a data URI client-side, so it stays behind auth.
+        .route("/browser", get(crate::api::routes::browser_status))
+        .route("/browser/start", post(crate::api::routes::browser_start))
+        .route("/browser/stop", post(crate::api::routes::browser_stop))
+        .route("/browser/{session}/state", get(crate::api::routes::browser_state_proxy))
+        .route("/browser/{session}/screenshot/{tab}", get(crate::api::routes::browser_screenshot_proxy))
+        .route("/browser/{session}/tool", post(crate::api::routes::browser_tool_proxy))
+        // Attachments: the phone uploads images and reads them back.
+        .route("/attachments/upload", post(crate::api::routes::upload_attachment))
+        .route("/attachments/{session}/{file_name}", get(crate::api::routes::get_attachment))
+        // Rooms — rosters, synced live like the desktop's.
+        .route("/rooms", get(crate::api::rooms::list_rooms).post(crate::api::rooms::create_room))
+        .route(
+            "/rooms/{id}",
+            axum::routing::patch(crate::api::rooms::update_room).delete(crate::api::rooms::delete_room),
+        )
+        // MCP servers.
+        .route("/mcp", get(crate::api::routes::list_mcp).post(crate::api::routes::add_mcp))
+        .route("/mcp/{name}", delete(crate::api::routes::remove_mcp))
+        // Memory.
+        .route(
+            "/memory/config",
+            get(crate::api::routes::get_workspace_memory).put(crate::api::routes::set_workspace_memory),
+        )
+        .route("/memory", get(crate::api::routes::list_memory).delete(crate::api::routes::delete_memory))
+        // Remote control: the phone can see and manage the routes it uses, and
+        // revoke other devices.
+        .route("/tunnel/status", get(crate::api::routes::tunnel_status))
+        .route("/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
+        .route("/tunnel/endpoints", get(crate::api::routes::tunnel_endpoints))
+        .route("/tunnel/{kind}/start", post(crate::api::routes::tunnel_start))
+        .route("/tunnel/{kind}/stop", post(crate::api::routes::tunnel_stop))
+        .route("/pair", post(crate::api::routes::initiate_pairing))
+        .route("/pair/endpoint", get(crate::api::routes::pairing_endpoint))
+        .route("/devices", get(crate::api::routes::list_devices))
+        .route("/devices/{id}", delete(crate::api::routes::revoke_device))
+        // Settings, including the sections the Configuration screen edits.
+        .route("/settings", get(crate::api::routes::get_settings).put(crate::api::routes::update_settings))
         .layer(middleware::from_fn_with_state(state.clone(), crate::api::middleware::auth_middleware));
 
     let app = Router::new()

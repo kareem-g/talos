@@ -57,3 +57,17 @@ jest.mock('@react-native-community/netinfo', () => ({
     fetch: jest.fn(async () => ({ isConnected: true, isInternetReachable: true })),
   },
 }))
+
+// The clipboard is a TurboModule, so importing any component that offers a copy
+// affordance (ui.tsx, AppNav, the code-block renderer) would throw in Jest
+// without this. `setString` records into an array tests can assert on.
+const clipboardWrites: string[] = []
+jest.mock('@react-native-clipboard/clipboard', () => ({
+  __esModule: true,
+  default: {
+    setString: jest.fn((value: string) => {
+      clipboardWrites.push(value)
+    }),
+    getString: jest.fn(async () => clipboardWrites[clipboardWrites.length - 1] ?? ''),
+  },
+}))
