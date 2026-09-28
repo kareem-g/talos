@@ -24,6 +24,7 @@ import type { ApprovalMeta, ClientFrame, ConnectionState, IncomingFrame } from '
 import { isIncomingFrame } from '@/types/protocol'
 import { deviceToken } from './api'
 import { socketOrigin } from './native'
+import { advanceRoute } from './pairing'
 
 type FrameListener = (frame: IncomingFrame) => void
 type StateListener = (state: ConnectionState) => void
@@ -50,6 +51,12 @@ class SocketClient {
   private lifecycleAttached = false
   /** Last known connectivity from NetInfo; optimistic until the first event. */
   private online = true
+  /** Origin the current attempt is dialing, so a dead route can be rotated out. */
+  private attemptOrigin: string | null = null
+  /** Whether the current attempt ever reached OPEN. */
+  private attemptOpened = false
+  /** Origins dialled since the last successful open; bounds route rotation. */
+  private attemptedRoutes: string[] = []
 
   getState(): ConnectionState {
     return this.state
@@ -128,6 +135,8 @@ class SocketClient {
       return
     }
     const url = `${origin}${path}`
+    this.attemptOrigin = origin
+    this.attemptOpened = false
 
     this.setState(this.everConnected ? 'reconnecting' : 'connecting')
 
@@ -142,6 +151,8 @@ class SocketClient {
 
     socket.onopen = () => {
       this.attempt = 0
+      this.attemptedRoutes = []
+      this.attemptOpened = true
       this.everConnected = true
       if (token) {
         // The server requires Authenticate as the first frame, within 10s.
@@ -172,6 +183,29 @@ class SocketClient {
       if (this.closedByUs) {
         this.setState('idle')
         return
+      }
+      // A dial that never reached OPEN means this origin is unreachable from
+      // wherever the phone is now — it left the house, the tailnet dropped, or
+      // the advertised name does not resolve here. Rotate to the next origin the
+      // daemon advertised before falling back to backoff, so the device is not
+      // pinned to one host it happened to pair against. Bounded by the number of
+      // routes, so a genuine outage still settles into backoff instead of
+      // hot-looping between them.
+      if (!this.attemptOpened && this.online && this.attemptOrigin) {
+        if (!this.attemptedRoutes.includes(this.attemptOrigin)) {
+          this.attemptedRoutes.push(this.attemptOrigin)
+        }
+        const next = advanceRoute(this.attemptOrigin, this.attemptedRoutes)
+        if (next) {
+          this.attemptOrigin = null
+          this.clearTimer()
+          this.setState('reconnecting')
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null
+            this.connect()
+          }, 250)
+          return
+        }
       }
       this.setState(this.online ? 'disconnected' : 'offline')
       this.scheduleReconnect()
@@ -228,6 +262,29 @@ class SocketClient {
     if (meta?.always === true) params.always = true
     if (meta?.allow !== undefined) params.allow = meta.allow
     this.send({ type: 'Command', payload: { action: 'approval_response', params } })
+  }
+
+  /**
+   * Change a live session option (permission mode, model, thought level, …).
+   *
+   * The mobile HTTP surface has no `PATCH /api/sessions/{id}/config`, but the
+   * WebSocket command set is identical for desktop and mobile clients — the
+   * daemon routes both `/ws` and `/ws/mobile` into the same handler — so config
+   * changes ride the socket here.
+   */
+  setConfig(sessionId: string, configId: string, value: string): void {
+    this.send({
+      type: 'Command',
+      payload: { action: 'set_config', params: { session_id: sessionId, config_id: configId, value } },
+    })
+  }
+
+  /** Switch the engine/model for a session (same socket command surface). */
+  switchModel(sessionId: string, model: string): void {
+    this.send({
+      type: 'Command',
+      payload: { action: 'model_switch', params: { session_id: sessionId, model } },
+    })
   }
 
   answerQuestion(questionId: string, selectedOptions: string[], customText?: string): void {

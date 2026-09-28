@@ -9,8 +9,14 @@
 import { Platform } from 'react-native'
 import * as Device from 'expo-device'
 import { deviceToken } from './api'
-import { deviceBaseUrl } from './native'
-import { persistBaseUrl, persistToken, clearCredentials, hydrateCredentials } from './secureStore'
+import { deviceBaseUrl, deviceRoutes, setDeviceBaseUrl } from './native'
+import {
+  persistBaseUrl,
+  persistRoutes,
+  persistToken,
+  clearCredentials,
+  hydrateCredentials,
+} from './secureStore'
 import { storage } from './storage'
 
 const DEVICE_KEY_STORAGE = 'agentdeck-device-key'
@@ -23,6 +29,30 @@ export function isPaired(): boolean {
 
 export function getPairingBaseUrl(): string {
   return deviceBaseUrl()
+}
+
+export { deviceRoutes }
+
+/**
+ * Pick the next advertised origin to dial after `failedOrigin` stopped
+ * answering, skipping everything already tried during this outage.
+ *
+ * `attempted` is the socket's record of the origins it has dialled since the
+ * last successful connection; the caller appends `failedOrigin` to it. Tracking
+ * the whole set rather than just the current position matters because the active
+ * origin moves as we rotate: a purely positional "next" bounces straight back to
+ * a route that has already failed, and the device never reaches the third one.
+ *
+ * Returns the origin to dial (now active), or `null` when every advertised
+ * route has been ruled out — at which point the caller should back off rather
+ * than spin.
+ */
+export function advanceRoute(failedOrigin: string, attempted: string[] = []): string | null {
+  const tried = new Set([...attempted, failedOrigin, deviceBaseUrl()])
+  const next = deviceRoutes().find((route) => !tried.has(route))
+  if (!next) return null
+  setDeviceBaseUrl(next)
+  return next
 }
 
 /**
@@ -48,9 +78,15 @@ export function deviceName(): string {
   return Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'android' ? 'Android device' : 'Mobile'
 }
 
-/** Persist a successful pairing: the daemon origin and the bearer token. */
-export async function savePairing(baseUrl: string, token: string): Promise<void> {
+/**
+ * Persist a successful pairing: the daemon origin, the bearer token, and — when
+ * the QR carried them — the other advertised origins to fail over to.
+ */
+export async function savePairing(baseUrl: string, token: string, routes?: string[]): Promise<void> {
+  const ordered = [baseUrl, ...(routes ?? [])].map((route) => route.replace(/\/+$/, ''))
+  const unique = Array.from(new Set(ordered.filter(Boolean)))
   await persistBaseUrl(baseUrl)
+  await persistRoutes(unique.length > 1 ? unique : null)
   await persistToken(token)
 }
 

@@ -13,13 +13,14 @@
 
 import * as SecureStore from 'expo-secure-store'
 import { storage } from './storage'
-import { setDeviceBaseUrl } from './native'
+import { setDeviceBaseUrl, setDeviceRoutes } from './native'
 
 /** MMKV key for the device token (mirrors the web app's localStorage key). */
 export const TOKEN_KEY = 'agentdeck-device-token'
 
 const SECURE_TOKEN = 'ad_device_token'
 const SECURE_BASE = 'ad_device_base_url'
+const SECURE_ROUTES = 'ad_device_routes'
 
 async function safeSet(key: string, value: string): Promise<void> {
   try {
@@ -52,6 +53,15 @@ export async function hydrateCredentials(): Promise<void> {
   } catch {
     // ignore
   }
+  try {
+    const raw = await SecureStore.getItemAsync(SECURE_ROUTES)
+    if (raw) {
+      const routes = JSON.parse(raw)
+      if (Array.isArray(routes)) setDeviceRoutes(routes as string[])
+    }
+  } catch {
+    // ignore — deviceRoutes() falls back to the single active origin
+  }
 }
 
 export async function persistToken(token: string | null): Promise<void> {
@@ -74,7 +84,23 @@ export async function persistBaseUrl(baseUrl: string | null): Promise<void> {
   await safeSet(SECURE_BASE, trimmed)
 }
 
+/**
+ * Remember every origin the daemon advertised. Not a secret — it is the same
+ * list encoded in the QR — but mirrored alongside the base URL so a reinstall
+ * that restores credentials also restores the ability to fail over between
+ * tailnet and LAN rather than pinning the device to one stale host.
+ */
+export async function persistRoutes(routes: string[] | null): Promise<void> {
+  setDeviceRoutes(routes)
+  if (!routes || routes.length === 0) {
+    await safeDelete(SECURE_ROUTES)
+    return
+  }
+  await safeSet(SECURE_ROUTES, JSON.stringify(routes))
+}
+
 export async function clearCredentials(): Promise<void> {
   await persistToken(null)
   await persistBaseUrl(null)
+  await persistRoutes(null)
 }

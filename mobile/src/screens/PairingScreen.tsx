@@ -1,17 +1,21 @@
 /**
  * Pairing — exchange the desktop's QR (or a pasted link) for a device token.
  *
- * The daemon shows a `<base>/mobile/pair?offer=…&secret=…` URL as a QR. We scan
- * it (expo-camera) or let the user paste it, parse it with the same
- * `parsePairingLink` the web shell uses, POST it to `/api/pair/verify`, and store
- * the returned token + origin. Then connect the socket and hand off to Home.
+ * Layout mirrors the desktop's `NativePairingGate`, which is the same screen for
+ * the same audience: brand tile, "Pair with your desktop", one primary scan
+ * action, and the manual link tucked behind a toggle. The desktop bundles that
+ * screen into its native shell; here it is native for real.
  *
- * The camera is a convenience, never a requirement: scanning needs permission
- * and a working sensor, so the manual paste path is always available.
+ * The offer is tried against EVERY origin the QR advertised, not just the one it
+ * was encoded with. The daemon lists the tailnet MagicDNS name first because it
+ * is the best route when it works, but a phone with MagicDNS off cannot resolve
+ * `.ts.net` — and a phone away from home cannot use the LAN address. Trying each
+ * in order is what stopped a tailnet QR from failing against a daemon that was
+ * perfectly reachable on its other routes.
  */
 
 import * as React from 'react'
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -23,15 +27,27 @@ import { deviceKey, deviceName, savePairing } from '@app/lib/pairing'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
-import { Button, ScreenHeader } from '@app/components/ui'
+import { BrandMark, Button, Mono, TextField } from '@app/components/ui'
+
+/**
+ * True when the failure is transport-level rather than "this offer is no good".
+ * Only a transport failure is worth retrying against another advertised route;
+ * an expired or already-spent offer answers the same way from every host.
+ */
+function isRouteUnreachable(cause: unknown): boolean {
+  return cause instanceof ApiError && (cause.status === 0 || cause.code === 'network_error')
+}
 
 export function PairingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const [permission, requestPermission] = useCameraPermissions()
+  const [scanning, setScanning] = React.useState(false)
+  const [showPaste, setShowPaste] = React.useState(false)
   const [manual, setManual] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [scanned, setScanned] = React.useState(false)
+  const [route, setRoute] = React.useState<string | null>(null)
 
   async function handlePairingText(text: string) {
     if (busy) return
@@ -42,105 +58,152 @@ export function PairingScreen() {
       return
     }
     setBusy(true)
-    try {
-      // Set the daemon origin from the QR BEFORE verifying. React Native has no
-      // page origin to resolve a relative URL against, so without this the
-      // verify request goes to a bare "/api/pair/verify" and never reaches the
-      // daemon. `savePairing` below re-persists it (plus the token) on success.
-      setDeviceBaseUrl(parsed.baseUrl)
-      const result = await pairingApi.verify({
-        offerId: parsed.offerId,
-        secret: parsed.secret,
-        deviceKey: deviceKey(),
-        deviceName: deviceName(),
-      })
-      await savePairing(parsed.baseUrl, result.token)
-      // The store already wired its frame/state listeners at boot; now that the
-      // origin and token exist, connect and pull the first snapshot.
-      socket.connect()
-      void useStore.getState().loadSnapshot()
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] })
-    } catch (cause) {
-      setBusy(false)
-      setScanned(false) // allow a re-scan after a failure
-      setError(
-        cause instanceof ApiError
-          ? cause.message
-          : 'Pairing failed. Check the code is current (offers expire in two minutes) and the daemon is reachable.',
-      )
+    const routes = parsed.baseUrls
+    let lastError: unknown
+    for (const candidate of routes) {
+      try {
+        // Set the daemon origin BEFORE verifying. React Native has no page origin
+        // to resolve a relative URL against, so without this the verify request
+        // goes to a bare "/api/pair/verify" and never reaches the daemon.
+        setRoute(candidate)
+        setDeviceBaseUrl(candidate)
+        const result = await pairingApi.verify({
+          offerId: parsed.offerId,
+          secret: parsed.secret,
+          deviceKey: deviceKey(),
+          deviceName: deviceName(),
+        })
+        // Keep the whole route list, winner first, so the socket can fail over
+        // later without the phone having to be re-paired.
+        await savePairing(candidate, result.token, routes)
+        socket.connect()
+        void useStore.getState().loadSnapshot()
+        navigation.reset({ index: 0, routes: [{ name: 'Main' }] })
+        return
+      } catch (cause) {
+        lastError = cause
+        // A spent or expired offer fails identically on every route — retrying
+        // the others would only burn time.
+        if (!isRouteUnreachable(cause)) break
+      }
     }
+    setBusy(false)
+    setScanned(false) // allow a re-scan after a failure
+    setError(
+      lastError instanceof ApiError && !isRouteUnreachable(lastError)
+        ? lastError.message
+        : 'Could not reach your desktop on any advertised route. Check the daemon is running and that this phone is on the same Wi‑Fi or signed in to the same tailnet.',
+    )
+  }
+
+  function startScanning() {
+    setError(null)
+    setScanned(false)
+    if (permission?.granted) {
+      setScanning(true)
+      return
+    }
+    void requestPermission().then((next) => setScanning(next.granted))
+  }
+
+  if (scanning && permission?.granted) {
+    return (
+      <SafeAreaView className="flex-1 bg-canvas" edges={['top', 'bottom']}>
+        <View className="flex-1 overflow-hidden">
+          <CameraView
+            style={{ flex: 1 }}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={
+              scanned || busy
+                ? undefined
+                : ({ data }) => {
+                    setScanned(true)
+                    void handlePairingText(data)
+                  }
+            }
+          />
+        </View>
+        <View className="gap-3 p-4">
+          {busy && route ? <Mono className="text-[11px]">Reaching {route}…</Mono> : null}
+          {error ? (
+            <View className="rounded-xl border border-red-border bg-red-tint px-3 py-2.5">
+              <Text className="text-[12px] leading-5 text-ink">{error}</Text>
+            </View>
+          ) : (
+            <Mono className="text-[11px]">Point the camera at the code on your desktop.</Mono>
+          )}
+          <Button
+            variant="surface"
+            label={busy ? 'Pairing…' : 'Cancel'}
+            disabled={busy}
+            onPress={() => setScanning(false)}
+          />
+        </View>
+      </SafeAreaView>
+    )
   }
 
   return (
     <SafeAreaView className="flex-1 bg-canvas" edges={['top', 'bottom']}>
-      <ScreenHeader title="Pair with your desktop" subtitle="Scan the code AgentDeck is showing" />
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerClassName="gap-4 p-4">
-          {/* Scanner */}
-          <View className="overflow-hidden rounded-card border border-line bg-inset">
-            {permission?.granted ? (
-              <CameraView
-                style={{ height: 260 }}
-                facing="back"
-                barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                onBarcodeScanned={
-                  scanned || busy
-                    ? undefined
-                    : ({ data }) => {
-                        setScanned(true)
-                        void handlePairingText(data)
-                      }
-                }
-              />
-            ) : (
-              <View className="items-center justify-center px-6" style={{ height: 260 }}>
-                <Text className="mb-3 text-center text-xs text-ink-3">
-                  {permission && !permission.granted && !permission.canAskAgain
-                    ? 'Camera access is off. Paste the pairing link below instead.'
-                    : 'Allow the camera to scan the pairing code, or paste the link below.'}
-                </Text>
-                {permission?.canAskAgain !== false ? (
-                  <Button variant="primary" label="Enable camera" onPress={() => void requestPermission()} />
-                ) : null}
-              </View>
-            )}
-          </View>
-
-          {/* Manual fallback */}
-          <View className="gap-2">
-            <Text className="text-xs font-medium text-ink-2">Or paste the pairing link</Text>
-            <TextInput
-              value={manual}
-              onChangeText={setManual}
-              placeholder="https://…/mobile/pair?offer=…&secret=…"
-              placeholderTextColor="#7e7e86"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!busy}
-              className="rounded-control border border-line bg-field px-3 py-3 text-[13px] text-ink"
-            />
-            <Button
-              variant="primary"
-              label={busy ? 'Pairing…' : 'Pair'}
-              disabled={busy || manual.trim().length === 0}
-              onPress={() => void handlePairingText(manual.trim())}
-              className="self-start"
-            />
-          </View>
-
-          {error ? (
-            <View className="rounded-control border border-red-border bg-red-tint px-3 py-2.5">
-              <Text className="text-xs leading-5 text-red">{error}</Text>
+      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerClassName="flex-grow items-center justify-center gap-6 px-6 py-10">
+          <View className="items-center gap-2">
+            <View className="size-11 items-center justify-center rounded-lg bg-surface">
+              <BrandMark size={26} />
             </View>
-          ) : null}
+            <Text className="text-[17px] font-semibold text-ink">Pair with your desktop</Text>
+            <Text className="max-w-[34ch] text-center text-[12.5px] leading-5 text-ink-3">
+              Open AgentDeck on your computer, go to the pairing page, and scan the code with this
+              device.
+            </Text>
+          </View>
 
-          <Text className="text-[11px] leading-5 text-ink-3">
-            On your desktop, open the AgentDeck dashboard's Remote screen to show a pairing code.
-            Offers expire after two minutes and work once.
-          </Text>
+          <View className="w-full max-w-sm gap-3">
+            <Button variant="primary" label="Scan pairing code" onPress={startScanning} />
+
+            <Pressable
+              onPress={() => setShowPaste((open) => !open)}
+              accessibilityRole="button"
+              className="items-center py-1"
+            >
+              <Text className="text-[12px] font-medium text-ink-3">
+                {showPaste ? 'Hide manual entry' : 'Enter the link manually'}
+              </Text>
+            </Pressable>
+
+            {showPaste ? (
+              <View className="gap-2">
+                <TextField
+                  value={manual}
+                  onChangeText={setManual}
+                  placeholder="http://192.168.1.8:9120/mobile/pair?offer=…&secret=…"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                />
+                <Button
+                  variant="surface"
+                  label={busy ? 'Pairing…' : 'Pair this device'}
+                  disabled={busy || manual.trim().length === 0}
+                  onPress={() => void handlePairingText(manual.trim())}
+                />
+              </View>
+            ) : null}
+
+            {busy && route ? <Mono className="text-[11px]">Reaching {route}…</Mono> : null}
+
+            {error ? (
+              <View className="rounded-xl border border-red-border bg-red-tint px-3 py-2.5">
+                <Text className="text-[12px] leading-5 text-ink">{error}</Text>
+              </View>
+            ) : null}
+
+            <Text className="text-center text-[11px] leading-4 text-ink-3">
+              Codes expire after two minutes and work once. If the tailnet name does not resolve here,
+              the same code also carries the tailnet IP and the home LAN address.
+            </Text>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

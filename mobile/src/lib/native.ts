@@ -15,6 +15,8 @@ import 'react-native-url-polyfill/auto'
 import { storage } from './storage'
 
 export const BASE_URL_KEY = 'agentdeck-device-base-url'
+/** Ordered origins the daemon advertised, so the socket can fail over. */
+export const ROUTES_KEY = 'agentdeck-device-routes'
 
 /** Always true here — this module only ships in the native app. */
 export function isNativeApp(): boolean {
@@ -30,6 +32,29 @@ export function setDeviceBaseUrl(baseUrl: string | null): void {
   const trimmed = (baseUrl ?? '').replace(/\/+$/, '')
   if (!trimmed) storage.delete(BASE_URL_KEY)
   else storage.set(BASE_URL_KEY, trimmed)
+}
+
+/**
+ * Every origin this device can reach the daemon on, active route first. The
+ * pairing QR carries them; the socket walks the list when the active one stops
+ * answering. Falls back to the single active origin so pairings made before the
+ * route list existed still work.
+ */
+export function deviceRoutes(): string[] {
+  const stored = storage.getJSON<string[]>(ROUTES_KEY)
+  const routes = Array.isArray(stored) ? stored.filter((route) => typeof route === 'string') : []
+  const active = deviceBaseUrl()
+  if (!active) return routes
+  return [active, ...routes.filter((route) => route !== active)]
+}
+
+export function setDeviceRoutes(routes: string[] | null): void {
+  const clean = (routes ?? [])
+    .map((route) => route.replace(/\/+$/, ''))
+    .filter((route) => /^https?:\/\//i.test(route))
+  const unique = Array.from(new Set(clean))
+  if (unique.length === 0) storage.delete(ROUTES_KEY)
+  else storage.setJSON(ROUTES_KEY, unique)
 }
 
 /** Prefix a relative API path with the paired daemon origin. */
@@ -51,10 +76,17 @@ export function socketOrigin(): string {
  * Parse a pairing payload (`<base>/mobile/pair?offer=…&secret=…`, or the bare
  * `offer=…&secret=…` a QR may encode) into the parts the pairing screen needs.
  * Mirrors the web parser so a QR shown by the daemon pairs the same way.
+ *
+ * `baseUrls` is the scanned origin followed by every `alt=` origin the daemon
+ * listed. The daemon advertises routes in preference order and a phone cannot
+ * always use the first one — a tailnet `.ts.net` name does not resolve when the
+ * phone's Tailscale has MagicDNS off, even though the tailnet IP and the home
+ * LAN address both work. Attempting only `baseUrl` is what made the tailnet
+ * route fail while the LAN route succeeded.
  */
 export function parsePairingLink(
   text: string,
-): { baseUrl: string; offerId: string; secret: string } | null {
+): { baseUrl: string; baseUrls: string[]; offerId: string; secret: string } | null {
   const trimmed = text.trim()
   let url: URL
   try {
@@ -69,5 +101,28 @@ export function parsePairingLink(
   const path = url.pathname.replace(/\/+$/, '')
   if (!path.endsWith('/mobile/pair')) return null
   const base = `${url.protocol}//${url.host}`
-  return { baseUrl: base, offerId: offer, secret }
+  return { baseUrl: base, baseUrls: withAlternates(base, url.searchParams.get('alt')), offerId: offer, secret }
+}
+
+/**
+ * The scanned origin first, then each advertised alternate, in the daemon's
+ * order and without duplicates. Any entry that is not a plain http(s) origin is
+ * dropped rather than allowed to poison the fallback list.
+ */
+function withAlternates(primary: string, alt: string | null): string[] {
+  const routes = [primary]
+  for (const candidate of (alt ?? '').split(',')) {
+    const trimmed = candidate.trim()
+    if (!trimmed) continue
+    let url: URL
+    try {
+      url = new URL(trimmed)
+    } catch {
+      continue
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue
+    const origin = `${url.protocol}//${url.host}`
+    if (!routes.includes(origin)) routes.push(origin)
+  }
+  return routes
 }

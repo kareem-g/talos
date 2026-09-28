@@ -3962,34 +3962,43 @@ pub async fn initiate_pairing(
         }
     }
 
+    // Every advertised origin a phone could actually dial, best first. Each QR
+    // carries the whole set in an `alt=` parameter so the phone is not stranded
+    // on the single host it was handed: when the advertised host does not
+    // resolve there — the common case being a tailnet MagicDNS `.ts.net` name
+    // while the phone has MagicDNS off — the client can retry the same offer
+    // against the tailnet IP, then the home LAN address, and keep whichever
+    // answers. Scanned origin stays first.
+    let origins = phone_origins(&endpoints);
+
     // Build a QR payload per endpoint. The phone only needs the offer id +
     // secret; the host part just has to be a URL the phone can open from
     // wherever it currently is (LAN, away on cellular, etc.).
-    let qr_options: Vec<serde_json::Value> = endpoints
-        .iter()
-        .map(|ep| {
-            let qr_data = format!(
-                "{}/mobile/pair?offer={}&secret={}",
-                ep.base_url, offer_id, offer_secret
-            );
-            json!({
-                "source": ep.source,
-                "label": endpoint_label(ep),
-                "host": ep.host,
-                "port": ep.port,
-                "secure": ep.secure,
-                "reachable": ep.reachable,
-                "via": ep.via,
-                "qr_data": qr_data,
-                "base_url": ep.base_url,
-            })
-        })
-        .collect();
+    let mut qr_options: Vec<serde_json::Value> = Vec::with_capacity(endpoints.len());
+    for ep in &endpoints {
+        let qr_data = pairing_qr_data(&ep.base_url, &offer_id, &offer_secret, &origins);
+        qr_options.push(json!({
+            "source": ep.source,
+            "label": endpoint_label(ep),
+            "host": ep.host,
+            "port": ep.port,
+            "secure": ep.secure,
+            "reachable": ep.reachable,
+            "via": ep.via,
+            "qr_data": qr_data,
+            "base_url": ep.base_url,
+        }));
+    }
 
     let best = endpoints.first();
-    let default_qr_data = best
-        .map(|ep| format!("{}/mobile/pair?offer={}&secret={}", ep.base_url, offer_id, offer_secret))
-        .unwrap_or_default();
+    // The default payload is exactly the best row's payload, so the QR the
+    // dashboard shows without a pick and the row it highlights cannot drift.
+    let default_qr_data = qr_options
+        .first()
+        .and_then(|option| option.get("qr_data"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
 
     let expires_at = chrono::Utc::now() + chrono::Duration::minutes(2);
 
@@ -4004,11 +4013,70 @@ pub async fn initiate_pairing(
         "offer_id": offer_id,
         "qr_data": default_qr_data,
         "qr_options": qr_options,
+        "routes": origins,
         "fingerprint": fingerprint,
         "expires_at": expires_at.to_rfc3339(),
         "status": "waiting_for_device",
         "endpoint": best.cloned(),
     }))
+}
+
+/// Origins a phone could actually dial to reach this daemon, in the daemon's
+/// preference order.
+///
+/// `Localhost` is dropped: it is a useful row to show on the desktop ("this
+/// machine"), but no phone can ever reach it, so advertising it as a fallback
+/// would only cost the client a wasted retry before it found a real route.
+fn phone_origins(endpoints: &[crate::tunnel::resolver::ReachableEndpoint]) -> Vec<String> {
+    endpoints
+        .iter()
+        .filter(|ep| ep.source != crate::tunnel::resolver::EndpointSource::Localhost)
+        .map(|ep| ep.base_url.clone())
+        .collect()
+}
+
+/// The URL a phone opens after scanning: the origin this row is for, the
+/// one-time offer, and — as `alt=` — every other origin it can retry against.
+///
+/// The `alt=` parameter is the whole point. Minting a QR that names only one
+/// host is what produced the "tailnet QR fails, LAN QR works" report: the daemon
+/// offers the tailnet MagicDNS name first because it is the best route when it
+/// resolves, but a phone whose Tailscale has MagicDNS off cannot resolve
+/// `.ts.net`, and the phone had nowhere else to go. Carrying the tailnet IP and
+/// the LAN address in the same code lets the client finish pairing on a route
+/// that actually answers, and remember all of them for later reconnects.
+fn pairing_qr_data(primary: &str, offer_id: &str, secret: &str, origins: &[String]) -> String {
+    let mut qr = format!("{primary}/mobile/pair?offer={offer_id}&secret={secret}");
+    let alternates: Vec<String> = origins
+        .iter()
+        .filter(|origin| origin.as_str() != primary)
+        .map(|origin| encode_origin(origin))
+        .collect();
+    if !alternates.is_empty() {
+        qr.push_str("&alt=");
+        qr.push_str(&alternates.join(","));
+    }
+    qr
+}
+
+/// Percent-encode one origin for the `alt=` query parameter.
+///
+/// Origins are `scheme://host:port` and need only `: / . - [ ]` preserved;
+/// everything else is escaped — notably `,` (our list separator) and `&` (which
+/// would otherwise split the query) — so the client can split the value back
+/// into origins and reverse the escaping with a normal query-string decode.
+fn encode_origin(origin: &str) -> String {
+    const SAFE: &[u8] = b":/.-_[]~";
+    let mut out = String::with_capacity(origin.len());
+    for byte in origin.bytes() {
+        if byte.is_ascii_alphanumeric() || SAFE.contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{:02X}", byte));
+        }
+    }
+    out
 }
 
 /// Human label for an endpoint, used as the chip text on each picker row.
@@ -5074,6 +5142,92 @@ pub async fn push_test(State(state): State<Arc<AppState>>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A phone can never dial `localhost`, so it must not appear in the
+    /// fallback list even though it stays a valid picker row for the desktop.
+    #[test]
+    fn phone_origins_drops_localhost_but_keeps_dialable_routes() {
+        use crate::tunnel::resolver::EndpointSource;
+        let endpoint = |source, host: &str| crate::tunnel::resolver::ReachableEndpoint {
+            base_url: format!("http://{host}:9120"),
+            source,
+            host: host.to_string(),
+            port: 9120,
+            secure: false,
+            reachable: true,
+            via: None,
+        };
+        let origins = phone_origins(&[
+            endpoint(EndpointSource::TailnetMagicDns, "kareem.taile90653.ts.net"),
+            endpoint(EndpointSource::TailnetIpv4, "100.94.122.121"),
+            endpoint(EndpointSource::Lan, "192.168.1.8"),
+            endpoint(EndpointSource::Localhost, "localhost"),
+        ]);
+        assert_eq!(
+            origins,
+            vec![
+                "http://kareem.taile90653.ts.net:9120".to_string(),
+                "http://100.94.122.121:9120".to_string(),
+                "http://192.168.1.8:9120".to_string(),
+            ]
+        );
+    }
+
+
+    #[test]
+    fn encode_origin_is_comma_safe_and_reversible() {
+        let origin = "http://100.94.122.121:9120";
+        assert_eq!(encode_origin(origin), origin);
+
+        let ipv6 = "http://[fd7a:115c:a1e0::435:7a7b]:9120";
+        assert_eq!(encode_origin(ipv6), ipv6);
+
+        // A separator or query-splitting character in a host must be escaped,
+        // otherwise the phone would read two origins where there is one.
+        let hostile = "http://a,b&c.example:9120";
+        let encoded = encode_origin(hostile);
+        assert!(!encoded.contains(','));
+        assert!(!encoded.contains('&'));
+        assert_eq!(encoded, "http://a%2Cb%26c.example:9120");
+    }
+
+    /// The whole point of the parameter: a QR minted for the tailnet MagicDNS
+    /// row must also carry the tailnet IP and the LAN address, so a phone whose
+    /// `.ts.net` name does not resolve still has somewhere to go.
+    #[test]
+    fn pairing_qr_carries_every_other_route() {
+        let origins = vec![
+            "http://kareem.taile90653.ts.net:9120".to_string(),
+            "http://100.94.122.121:9120".to_string(),
+            "http://192.168.1.8:9120".to_string(),
+        ];
+
+        // Scanned the tailnet name: the fallbacks are the IP and the LAN.
+        assert_eq!(
+            pairing_qr_data(origins[0].as_str(), "offer-1", "secret-1", &origins),
+            "http://kareem.taile90653.ts.net:9120/mobile/pair?offer=offer-1&secret=secret-1\
+             &alt=http://100.94.122.121:9120,http://192.168.1.8:9120"
+        );
+
+        // Scanned the LAN row: the fallbacks are the two tailnet routes. The
+        // scanned origin is never repeated in its own alt list.
+        let lan = pairing_qr_data(origins[2].as_str(), "offer-1", "secret-1", &origins);
+        assert!(lan.ends_with(
+            "&alt=http://kareem.taile90653.ts.net:9120,http://100.94.122.121:9120"
+        ));
+        assert_eq!(lan.matches("192.168.1.8").count(), 1);
+    }
+
+    /// With nothing else to fall back to, the QR stays exactly the shape older
+    /// clients expect — no trailing `alt=` to parse.
+    #[test]
+    fn pairing_qr_omits_alt_when_there_is_one_route() {
+        let origins = vec!["http://192.168.1.8:9120".to_string()];
+        assert_eq!(
+            pairing_qr_data(origins[0].as_str(), "o", "s", &origins),
+            "http://192.168.1.8:9120/mobile/pair?offer=o&secret=s"
+        );
+    }
 
     #[test]
     fn acp_browser_mcp_entry_has_correct_wire_shape() {
