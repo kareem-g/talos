@@ -438,7 +438,9 @@ fn push_topic(tag: &str) -> Option<String> {
 /// Build the notification a lifecycle event should page the user with, or
 /// `None` when the event is not one worth interrupting for.
 ///
-/// Three moments qualify, matching `notify_on` in the daemon config:
+/// Three moments qualify — the same three the `notify_on` config lists by
+/// default, though this path does not currently gate on that field (nothing
+/// else reads it yet either):
 /// - `agent_completed` — the turn finished; the user can come back.
 /// - `permission_required` — an agent is blocked on an approval or a question.
 /// - `StateChange` to `error` — the agent died; without this a failed turn
