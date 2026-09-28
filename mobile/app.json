@@ -65,11 +65,7 @@
           "icon": "./assets/notification-icon.png",
           "color": "#5b8def"
         }
-      ],
-      "expo-image"
-    ],
-    "experiments": {
-      "typedRoutes": true
-    }
+      ]
+    ]
   }
 }
