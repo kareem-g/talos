@@ -53,6 +53,9 @@ impl Daemon {
 
         // Create subsystems
         let devices = Arc::new(DeviceStore::new(pool.clone()));
+        // Web Push delivery. Constructed before `SessionManager::new(pool)`
+        // consumes the pool, and after migrations so its tables exist.
+        let push = crate::notifications::push::PushService::new(pool.clone()).await?;
         let session_manager = Arc::new(SessionManager::new(pool).await?);
         let broadcast = BroadcastHub::new();
         let pty_manager = Arc::new(PtyManager::new(broadcast.clone()));
@@ -76,6 +79,7 @@ impl Daemon {
             transcript_tails: Some(crate::transcript::TranscriptTails::shared()),
             browser_manager: Arc::new(crate::browser::manager::BrowserManager::new()),
             trajectories: Arc::new(crate::trajectory::TrajectoryRecorder::new()),
+            push,
         });
 
         // Reconcile sessions left mid-flight by a previous run.
@@ -247,6 +251,11 @@ impl Daemon {
         // Verification gate: after a turn that changed code, run the project's
         // tests and broadcast pass/fail.
         crate::verification::spawn(&state);
+
+        // Web Push: page subscribed devices when an agent finishes a turn, needs
+        // an approval, or errors out — the moments the user is most likely to
+        // have the app closed.
+        crate::notifications::push::spawn(&state);
 
         let cfg = self.config.read().await;
         let settings = cfg.settings().clone();

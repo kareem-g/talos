@@ -20,6 +20,14 @@ import {
   requestNotificationPermission,
   type NotificationSupport,
 } from '@/lib/notify'
+import {
+  disablePush,
+  enablePush,
+  pushSupport,
+  sendTestPush,
+  syncPushSubscription,
+  type PushSupport,
+} from '@/lib/push'
 import { formatFingerprint } from '@/lib/pairing'
 import { cn, relativeTime } from '@/lib/format'
 
@@ -189,36 +197,142 @@ export function DevicesCard() {
 /** Card 4: system-level nudges when an agent needs attention off-screen. */
 function NotificationsCard() {
   const [state, setState] = useState<NotificationSupport>(() => notificationState())
+  const [support] = useState<PushSupport>(() => pushSupport())
+  // Whether the daemon holds a live push subscription for this browser — the
+  // thing that makes alerts arrive with the app fully closed, not just hidden.
+  const [pushed, setPushed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [testNote, setTestNote] = useState<string | null>(null)
+
+  // Reflect an already-granted subscription on mount (returning user, or a
+  // reload after enabling). Also resyncs the endpoint with the daemon.
+  useEffect(() => {
+    if (support !== 'supported') return
+    let cancelled = false
+    void syncPushSubscription().then((active) => {
+      if (!cancelled) setPushed(active)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [support])
 
   async function enable() {
-    setState(await requestNotificationPermission())
+    setBusy(true)
+    setTestNote(null)
+    try {
+      const permission = await requestNotificationPermission()
+      setState(permission)
+      // In a browser, permission alone only covers the page being open. Ask the
+      // daemon to be able to page us when it is not.
+      if (permission === 'granted' && support === 'supported') {
+        setPushed(await enablePush())
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const labels: Record<NotificationSupport, string> = {
-    granted: 'On',
-    denied: 'Blocked by browser',
-    default: 'Off',
-    unsupported: 'Not supported here',
+  async function turnOff() {
+    setBusy(true)
+    setTestNote(null)
+    try {
+      await disablePush()
+      setPushed(false)
+    } finally {
+      setBusy(false)
+    }
   }
+
+  async function test() {
+    setBusy(true)
+    setTestNote(null)
+    try {
+      const delivered = await sendTestPush()
+      setTestNote(
+        delivered > 0
+          ? `Sent to ${delivered} device${delivered === 1 ? '' : 's'}.`
+          : 'No device received it — is this browser subscribed?',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // The chip should say whether background paging is actually live, not merely
+  // whether the browser granted permission.
+  const chipLabel =
+    state === 'denied'
+      ? 'Blocked by browser'
+      : support === 'insecure'
+        ? 'Needs HTTPS'
+        : support === 'unsupported'
+          ? 'Not supported here'
+          : support === 'native'
+            ? state === 'granted'
+              ? 'On (app open)'
+              : 'Off'
+            : pushed
+              ? 'On'
+              : state === 'granted'
+                ? 'On (app open)'
+                : 'Off'
+  const chipTone =
+    state === 'denied' || support === 'insecure'
+      ? 'red'
+      : pushed || (support === 'native' && state === 'granted')
+        ? 'green'
+        : 'default'
+
+  const canEnable =
+    support !== 'unsupported' && support !== 'insecure' && state !== 'granted' && state !== 'denied'
+  // Background paging (the daemon-sent kind) is only offered where push works.
+  const backgroundCapable = support === 'supported'
+
+  const body =
+    support === 'insecure' ? (
+      'Background alerts need a secure connection. Open the dashboard over HTTPS (for example via the Tailscale or Cloudflare tunnel) to enable them.'
+    ) : support === 'unsupported' ? (
+      'This browser cannot show system notifications.'
+    ) : support === 'native' ? (
+      'Get an alert when an agent needs approval or finishes while the app is open or briefly backgrounded. The installed app pages you natively; nothing leaves your machine.'
+    ) : backgroundCapable ? (
+      'Get a system alert when an agent needs approval, finishes, or errors — even with this tab closed or your phone locked. The daemon sends it; your browser decrypts it locally.'
+    ) : (
+      'Get a system alert when an agent needs approval or finishes while Plumb is in the background.'
+    )
 
   return (
     <section className="rounded-card border border-line bg-surface shadow-card">
       <header className="flex items-center justify-between border-b border-line px-3.5 py-2.5">
         <h3 className="text-[12.5px] font-medium text-ink">Attention alerts</h3>
-        <Chip tone={state === 'granted' ? 'green' : state === 'denied' ? 'red' : 'default'}>
-          {labels[state]}
-        </Chip>
+        <Chip tone={chipTone}>{chipLabel}</Chip>
       </header>
-      <div className="flex flex-col gap-2 p-3.5">
-        <p className="text-[11.5px] leading-[1.6] text-ink-2">
-          Get a system alert when an agent needs approval or finishes while Plumb is in the
-          background. Alerts are local to this browser — nothing leaves your machine.
-        </p>
-        {state !== 'granted' && state !== 'unsupported' ? (
-          <Button variant="primary" onClick={() => void enable()} className="self-start">
-            Enable alerts
-          </Button>
-        ) : null}
+      <div className="flex flex-col gap-2.5 p-3.5">
+        <p className="text-[11.5px] leading-[1.6] text-ink-2">{body}</p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {canEnable ? (
+            <Button variant="primary" onClick={() => void enable()} disabled={busy} className="self-start">
+              {busy ? 'Enabling…' : backgroundCapable ? 'Enable background alerts' : 'Enable alerts'}
+            </Button>
+          ) : null}
+
+          {backgroundCapable && (pushed || state === 'granted') ? (
+            <>
+              <Button variant="ghost" onClick={() => void test()} disabled={busy} className="self-start">
+                Send test
+              </Button>
+              {pushed ? (
+                <Button variant="ghost" onClick={() => void turnOff()} disabled={busy} className="self-start">
+                  Turn off
+                </Button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+
+        {testNote ? <p className="text-[11px] leading-[1.5] text-ink-3">{testNote}</p> : null}
       </div>
     </section>
   )

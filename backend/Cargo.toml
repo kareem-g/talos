@@ -68,6 +68,7 @@ crossterm = { workspace = true }
 
 # Shared crate
 agentdeck-shared = { path = "../shared" }
+web-push = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 tokio-test = "0.4"

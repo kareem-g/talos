@@ -4970,6 +4970,88 @@ pub async fn send_test_notification(
     }))
 }
 
+// ===== WEB PUSH =====
+//
+// A browser that wants background notifications asks the daemon for its VAPID
+// public key, hands that to `pushManager.subscribe`, and posts the resulting
+// subscription back. From then on the daemon — not the page — is what pages the
+// device, so notifications arrive with the app closed. These live on the
+// unauthenticated desktop router like the rest of `/api/*`; the daemon is
+// reached over loopback or a private tunnel, and the VAPID key is public by
+// design.
+
+/// The daemon's VAPID public key, for `pushManager.subscribe`.
+pub async fn push_public_key(State(state): State<Arc<AppState>>) -> Response {
+    Json(json!({ "publicKey": state.push.public_key() })).into_response()
+}
+
+/// Register a browser's push subscription.
+///
+/// Accepts the `PushSubscription.toJSON()` shape verbatim. An optional paired
+/// device id (from `/api/mobile` auth) is recorded for attribution; the desktop
+/// dashboard has none and that is fine.
+pub async fn push_subscribe(
+    State(state): State<Arc<AppState>>,
+    Json(input): Json<crate::notifications::push::PushSubscriptionInput>,
+) -> Response {
+    if input.endpoint.trim().is_empty()
+        || input.keys.p256dh.trim().is_empty()
+        || input.keys.auth.trim().is_empty()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "endpoint and keys are required" })),
+        )
+            .into_response();
+    }
+    match state.push.subscribe(&input, None).await {
+        Ok(()) => Json(json!({ "subscribed": true })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Remove a push subscription, given its endpoint.
+pub async fn push_unsubscribe(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let Some(endpoint) = body.get("endpoint").and_then(|v| v.as_str()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "endpoint is required" })),
+        )
+            .into_response();
+    };
+    match state.push.unsubscribe(endpoint).await {
+        Ok(()) => Json(json!({ "unsubscribed": true })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Send a test push to every subscription — the "did this actually work?"
+/// button. Reports how many devices accepted it so a silent failure is visible.
+pub async fn push_test(State(state): State<Arc<AppState>>) -> Response {
+    let payload = crate::notifications::push::PushPayload {
+        title: "AgentDeck push is working".to_string(),
+        body: "You'll be paged when an agent finishes or needs you.".to_string(),
+        tag: "agentdeck-test".to_string(),
+        url: "/".to_string(),
+        kind: "test".to_string(),
+        session_id: None,
+    };
+    let delivered = state.push.broadcast(&payload).await;
+    Json(json!({ "sent": true, "delivered": delivered })).into_response()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

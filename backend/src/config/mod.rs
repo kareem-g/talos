@@ -119,4 +119,7 @@ pub struct AppState {
     pub transcript_tails: Option<Arc<TranscriptTails>>,
     pub browser_manager: Arc<crate::browser::manager::BrowserManager>,
     pub trajectories: Arc<crate::trajectory::TrajectoryRecorder>,
+    /// Web Push delivery to subscribed browsers/phones — pages the user when an
+    /// agent finishes, needs approval, or errors, even with the app closed.
+    pub push: Arc<crate::notifications::push::PushService>,
 }

@@ -82,6 +82,17 @@ async fn test_state() -> AppState {
         transcript_tails: None,
         browser_manager: Arc::new(agentdeck_backend::browser::manager::BrowserManager::new()),
         trajectories: Arc::new(agentdeck_backend::trajectory::TrajectoryRecorder::new()),
+        push: {
+            let push_pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::migrate!("./migrations").run(&push_pool).await.unwrap();
+            agentdeck_backend::notifications::push::PushService::new(push_pool)
+                .await
+                .unwrap()
+        },
     }
 }
 

@@ -79,3 +79,83 @@ self.addEventListener('fetch', (event) => {
       ),
   )
 })
+
+/**
+ * Web Push — the daemon pages the device when an agent finishes, needs an
+ * approval, or errors, even with the app closed. This is the only place that
+ * can fire once the page's JavaScript is gone: a backgrounded phone suspends
+ * the webview within seconds, so nothing driven from the page survives. The
+ * daemon does the sending; the service worker just decides whether to show it.
+ *
+ * The payload is encrypted end-to-end by the browser (RFC 8291) before this
+ * handler ever sees it, so `event.data.json()` is plaintext only because the
+ * push service already decrypted it with keys this browser holds.
+ */
+self.addEventListener('push', (event) => {
+  let data = {}
+  if (event.data) {
+    try {
+      data = event.data.json()
+    } catch {
+      // A malformed or empty body still deserves a generic ping rather than
+      // dropping the notification on the floor — the user was paged for a
+      // reason, even if we cannot name it.
+      data = { title: 'AgentDeck', body: event.data.text() }
+    }
+  }
+
+  const title = data.title || 'AgentDeck'
+  const options = {
+    body: data.body || '',
+    tag: data.tag || 'agentdeck',
+    // Replace an older notification with the same tag rather than stacking —
+    // a second "needs approval" for one session supersedes the first.
+    renotify: true,
+    icon: '/favicon.svg',
+    badge: '/icon-maskable.svg',
+    data: { url: data.url || '/', session_id: data.session_id || null },
+  }
+
+  event.waitUntil(
+    // Do not page the user about something they are already looking at. If a
+    // client is visible and focused, the in-app cue (App.tsx) handles it and a
+    // system notification on top would be noise. `includeUncontrolled` catches
+    // windows this worker does not yet control (freshly opened tabs).
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        const looking = clientList.some((client) => client.visibilityState === 'visible')
+        if (looking) return undefined
+        return self.registration.showNotification(title, options)
+      }),
+  )
+})
+
+/**
+ * A tap on the notification brings the app to the relevant session. Reuse an
+ * open window when there is one (navigating it) rather than spawning a second
+ * instance of the remote control.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const target = (event.notification.data && event.notification.data.url) || '/'
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          // Best-effort deep link: tell the open window where to go, then focus
+          // it. postMessage is fire-and-forget; the page routes on receipt.
+          try {
+            client.postMessage({ type: 'agentdeck-push-navigate', url: target })
+          } catch {
+            // An uncontrolled or cross-origin window may refuse; focusing still
+            // gets the user back into the app.
+          }
+          return client.focus()
+        }
+      }
+      return self.clients.openWindow(target)
+    }),
+  )
+})

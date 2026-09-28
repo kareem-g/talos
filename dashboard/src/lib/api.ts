@@ -1065,3 +1065,33 @@ export const settingsApi = {
       body: JSON.stringify(body),
     }),
 }
+
+/* ── Web Push ────────────────────────────────────────────────────────────── */
+
+/**
+ * The daemon's VAPID identity and the subscription registry.
+ *
+ * Background notifications are sent by the daemon, not the page, so a browser
+ * that wants them registers its push endpoint here. `key` is fetched once and
+ * handed to `pushManager.subscribe`; the resulting subscription is posted back
+ * verbatim (it is already the `PushSubscription.toJSON()` shape the backend
+ * deserializes). See `lib/push.ts` for the browser-side orchestration.
+ */
+export const pushApi = {
+  /** The daemon's VAPID public key, base64url — for `applicationServerKey`. */
+  key: () => request<{ publicKey: string }>('/api/push/key'),
+  /** Register a browser push subscription with the daemon. */
+  subscribe: (subscription: PushSubscriptionJSON) =>
+    request<{ subscribed: boolean }>('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(subscription),
+    }),
+  /** Remove a subscription by its endpoint. */
+  unsubscribe: (endpoint: string) =>
+    request<{ unsubscribed: boolean }>('/api/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
+    }),
+  /** Send a test push to every subscription; reports how many accepted it. */
+  test: () => request<{ sent: boolean; delivered: number }>('/api/push/test', { method: 'POST' }),
+}

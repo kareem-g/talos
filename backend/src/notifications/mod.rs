@@ -1,5 +1,6 @@
 pub mod telegram;
 pub mod slack;
+pub mod push;
 
 use crate::Result;
 use serde::{Deserialize, Serialize};

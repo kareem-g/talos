@@ -411,6 +411,17 @@ async fn trajectory_similarity_finds_and_formats_past_runs() {
             agentdeck_backend::browser::manager::BrowserManager::new(),
         ),
         trajectories: std::sync::Arc::new(trajectory::TrajectoryRecorder::new()),
+        push: {
+            let push_pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::migrate!("./migrations").run(&push_pool).await.unwrap();
+            agentdeck_backend::notifications::push::PushService::new(push_pool)
+                .await
+                .unwrap()
+        },
     };
 
     let (found, refs) = find_similar_trajectories(&state, &current, "fix the auth bug", 3, 0.3)

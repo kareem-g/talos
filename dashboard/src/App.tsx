@@ -16,6 +16,7 @@ import { roomOpenApproval, useRooms } from './lib/rooms'
 import { getConversation, useStore } from './store'
 import { sessionUIState } from './lib/sessionState'
 import { notifyOnBackground } from './lib/notify'
+import { syncPushSubscription } from './lib/push'
 import { socket } from './lib/socket'
 import { cn } from './lib/format'
 
@@ -176,22 +177,64 @@ export default function App() {
     return () => window.removeEventListener('keydown', onPaletteKey)
   }, [])
 
-  /** System alerts while backgrounded: approvals and completions page you. */
+  /**
+   * In-app system alerts for the native shell.
+   *
+   * The Capacitor shell has no service worker and no push service, so it cannot
+   * receive daemon-sent Web Push. While it is open or briefly backgrounded
+   * (before iOS suspends the webview) it drives its own LocalNotifications from
+   * the live socket. Browser builds deliberately skip this: there the daemon
+   * pushes to the service worker, which already suppresses the alert while the
+   * page is visible — firing here too would double-notify.
+   *
+   * Keyed on the same signals the daemon pushes on, so the foreground cue and
+   * the background push never diverge: `agent_completed` (turn finished),
+   * `permission_required` (needs approval), and the `error` state change. Note
+   * the old `completed` state check was dead — the backend never broadcasts a
+   * `completed` StateChange; a finished turn is an `agent_completed` event.
+   */
   useEffect(() => {
+    if (!isNativeApp()) return
     return socket.onFrame((frame) => {
       const nameFor = (sessionId: string) =>
         useStore.getState().sessions.find((session) => session.id === sessionId)?.name ?? 'A session'
-      if (frame.type === 'ApprovalRequest') {
-        notifyOnBackground('Approval needed', frame.payload.request.prompt.slice(0, 120))
-      } else if (frame.type === 'StateChange') {
-        if (frame.payload.state === 'waiting_for_approval') {
-          notifyOnBackground('Approval needed', nameFor(frame.payload.session_id))
-        } else if (frame.payload.state === 'completed') {
-          notifyOnBackground('Task finished', nameFor(frame.payload.session_id))
+      if (frame.type === 'AgentEvent') {
+        const { kind, session_id, payload } = frame.payload.event
+        if (kind === 'agent_completed') {
+          notifyOnBackground('Task finished', `${nameFor(session_id)} finished its turn.`)
+        } else if (kind === 'permission_required') {
+          const prompt = typeof payload.prompt === 'string' ? payload.prompt : ''
+          notifyOnBackground('Approval needed', prompt ? prompt.slice(0, 120) : nameFor(session_id))
         }
+      } else if (frame.type === 'StateChange' && frame.payload.state === 'error') {
+        notifyOnBackground('Agent stopped', `${nameFor(frame.payload.session_id)} hit an error.`)
       }
     })
   }, [])
+
+  /**
+   * Web Push lifecycle for browser builds.
+   *
+   * Resync the subscription with the daemon on start — push endpoints rotate and
+   * the daemon's database can be reset independently of the browser, so an
+   * existing subscription is re-posted rather than left to go stale. Also handle
+   * a tap on a daemon-sent notification: the service worker focuses the open
+   * window and posts where to go, so we deep-link to the session that paged.
+   */
+  useEffect(() => {
+    if (isNativeApp()) return
+    void syncPushSubscription()
+    if (!('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | undefined
+      if (data?.type !== 'agentdeck-push-navigate') return
+      const match = /^\/session\/([^/?#]+)/.exec(data.url ?? '/')
+      if (match) navigate({ name: 'session', sessionId: decodeURIComponent(match[1]) })
+      else navigate({ name: 'list' })
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [navigate])
 
   // Global keyboard shortcut: Cmd/Ctrl+N starts a session from anywhere.
   useEffect(() => {

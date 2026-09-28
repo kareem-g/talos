@@ -192,6 +192,13 @@ pub async fn start(
         // Notifications
         .route("/api/notifications/test", post(crate::api::routes::send_test_notification))
 
+        // Web Push — the daemon pages subscribed devices when an agent finishes,
+        // needs approval, or errors, even with the app closed.
+        .route("/api/push/key", get(crate::api::routes::push_public_key))
+        .route("/api/push/subscribe", post(crate::api::routes::push_subscribe))
+        .route("/api/push/unsubscribe", post(crate::api::routes::push_unsubscribe))
+        .route("/api/push/test", post(crate::api::routes::push_test))
+
         // Local provider hook ingestion. Hook tokens are validated by the handler.
         .route("/api/hooks/claude", post(crate::hooks::server::handle_claude_hook))
         .route("/api/hooks/permission", post(crate::hooks::server::handle_permission_request))
