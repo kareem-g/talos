@@ -31,6 +31,7 @@ import type { RootStackParamList, DrawerParamList } from '@app/navigation'
 import { deviceToken } from '@app/lib/api'
 import { cn } from '@/lib/format'
 import { BrandMark, Button, Dot, IconButton, Mono, NavLabel } from '@app/components/ui'
+import { NewTaskSheet } from '@app/components/NewTaskSheet'
 
 /** Desktop `connectionDot`/label mapping, reused verbatim. */
 function connectionTone(connection: string): 'green' | 'orange' | 'red' {
@@ -60,11 +61,10 @@ function connectionLabel(connection: string, paired: boolean): string {
 export function AppNav({ navigation, state }: DrawerContentComponentProps) {
   const active = state.routeNames[state.index]
   const sessions = useStore((s) => s.sessions)
-  const agents = useStore((s) => s.agents)
   const connection = useStore((s) => s.connection)
   const desktopName = useStore((s) => s.desktopName)
-  const createSession = useStore((s) => s.createSession)
   const [copied, setCopied] = React.useState(false)
+  const [newOpen, setNewOpen] = React.useState(false)
 
   // Sessions and the pairing gate are ROOT stack screens, pushed over the rail.
   // The drawer's own navigator only knows Home/Agents/History/Usage/Config, so
@@ -86,15 +86,15 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
     [sessions],
   )
 
-  async function newTask() {
-    const ready = agents.find((agent) => agent.available)
-    if (!ready) {
-      go('Home')
-      return
-    }
-    const session = await createSession({ agent: ready.id })
-    if (session) openSession(session.id)
-    else navigation.closeDrawer()
+  /**
+   * "New task" opens the configured flow rather than starting a default run:
+   * workspace, agent, prompt, model, thought level and permissions. Starting a
+   * session in one tap is not what the desktop offers, and it is the reason the
+   * phone could only ever launch a bare chat.
+   */
+  function newTask() {
+    navigation.closeDrawer()
+    setNewOpen(true)
   }
 
   function copyToken() {
@@ -186,6 +186,12 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
           onPress={() => go('Agents')}
         />
       </ScrollView>
+
+      <NewTaskSheet
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onCreated={(session) => openSession(session.id)}
+      />
 
       {/* Device card */}
       <View className="border-t border-line p-2.5">

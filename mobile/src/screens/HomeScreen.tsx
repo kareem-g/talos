@@ -1,20 +1,20 @@
 /**
  * Home — the Control Deck.
  *
- * Composition follows the desktop `StationHome` top to bottom: the control-deck
- * header (eyebrow, attention pill, live count, New), the anchor strip, then
- * "Needs you" triage → "Active" → workspace-grouped sessions with the same
- * All/Active/Attention/Starred/Archived filters and search, and finally the
- * phone/connection section.
+ * Composition follows the desktop `StationHome` top to bottom: a control-deck
+ * header (brand, eyebrow, attention pill, live count, quick launch, New), the
+ * anchor strip that jumps between sections, then Sessions (triage → active →
+ * workspace groups with filters and search), Phone, Automations and Skills.
  *
- * The ranking, headlines, counts and workspace grouping are not reimplemented
- * here — they come from the desktop's own pure `deriveHomeView`, fed the mobile
- * store's conversations. So a session that floats to the top of triage on the
- * desktop floats to the top here too, for the same reasons.
+ * Ranking, headlines, counts and workspace grouping come from the desktop's own
+ * `deriveHomeView`, so a session floats to the top here for the same reasons it
+ * does there. Two native deviations: the anchor strip is pinned under the header
+ * rather than sticky-in-flow, and touch targets are 44px rather than the
+ * desktop's hover-sized 36px.
  */
 
 import * as React from 'react'
-import { FlatList, Modal, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
+import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useNavigation } from '@react-navigation/native'
 import type { DrawerNavigationProp } from '@react-navigation/drawer'
@@ -22,20 +22,20 @@ import {
   Archive,
   ArchiveRestore,
   ChevronRight,
+  Menu,
   Plus,
   Search,
   Star,
-  X,
+  Zap,
 } from 'lucide-react-native'
 
 import { getConversation, useStore } from '@app/store'
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
 import { firstOpenApprovalId } from '@/lib/sessionState'
-import { basename } from '@/lib/format'
+import { basename, relativeTime } from '@/lib/format'
 import type { Session } from '@/types/session'
 import { useOpenSession, type DrawerParamList } from '@app/navigation'
 import { mobileApi } from '@app/lib/api'
-import { AutomationsSection, SkillsSection } from '@app/components/home/Sections'
 import { deviceBaseUrl, deviceRoutes } from '@app/lib/native'
 import {
   Button,
@@ -45,15 +45,15 @@ import {
   Dot,
   Dots,
   EmptyState,
+  GlassSurface,
   IconButton,
   Mono,
-  PageHeader,
-  SectionHeading,
-  SectionLabel,
   Segmented,
   StatusPill,
   TextField,
 } from '@app/components/ui'
+import { NewTaskSheet } from '@app/components/NewTaskSheet'
+import { AutomationsSection, SkillsSection } from '@app/components/home/Sections'
 
 const FILTERS: Array<{ value: HomeFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -63,27 +63,33 @@ const FILTERS: Array<{ value: HomeFilter; label: string }> = [
   { value: 'archived', label: 'Archived' },
 ]
 
-type FilterValue = HomeFilter
+/** The desktop's anchor strip, in the same order as its home sections. */
+const ANCHORS = ['Sessions', 'Phone', 'Automations', 'Skills'] as const
+type Anchor = (typeof ANCHORS)[number]
 
 export function HomeScreen() {
   const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
-  const sessions = useStore((s) => s.sessions)
-  const agents = useStore((s) => s.agents)
-  const connection = useStore((s) => s.connection)
-  const desktopName = useStore((s) => s.desktopName)
-  const notices = useStore((s) => s.notices)
-  const starred = useStore((s) => s.starred)
-  const revisions = useStore((s) => s.revisions)
-  const sessionsLoading = useStore((s) => s.sessionsLoading)
-  const loadSnapshot = useStore((s) => s.loadSnapshot)
-  const respondToApproval = useStore((s) => s.respondToApproval)
-  const toggleStar = useStore((s) => s.toggleStar)
-  const createSession = useStore((s) => s.createSession)
+  const scrollRef = React.useRef<ScrollView>(null)
+  const offsets = React.useRef(new Map<Anchor, number>())
 
-  const [filter, setFilter] = React.useState<FilterValue>('all')
+  const sessions = useStore((state) => state.sessions)
+  const agents = useStore((state) => state.agents)
+  const connection = useStore((state) => state.connection)
+  const desktopName = useStore((state) => state.desktopName)
+  const notices = useStore((state) => state.notices)
+  const starred = useStore((state) => state.starred)
+  const revisions = useStore((state) => state.revisions)
+  const sessionsLoading = useStore((state) => state.sessionsLoading)
+  const loadSnapshot = useStore((state) => state.loadSnapshot)
+  const respondToApproval = useStore((state) => state.respondToApproval)
+  const toggleStar = useStore((state) => state.toggleStar)
+
+  const [filter, setFilter] = React.useState<HomeFilter>('all')
   const [search, setSearch] = React.useState('')
   const [refreshing, setRefreshing] = React.useState(false)
   const [newOpen, setNewOpen] = React.useState(false)
+  const [quickOpen, setQuickOpen] = React.useState(false)
+  const [quickAgent, setQuickAgent] = React.useState<string | undefined>()
 
   const providerNameFor = React.useCallback(
     (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId,
@@ -102,12 +108,15 @@ export function HomeScreen() {
         providerNameFor,
         notices,
         now: Date.now(),
-        // `revisions` is a dependency only so a conversation mutation re-derives
-        // the headline/preview; the value itself is not read.
+        // `revisions` re-derives headlines and previews as conversations stream;
+        // the value itself is not read.
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sessions, connection, search, filter, starred, notices, providerNameFor, revisions],
   )
+
+  const readyAgents = agents.filter((agent) => agent.available)
+  const live = connection === 'connected'
 
   async function onRefresh() {
     setRefreshing(true)
@@ -115,7 +124,7 @@ export function HomeScreen() {
     setRefreshing(false)
   }
 
-  async function approve(sessionId: string) {
+  function approve(sessionId: string) {
     const requestId = firstOpenApprovalId(getConversation(sessionId))
     if (!requestId) return
     respondToApproval(sessionId, requestId, 'allow')
@@ -131,216 +140,272 @@ export function HomeScreen() {
   }
 
   const openSession = useOpenSession()
+  const jumpTo = (anchor: Anchor) =>
+    scrollRef.current?.scrollTo({ y: offsets.current.get(anchor) ?? 0, animated: true })
 
   return (
     <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
-      <PageHeader
-        onMenu={() => navigation.openDrawer()}
-        title="Home"
-        right={
-          <>
+      {/* ── Control-deck header ─────────────────────────────────────────── */}
+      <GlassSurface radius={0} className="border-b border-line">
+        <View className="gap-2 px-3 pt-1.5 pb-2.5">
+          <View className="flex-row items-center gap-1">
+            <IconButton label="Menu" onPress={() => navigation.openDrawer()} className="size-9">
+              <Menu size={18} color="#f2f2f3" />
+            </IconButton>
+            <View className="min-w-0 flex-1 pl-1">
+              <Mono className="text-[9.5px] uppercase tracking-[0.16em] text-ink-3">Control deck</Mono>
+              <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+                {desktopName}
+              </Text>
+            </View>
             <StatusPill
               tone={view.counts.attention > 0 ? 'red' : 'green'}
               label={view.counts.attention > 0 ? `${view.counts.attention} need you` : 'all clear'}
             />
-            <IconButton label="New session" onPress={() => setNewOpen(true)}>
-              <Plus size={18} color="#f2f2f3" />
-            </IconButton>
-          </>
-        }
-      />
+          </View>
 
-      <FlatList
-        data={view.filtered}
-        keyExtractor={(entry) => entry.session.id}
+          <View className="flex-row flex-wrap items-center gap-1.5">
+            <View className="flex-row items-center gap-1.5">
+              <Dot tone={live ? 'green' : connection === 'offline' ? 'red' : 'orange'} pulse={!live} />
+              <Text className="text-[10.5px] text-ink-3">{live ? 'system live' : connection}</Text>
+            </View>
+            <Chip tone={view.counts.running > 0 ? 'accent' : 'dim'} label={`${view.counts.running} live`} />
+            <Chip label={`${view.counts.total} sessions`} />
+            {view.counts.paused > 0 ? <Chip tone="orange" label={`${view.counts.paused} paused`} /> : null}
+            <View className="flex-1" />
+            <Pressable
+              onPress={() => setQuickOpen(true)}
+              className="min-h-8 flex-row items-center gap-1.5 rounded-control border border-line bg-surface px-2.5 active:bg-hover"
+            >
+              <Zap size={12} color="#db6d28" />
+              <Text className="text-[11px] text-ink-2">Quick launch</Text>
+              <Mono className="text-[10px]">{readyAgents.length}</Mono>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setQuickAgent(undefined)
+                setNewOpen(true)
+              }}
+              accessibilityLabel="New task"
+              className="min-h-8 flex-row items-center gap-1 rounded-control bg-ink px-3 active:opacity-90"
+            >
+              <Plus size={13} color="#131315" />
+              <Text className="text-[11.5px] font-semibold text-canvas">New</Text>
+            </Pressable>
+          </View>
+        </View>
+      </GlassSurface>
+
+      {/* ── Anchor strip ────────────────────────────────────────────────── */}
+      <View className="flex-row gap-1.5 border-b border-line bg-canvas px-3 py-2">
+        {ANCHORS.map((anchor) => (
+          <Pressable
+            key={anchor}
+            onPress={() => jumpTo(anchor)}
+            className="min-h-7 flex-row items-center rounded-control border border-line bg-inset px-2.5 active:bg-hover"
+          >
+            <Mono className="text-[10px] uppercase tracking-[0.12em] text-ink-2">{anchor}</Mono>
+          </Pressable>
+        ))}
+      </View>
+
+      <ScrollView
+        ref={scrollRef}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7e7e86" />}
-        ListHeaderComponent={
-          <ListHeader
-            view={view}
-            desktopName={desktopName}
-            filter={filter}
-            setFilter={setFilter}
-            search={search}
-            setSearch={setSearch}
-            onApprove={approve}
-            onOpen={openSession}
-            connection={connection}
-          />
-        }
-        renderItem={({ item }) => (
-          <SessionRow
-            session={item.session}
-            onPress={() => openSession(item.session.id)}
-            starred={starred.includes(item.session.id)}
-            onToggleStar={() => toggleStar(item.session.id)}
-            onArchive={() => void archive(item.session.id, item.session.status === 'archived')}
-          />
-        )}
-        ListEmptyComponent={
-          sessionsLoading && sessions.length === 0 ? (
-            <View className="items-center py-14">
+        contentContainerClassName="gap-6 px-4 py-4 pb-14"
+      >
+        {/* ── Sessions ──────────────────────────────────────────────────── */}
+        <View
+          onLayout={(event) => offsets.current.set('Sessions', event.nativeEvent.layout.y)}
+          className="gap-3"
+        >
+          {view.attention.length > 0 ? (
+            <View className="gap-1.5">
+              <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
+                Triage · needs you
+              </Mono>
+              {view.attention.map((entry) => (
+                <View key={entry.session.id} className="gap-2 rounded-xl border border-line bg-surface p-3">
+                  <View className="flex-row items-center gap-2">
+                    <Dot
+                      tone={entry.uiState === 'failed' ? 'red' : entry.uiState === 'paused' ? 'dim' : 'orange'}
+                    />
+                    <Text className="min-w-0 flex-1 text-[13px] font-medium text-ink" numberOfLines={1}>
+                      {entry.session.name}
+                    </Text>
+                    {entry.idleFor ? <Mono className="text-[10.5px]">{entry.idleFor}</Mono> : null}
+                  </View>
+                  <Text className="text-[12px] leading-5 text-ink-2" numberOfLines={2}>
+                    {entry.headline}
+                  </Text>
+                  <View className="flex-row items-center gap-2">
+                    {entry.uiState === 'approval' ? (
+                      <Button
+                        variant="primary"
+                        label="Approve"
+                        className="min-h-9 px-3"
+                        onPress={() => approve(entry.session.id)}
+                      />
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      label="Open"
+                      className="min-h-9 px-3"
+                      onPress={() => openSession(entry.session.id)}
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {view.active.length > 0 ? (
+            <View className="gap-1.5">
+              <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
+                Active · {view.active.length} running
+              </Mono>
+              {view.active.map((entry) => (
+                <Pressable
+                  key={entry.session.id}
+                  onPress={() => openSession(entry.session.id)}
+                  className="flex-row items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 active:bg-hover"
+                >
+                  <Dot tone="accent" pulse />
+                  <Text className="min-w-0 flex-1 text-[12.5px] text-ink" numberOfLines={1}>
+                    {entry.task ?? entry.session.name}
+                  </Text>
+                  <Mono className="text-[10.5px]">{entry.runtime}</Mono>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          <View className="gap-2">
+            <View className="flex-row items-baseline justify-between">
+              <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
+                Workspaces · {view.workspaces.length}
+              </Mono>
+              <Mono className="text-[10.5px]">{view.filtered.length} sessions</Mono>
+            </View>
+            <Segmented options={FILTERS} value={filter} onChange={setFilter} />
+            <TextField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search sessions"
+              autoCapitalize="none"
+              autoCorrect={false}
+              leading={<Search size={14} color="#7e7e86" />}
+            />
+          </View>
+
+          {sessionsLoading && sessions.length === 0 ? (
+            <View className="items-center py-10">
               <Dots label="Loading sessions…" />
             </View>
+          ) : view.workspaces.length === 0 ? (
+            <Card>
+              <EmptyState
+                title="No sessions here"
+                body="Start an agent on your desktop, or tap New to launch one from here. Pull to refresh."
+              />
+            </Card>
           ) : (
-            <EmptyState
-              title="No sessions here"
-              body="Start an agent on your desktop and it shows up here. Pull to refresh."
-            />
-          )
-        }
-        ListFooterComponent={
-          <View className="gap-6 p-4">
-            <PhoneSection />
-            <AutomationsSection />
-            <SkillsSection />
-          </View>
-        }
-        contentContainerClassName="pb-10"
+            view.workspaces.map((workspace) => (
+              <Card key={workspace.id}>
+                <CardHeader
+                  title={workspace.name}
+                  right={
+                    <View className="flex-row items-center gap-1.5">
+                      {workspace.counts.attention > 0 ? (
+                        <Chip tone="red" label={`${workspace.counts.attention} need you`} />
+                      ) : null}
+                      {workspace.counts.running > 0 ? (
+                        <Chip tone="accent" label={`${workspace.counts.running} running`} />
+                      ) : null}
+                      <IconButton
+                        label="New session here"
+                        onPress={() => {
+                          setQuickAgent(undefined)
+                          setNewOpen(true)
+                        }}
+                        className="size-8"
+                      >
+                        <Plus size={15} color="#b0b0b6" />
+                      </IconButton>
+                    </View>
+                  }
+                />
+                <View>
+                  {workspace.sessions.map(({ session }) => (
+                    <SessionRow
+                      key={session.id}
+                      session={session}
+                      onPress={() => openSession(session.id)}
+                      starred={starred.includes(session.id)}
+                      onToggleStar={() => toggleStar(session.id)}
+                      onArchive={() => void archive(session.id, session.status === 'archived')}
+                    />
+                  ))}
+                </View>
+              </Card>
+            ))
+          )}
+        </View>
+
+        {/* ── Phone ─────────────────────────────────────────────────────── */}
+        <View onLayout={(event) => offsets.current.set('Phone', event.nativeEvent.layout.y)} className="gap-2">
+          <SectionHeading eyebrow="Phone" title="Connection" />
+          <PhoneCard />
+        </View>
+
+        {/* ── Automations ───────────────────────────────────────────────── */}
+        <View
+          onLayout={(event) => offsets.current.set('Automations', event.nativeEvent.layout.y)}
+          className="gap-2"
+        >
+          <SectionHeading eyebrow="Automations" title="Scheduled and idle-time tasks" />
+          <AutomationsSection />
+        </View>
+
+        {/* ── Skills ────────────────────────────────────────────────────── */}
+        <View onLayout={(event) => offsets.current.set('Skills', event.nativeEvent.layout.y)} className="gap-2">
+          <SectionHeading eyebrow="Prompt library" title="Skills" />
+          <SkillsSection />
+        </View>
+      </ScrollView>
+
+      <NewTaskSheet
+        open={newOpen}
+        initialAgent={quickAgent}
+        onClose={() => setNewOpen(false)}
+        onCreated={(session) => openSession(session.id)}
       />
 
-      <NewSessionSheet
-        open={newOpen}
-        onClose={() => setNewOpen(false)}
-        onCreate={async (agentId) => {
-          const session = await createSession({ agent: agentId })
-          setNewOpen(false)
-          if (session) openSession(session.id)
+      <QuickLaunch
+        open={quickOpen}
+        agents={readyAgents}
+        onClose={() => setQuickOpen(false)}
+        onPick={(agentId) => {
+          setQuickOpen(false)
+          setQuickAgent(agentId)
+          setNewOpen(true)
         }}
       />
     </SafeAreaView>
   )
 }
 
-/** The scrollable part above the session list — control strip, triage, active. */
-function ListHeader({
-  view,
-  desktopName,
-  filter,
-  setFilter,
-  search,
-  setSearch,
-  onApprove,
-  onOpen,
-  connection,
-}: {
-  view: ReturnType<typeof deriveHomeView>
-  desktopName: string
-  filter: FilterValue
-  setFilter: (value: FilterValue) => void
-  search: string
-  setSearch: (value: string) => void
-  onApprove: (sessionId: string) => void
-  onOpen: (sessionId: string) => void
-  connection: string
-}) {
+/** Desktop `SectionHeading`: mono eyebrow over a large title. */
+function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
-    <View className="gap-4 p-4">
-      {/* Control deck strip */}
-      <View className="gap-2">
-        <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">Control deck</Mono>
-        <View className="flex-row items-center gap-2">
-          <Text className="flex-1 text-[20px] font-semibold tracking-tight text-ink" numberOfLines={1}>
-            {desktopName}
-          </Text>
-          <View className="flex-row items-center gap-1.5">
-            <Dot tone={connection === 'connected' ? 'green' : connection === 'offline' ? 'red' : 'orange'} />
-            <Text className="text-[11px] text-ink-3">
-              {connection === 'connected' ? 'Live' : 'Offline'}
-            </Text>
-          </View>
-        </View>
-        <View className="flex-row flex-wrap items-center gap-2">
-          <Chip tone={view.counts.attention > 0 ? 'red' : 'green'} label={`${view.counts.attention} need you`} />
-          <Chip tone={view.counts.running > 0 ? 'accent' : 'dim'} label={`${view.counts.running} live`} />
-          <Chip label={`${view.counts.total} sessions`} />
-          {view.counts.paused > 0 ? <Chip tone="orange" label={`${view.counts.paused} paused`} /> : null}
-        </View>
-      </View>
-
-      {/* Triage — anything blocked on the human, most urgent first. */}
-      {view.attention.length > 0 ? (
-        <View className="gap-1">
-          <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
-            Needs you
-          </Mono>
-          {view.attention.map((entry) => (
-            <View
-              key={entry.session.id}
-              className="gap-2 rounded-xl border border-line bg-surface p-3"
-            >
-              <View className="flex-row items-center gap-2">
-                <Dot tone={entry.uiState === 'failed' ? 'red' : entry.uiState === 'paused' ? 'dim' : 'orange'} />
-                <Text className="min-w-0 flex-1 text-[13px] font-medium text-ink" numberOfLines={1}>
-                  {entry.session.name}
-                </Text>
-                {entry.idleFor ? <Mono className="text-[10.5px]">{entry.idleFor}</Mono> : null}
-              </View>
-              <Text className="text-[12px] leading-5 text-ink-2" numberOfLines={2}>
-                {entry.headline}
-              </Text>
-              <View className="flex-row items-center gap-2">
-                {entry.uiState === 'approval' ? (
-                  <Button
-                    variant="primary"
-                    label="Approve"
-                    className="min-h-9 px-3"
-                    onPress={() => onApprove(entry.session.id)}
-                  />
-                ) : null}
-                <Button
-                  variant="ghost"
-                  label="Open"
-                  className="min-h-9 px-3"
-                  onPress={() => onOpen(entry.session.id)}
-                />
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {/* Active — work in flight, with runtime. */}
-      {view.active.length > 0 ? (
-        <View className="gap-1">
-          <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
-            Active · {view.active.length} running
-          </Mono>
-          {view.active.map((entry) => (
-            <Pressable
-              key={entry.session.id}
-              onPress={() => onOpen(entry.session.id)}
-              className="flex-row items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 active:bg-hover"
-            >
-              <Dot tone="accent" pulse />
-              <Text className="min-w-0 flex-1 text-[12.5px] text-ink" numberOfLines={1}>
-                {entry.task ?? entry.session.name}
-              </Text>
-              <Mono className="text-[10.5px]">{entry.runtime}</Mono>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
-      {/* Workspaces header: filter + search */}
-      <View className="gap-2">
-        <Mono className="text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
-          Workspaces · {view.workspaces.length}
-        </Mono>
-        <Segmented options={FILTERS} value={filter} onChange={setFilter} />
-        <TextField
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search sessions"
-          autoCapitalize="none"
-          autoCorrect={false}
-          leading={<Search size={14} color="#7e7e86" />}
-        />
-      </View>
+    <View className="gap-0.5">
+      <Mono className="text-[10.5px] uppercase tracking-[0.16em] text-ink-3">{eyebrow}</Mono>
+      <Text className="text-[20px] font-semibold tracking-tight text-ink">{title}</Text>
     </View>
   )
 }
 
-/** A session row inside a workspace group. */
+/** A session row inside a workspace card. */
 function SessionRow({
   session,
   onPress,
@@ -357,18 +422,16 @@ function SessionRow({
   return (
     <Pressable
       onPress={onPress}
-      className="min-h-14 flex-row items-center gap-2 border-b border-line px-4 py-2.5 active:bg-hover"
+      className="min-h-14 flex-row items-center gap-1 border-b border-line px-3 py-2.5 active:bg-hover"
     >
       <View className="min-w-0 flex-1">
         <Text className="text-[13.5px] text-ink" numberOfLines={1}>
           {session.name}
         </Text>
-        <View className="mt-0.5 flex-row items-center gap-1.5">
-          <Mono className="text-[11px]" numberOfLines={1}>
-            {session.agent}
-            {session.project ? ` · ${basename(session.project)}` : ''}
-          </Mono>
-        </View>
+        <Mono className="mt-0.5 text-[10.5px]" numberOfLines={1}>
+          {session.agent}
+          {session.project ? ` · ${basename(session.project)}` : ''} · {relativeTime(session.updated_at)}
+        </Mono>
       </View>
       <IconButton label={starred ? 'Unstar' : 'Star'} onPress={onToggleStar} className="size-9">
         <Star size={15} color={starred ? '#db6d28' : '#7e7e86'} fill={starred ? '#db6d28' : 'transparent'} />
@@ -389,91 +452,91 @@ function SessionRow({
   )
 }
 
-/**
- * Phone section — how this device currently reaches the daemon, and the other
- * routes it can fall back to. The desktop's equivalent is the QR card; a phone
- * shows the routes it already holds instead, which is also how it recovers when
- * one stops answering.
- */
-function PhoneSection() {
-  const connection = useStore((s) => s.connection)
+/** How this device reaches the daemon, and the routes it can fall back to. */
+function PhoneCard() {
+  const connection = useStore((state) => state.connection)
   const routes = deviceRoutes()
   const active = deviceBaseUrl()
   return (
-    <View className="gap-3">
-      <SectionHeading
-        eyebrow="Phone"
-        title="Connection"
-        description="Routes this device remembers, best first. The app moves to the next one automatically when the active route stops answering."
+    <Card>
+      <CardHeader
+        title="Routes"
+        right={<Chip tone={connection === 'connected' ? 'green' : 'orange'} label={connection} />}
       />
-      <Card>
-        <CardHeader title="Routes" right={<Chip tone={connection === 'connected' ? 'green' : 'orange'} label={connection} />} />
-        <View className="gap-1 p-3">
-          {routes.length === 0 ? (
-            <Text className="text-[12px] text-ink-3">Not paired.</Text>
-          ) : (
-            routes.map((route, index) => (
-              <View key={route} className="flex-row items-center gap-2">
-                <Dot tone={route === active ? 'green' : 'dim'} />
-                <Mono className="min-w-0 flex-1 text-[11.5px] text-ink" numberOfLines={1}>
-                  {route}
-                </Mono>
-                {route === active ? <Chip tone="accent" label="active" /> : <Mono className="text-[10.5px]">#{index + 1}</Mono>}
-              </View>
-            ))
-          )}
-        </View>
-      </Card>
-    </View>
+      <View className="gap-2 p-3">
+        <Text className="text-[11.5px] leading-5 text-ink-2">
+          Best first. The app moves to the next route on its own when the active one stops answering —
+          leaving home, or the tailnet dropping, does not need a rescan.
+        </Text>
+        {routes.length === 0 ? (
+          <Text className="text-[12px] text-ink-3">Not paired.</Text>
+        ) : (
+          routes.map((route, index) => (
+            <View key={route} className="flex-row items-center gap-2">
+              <Dot tone={route === active ? 'green' : 'dim'} />
+              <Mono className="min-w-0 flex-1 text-[11px] text-ink" numberOfLines={1}>
+                {route}
+              </Mono>
+              {route === active ? (
+                <Chip tone="accent" label="active" />
+              ) : (
+                <Mono className="text-[10px]">#{index + 1}</Mono>
+              )}
+            </View>
+          ))
+        )}
+      </View>
+    </Card>
   )
 }
 
-/** Quick launch: pick an agent, start a session — the desktop's New task path. */
-function NewSessionSheet({
+/**
+ * Quick launch — the desktop's ready-provider popup. It does not start a session
+ * on tap; it preselects the agent and opens the full new-task flow, so the
+ * workspace, model and permissions are still configurable.
+ */
+function QuickLaunch({
   open,
+  agents,
   onClose,
-  onCreate,
+  onPick,
 }: {
   open: boolean
+  agents: Array<{ id: string; name: string }>
   onClose: () => void
-  onCreate: (agentId: string) => void | Promise<void>
+  onPick: (agentId: string) => void
 }) {
-  const agents = useStore((s) => s.agents)
-  const ready = agents.filter((agent) => agent.available)
+  if (!open) return null
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <View className="flex-1 justify-end bg-black/65">
-        <View className="max-h-[80%] rounded-t-2xl border border-line bg-surface">
-          <View className="flex-row items-center justify-between border-b border-line px-3.5 py-2.5">
-            <Text className="text-[13px] font-medium text-ink">New session</Text>
-            <IconButton label="Close" onPress={onClose} className="size-9">
-              <X size={16} color="#b0b0b6" />
-            </IconButton>
+    <View className="absolute inset-0 z-30 justify-end bg-black/65">
+      <Pressable className="absolute inset-0" onPress={onClose} accessibilityLabel="Close" />
+      <GlassSurface radius={20} className="border-t border-line">
+        <View className="p-3 pb-8">
+          <View className="mb-2 flex-row items-center justify-between">
+            <Mono className="text-[10px] uppercase tracking-[0.14em] text-ink-3">Quick launch</Mono>
+            <Text className="text-[11px] text-ink-3">{agents.length} ready</Text>
           </View>
-          <ScrollView contentContainerClassName="p-2">
-            {ready.length === 0 ? (
-              <EmptyState title="No agents ready" body="Install an agent CLI on the desktop, then re-scan." />
-            ) : (
-              <>
-                <SectionLabel>Ready on your desktop</SectionLabel>
-                {ready.map((agent) => (
-                  <Pressable
-                    key={agent.id}
-                    onPress={() => void onCreate(agent.id)}
-                    className="min-h-11 flex-row items-center gap-2.5 rounded-control px-2.5 active:bg-hover-2"
-                  >
-                    <Dot tone="green" />
-                    <Text className="min-w-0 flex-1 text-[13px] text-ink" numberOfLines={1}>
-                      {agent.name}
-                    </Text>
-                    <ChevronRight size={16} color="#7e7e86" />
-                  </Pressable>
-                ))}
-              </>
-            )}
-          </ScrollView>
+          <View className="flex-row flex-wrap gap-1.5">
+            {agents.map((agent) => (
+              <Pressable
+                key={agent.id}
+                onPress={() => onPick(agent.id)}
+                className="min-h-11 flex-row items-center gap-2 rounded-xl border border-line bg-surface px-3 active:bg-hover"
+              >
+                <Zap size={14} color="#db6d28" />
+                <Text className="text-[12.5px] text-ink">{agent.name}</Text>
+              </Pressable>
+            ))}
+            {agents.length === 0 ? (
+              <Text className="text-[12px] text-ink-3">No agent is ready on the desktop yet.</Text>
+            ) : null}
+          </View>
+          <Text className="mt-2 text-[11px] leading-4 text-ink-3">
+            Opens the new-task flow with that agent preselected, so the workspace, model and
+            permissions are still yours to set.
+          </Text>
         </View>
-      </View>
-    </Modal>
+      </GlassSurface>
+    </View>
   )
 }

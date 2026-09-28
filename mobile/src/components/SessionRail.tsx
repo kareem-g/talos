@@ -25,7 +25,7 @@ import type { Session } from '@/types/session'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import { deriveSubagents, hasRecentError, latestPlanInfo, latestUserPrompt } from '@app/lib/sessionView'
-import { Button, Mono, StatusPill } from '@app/components/ui'
+import { Button, GlassSurface, Mono, StatusPill } from '@app/components/ui'
 
 export type RailTab =
   | 'plan'
@@ -77,7 +77,8 @@ export function SessionRail({
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
       <View className="flex-1 bg-canvas">
-        <View className="flex-row items-center gap-2 border-b border-line bg-inset px-2 pt-12 pb-1.5">
+        <GlassSurface radius={0} className="border-b border-line">
+        <View className="flex-row items-center gap-2 px-2 pt-12 pb-1.5">
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-0.5">
             {TABS.map((entry) => {
               const active = entry.id === tab
@@ -99,6 +100,7 @@ export function SessionRail({
             <X size={16} color="#b0b0b6" />
           </Pressable>
         </View>
+        </GlassSurface>
 
         <ScrollView contentContainerClassName="p-4 pb-10">
           {tab === 'plan' ? <PlanTab conversation={conversation} /> : null}

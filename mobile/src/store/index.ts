@@ -120,7 +120,10 @@ interface StoreState {
     prompt?: string
     name?: string
     model?: string
+    thought?: string
   }) => Promise<Session | undefined>
+  /** Change a live session dimension (model, permission mode, thought, …). */
+  setConfig: (sessionId: string, configId: string, value: string) => void
   sendPrompt: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   queueMessage: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   removeQueued: (sessionId: string, id: string) => void
@@ -324,6 +327,10 @@ export const useStore = create<StoreState>((set, get) => ({
 
   respondToApproval(sessionId, requestId, decision, meta) {
     socket.respondToApproval(sessionId, requestId, decision, meta)
+  },
+
+  setConfig(sessionId, configId, value) {
+    socket.setConfig(sessionId, configId, value)
   },
 
   answerQuestion(questionId, selectedOptions, customText) {

@@ -245,7 +245,18 @@ export const attachmentsApi = {
       try {
         parsed = JSON.parse(body)
       } catch {
-        throw new ApiError('Malformed upload response', response.status, 'malformed_response')
+        // The daemon serves the dashboard SPA for any path it does not know, so
+        // an HTML body here means this route does not exist on that build — an
+        // older daemon, not a broken upload. Saying "malformed" sent people
+        // looking in the wrong place.
+        const looksLikeHtml = /^\s*</.test(body)
+        throw new ApiError(
+          looksLikeHtml
+            ? 'The daemon does not have the attachments route — it is running an older build. Rebuild and restart it.'
+            : 'Malformed upload response',
+          response.status,
+          looksLikeHtml ? 'route_missing' : 'malformed_response',
+        )
       }
     }
     if (parsed?.error) throw new ApiError(parsed.error, response.status)

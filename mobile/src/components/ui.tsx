@@ -34,6 +34,10 @@ import {
   type ViewProps,
 } from 'react-native'
 import { cn } from '@/lib/format'
+import { GlassSurface } from './Glass'
+
+// Re-exported so screens have one import site for the primitive set.
+export { GlassSurface, GlassGroup, GLASS } from './Glass'
 
 export type Tone = 'green' | 'orange' | 'red' | 'dim' | 'accent'
 
@@ -413,20 +417,22 @@ export function ScreenHeader({
   right?: React.ReactNode
 }) {
   return (
-    <View className="flex-row items-center gap-3 border-b border-line bg-canvas px-4 pb-3 pt-6">
-      {left}
-      <View className="flex-1">
-        <Text className="text-[17px] font-semibold text-ink" numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Mono className="mt-0.5 text-[11.5px]" numberOfLines={1}>
-            {subtitle}
-          </Mono>
-        ) : null}
+    <GlassSurface radius={0} className="border-b border-line">
+      <View className="flex-row items-center gap-3 px-4 py-3">
+        {left}
+        <View className="flex-1">
+          <Text className="text-[17px] font-semibold text-ink" numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Mono className="mt-0.5 text-[11.5px]" numberOfLines={1}>
+              {subtitle}
+            </Mono>
+          ) : null}
+        </View>
+        {right}
       </View>
-      {right}
-    </View>
+    </GlassSurface>
   )
 }
 
@@ -443,7 +449,8 @@ export function PageHeader({
   right?: React.ReactNode
 }) {
   return (
-    <View className="h-14 flex-row items-center gap-3 border-b border-line bg-canvas px-3">
+    <GlassSurface radius={0} className="border-b border-line">
+      <View className="h-14 flex-row items-center gap-3 px-3">
       {onMenu ? (
         <IconButton label="Menu" onPress={onMenu}>
           <MenuIcon />
@@ -458,7 +465,8 @@ export function PageHeader({
         <View className="flex-1" />
       )}
       {right}
-    </View>
+      </View>
+    </GlassSurface>
   )
 }
 

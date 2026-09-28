@@ -56,10 +56,30 @@ jobs:
 
   build-ios:
     name: Build iOS IPA (unsigned)
-    runs-on: macos-15
+    # macos-26 because @callstack/liquid-glass compiles against the iOS 26 SDK;
+    # Xcode 16 on the older images cannot build it.
+    runs-on: macos-26
     steps:
       - name: Check out
         uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          set -euo pipefail
+          # Pin the toolchain instead of trusting the image default: the glass
+          # material needs the iOS 26 SDK, and a stale default fails deep inside
+          # pod install with a message that does not say why.
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          if ! xcodebuild -version | head -1 | grep -qE 'Xcode (2[6-9]|[3-9][0-9])'; then
+            echo "::error::Xcode 26 or newer is required for @callstack/liquid-glass"
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
