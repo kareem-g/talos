@@ -1,0 +1,108 @@
+name: Mobile (React Native)
+
+# Builds the React Native mobile client. The JS verification job runs on Ubuntu
+# (fast feedback on every change); the iOS job runs on a macOS runner because an
+# IPA cannot be produced on Linux. The Xcode project is generated on the runner
+# by `expo prebuild` — no native iOS source is committed.
+#
+# The IPA is unsigned (CODE_SIGNING_ALLOWED=NO): re-sign it with Sideloadly or
+# AltStore to install. Signing/TestFlight would need an Apple Developer account
+# and the APPLE_* secrets; local notifications need none of that, which is the
+# point of this client.
+on:
+  push:
+    branches: [main, "ios-*"]
+    paths:
+      - "mobile/**"
+      - "dashboard/src/**" # the app imports the shared core from the dashboard
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "dashboard/src/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci || npm install
+      - name: Typecheck
+        working-directory: mobile
+        run: npx tsc --noEmit
+      - name: Unit tests
+        working-directory: mobile
+        run: npx jest --ci
+
+  build-ios:
+    name: Build iOS IPA (unsigned)
+    runs-on: macos-15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci || npm install
+
+      - name: Generate the native iOS project
+        working-directory: mobile
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods
+        working-directory: mobile/ios
+        run: pod install --repo-update
+
+      - name: Archive and package an unsigned IPA
+        working-directory: mobile/ios
+        run: |
+          set -euo pipefail
+          # Derive the workspace and scheme from what prebuild generated rather
+          # than hard-coding a name that could drift with the app config.
+          WORKSPACE="$(ls -d *.xcworkspace | head -1)"
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Archiving $WORKSPACE (scheme: $SCHEME)"
+
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath ../build/AgentDeck.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -quiet
+
+          mkdir -p ../build/Payload
+          cp -R ../build/AgentDeck.xcarchive/Products/Applications/*.app ../build/Payload/AgentDeck.app
+          cd ../build && zip -qry AgentDeck-rn-unsigned.ipa Payload
+
+          echo "## React Native iOS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unsigned IPA: AgentDeck-rn-unsigned.ipa (re-sign with Sideloadly/AltStore)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDeck-rn-ios-ipa
+          path: mobile/build/AgentDeck-rn-unsigned.ipa
+          retention-days: 14
