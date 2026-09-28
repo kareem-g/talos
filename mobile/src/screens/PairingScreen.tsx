@@ -18,7 +18,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { pairingApi, ApiError } from '@app/lib/api'
-import { parsePairingLink } from '@app/lib/native'
+import { parsePairingLink, setDeviceBaseUrl } from '@app/lib/native'
 import { deviceKey, deviceName, savePairing } from '@app/lib/pairing'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
@@ -43,6 +43,11 @@ export function PairingScreen() {
     }
     setBusy(true)
     try {
+      // Set the daemon origin from the QR BEFORE verifying. React Native has no
+      // page origin to resolve a relative URL against, so without this the
+      // verify request goes to a bare "/api/pair/verify" and never reaches the
+      // daemon. `savePairing` below re-persists it (plus the token) on success.
+      setDeviceBaseUrl(parsed.baseUrl)
       const result = await pairingApi.verify({
         offerId: parsed.offerId,
         secret: parsed.secret,
