@@ -26,6 +26,10 @@ data/
 *.db
 *.db-shm
 *.db-wal
+# Room memory the daemon writes as rooms run.
+.agentdeck/rooms/
+# Bundled skills the daemon materialises beside its working directory.
+backend/.agentdeck/
 
 # Secrets
 .env

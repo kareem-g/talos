@@ -28,14 +28,22 @@ pub struct TabInfo {
 
 /// A running headless Chromium instance.
 ///
-/// Dropping the engine kills the child process and cleans up the user-data-dir.
+/// Dropping the engine kills the child process and cleans up the user-data-dir
+/// — unless a persistent profile was requested (see [`launch`]), in which case
+/// the directory is kept so logins and storage survive restarts.
 pub struct BrowserEngine {
     child: Option<tokio::process::Child>,
     pub port: u16,
     pub user_data_dir: PathBuf,
-    /// The browser-level WebSocket debugger URL (for `Target` domain, not used
-    /// heavily — tabs get their own per-page CDP clients).
-    pub ws_url: Option<String>,
+    /// CSS viewport the browser was launched with (default 1280x900). The
+    /// dashboard mirror and the AI-cursor overlay map coordinates against
+    /// this, so it is reported via `/state` and `browser_screenshot`.
+    pub viewport: (u32, u32),
+    /// When true, [`Drop`] kills Chromium but keeps the user-data-dir.
+    pub persistent: bool,
+    /// Extra launch flags actually applied (proxy/UA/headful/profile), echoed
+    /// in `/state` so the dashboard can show what this engine runs with.
+    pub launch_notes: Vec<String>,
 }
 
 impl Drop for BrowserEngine {
@@ -43,9 +51,13 @@ impl Drop for BrowserEngine {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
         }
-        // Clean up user-data-dir on drop. The caller is responsible for
-        // ensuring the directory is a dedicated temp dir.
-        let _ = std::fs::remove_dir_all(&self.user_data_dir);
+        // Persistent profiles survive: cookies, localStorage, and logins stay
+        // for the next session. Ephemeral dirs are removed as before.
+        // The caller is responsible for ensuring an ephemeral directory is a
+        // dedicated temp dir.
+        if !self.persistent {
+            let _ = std::fs::remove_dir_all(&self.user_data_dir);
+        }
     }
 }
 
@@ -87,10 +99,35 @@ impl BrowserEngine {
         None
     }
 
-    /// Launch a headless Chromium instance on a random port.
+    /// Launch a Chromium instance on a random port.
     ///
     /// `user_data_dir` should be a freshly-created temp directory; the engine
-    /// owns it and deletes it on drop.
+    /// owns it and deletes it on drop — unless persistence is requested:
+    ///
+    /// - `AGENTDECK_BROWSER_PROFILE_DIR`: absolute path used as the
+    ///   user-data-dir instead (created if missing, **never deleted**), so
+    ///   cookies, localStorage, and logins survive daemon restarts. Prefer a
+    ///   per-purpose directory; sharing one profile between concurrent
+    ///   sessions trips Chromium's profile lock.
+    /// - `AGENTDECK_BROWSER_PERSIST=1`: keep the session's own
+    ///   `user_data_dir` on exit instead of deleting it (per-session login
+    ///   persistence with zero config).
+    ///
+    /// Stealth / launch tuning (all optional):
+    ///
+    /// - `AGENTDECK_BROWSER_PROXY`: `--proxy-server=` value
+    ///   (e.g. `http://127.0.0.1:8080` or `socks5://host:1080`).
+    /// - `AGENTDECK_BROWSER_USER_AGENT`: override the UA string.
+    /// - `AGENTDECK_BROWSER_WINDOW_SIZE`: e.g. `1366,768` (default
+    ///   `1280,900`). Reported as `viewport` via `/state` so the dashboard
+    ///   cursor overlay keeps mapping correctly.
+    /// - `AGENTDECK_BROWSER_HEADLESS=0`: run headful (needs a display or
+    ///   Xvfb — for watching the real window / extensions that refuse
+    ///   headless).
+    /// - `AGENTDECK_BROWSER_PROFILE_NAME`: `--profile-directory=` (default
+    ///   `Default`); only meaningful with a persistent profile dir.
+    /// - Extra Chromium flags: `AGENTDECK_BROWSER_ARGS` (space-separated,
+    ///   appended verbatim).
     pub async fn launch(user_data_dir: PathBuf) -> Result<Self> {
         let binary = Self::chromium_path().ok_or_else(|| {
             crate::AgentDeckError::Unknown(
@@ -98,10 +135,35 @@ impl BrowserEngine {
             )
         })?;
 
+        let (user_data_dir, persistent) = match std::env::var("AGENTDECK_BROWSER_PROFILE_DIR") {
+            Ok(dir) if !dir.trim().is_empty() => (PathBuf::from(dir.trim()), true),
+            _ if std::env::var("AGENTDECK_BROWSER_PERSIST").as_deref() == Ok("1") => (user_data_dir, true),
+            _ => (user_data_dir, false),
+        };
+        if let Err(e) = std::fs::create_dir_all(&user_data_dir) {
+            return Err(crate::AgentDeckError::Unknown(format!(
+                "Browser profile dir {}: {e}",
+                user_data_dir.display()
+            )));
+        }
+
+        let viewport = parse_window_size(
+            &std::env::var("AGENTDECK_BROWSER_WINDOW_SIZE").unwrap_or_default(),
+        );
+        let mut notes = Vec::new();
+        if persistent {
+            notes.push(format!("persistent profile: {}", user_data_dir.display()));
+        }
+
         let port = pick_free_port().await?;
         let mut cmd = Command::new(&binary);
+        let headful = std::env::var("AGENTDECK_BROWSER_HEADLESS").as_deref() == Ok("0");
+        if !headful {
+            cmd.arg("--headless=new");
+        } else {
+            notes.push("headful (needs a display)".to_string());
+        }
         cmd.args([
-            "--headless=new",
             &format!("--remote-debugging-port={port}"),
             &format!("--user-data-dir={}", user_data_dir.display()),
             "--no-sandbox",
@@ -112,9 +174,35 @@ impl BrowserEngine {
             "--disable-renderer-backgrounding",
             "--mute-audio",
             "--force-device-scale-factor=1",
-            "--window-size=1280,900",
+            &format!("--window-size={},{}", viewport.0, viewport.1),
             "about:blank",
         ]);
+        if let Ok(profile) = std::env::var("AGENTDECK_BROWSER_PROFILE_NAME") {
+            if !profile.trim().is_empty() {
+                cmd.arg(format!("--profile-directory={}", profile.trim()));
+                notes.push(format!("profile: {}", profile.trim()));
+            }
+        }
+        if let Ok(proxy) = std::env::var("AGENTDECK_BROWSER_PROXY") {
+            if !proxy.trim().is_empty() {
+                cmd.arg(format!("--proxy-server={}", proxy.trim()));
+                notes.push("proxy configured".to_string());
+            }
+        }
+        if let Ok(ua) = std::env::var("AGENTDECK_BROWSER_USER_AGENT") {
+            if !ua.trim().is_empty() {
+                cmd.arg(format!("--user-agent={ua}"));
+                notes.push("custom user-agent".to_string());
+            }
+        }
+        if let Ok(extra) = std::env::var("AGENTDECK_BROWSER_ARGS") {
+            for flag in extra.split_whitespace() {
+                cmd.arg(flag);
+            }
+            if !extra.trim().is_empty() {
+                notes.push("extra chromium flags".to_string());
+            }
+        }
         // Swallow stdout/stderr — Chromium is chatty and we don't need it.
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::null());
@@ -125,13 +213,15 @@ impl BrowserEngine {
         })?;
 
         // Wait for the debugging API to be ready (poll /json/version).
-        let ws_url = wait_for_browser(&port, Duration::from_secs(15)).await?;
+        let _ = wait_for_browser(&port, Duration::from_secs(15)).await?;
 
         Ok(Self {
             child: Some(child),
             port,
             user_data_dir,
-            ws_url,
+            viewport,
+            persistent,
+            launch_notes: notes,
         })
     }
 
@@ -223,6 +313,16 @@ async fn pick_free_port() -> Result<u16> {
     Err(crate::AgentDeckError::Unknown(
         "Could not find a free port for Chromium".into(),
     ))
+}
+
+/// Parse `AGENTDECK_BROWSER_WINDOW_SIZE` (`"1366,768"` / `"1366x768"`),
+/// falling back to the 1280x900 default the dashboard mirror assumes.
+fn parse_window_size(raw: &str) -> (u32, u32) {
+    let cleaned = raw.trim().replace('x', ",");
+    let mut parts = cleaned.split(',');
+    let w = parts.next().and_then(|v| v.trim().parse().ok()).unwrap_or(1280);
+    let h = parts.next().and_then(|v| v.trim().parse().ok()).unwrap_or(900);
+    (w.clamp(320, 7680), h.clamp(200, 4320))
 }
 
 /// Minimal percent-encoding for a URL query parameter (just enough for `/json/new`).

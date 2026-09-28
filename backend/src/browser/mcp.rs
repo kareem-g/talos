@@ -279,7 +279,7 @@ impl BrowserMcp {
             // half-loaded. Capture right after so the dashboard mirror shows
             // the loaded site even if the agent never calls browser_screenshot.
             let _ = self.wait_for_load_state(&client, "load", Duration::from_secs(30)).await;
-            let _ = self.capture_screenshot(&tab.id, &client).await;
+            let _ = self.capture_screenshot(&tab.id, &client, false).await;
         }
         *self.active_tab_id.lock().await = Some(tab.id.clone());
         self.tabs.lock().await.insert(tab.id.clone(), (tab.clone(), client));
@@ -326,7 +326,7 @@ impl BrowserMcp {
         // the loaded site immediately — no fixed sleep, no broken image icon.
         let _ = self.wait_for_load_state(&client, "load", Duration::from_secs(30)).await;
         self.invalidate_snapshot(&info.id).await;
-        let _ = self.capture_screenshot(&info.id, &client).await;
+        let _ = self.capture_screenshot(&info.id, &client, false).await;
         *self.active_tab_id.lock().await = Some(info.id.clone());
         self.emit_step_end(&step, "ok", &format!("Navigated to {url}")).await;
         Ok(json!({ "ok": true, "result": result }))
@@ -533,36 +533,325 @@ impl BrowserMcp {
         Ok(json!({ "ok": true }))
     }
 
+    /// Extract the page's readable text (title + URL + body text, capped).
+    /// Read-only: the cheap "what does this page say" read for QA asserts and
+    /// summaries — no snapshot walk, no gomock indices.
+    async fn tool_extract(&self, args: Value) -> Result<Value> {
+        const EXTRACT_JS: &str = r#"(() => {
+          const b = document.body;
+          const t = b ? (b.innerText || '') : '';
+          const MAX = 8000;
+          return {
+            title: document.title, url: location.href,
+            truncated: t.length > MAX,
+            text: t.length > MAX ? t.slice(0, MAX) : t,
+          };
+        })()"#;
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("extract", "page text").await;
+        let value = client.evaluate(EXTRACT_JS).await?;
+        self.emit_step_end(&step, "ok", "Extracted page text").await;
+        Ok(json!({ "ok": true, "extract": value }))
+    }
+
+    /// Find visible text on the page, scroll the first match into view, and
+    /// return the match count plus its center point (for screenshot aiming).
+    async fn tool_find_text(&self, args: Value) -> Result<Value> {
+        const FIND_TEXT_JS: &str = r#"((needle) => {
+          const q = String(needle || '').toLowerCase();
+          if (!q) return { ok: false, error: 'empty text' };
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let count = 0;
+          let first = null;
+          let node;
+          while ((node = walker.nextNode())) {
+            if ((node.nodeValue || '').toLowerCase().includes(q)) {
+              const el = node.parentElement;
+              if (!el) continue;
+              const cs = getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+              count += 1;
+              if (!first) first = el;
+            }
+          }
+          if (!first) return { ok: true, count: 0 };
+          first.scrollIntoView({ block: 'center', inline: 'center' });
+          const r = first.getBoundingClientRect();
+          return {
+            ok: true, count,
+            x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2),
+          };
+        })"#;
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let text = args.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("find", &text).await;
+        let expression = format!("({FIND_TEXT_JS})({})", json!(text));
+        let value = client.evaluate(&expression).await?;
+        let count = value.get("count").and_then(Value::as_u64).unwrap_or(0);
+        self.emit_step_end(&step, "ok", &format!("Found {count} match(es)")).await;
+        Ok(json!({ "ok": true, "text": text, "result": value }))
+    }
+
+    /// Choose an option in a `<select>` by snapshot path. `value` matches the
+    /// option's `value` first, then its visible text. Fires input+change so
+    /// framework listeners react.
+    async fn tool_select_option(&self, args: Value) -> Result<Value> {
+        const SELECT_FN: &str = r#"function(value) {
+          if (!this || (this.tagName || '').toLowerCase() !== 'select') {
+            return { ok: false, error: 'element is not a <select>' };
+          }
+          const opts = [...this.options].map((o) => o.value);
+          const hit = [...this.options].find((o) => o.value === value || (o.text || '').trim() === value);
+          if (!hit) return { ok: false, error: 'no such option', options: opts };
+          this.value = hit.value;
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          return { ok: true, value: this.value };
+        }"#;
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let path = args.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+        let value = args.get("value").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("select", &format!("path: {path}")).await;
+        let Some(object_id) = snapshot::element_object_id(&client, &path).await? else {
+            self.emit_step_end(&step, "failed", "Element not found").await;
+            return Ok(json!({ "ok": false, "error": format!("Element not found or not visible: {path}") }));
+        };
+        let result = client
+            .call(
+                "Runtime.callFunctionOn",
+                json!({
+                    "objectId": object_id,
+                    "functionDeclaration": SELECT_FN,
+                    "arguments": [{ "value": value }],
+                    "returnByValue": true,
+                }),
+            )
+            .await?;
+        if result.get("exceptionDetails").is_some() {
+            self.emit_step_end(&step, "failed", "Select threw").await;
+            return Ok(json!({ "ok": false, "error": "select handler threw (stale element?)" }));
+        }
+        let value_out = result.pointer("/result/value").cloned().unwrap_or(Value::Null);
+        let ok = value_out.get("ok").and_then(Value::as_bool).unwrap_or(false);
+        self.emit_step_end(&step, if ok { "ok" } else { "failed" }, &format!("Selected {value}")).await;
+        self.invalidate_snapshot(&tab_id).await;
+        Ok(json!({ "ok": ok, "result": value_out }))
+    }
+
+    /// Upload a local file into an `<input type=file>` by snapshot path (CDP
+    /// `DOM.setFileInputFiles` — page JS can never do this, so there is no
+    /// evaluate fallback). The path must exist on the daemon host; uploads to
+    /// a website need explicit user approval (see the skill doc).
+    async fn tool_upload_file(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let path = args.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+        let file = args.get("file").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("upload", &file).await;
+        if path.starts_with("coord:") {
+            self.emit_step_end(&step, "failed", "Snapshot path required").await;
+            return Ok(json!({ "ok": false, "error": "upload needs a snapshot path (from get_by_*), not coord:x:y — DOM file inputs can't be addressed by coordinates" }));
+        }
+        let abs = std::fs::canonicalize(&file).map_err(|_| {
+            crate::AgentDeckError::Unknown(format!("Upload file not found: {file}"))
+        })?;
+        if !abs.is_file() {
+            self.emit_step_end(&step, "failed", "Not a file").await;
+            return Ok(json!({ "ok": false, "error": format!("Not a file: {}", abs.display()) }));
+        }
+        if abs.metadata().map(|m| m.len()).unwrap_or(0) > 200 * 1024 * 1024 {
+            self.emit_step_end(&step, "failed", "File too large").await;
+            return Ok(json!({ "ok": false, "error": "File larger than 200MB — refused" }));
+        }
+        let Some(object_id) = snapshot::element_object_id(&client, &path).await? else {
+            self.emit_step_end(&step, "failed", "Element not found").await;
+            return Ok(json!({ "ok": false, "error": format!("Element not found or not visible: {path}") }));
+        };
+        let check = client
+            .call(
+                "Runtime.callFunctionOn",
+                json!({
+                    "objectId": object_id,
+                    "functionDeclaration": "function() { return { tag: (this.tagName||'').toLowerCase(), type: (this.type||'').toLowerCase() }; }",
+                    "returnByValue": true,
+                }),
+            )
+            .await?;
+        let checked = check.pointer("/result/value").cloned().unwrap_or_default();
+        let (tag, ftype) = (
+            checked.get("tag").and_then(Value::as_str).unwrap_or(""),
+            checked.get("type").and_then(Value::as_str).unwrap_or(""),
+        );
+        if tag != "input" || ftype != "file" {
+            self.emit_step_end(&step, "failed", "Not a file input").await;
+            return Ok(json!({ "ok": false, "error": format!("Element is <{tag} type={ftype}>, not <input type=file>") }));
+        }
+        let _ = client.call("DOM.enable", json!({})).await;
+        // Resolve the element to a CDP nodeId through a unique CSS selector
+        // (getDocument + querySelector). This is the well-trodden path:
+        // objectId→node mapping (describeNode/requestNode) returns nodeId 0
+        // for these elements in headless Chromium.
+        const SELECTOR_FN: &str = r#"function() {
+          const el = this;
+          if (!el || el.nodeType !== 1) return null;
+          if (el.id) return '#' + CSS.escape(el.id);
+          const parts = [];
+          let cur = el;
+          while (cur && cur !== document.body && parts.length < 10) {
+            const tag = (cur.tagName || '').toLowerCase();
+            const parent = cur.parentNode;
+            if (!parent || !parent.children) break;
+            const sibs = [...parent.children].filter((c) => c.tagName === cur.tagName);
+            parts.unshift(tag + ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')');
+            cur = parent;
+          }
+          parts.unshift('body');
+          return parts.join(' > ');
+        }"#;
+        let sel_result = client
+            .call(
+                "Runtime.callFunctionOn",
+                json!({
+                    "objectId": object_id,
+                    "functionDeclaration": SELECTOR_FN,
+                    "returnByValue": true,
+                }),
+            )
+            .await?;
+        let selector = sel_result
+            .pointer("/result/value")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if selector.is_empty() {
+            self.emit_step_end(&step, "failed", "No selector").await;
+            return Ok(json!({ "ok": false, "error": "Could not build a selector for the element" }));
+        }
+        let doc = client.call("DOM.getDocument", json!({})).await?;
+        let root_id = doc.pointer("/root/nodeId").and_then(Value::as_u64).unwrap_or(0);
+        let found = client
+            .call("DOM.querySelector", json!({ "nodeId": root_id, "selector": selector }))
+            .await?;
+        let node_id = found.get("nodeId").and_then(Value::as_u64).unwrap_or(0);
+        if node_id == 0 {
+            self.emit_step_end(&step, "failed", "Selector missed").await;
+            return Ok(json!({ "ok": false, "error": format!("Selector resolved nothing: {selector}") }));
+        }
+        client
+            .call(
+                "DOM.setFileInputFiles",
+                json!({ "nodeId": node_id, "files": [abs.to_string_lossy().to_string()] }),
+            )
+            .await?;
+        // Best-effort change event for framework listeners (some apps need a
+        // real user gesture chain beyond this — the agent should snapshot and
+        // verify the file actually registered).
+        let _ = client
+            .call(
+                "Runtime.callFunctionOn",
+                json!({
+                    "objectId": object_id,
+                    "functionDeclaration": "function() { this.dispatchEvent(new Event('input', { bubbles: true })); this.dispatchEvent(new Event('change', { bubbles: true })); return true; }",
+                    "returnByValue": true,
+                }),
+            )
+            .await;
+        self.emit_step_end(&step, "ok", &format!("Uploaded {}", abs.display())).await;
+        self.invalidate_snapshot(&tab_id).await;
+        Ok(json!({ "ok": true, "file": abs.to_string_lossy().to_string() }))
+    }
+
+    /// Coordinate click (computer-use escape hatch the skill doc already
+    /// promises): press+release at x,y, move the visible cursor there, and
+    /// emit the click event the dashboard overlay animates.
+    async fn tool_cua_click(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let x = args.get("x").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let y = args.get("y").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let button = args.get("button").and_then(Value::as_str).unwrap_or("left").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("click", &format!("coord:{x}:{y}")).await;
+        self.set_cursor(x, y, true, &button).await;
+        self.dispatch_click(&client, x, y, &button, false).await?;
+        let _ = self.emit("browser_cursor_clicked", json!({ "x": x, "y": y, "button": button })).await;
+        self.emit_step_end(&step, "ok", &format!("Clicked ({x},{y})")).await;
+        Ok(json!({ "ok": true, "x": x, "y": y }))
+    }
+
+    /// Coordinate keypress (skill-doc escape hatch): special keys / chords at
+    /// the current focus — the same dispatcher `browser_press` uses, without
+    /// needing a locator.
+    async fn tool_cua_keypress(&self, args: Value) -> Result<Value> {
+        let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let keys = args.get("keys").and_then(Value::as_str).unwrap_or("").to_string();
+        let (_info, client) = if tab_id.is_empty() {
+            self.active_tab().await?
+        } else {
+            self.ensure_tab(&tab_id).await?
+        };
+        let step = self.emit_step_start("keypress", &keys).await;
+        dispatch_keys(&client, &keys).await?;
+        self.emit_step_end(&step, "ok", &format!("Pressed {keys}")).await;
+        Ok(json!({ "ok": true }))
+    }
+
     async fn tool_screenshot(&self, args: Value) -> Result<Value> {
         let tab_id = args.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+        let full_page = args.get("full_page").and_then(Value::as_bool).unwrap_or(false);
         let (info, client) = if tab_id.is_empty() {
             self.active_tab().await?
         } else {
             self.ensure_tab(&tab_id).await?
         };
-        let step = self.emit_step_start("screenshot", "page").await;
-        let Some((path, base64_data)) = self.capture_screenshot(&info.id, &client).await else {
+        let step = self.emit_step_start("screenshot", if full_page { "full page" } else { "page" }).await;
+        let Some((path, base64_data)) = self.capture_screenshot(&info.id, &client, full_page).await else {
             self.emit_step_end(&step, "failed", "Screenshot returned no data").await;
             return Ok(json!({ "ok": false, "error": "Screenshot returned no data" }));
         };
         self.emit_step_end(&step, "ok", "Captured screenshot").await;
+        let (vw, vh) = self.engine.lock().await.as_ref().map(|e| e.viewport).unwrap_or((1280, 900));
         Ok(json!({
             "ok": true,
             "tab": tab_id,
             "path": path.to_string_lossy().to_string(),
             "data": base64_data,
-            "width": 1280,
-            "height": 900,
+            "width": vw,
+            "height": vh,
+            "full_page": full_page,
         }))
     }
 
     /// Capture the current page state of `client` into `{tab_id}.png` — the
     /// file the dashboard mirror serves — and return the file plus the raw
     /// PNG as base64 for the tool result. Best-effort: the mirror must never
-    /// block an agent step because a capture failed.
-    async fn capture_screenshot(&self, tab_id: &str, client: &CdpClient) -> Option<(std::path::PathBuf, String)> {
+    /// block an agent step because a capture failed. `full_page` captures
+    /// beyond the viewport (taller image; the mirror letterboxes it).
+    async fn capture_screenshot(&self, tab_id: &str, client: &CdpClient, full_page: bool) -> Option<(std::path::PathBuf, String)> {
         let result = client
-            .call("Page.captureScreenshot", json!({ "format": "png", "fromSurface": true }))
+            .call("Page.captureScreenshot", json!({ "format": "png", "fromSurface": true, "captureBeyondViewport": full_page }))
             .await
             .ok()?;
         let base64_data = result.get("data").and_then(Value::as_str).unwrap_or("").to_string();
@@ -845,7 +1134,12 @@ impl BrowserMcp {
 
     /// Current state for the dashboard: tabs, cursor, latest screenshot path.
     async fn http_state(&self) -> Value {
-        let engine_port = self.engine.lock().await.as_ref().map(|e| e.port).unwrap_or(0);
+        let engine = self.engine.lock().await.clone();
+        let engine_port = engine.as_ref().map(|e| e.port).unwrap_or(0);
+        let (vw, vh) = engine.as_ref().map(|e| e.viewport).unwrap_or((1280, 900));
+        let persistent = engine.as_ref().map(|e| e.persistent).unwrap_or(false);
+        let launch_notes = engine.as_ref().map(|e| e.launch_notes.clone()).unwrap_or_default();
+        drop(engine);
         let tabs = self.tabs.lock().await;
         let list: Vec<Value> = tabs
             .values()
@@ -858,6 +1152,9 @@ impl BrowserMcp {
             "tabs": list,
             "cursor": cursor,
             "session_id": self.session_id,
+            "viewport": { "width": vw, "height": vh },
+            "persistent": persistent,
+            "launch_notes": launch_notes,
         })
     }
 
@@ -1072,10 +1369,79 @@ fn browser_tools() -> Vec<(&'static str, &'static str, Value)> {
     ),
     (
         "browser_screenshot",
-        "Capture a screenshot of the tab. Returns PNG bytes (shown in the Automation screen).",
+        "Capture a screenshot of the tab. Returns PNG bytes (shown in the Automation screen). full_page captures beyond the viewport.",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "full_page": { "type": "boolean", "description": "Capture the full scrollable page, not just the viewport" },
+            },
+        }),
+    ),
+    (
+        "browser_extract",
+        "Extract the page's readable text (title, URL, body text capped at ~8000 chars). Read-only; the cheap 'what does this page say' read.",
         json!({
             "type": "object",
             "properties": { "tab": { "type": "string" } },
+        }),
+    ),
+    (
+        "browser_find_text",
+        "Find visible text on the page: returns the match count and scrolls the first match into view (with its center coordinates).",
+        json!({
+            "type": "object",
+            "properties": { "tab": { "type": "string" }, "text": { "type": "string" } },
+            "required": ["text"],
+        }),
+    ),
+    (
+        "browser_upload_file",
+        "Upload a local file into an <input type=file> by snapshot path. The file must exist on the daemon host; uploading to a website needs explicit user approval.",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "path": { "type": "string" },
+                "file": { "type": "string", "description": "Absolute local path to upload" },
+            },
+            "required": ["path", "file"],
+        }),
+    ),
+    (
+        "browser_select_option",
+        "Choose an option in a <select> by snapshot path. value matches the option value first, then its visible text; reports the available options on mismatch.",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "path": { "type": "string" },
+                "value": { "type": "string" },
+            },
+            "required": ["path", "value"],
+        }),
+    ),
+    (
+        "browser_cua_click",
+        "Click at page coordinates (computer-use escape hatch for canvas/widgets the snapshot can't see). Moves the visible cursor there too.",
+        json!({
+            "type": "object",
+            "properties": {
+                "tab": { "type": "string" },
+                "x": { "type": "integer" },
+                "y": { "type": "integer" },
+                "button": { "type": "string", "description": "left (default), right, or middle" },
+            },
+            "required": ["x", "y"],
+        }),
+    ),
+    (
+        "browser_cua_keypress",
+        "Press special keys (Enter, Tab, Escape, Meta+a, …) at the current focus, without needing a locator.",
+        json!({
+            "type": "object",
+            "properties": { "tab": { "type": "string" }, "keys": { "type": "string" } },
+            "required": ["keys"],
         }),
     ),
     (
@@ -1336,6 +1702,12 @@ async fn call_tool(mcp: &Arc<BrowserMcp>, name: &str, args: Value) -> Result<Val
         "browser_press" => mcp.tool_press(args).await,
         "browser_check" => mcp.tool_check(args).await,
         "browser_screenshot" => mcp.tool_screenshot(args).await,
+        "browser_extract" => mcp.tool_extract(args).await,
+        "browser_find_text" => mcp.tool_find_text(args).await,
+        "browser_upload_file" => mcp.tool_upload_file(args).await,
+        "browser_select_option" => mcp.tool_select_option(args).await,
+        "browser_cua_click" => mcp.tool_cua_click(args).await,
+        "browser_cua_keypress" => mcp.tool_cua_keypress(args).await,
         "browser_wait_for" => mcp.tool_wait_for(args).await,
         "browser_wait_for_url" => mcp.tool_wait_for_url(args).await,
         "browser_wait_for_load_state" => mcp.tool_wait_for_load_state(args).await,

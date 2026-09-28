@@ -252,6 +252,60 @@ pub async fn resolve_path(client: &CdpClient, path: &str) -> Result<Option<(i32,
     }
 }
 
+/// Find the live DOM element for a snapshot `path` (same re-walk as
+/// [`resolve_path`); returns the element itself, or null when gone.
+const ELEMENT_BY_PATH_JS: &str = r#"
+((pathStr) => {
+  const parts = String(pathStr).split('.').map(Number);
+  function isVisible(el) {
+    if (el.nodeType !== 1) return true;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function find(node, depth, target) {
+    if (node.nodeType !== 1) return null;
+    if (!isVisible(node)) return null;
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'template') return null;
+    if (depth === target.length - 1) return node;
+    let idx = 0;
+    for (const child of node.childNodes) {
+      if (child.nodeType !== 1) continue;
+      idx += 1;
+      if (idx === target[depth + 1]) {
+        const r = find(child, depth + 1, target);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  return find(document.body, 0, parts);
+})
+"#;
+
+/// Resolve a snapshot `path` to a CDP remote `objectId` for the live element,
+/// so tools can call DOM-domain methods on it (`DOM.describeNode` →
+/// `DOM.setFileInputFiles` for uploads). Returns `None` when the path no
+/// longer resolves (stale snapshot, hidden element).
+pub async fn element_object_id(client: &CdpClient, path: &str) -> Result<Option<String>> {
+    let expression = format!("({ELEMENT_BY_PATH_JS})({})", json!(path));
+    let result = client
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": expression, "returnByValue": false }),
+        )
+        .await?;
+    if result.get("exceptionDetails").is_some() {
+        return Ok(None);
+    }
+    Ok(result
+        .pointer("/result/objectId")
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
 /// Serialize a list of snapshot nodes into a plain JSON array (for locator
 /// searches). Filtering by role/name happens in Rust against this list.
 pub fn nodes_array(snapshot: &Value) -> Vec<Value> {

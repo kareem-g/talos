@@ -755,7 +755,13 @@ export const browserApi = {
     }),
 
   state: (sessionId: string) =>
-    request<{ ok: boolean; tabs?: Array<{ id: string; url: string; title: string }> }>(
+    request<{
+      ok: boolean
+      tabs?: Array<{ id: string; url: string; title: string }>
+      viewport?: { width: number; height: number }
+      persistent?: boolean
+      launch_notes?: string[]
+    }>(
       `/api/browser/${encodeURIComponent(sessionId)}/state`,
     ),
 

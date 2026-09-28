@@ -331,9 +331,15 @@ export function BrowserView({
   const [browserError, setBrowserError] = useState<string | null>(null)
   const [screenshotFailed, setScreenshotFailed] = useState(false)
   const [mirrorNavPending, setMirrorNavPending] = useState(false)
-  const screenshotRef = useRef(0)
+  const [mirrorTick, setMirrorTick] = useState(0)
+  // Engine viewport (CSS px the CDP page renders at) + profile mode, reported
+  // by /state. Coordinate mapping must use these, not hardcoded 1280x900.
+  const [viewport, setViewport] = useState({ width: 1280, height: 900 })
+  const [profileSaved, setProfileSaved] = useState(false)
   // Fire `onEngineActive` once per engine start, not on every 2s poll.
   const engineNotifiedRef = useRef(false)
+  // Throttle mirror wheel-scroll driving (one CDP wheel event per 180ms max).
+  const lastWheelRef = useRef(0)
 
   const sessionId = session?.id
   // Live AI-cursor position from WS `browser_cursor_*` events.
@@ -354,10 +360,10 @@ export function BrowserView({
     const rect = img.getBoundingClientRect()
     const host = box.getBoundingClientRect()
     setCursorOverlay({
-      left: rect.left - host.left + (aiCursor.x / 1280) * rect.width,
-      top: rect.top - host.top + (aiCursor.y / 900) * rect.height,
+      left: rect.left - host.left + (aiCursor.x / viewport.width) * rect.width,
+      top: rect.top - host.top + (aiCursor.y / viewport.height) * rect.height,
     })
-  }, [aiCursor, browserRunning, activeTab])
+  }, [aiCursor, browserRunning, activeTab, viewport])
 
   // Poll browser state: auto-detects the agent's running browser (daemon- or
   // agent-spawned — the daemon proxies both) and keeps tabs fresh. Mirror mode
@@ -372,6 +378,10 @@ export function BrowserView({
         if (stopped) return
         if (data.ok && data.tabs) {
           setBrowserTabs(data.tabs)
+          if (data.viewport?.width && data.viewport?.height) {
+            setViewport({ width: data.viewport.width, height: data.viewport.height })
+          }
+          setProfileSaved(data.persistent === true)
           if (data.tabs.length > 0) {
             setBrowserRunning(true)
             // Auto-open the Browser tab the first time the agent's CDP engine
@@ -420,13 +430,17 @@ export function BrowserView({
     return ''
   }, [revision, sessionId])
 
+  // The live mirror refreshes as real state: every `browser_step` (navigate /
+  // click / type / … — agent OR your own takeover clicks below) bumps the
+  // tick, so the <img> URL actually changes and the frame reloads. Between
+  // steps a interval keeps it live: fast while the agent is acting, slow at
+  // idle (pages still animate without steps). This is state-driven — unlike
+  // the old ref-only bump, which never re-rendered and left idle frames stale.
   useEffect(() => {
     if (!browserRunning) return
-    // Refresh on real activity…
-    if (lastBrowserStep) screenshotRef.current += 1
-    // …and as a slow fallback so a page that changes without agent steps
-    // (animations, timers, streams) still stays live.
-    const interval = setInterval(() => { screenshotRef.current += 1 }, 8000)
+    if (lastBrowserStep) setMirrorTick((t) => t + 1)
+    const actingNow = lastBrowserStep.length > 0 && lastBrowserStep.endsWith(':running')
+    const interval = setInterval(() => setMirrorTick((t) => t + 1), actingNow ? 2500 : 8000)
     return () => clearInterval(interval)
   }, [browserRunning, lastBrowserStep])
 
@@ -581,7 +595,82 @@ export function BrowserView({
     setMirrorNavPending(false)
   }
 
-  // CDP mirror mode
+  /* ── User takeover: drive the SAME engine the agent automates ──────────
+   * Clicks / scrolls / typing go through the identical browser_* tools, so
+   * they land in the timeline like agent steps and visibly move the AI
+   * cursor. The agent is told (skill doc) to re-snapshot after you
+   * interfere — glance at the chat to see it notice. */
+  const [takeoverText, setTakeoverText] = useState('')
+
+  function mirrorPageCoords(e: React.MouseEvent): { x: number; y: number } | null {
+    const img = browserImgRef.current
+    if (!img) return null
+    const rect = img.getBoundingClientRect()
+    if (rect.width < 1 || rect.height < 1) return null
+    return {
+      x: Math.round(((e.clientX - rect.left) / rect.width) * viewport.width),
+      y: Math.round(((e.clientY - rect.top) / rect.height) * viewport.height),
+    }
+  }
+
+  async function mirrorClick(e: React.MouseEvent) {
+    if (!sessionId || !activeTab) return
+    const pt = mirrorPageCoords(e)
+    if (!pt) return
+    try {
+      const { browserApi } = await import('@/lib/api')
+      await browserApi.tool(sessionId, 'browser_cua_click', { tab: activeTab, x: pt.x, y: pt.y })
+      // The click lands as a timeline step; refresh the frame right after it.
+      setTimeout(() => setMirrorTick((t) => t + 1), 600)
+    } catch {
+      /* transient — the next state poll will reconcile */
+    }
+  }
+
+  // Wheel over the mirror scrolls the automated page (native non-passive
+  // listener: React onWheel can't preventDefault the pane scroll).
+  useEffect(() => {
+    const box = browserBoxRef.current
+    if (!box || !browserRunning || !activeTab || !sessionId) return
+    const vw = viewport.width
+    const vh = viewport.height
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const now = Date.now()
+      if (now - lastWheelRef.current < 180) return
+      lastWheelRef.current = now
+      import('@/lib/api').then(({ browserApi }) =>
+        browserApi
+          .tool(sessionId, 'browser_cua_scroll', {
+            tab: activeTab,
+            x: Math.round(vw / 2),
+            y: Math.round(vh / 2),
+            scrollX: 0,
+            scrollY: Math.round(e.deltaY),
+          })
+          .catch(() => {}),
+      )
+    }
+    box.addEventListener('wheel', onWheel, { passive: false })
+    return () => box.removeEventListener('wheel', onWheel)
+  }, [browserRunning, activeTab, viewport, sessionId])
+
+  async function mirrorType() {
+    const text = takeoverText
+    if (!text || !sessionId) return
+    setTakeoverText('')
+    try {
+      const { browserApi } = await import('@/lib/api')
+      // Types at the current focus — click a field in the mirror first.
+      await browserApi.tool(sessionId, 'browser_cursor_type', { tab: activeTab ?? undefined, text })
+    } catch {
+      /* transient */
+    }
+  }
+
+  // CDP mirror mode — live AND drivable: click the page to take over, scroll
+  // with the wheel, type via the toolbar box. Everything drives the same
+  // engine the agent automates and lands in the timeline as browser steps.
   if (browserRunning && activeTab) {
     const screenshotUrl = `/api/browser/${encodeURIComponent(sessionId ?? '')}/screenshot/${encodeURIComponent(activeTab)}`
     return (
@@ -591,7 +680,17 @@ export function BrowserView({
           right={
             <span className="flex items-center gap-1.5">
               <span className="font-mono text-[10px] text-green">CDP</span>
-              {acting ? <span className="font-mono text-[9px] text-accent">acting…</span> : null}
+              {acting ? (
+                <span className="flex items-center gap-1 font-mono text-[9px] text-accent" title="The agent is driving the browser right now — you can still click in">
+                  <span className="size-1.5 animate-pulse rounded-full bg-accent" aria-hidden /> LIVE
+                </span>
+              ) : (
+                <span className="font-mono text-[9px] text-ink-3" title="Mirror is live; click the page anytime to take over">mirror</span>
+              )}
+              {profileSaved ? (
+                <span className="font-mono text-[9px] text-ink-3" title="Persistent profile — cookies and logins survive restarts">saved</span>
+              ) : null}
+              <span className="font-mono text-[9px] text-ink-3" title="Page viewport in CSS px">{viewport.width}×{viewport.height}</span>
               {aiCursor ? <span className="font-mono text-[9px] text-ink-3">AI cursor {aiCursor.x},{aiCursor.y}</span> : null}
               {activeTabInfo ? <span className="max-w-[140px] truncate font-mono text-[9.5px] text-ink-3">{activeTabInfo.title}</span> : null}
               {browserTabs.length > 1 ? browserTabs.map((t) => (
@@ -622,15 +721,30 @@ export function BrowserView({
           >
             <RefreshCw size={12} />
           </button>
+          <input
+            value={takeoverText}
+            onChange={(e) => setTakeoverText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void mirrorType() }}
+            placeholder="Type… (click a field first)"
+            aria-label="Type into the automated page"
+            title="Click a field in the page first to focus it, then type here"
+            className="h-6 w-28 rounded-md border border-line/50 bg-field px-2 font-mono text-[10.5px] text-ink outline-none placeholder:text-ink-3"
+          />
         </div>
-        <div ref={browserBoxRef} className="relative min-h-0 flex-1 bg-white">
+        <div
+          ref={browserBoxRef}
+          onClick={(e) => void mirrorClick(e)}
+          title="Live automated page — click to take over, scroll with the wheel. Your actions land in the timeline."
+          className="relative min-h-0 flex-1 cursor-crosshair bg-white"
+        >
           <img
             ref={browserImgRef}
-            src={`${screenshotUrl}?t=${screenshotRef.current}`}
+            src={`${screenshotUrl}?t=${mirrorTick}`}
             alt="Browser page"
             className={cn('size-full object-contain', screenshotFailed && 'hidden')}
             onLoad={() => setScreenshotFailed(false)}
             onError={() => setScreenshotFailed(true)}
+            draggable={false}
           />
           {screenshotFailed ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-canvas">
@@ -671,7 +785,7 @@ export function BrowserView({
           <span className="flex size-11 items-center justify-center rounded-2xl border border-line/50 bg-surface text-ink-3"><Globe2 size={20} /></span>
           <p className="mt-1 text-[13px] font-medium text-ink">{browserRunning ? 'Browser running' : 'No page open'}</p>
           <p className="max-w-[240px] text-[11.5px] leading-[1.6] text-ink-3">
-            {browserRunning ? 'The CDP browser is ready. The agent will open pages through MCP tools.' : 'Enter a URL below to browse inline, or start the CDP browser for automation.'}
+            {browserRunning ? 'The CDP browser is ready. The agent will open pages through MCP tools.' : 'Enter a URL below to browse inline, or start the CDP browser for automation — its page then mirrors here live, and you can click, scroll, and type straight into it while the agent works.'}
           </p>
           {!browserRunning ? (
             <div className="mt-2 flex w-full max-w-[280px] items-center gap-1.5 rounded-lg border border-line/50 bg-field px-2 py-1.5">
