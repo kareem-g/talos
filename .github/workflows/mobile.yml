@@ -14,12 +14,17 @@ on:
     branches: [main, "ios-*"]
     paths:
       - "mobile/**"
-      - "dashboard/src/**" # the app imports the shared core from the dashboard
+      # The app imports the shared framework-agnostic core from the dashboard
+      # (lib reducers/types), not its web components — so only those paths
+      # warrant a mobile rebuild.
+      - "dashboard/src/lib/**"
+      - "dashboard/src/types/**"
       - ".github/workflows/mobile.yml"
   pull_request:
     paths:
       - "mobile/**"
-      - "dashboard/src/**"
+      - "dashboard/src/lib/**"
+      - "dashboard/src/types/**"
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
 

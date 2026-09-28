@@ -171,22 +171,45 @@ function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
   // value would no-op and never re-trigger it).
   const [mintNonce, setMintNonce] = useState(0)
 
-  // Fetch the transport list on mount.
-  const refreshEndpoints = useCallback(async () => {
+  // Fetch the transport list on mount. Returns whether it succeeded so the
+  // mount effect can retry through a daemon that is still starting.
+  const refreshEndpoints = useCallback(async (): Promise<boolean> => {
     setEndpointsLoading(true)
     try {
       const list = await tunnelApi.endpoints()
       setEndpoints(list.endpoints)
       setEndpointsError(undefined)
+      return true
     } catch (cause) {
       setEndpointsError(cause instanceof Error ? cause.message : 'Could not list tunnels')
+      return false
     } finally {
       setEndpointsLoading(false)
     }
   }, [])
 
+  // Load the transport list on mount, retrying with backoff. The daemon may
+  // still be starting when the page first loads (a restart, a slow boot), and a
+  // single failed fetch used to strand the QR on "Preparing…" with no recovery:
+  // no transport gets selected, so the offer is never minted. A handful of
+  // retries rides out that race and stops the moment one succeeds.
   useEffect(() => {
-    void refreshEndpoints()
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let attempt = 0
+    const load = async () => {
+      if (cancelled) return
+      const ok = await refreshEndpoints()
+      if (!ok && !cancelled && attempt < 6) {
+        attempt += 1
+        timer = setTimeout(load, Math.min(1000 * 2 ** (attempt - 1), 8000))
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   }, [refreshEndpoints])
 
   // Auto-select on first load: best reachable transport, or the first
@@ -443,7 +466,15 @@ function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
       <div
         className={cn('flex flex-col items-center gap-3', !stacked && 'max-lg:-order-1 max-lg:pb-16')}
       >
-        {offerError ? (
+        {endpointsError && endpoints.length === 0 ? (
+          <div className="flex w-full flex-col items-center gap-2 py-6">
+            <p className="text-center text-[12px] leading-[1.6] text-red">
+              Can&apos;t reach the daemon to build a pairing code — is it running? Retrying
+              automatically.
+            </p>
+            <Button onClick={() => void refreshEndpoints()}>Try again</Button>
+          </div>
+        ) : offerError ? (
           <div className="flex w-full flex-col items-center gap-2 py-6">
             <p className="text-center text-[12px] leading-[1.6] text-red">{offerError}</p>
             <Button onClick={() => setMintNonce((n) => n + 1)}>Try again</Button>
