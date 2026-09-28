@@ -18,11 +18,14 @@ import * as Linking from 'expo-linking'
 import { HomeScreen } from './screens/HomeScreen'
 import { SessionScreen } from './screens/SessionScreen'
 import { PairingScreen } from './screens/PairingScreen'
+import { SettingsScreen } from './screens/SettingsScreen'
+import { isPaired } from './lib/pairing'
 
 export type RootStackParamList = {
   Home: undefined
   Session: { sessionId: string; approvalId?: string }
   Pairing: undefined
+  Settings: undefined
 }
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>()
@@ -37,6 +40,7 @@ const linking = {
       Home: '',
       Session: 'session/:sessionId',
       Pairing: 'pair',
+      Settings: 'settings',
     } as const,
   },
 }
@@ -51,11 +55,15 @@ export function navigateToAction(data: { sessionId: string; approvalId?: string 
 }
 
 export function RootNavigator() {
+  // Land on Pairing until a device token exists, then Home. Evaluated at render,
+  // which App gates on credential hydration, so the first paint is correct.
+  const initialRouteName = isPaired() ? 'Home' : 'Pairing'
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator initialRouteName={initialRouteName} screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Session" component={SessionScreen} />
       <Stack.Screen name="Pairing" component={PairingScreen} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
   )
 }

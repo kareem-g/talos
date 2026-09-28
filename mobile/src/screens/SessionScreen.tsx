@@ -1,46 +1,70 @@
 /**
- * Session detail. Phase C replaces this with the real transcript (Timeline +
- * StateZone approval/question cards + Composer), hydrated from
- * `GET /api/mobile/sessions/{id}` and the shared event reducer.
+ * Session detail — transcript, live approval/question cards, and the composer.
  *
- * The notification-security rule lives here: a tap only navigates. This screen
- * fetches the CURRENT approval state from the backend on mount — it never trusts
- * the `approvalId` in the notification payload beyond using it to scroll/focus.
- * Resolving an approval goes through the existing WS `approval_response`, so a
- * stale tap (approval already answered) shows the resolved state, not a live
- * button.
+ * On open it hydrates the conversation from `GET /api/mobile/sessions/{id}` (the
+ * backend is the source of truth, never the notification payload), then stays
+ * live off the socket. The status pill comes from the shared `sessionState`
+ * machine, so an approval that is open in the transcript reads as "Needs approval"
+ * even if the backend status frame lags.
+ *
+ * A notification tap lands here with `approvalId`; the card is already rendered
+ * inline from the fetched state. Scroll-to-focus for that id is a Phase D polish.
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, Pressable } from 'react-native'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { ChevronLeft } from 'lucide-react-native'
+
+import { useStore, useConversation } from '@app/store'
+import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import type { RootStackParamList } from '@app/navigation'
+import { ScreenHeader, StatusPill } from '@app/components/ui'
+import { Transcript } from '@app/components/Transcript'
+import { Composer } from '@app/components/Composer'
 
 export function SessionScreen() {
   const navigation = useNavigation()
   const route = useRoute<RouteProp<RootStackParamList, 'Session'>>()
-  const { sessionId, approvalId } = route.params
+  const { sessionId } = route.params
+
+  const openSession = useStore((state) => state.openSession)
+  const session = useStore((state) => state.sessions.find((s) => s.id === sessionId))
+  const connection = useStore((state) => state.connection)
+  const revision = useStore((state) => state.revisions[sessionId] ?? 0)
+  const conversation = useConversation(sessionId)
+
+  React.useEffect(() => {
+    void openSession(sessionId)
+  }, [sessionId, openSession])
+
+  const uiState = session ? sessionUIState(session, conversation, connection) : 'ready'
+  const display = uiStateDisplay(uiState)
 
   return (
-    <View className="flex-1 bg-canvas">
-      <View className="flex-row items-center border-b border-line px-4 pb-3 pt-6">
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text className="mr-3 text-base text-accent">Back</Text>
-        </Pressable>
-        <Text className="flex-1 text-base text-ink" numberOfLines={1}>
-          {sessionId}
-        </Text>
-      </View>
-      <View className="p-4">
-        <Text className="text-sm text-ink-2">Session {sessionId}</Text>
-        {approvalId ? (
-          <Text className="mt-2 text-sm text-orange">Pending approval: {approvalId}</Text>
-        ) : null}
-        <Text className="mt-4 text-xs text-ink-3">
-          Transcript and live approval card arrive in Phase C. State is always
-          re-fetched from the daemon here — the notification is only a signal.
-        </Text>
-      </View>
-    </View>
+    <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
+      <ScreenHeader
+        title={session?.name ?? 'Session'}
+        subtitle={session ? `${session.agent}${display.hint ? ` · ${display.hint}` : ''}` : undefined}
+        left={
+          <Pressable
+            onPress={() => navigation.goBack()}
+            className="-ml-1 rounded-lg p-1 active:bg-hover"
+            accessibilityLabel="Back"
+          >
+            <ChevronLeft size={22} color="#f2f2f3" />
+          </Pressable>
+        }
+        right={<StatusPill tone={display.tone} label={display.label} pulse={display.pulse} />}
+      />
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Transcript sessionId={sessionId} messages={conversation.messages} revision={revision} />
+        <Composer sessionId={sessionId} uiState={uiState} />
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   )
 }
