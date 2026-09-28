@@ -379,6 +379,121 @@ impl SessionManager {
         Ok(expired)
     }
 
+    /// Every human-intervention request that is still open, across all sessions.
+    ///
+    /// Used by `GET /api/mobile/pending` for reconnect synchronization: a client
+    /// that was offline diffs this against what it has already notified for and
+    /// raises local notifications for the rest. Two sources, both authoritative:
+    ///
+    /// - Approvals: `permission_required` agent events minus `permission_resolved`
+    ///   ones (matched on id). This is the same reconciliation
+    ///   `expire_orphaned_approvals` uses, and unlike the `approvals` table it
+    ///   covers every backend (claude-stream, ACP, API, hook, PTY parser).
+    /// - Questions: rows in `questions` still `status = 'pending'`.
+    ///
+    /// Both are filtered to sessions whose status is actually a waiting state, so
+    /// a card whose session was killed or resumed (and thus is no longer waiting)
+    /// cannot resurface as a phantom notification.
+    pub async fn list_pending_actions(&self) -> Result<Vec<PendingAction>> {
+        use std::collections::{HashMap, HashSet};
+
+        // Sessions currently waiting on a human, with their names. The status is
+        // the cheap, honest filter: it is set for every card path and cleared the
+        // moment the agent resumes, so anything not waiting here is not pending.
+        let waiting: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, name, status FROM sessions WHERE status IN ('waiting_for_approval', 'waiting_for_input')",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if waiting.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sessions: HashMap<String, (String, String)> = waiting
+            .into_iter()
+            .map(|(id, name, status)| (id, (name, status)))
+            .collect();
+
+        // Ids that already have a resolution (allow/deny/expired) — skip them.
+        let resolved: Vec<(String,)> =
+            sqlx::query_as("SELECT payload FROM agent_events WHERE kind = 'permission_resolved'")
+                .fetch_all(&self.pool)
+                .await?;
+        let mut resolved_ids: HashSet<String> = HashSet::new();
+        for (payload,) in resolved {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&payload) {
+                if let Some(id) = value.get("request_id").and_then(|v| v.as_str()) {
+                    resolved_ids.insert(id.to_string());
+                }
+            }
+        }
+
+        let required: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT session_id, payload, timestamp FROM agent_events WHERE kind = 'permission_required' ORDER BY timestamp ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut actions = Vec::new();
+        let mut seen = HashSet::new();
+        for (session_id, payload, created_at) in required {
+            let Some((name, status)) = sessions.get(&session_id) else {
+                continue;
+            };
+            if status != "waiting_for_approval" {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&payload) else {
+                continue;
+            };
+            let Some(id) = value.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+                continue;
+            };
+            // Dedup: the same card can be replayed; only surface it once.
+            if resolved_ids.contains(&id) || !seen.insert(id.clone()) {
+                continue;
+            }
+            actions.push(PendingAction {
+                session_id: session_id.clone(),
+                session_name: name.clone(),
+                kind: "approval".to_string(),
+                id,
+                title: "Approval needed".to_string(),
+                prompt: value.get("prompt").and_then(|v| v.as_str()).map(str::to_string),
+                tool_name: value.get("tool_name").and_then(|v| v.as_str()).map(str::to_string),
+                risk_level: value.get("risk_level").and_then(|v| v.as_str()).map(str::to_string),
+                created_at,
+                payload: value,
+            });
+        }
+
+        // Pending questions (hook-path AskUserQuestion). The row's own status is
+        // authoritative; we only require that the session is in a waiting state.
+        let questions: Vec<(String, String, String, String, String)> = sqlx::query_as(
+            "SELECT question_id, session_id, title, question, created_at FROM questions WHERE status = 'pending' ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for (question_id, session_id, title, question, created_at) in questions {
+            let Some((name, _status)) = sessions.get(&session_id) else {
+                continue;
+            };
+            actions.push(PendingAction {
+                session_id,
+                session_name: name.clone(),
+                kind: "question".to_string(),
+                id: question_id,
+                title: if title.is_empty() { "Question".to_string() } else { title },
+                prompt: Some(question),
+                tool_name: None,
+                risk_level: None,
+                created_at,
+                payload: serde_json::Value::Null,
+            });
+        }
+
+        Ok(actions)
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         self.list_sessions_with_archived(false).await
     }
@@ -929,6 +1044,32 @@ pub struct StoredApproval {
     pub options: Vec<String>,
     pub risk_level: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// A human-intervention request that is still open, across every backend.
+///
+/// Returned by `GET /api/mobile/pending` so a reconnecting client can discover
+/// what piled up while it was offline and raise local notifications for it.
+/// Approvals are reconciled from the `agent_events` log (the only source that
+/// covers claude-stream, ACP, API, hook, and PTY-parser cards alike) rather than
+/// the `approvals` table, which only the Claude-hook path writes.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PendingAction {
+    pub session_id: String,
+    pub session_name: String,
+    /// `"approval"` or `"question"`.
+    pub kind: String,
+    /// The request id (approval) or question id — the dedup key on the client.
+    pub id: String,
+    pub title: String,
+    pub prompt: Option<String>,
+    pub tool_name: Option<String>,
+    pub risk_level: Option<String>,
+    pub created_at: String,
+    /// Full approval payload (options, option_data, selection_mode, …) so the
+    /// client can render the card; null for questions, whose options come from
+    /// the per-session fetch.
+    pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

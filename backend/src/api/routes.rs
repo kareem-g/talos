@@ -1675,6 +1675,25 @@ pub async fn mobile_me(
     .into_response()
 }
 
+/// Every open approval/question across all sessions, for a reconnecting mobile
+/// client to diff against what it has already notified for. This is the
+/// reconnect-sync source of truth: realtime events can be missed while offline,
+/// so on (re)connect the client calls this and raises local notifications for
+/// anything pending it has not seen. See `SessionManager::list_pending_actions`.
+pub async fn mobile_pending(
+    State(state): State<Arc<AppState>>,
+    Extension(_device): Extension<crate::auth::devices::AuthenticatedDevice>,
+) -> Response {
+    match state.session_manager.list_pending_actions().await {
+        Ok(pending) => Json(json!({ "pending": pending })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn mobile_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(device): Extension<crate::auth::devices::AuthenticatedDevice>,

@@ -28,6 +28,7 @@ pub async fn start(
     let mobile_api = Router::new()
         .route("/me", get(crate::api::routes::mobile_me))
         .route("/snapshot", get(crate::api::routes::mobile_snapshot))
+        .route("/pending", get(crate::api::routes::mobile_pending))
         .route("/agents", get(crate::api::routes::mobile_agents))
         .route("/sessions", post(crate::api::routes::mobile_create_session))
         .route("/sessions/{id}", get(crate::api::routes::mobile_session).delete(crate::api::routes::mobile_delete_session))
