@@ -1,0 +1,75 @@
+{
+  "expo": {
+    "name": "AgentDeck",
+    "slug": "agentdeck",
+    "scheme": "agentdeck",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#131315",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#131315"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.agentdeck.mobile",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSCameraUsageDescription": "AgentDeck uses the camera to scan the pairing code from your desktop.",
+        "NSLocalNetworkUsageDescription": "AgentDeck connects to the daemon running on your local network.",
+        "UIRequiresFullScreen": false
+      }
+    },
+    "android": {
+      "package": "com.agentdeck.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#131315",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE"
+      ],
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#131315"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AgentDeck uses the camera to scan the pairing code from your desktop."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5b8def"
+        }
+      ],
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
