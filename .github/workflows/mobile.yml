@@ -53,6 +53,19 @@ jobs:
       - name: Unit tests
         working-directory: mobile
         run: npx jest --ci
+      # Design-system guards. `check:colors` fails on a raw hex in a component
+      # and `check:tokens` fails on a token name used as a string
+      # (`color="palette.ink3"` compiles and passes every test, then renders
+      # nothing). Without these in CI the palette erodes one PR at a time.
+      - name: Design-system guards
+        working-directory: mobile
+        run: npm run check:colors && npm run check:tokens
+      # Cross-checks every HTTP call site against backend/src/daemon/server.rs,
+      # so a route that the app calls but the daemon does not serve is caught
+      # here rather than on a phone that cannot reach the desktop.
+      - name: API routes match the backend
+        working-directory: mobile
+        run: npm run check:api
 
   build-ios:
     name: Build iOS IPA (unsigned)
