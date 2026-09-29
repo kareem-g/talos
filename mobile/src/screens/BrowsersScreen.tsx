@@ -18,6 +18,7 @@ import type { DrawerParamList } from '@app/navigation'
 import { browserApi, type BrowserInstance } from '@app/lib/api'
 import { useStore } from '@app/store'
 import { Button, Card, CardHeader, Chip, Dot, EmptyState, Mono, PageHeader } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 export function BrowsersScreen() {
   const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
@@ -71,7 +72,7 @@ export function BrowsersScreen() {
               setRefreshing(true)
               void load().finally(() => setRefreshing(false))
             }}
-            tintColor="#7e7e86"
+            tintColor={palette.ink3}
           />
         }
         ListHeaderComponent={

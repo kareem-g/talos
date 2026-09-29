@@ -34,6 +34,7 @@ import { deviceToken } from '@app/lib/api'
 import { cn } from '@/lib/format'
 import { BrandMark, Button, Dot, IconButton, Mono, NavLabel } from '@app/components/ui'
 import { NewTaskSheet } from '@app/components/NewTaskSheet'
+import { palette } from '@app/design/tokens'
 
 /** Desktop `connectionDot`/label mapping, reused verbatim. */
 function connectionTone(connection: string): 'green' | 'orange' | 'red' {
@@ -123,7 +124,7 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
         <NavLabel>Get started</NavLabel>
         <NavItem
           label="Home"
-          icon={<HomeIcon size={15} color="#b0b0b6" />}
+          icon={<HomeIcon size={15} color={palette.ink2} />}
           active={active === 'Home'}
           onPress={() => go('Home')}
         />
@@ -131,13 +132,13 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
         <NavLabel>Products</NavLabel>
         <NavItem
           label="Agents"
-          icon={<Bot size={15} color="#b0b0b6" />}
+          icon={<Bot size={15} color={palette.ink2} />}
           active={active === 'Agents'}
           onPress={() => go('Agents')}
         />
         <NavItem
           label="Browsers"
-          icon={<Globe size={15} color="#b0b0b6" />}
+          icon={<Globe size={15} color={palette.ink2} />}
           active={active === 'Browsers'}
           onPress={() => go('Browsers')}
         />
@@ -145,37 +146,37 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
         <NavLabel>Manage</NavLabel>
         <NavItem
           label="History"
-          icon={<HistoryIcon size={15} color="#b0b0b6" />}
+          icon={<HistoryIcon size={15} color={palette.ink2} />}
           active={active === 'History'}
           onPress={() => go('History')}
         />
         <NavItem
           label="Usage"
-          icon={<BarChart3 size={15} color="#b0b0b6" />}
+          icon={<BarChart3 size={15} color={palette.ink2} />}
           active={active === 'Usage'}
           onPress={() => go('Usage')}
         />
         <NavItem
           label="Configuration"
-          icon={<SettingsIcon size={15} color="#b0b0b6" />}
+          icon={<SettingsIcon size={15} color={palette.ink2} />}
           active={active === 'Config'}
           onPress={() => go('Config')}
         />
         <NavItem
           label="MCP Servers"
-          icon={<Server size={15} color="#b0b0b6" />}
+          icon={<Server size={15} color={palette.ink2} />}
           active={active === 'Mcp'}
           onPress={() => go('Mcp')}
         />
         <NavItem
           label="Remote Access"
-          icon={<Cloud size={15} color="#b0b0b6" />}
+          icon={<Cloud size={15} color={palette.ink2} />}
           active={active === 'Remote'}
           onPress={() => go('Remote')}
         />
         <NavItem
           label="Daemon Settings"
-          icon={<Wrench size={15} color="#b0b0b6" />}
+          icon={<Wrench size={15} color={palette.ink2} />}
           active={active === 'DaemonSettings'}
           onPress={() => go('DaemonSettings')}
         />
@@ -197,12 +198,12 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
         <NavLabel>Quick access</NavLabel>
         <NavItem
           label={copied ? 'Copied' : 'API key'}
-          icon={<KeyRound size={15} color="#b0b0b6" />}
+          icon={<KeyRound size={15} color={palette.ink2} />}
           onPress={copyToken}
         />
         <NavItem
           label="Agent setup"
-          icon={<Wrench size={15} color="#b0b0b6" />}
+          icon={<Wrench size={15} color={palette.ink2} />}
           onPress={() => go('Agents')}
         />
       </ScrollView>
@@ -217,7 +218,7 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
       <View className="border-t border-line p-3">
         <View className="flex-row items-center gap-3 rounded-2xl bg-surface p-3">
           <View className="size-10 items-center justify-center rounded-xl bg-accent-tint">
-            <Smartphone size={18} color="#5e9eff" />
+            <Smartphone size={18} color={palette.accent} />
           </View>
           <View className="min-w-0 flex-1">
             <Text className="text-[13px] font-semibold text-ink" numberOfLines={1}>
@@ -235,7 +236,7 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
             }}
             className="size-10"
           >
-            <Smartphone size={16} color="#b5b5bc" />
+            <Smartphone size={16} color={palette.ink2} />
           </IconButton>
         </View>
         <View className="mt-2.5 flex-row items-center gap-2 px-1">

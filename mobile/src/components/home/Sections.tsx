@@ -22,6 +22,7 @@ import { skillsApi } from '@app/lib/api'
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
 import { Button, Card, CardHeader, Chip, Mono } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 /* ── Automations ─────────────────────────────────────────────────────────── */
 
@@ -165,7 +166,7 @@ export function AutomationsSection() {
               key={automation.id}
               className="flex-row items-center gap-2 rounded-lg border border-line bg-inset px-2.5 py-2"
             >
-              <Zap size={13} color={automation.enabled ? '#db6d28' : '#7e7e86'} />
+              <Zap size={13} color={automation.enabled ? palette.wait : palette.ink3} />
               <View className="min-w-0 flex-1">
                 <Text className="text-[12.5px] text-ink" numberOfLines={1}>
                   {automation.name}
@@ -191,14 +192,14 @@ export function AutomationsSection() {
                 accessibilityLabel={`Run ${automation.name}`}
                 className="size-7 items-center justify-center rounded-lg active:bg-hover-2"
               >
-                <Play size={13} color="#b0b0b6" />
+                <Play size={13} color={palette.ink2} />
               </Pressable>
               <Pressable
                 onPress={() => remove(automation.id)}
                 accessibilityLabel={`Delete ${automation.name}`}
                 className="size-7 items-center justify-center rounded-lg active:bg-red-tint"
               >
-                <Trash2 size={13} color="#7e7e86" />
+                <Trash2 size={13} color={palette.ink3} />
               </Pressable>
             </View>
           ))
@@ -230,7 +231,7 @@ export function AutomationsSection() {
                 {picker === 'idle' ? 'Idle-time templates' : 'Scheduled templates'}
               </Text>
               <Pressable onPress={() => setPicker(null)} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
-                <X size={16} color="#b0b0b6" />
+                <X size={16} color={palette.ink2} />
               </Pressable>
             </View>
             <ScrollView contentContainerClassName="p-2">
@@ -240,7 +241,7 @@ export function AutomationsSection() {
                   onPress={() => addTemplate(template)}
                   className="min-h-11 flex-row items-center gap-2 rounded-control px-2.5 active:bg-hover-2"
                 >
-                  <Plus size={14} color="#7e7e86" />
+                  <Plus size={14} color={palette.ink3} />
                   <View className="min-w-0 flex-1">
                     <Text className="text-[12.5px] text-ink" numberOfLines={1}>
                       {template.name}
@@ -407,7 +408,7 @@ export function SkillsSection() {
                       accessibilityLabel={`View ${skill.name}`}
                       className="size-7 items-center justify-center rounded-lg active:bg-hover"
                     >
-                      <Eye size={13} color="#7e7e86" />
+                      <Eye size={13} color={palette.ink3} />
                     </Pressable>
                     <Pressable
                       onPress={() => void toggleSkill(skill.id, !skill.enabled)}
@@ -437,7 +438,7 @@ export function SkillsSection() {
                         accessibilityLabel={`Uninstall ${skill.name}`}
                         className="size-7 items-center justify-center rounded-lg active:bg-red-tint"
                       >
-                        <Trash2 size={13} color="#7e7e86" />
+                        <Trash2 size={13} color={palette.ink3} />
                       </Pressable>
                     )}
                   </View>
@@ -490,7 +491,7 @@ export function SkillsSection() {
                 </Text>
               </View>
               <Pressable onPress={() => setViewSkill(null)} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
-                <X size={16} color="#b0b0b6" />
+                <X size={16} color={palette.ink2} />
               </Pressable>
             </View>
             <ScrollView className="p-3.5">

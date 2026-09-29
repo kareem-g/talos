@@ -20,6 +20,7 @@ import { useStore } from '@app/store'
 import type { Session } from '@/types/session'
 import { Button, Chip, Mono, SectionLabel } from '@app/components/ui'
 import { GlassSurface } from '@app/components/Glass'
+import { palette } from '@app/design/tokens'
 
 /** The desktop's four permission modes, same ids and labels. */
 const PERMISSION_MODES = [
@@ -162,7 +163,7 @@ export function NewTaskSheet({
                   accessibilityLabel="Back"
                   className="size-9 items-center justify-center rounded-full active:bg-hover-2"
                 >
-                  <ChevronLeft size={18} color="#f2f2f3" />
+                  <ChevronLeft size={18} color={palette.ink} />
                 </Pressable>
               ) : (
                 <View className="size-9" />
@@ -180,7 +181,7 @@ export function NewTaskSheet({
                 accessibilityLabel="Close"
                 className="size-9 items-center justify-center rounded-full active:bg-hover-2"
               >
-                <X size={17} color="#b0b0b6" />
+                <X size={17} color={palette.ink2} />
               </Pressable>
             </View>
           </GlassSurface>
@@ -205,7 +206,7 @@ export function NewTaskSheet({
                       project === path && !customPath ? 'bg-accent-tint' : 'active:bg-hover-2',
                     )}
                   >
-                    <Folder size={15} color="#7e7e86" />
+                    <Folder size={15} color={palette.ink3} />
                     <View className="min-w-0 flex-1">
                       <Text className="text-[13px] text-ink" numberOfLines={1}>
                         {basename(path)}
@@ -214,7 +215,7 @@ export function NewTaskSheet({
                         {path}
                       </Mono>
                     </View>
-                    {project === path && !customPath ? <ChevronRight size={15} color="#5b8def" /> : null}
+                    {project === path && !customPath ? <ChevronRight size={15} color={palette.accent} /> : null}
                   </Pressable>
                 ))
               )}
@@ -230,7 +231,7 @@ export function NewTaskSheet({
                   !effectiveProject ? 'bg-accent-tint' : 'active:bg-hover-2',
                 )}
               >
-                <Inbox size={15} color="#7e7e86" />
+                <Inbox size={15} color={palette.ink3} />
                 <Text className="flex-1 text-[13px] text-ink">Inbox</Text>
               </Pressable>
 
@@ -239,7 +240,7 @@ export function NewTaskSheet({
                 value={customPath}
                 onChangeText={setCustomPath}
                 placeholder="/home/you/project"
-                placeholderTextColor="#7e7e86"
+                placeholderTextColor={palette.ink3}
                 autoCapitalize="none"
                 autoCorrect={false}
                 className="min-h-11 rounded-xl border border-line bg-field px-3 text-[12.5px] text-ink"
@@ -288,7 +289,7 @@ export function NewTaskSheet({
                   value={prompt}
                   onChangeText={setPrompt}
                   placeholder="What should it do?"
-                  placeholderTextColor="#7e7e86"
+                  placeholderTextColor={palette.ink3}
                   multiline
                   className="min-h-[92px] rounded-xl border border-line bg-field px-3 py-2.5 text-[13px] leading-5 text-ink"
                 />
@@ -377,7 +378,7 @@ function ConfigRow({
       <Text className="max-w-[55%] text-[12.5px] text-ink" numberOfLines={1}>
         {value}
       </Text>
-      <ChevronRight size={14} color="#7e7e86" />
+      <ChevronRight size={14} color={palette.ink3} />
     </Pressable>
   )
 }
@@ -411,7 +412,7 @@ function ChoiceOverlay({
             <View className="flex-row items-center gap-2">
               <Chip label={`${choices.length}`} />
               <Pressable onPress={onClose} accessibilityLabel="Close" className="size-7 items-center justify-center rounded-full active:bg-hover-2">
-                <X size={15} color="#b0b0b6" />
+                <X size={15} color={palette.ink2} />
               </Pressable>
             </View>
           </View>

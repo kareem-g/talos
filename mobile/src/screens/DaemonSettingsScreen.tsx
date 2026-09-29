@@ -23,6 +23,7 @@ import {
   Mono,
   PageHeader,
 } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 export function DaemonSettingsScreen() {
   const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
@@ -112,7 +113,7 @@ export function DaemonSettingsScreen() {
       />
 
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7e7e86" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
         contentContainerClassName="gap-4 p-4 pb-10"
       >
         <View className="gap-1.5">

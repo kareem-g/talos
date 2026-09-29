@@ -50,6 +50,7 @@ import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
 import { Button, EmptyState, GlassSurface, Mono, StatusPill, TextField } from '@app/components/ui'
 import { DiffView } from '@app/components/chat/rows'
+import { palette } from '@app/design/tokens'
 
 function RailHeader({ eyebrow, right }: { eyebrow: string; right?: React.ReactNode }) {
   return (
@@ -231,7 +232,7 @@ export function GitTab({ session }: { session: Session }) {
         eyebrow={`git · ${basename(project)}`}
         right={
           <Pressable onPress={() => void load()} accessibilityLabel="Refresh" className="size-7 items-center justify-center rounded-md active:bg-hover-2">
-            <RefreshCw size={12} color="#7e7e86" />
+            <RefreshCw size={12} color={palette.ink3} />
           </Pressable>
         }
       />
@@ -246,9 +247,9 @@ export function GitTab({ session }: { session: Session }) {
               onPress={() => setBranchOpen(!branchOpen)}
               className="min-h-8 flex-row items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 active:bg-hover"
             >
-              <GitBranch size={13} color="#5b8def" />
+              <GitBranch size={13} color={palette.accent} />
               <Mono className="text-[11px] text-ink font-semibold">{git.current ?? 'detached'}</Mono>
-              <ChevronDown size={11} color="#7e7e86" />
+              <ChevronDown size={11} color={palette.ink3} />
             </Pressable>
 
             <Mono className="text-[10.5px] text-ink-3">{git.branches.length} branches</Mono>
@@ -291,7 +292,7 @@ export function GitTab({ session }: { session: Session }) {
                     value={newBranch}
                     onChangeText={setNewBranch}
                     placeholder="branch-name"
-                    placeholderTextColor="#7e7e86"
+                    placeholderTextColor={palette.ink3}
                     autoCapitalize="none"
                     autoCorrect={false}
                     className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2.5 font-mono text-[11.5px] text-ink"
@@ -316,7 +317,7 @@ export function GitTab({ session }: { session: Session }) {
                 logOpen ? 'border-accent bg-accent-tint' : 'border-line bg-surface active:bg-hover'
               }`}
             >
-              <GitCommit size={12} color={logOpen ? '#5b8def' : '#7e7e86'} />
+              <GitCommit size={12} color={logOpen ? palette.accent : palette.ink3} />
               <Text className={`text-[11.5px] ${logOpen ? 'text-ink font-medium' : 'text-ink-2'}`}>
                 Commit History
               </Text>
@@ -328,7 +329,7 @@ export function GitTab({ session }: { session: Session }) {
                 worktreesOpen ? 'border-accent bg-accent-tint' : 'border-line bg-surface active:bg-hover'
               }`}
             >
-              <Layers size={12} color={worktreesOpen ? '#5b8def' : '#7e7e86'} />
+              <Layers size={12} color={worktreesOpen ? palette.accent : palette.ink3} />
               <Text className={`text-[11.5px] ${worktreesOpen ? 'text-ink font-medium' : 'text-ink-2'}`}>
                 Worktrees
               </Text>
@@ -340,7 +341,7 @@ export function GitTab({ session }: { session: Session }) {
             <View className="rounded-xl border border-line bg-field p-2.5 gap-1.5">
               <Mono className="text-[9.5px] uppercase tracking-wider text-ink-3">Recent Commits</Mono>
               {logLoading ? (
-                <ActivityIndicator size="small" color="#5b8def" />
+                <ActivityIndicator size="small" color={palette.accent} />
               ) : commits.length === 0 ? (
                 <Text className="text-[11px] text-ink-3">No commits found.</Text>
               ) : (
@@ -371,7 +372,7 @@ export function GitTab({ session }: { session: Session }) {
               ) : (
                 worktrees.map((wt, idx) => (
                   <View key={idx} className="flex-row items-center gap-2 py-1">
-                    <Layers size={12} color="#7e7e86" />
+                    <Layers size={12} color={palette.ink3} />
                     <Mono className="flex-1 text-[11px] text-ink" numberOfLines={1}>{wt.path}</Mono>
                     {wt.branch ? <Mono className="text-[10px] text-accent">{wt.branch}</Mono> : null}
                   </View>
@@ -381,7 +382,7 @@ export function GitTab({ session }: { session: Session }) {
           ) : null}
         </View>
       ) : (
-        <ActivityIndicator color="#5b8def" />
+        <ActivityIndicator color={palette.accent} />
       )}
 
       <Mono className="mb-1 text-[9.5px] uppercase tracking-wider">
@@ -399,7 +400,7 @@ export function GitTab({ session }: { session: Session }) {
               >
                 <ChevronDown
                   size={11}
-                  color="#7e7e86"
+                  color={palette.ink3}
                   style={{ transform: [{ rotate: open === file.path ? '0deg' : '-90deg' }] }}
                 />
                 <Mono className="min-w-0 flex-1 text-[11px] text-ink" numberOfLines={1}>
@@ -426,7 +427,7 @@ export function GitTab({ session }: { session: Session }) {
           value={message}
           onChangeText={setMessage}
           placeholder="Commit message"
-          placeholderTextColor="#7e7e86"
+          placeholderTextColor={palette.ink3}
           multiline
           className="min-h-11 rounded-lg border border-line bg-field px-2.5 py-2 text-[12.5px] text-ink"
         />
@@ -497,7 +498,7 @@ export function FilesTab({ session }: { session: Session }) {
       <View>
         <View className="mb-3 flex-row items-center gap-2 border-b border-line pb-2">
           <Pressable onPress={() => setOpenFile(null)} className="min-h-8 flex-row items-center gap-1 rounded-md px-2 active:bg-hover-2">
-            <ChevronRight size={12} color="#b0b0b6" style={{ transform: [{ rotate: '180deg' }] }} />
+            <ChevronRight size={12} color={palette.ink2} style={{ transform: [{ rotate: '180deg' }] }} />
             <Text className="text-[11.5px] text-ink-2">Back</Text>
           </Pressable>
           <Mono className="min-w-0 flex-1 text-[10.5px]" numberOfLines={1}>
@@ -530,7 +531,7 @@ export function FilesTab({ session }: { session: Session }) {
               onPress={() => void load(listing.parent)}
               className="min-h-9 flex-row items-center gap-2 rounded-md px-2 active:bg-hover-2"
             >
-              <Folder size={13} color="#7e7e86" />
+              <Folder size={13} color={palette.ink3} />
               <Mono className="text-[11.5px] text-ink-2">..</Mono>
             </Pressable>
           ) : null}
@@ -540,11 +541,11 @@ export function FilesTab({ session }: { session: Session }) {
               onPress={() => (entry.dir ? void load(entry.path) : void readFile(entry))}
               className="min-h-9 flex-row items-center gap-2 rounded-md px-2 active:bg-hover-2"
             >
-              {entry.dir ? <Folder size={13} color="#7e7e86" /> : <FileText size={13} color="#7e7e86" />}
+              {entry.dir ? <Folder size={13} color={palette.ink3} /> : <FileText size={13} color={palette.ink3} />}
               <Mono className="min-w-0 flex-1 text-[11.5px] text-ink-2" numberOfLines={1}>
                 {entry.name}
               </Mono>
-              {entry.dir ? <ChevronRight size={12} color="#52525b" /> : null}
+              {entry.dir ? <ChevronRight size={12} color={palette.ink3} /> : null}
             </Pressable>
           ))}
           {listing.entries.length === 0 ? (
@@ -552,7 +553,7 @@ export function FilesTab({ session }: { session: Session }) {
           ) : null}
         </View>
       ) : (
-        <ActivityIndicator color="#5b8def" />
+        <ActivityIndicator color={palette.accent} />
       )}
     </View>
   )
@@ -728,7 +729,7 @@ export function BrowserTab({ session }: { session: Session }) {
         <View className="mb-4 rounded-xl border border-line bg-field p-3 gap-2">
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center gap-1.5">
-              <Play size={13} color="#5b8def" />
+              <Play size={13} color={palette.accent} />
               <Mono className="text-[10px] uppercase tracking-wider text-ink font-semibold">
                 Workspace App Server
               </Mono>
@@ -796,7 +797,7 @@ export function BrowserTab({ session }: { session: Session }) {
                   value={serveCommand}
                   onChangeText={setServeCommand}
                   placeholder="Command (default: static files)"
-                  placeholderTextColor="#7e7e86"
+                  placeholderTextColor={palette.ink3}
                   autoCapitalize="none"
                   autoCorrect={false}
                   className="min-h-8 flex-1 rounded-lg border border-line bg-surface px-2 font-mono text-[11px] text-ink"
@@ -834,7 +835,7 @@ export function BrowserTab({ session }: { session: Session }) {
               value={url}
               onChangeText={setUrl}
               placeholder="https://…"
-              placeholderTextColor="#7e7e86"
+              placeholderTextColor={palette.ink3}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
@@ -851,7 +852,7 @@ export function BrowserTab({ session }: { session: Session }) {
               accessibilityLabel="Stop browser"
               className="size-10 items-center justify-center rounded-lg bg-red-tint"
             >
-              <Square size={13} color="#f85149" fill="#f85149" />
+              <Square size={13} color={palette.danger} fill={palette.danger} />
             </Pressable>
           </View>
 
@@ -976,10 +977,10 @@ export function ProjectsTab() {
               >
                 <ChevronRight
                   size={13}
-                  color="#7e7e86"
+                  color={palette.ink3}
                   style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
                 />
-                <Folder size={13} color="#7e7e86" />
+                <Folder size={13} color={palette.ink3} />
                 <Text className="min-w-0 flex-1 text-[12px] font-medium text-ink" numberOfLines={1}>
                   {project === '__inbox__' ? 'Inbox' : basename(project)}
                 </Text>
@@ -1063,7 +1064,7 @@ export function TerminalsTab({ session }: { session: Session }) {
         eyebrow="Standalone Terminals"
         right={
           <Pressable onPress={() => void load()} accessibilityLabel="Refresh" className="size-7 items-center justify-center rounded-md active:bg-hover-2">
-            <RefreshCw size={12} color="#7e7e86" />
+            <RefreshCw size={12} color={palette.ink3} />
           </Pressable>
         }
       />
@@ -1076,7 +1077,7 @@ export function TerminalsTab({ session }: { session: Session }) {
             value={newCwd}
             onChangeText={setNewCwd}
             placeholder="Working directory (default: workspace)"
-            placeholderTextColor="#7e7e86"
+            placeholderTextColor={palette.ink3}
             autoCapitalize="none"
             autoCorrect={false}
             className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2.5 font-mono text-[11px] text-ink"
@@ -1105,7 +1106,7 @@ export function TerminalsTab({ session }: { session: Session }) {
             >
               <View className="min-w-0 flex-1">
                 <View className="flex-row items-center gap-1.5">
-                  <Terminal size={13} color="#5b8def" />
+                  <Terminal size={13} color={palette.accent} />
                   <Mono className="text-[11.5px] text-ink font-semibold">{t.id}</Mono>
                 </View>
                 {t.cwd ? (
@@ -1157,7 +1158,7 @@ export function SideTab({ session }: { session: Session }) {
         value={notes}
         onChangeText={save}
         placeholder="Type scratch notes, ideas, snippet tests or todos here…"
-        placeholderTextColor="#7e7e86"
+        placeholderTextColor={palette.ink3}
         multiline
         className="min-h-48 rounded-xl border border-line bg-field p-3 font-mono text-[12px] leading-5 text-ink"
       />
@@ -1216,13 +1217,13 @@ export function TrajectoriesTab({ session }: { session: Session }) {
         eyebrow="Session Trajectory"
         right={
           <Pressable onPress={() => void load()} accessibilityLabel="Refresh" className="size-7 items-center justify-center rounded-md active:bg-hover-2">
-            <RefreshCw size={12} color="#7e7e86" />
+            <RefreshCw size={12} color={palette.ink3} />
           </Pressable>
         }
       />
       {error ? <LoadError message={error} onRetry={() => void load()} /> : null}
       {loading ? (
-        <ActivityIndicator color="#5b8def" />
+        <ActivityIndicator color={palette.accent} />
       ) : data.length === 0 ? (
         <EmptyState title="No recorded trajectory" body="Recorded timeline events for this run will appear here." />
       ) : (

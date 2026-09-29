@@ -41,6 +41,7 @@ import {
   Row,
   SectionLabel,
 } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 const PERMISSION_LABEL: Record<PermissionState, string> = {
   granted: 'Allowed',
@@ -196,34 +197,34 @@ export function SettingsScreen() {
               onPress={() => navigation.navigate('Mcp' as keyof DrawerParamList)}
               className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
             >
-              <Server size={16} color="#5b8def" />
+              <Server size={16} color={palette.accent} />
               <View className="min-w-0 flex-1">
                 <Text className="text-[13px] font-medium text-ink">MCP Servers</Text>
                 <Text className="text-[11px] text-ink-3">Manage Model Context Protocol integrations</Text>
               </View>
-              <ChevronRight size={16} color="#7e7e86" />
+              <ChevronRight size={16} color={palette.ink3} />
             </Pressable>
             <Pressable
               onPress={() => navigation.navigate('Remote' as keyof DrawerParamList)}
               className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
             >
-              <Wifi size={16} color="#5b8def" />
+              <Wifi size={16} color={palette.accent} />
               <View className="min-w-0 flex-1">
                 <Text className="text-[13px] font-medium text-ink">Remote Access</Text>
                 <Text className="text-[11px] text-ink-3">Tunnels, endpoints, and paired devices</Text>
               </View>
-              <ChevronRight size={16} color="#7e7e86" />
+              <ChevronRight size={16} color={palette.ink3} />
             </Pressable>
             <Pressable
               onPress={() => navigation.navigate('DaemonSettings' as keyof DrawerParamList)}
               className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
             >
-              <SettingsIcon size={16} color="#5b8def" />
+              <SettingsIcon size={16} color={palette.accent} />
               <View className="min-w-0 flex-1">
                 <Text className="text-[13px] font-medium text-ink">Daemon Settings</Text>
                 <Text className="text-[11px] text-ink-3">Read and edit daemon configuration</Text>
               </View>
-              <ChevronRight size={16} color="#7e7e86" />
+              <ChevronRight size={16} color={palette.ink3} />
             </Pressable>
           </View>
         </Card>

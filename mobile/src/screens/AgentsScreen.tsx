@@ -31,6 +31,7 @@ import {
   PageHeader,
   SectionHeading,
 } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 /** The capability flags the desktop renders as chips, in the same order. */
 const CAPABILITIES: Array<{ key: string; label: string }> = [
@@ -75,7 +76,7 @@ export function AgentsScreen() {
       <FlatList
         data={agents}
         keyExtractor={(agent) => agent.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7e7e86" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
         ListHeaderComponent={
           <View className="px-4 pt-5 pb-3">
             <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Products</Mono>

@@ -59,10 +59,35 @@ pub struct UpdateContentRequest {
     pub project: String,
 }
 
-fn internal_error(error: crate::AgentDeckError) -> Response {
+/// Map a skills error onto an HTTP status.
+///
+/// `toggle_skill` reports "this skill is not installed" through
+/// `AgentDeckError::Unknown`, which is right for the error type but wrong for
+/// the status: a caller asking to disable a skill that does not exist has made
+/// a bad request, not tripped a server fault. Answering 500 there made the
+/// phone's skill toggle look broken and pushed anyone debugging it at the
+/// daemon rather than at their own request.
+///
+/// Matching stays on the message prefix rather than widening `AgentDeckError`
+/// with a `NotFound` variant: these are the only two user-error strings the
+/// skills layer raises, and every match on the enum elsewhere has a catch-all
+/// arm, so a new variant would be correct too but touches far more code.
+fn skills_error_response(error: crate::AgentDeckError) -> Response {
+    let message = error.to_string();
+    // `AgentDeckError::Unknown` renders as "Unknown error: …", which is noise
+    // for a caller who simply named a skill that does not exist. The prefix is
+    // stripped so the body reads the same as the sibling handlers' 404s.
+    let detail = message.strip_prefix("Unknown error: ").unwrap_or(&message);
+    let status = if message.contains("skill not installed") {
+        StatusCode::NOT_FOUND
+    } else if message.contains("invalid skill id") {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
     (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": error.to_string() })),
+        status,
+        Json(json!({ "error": detail, "code": status.as_u16() })),
     )
         .into_response()
 }
@@ -76,7 +101,7 @@ pub async fn list_available() -> Response {
 pub async fn list_installed(Query(query): Query<ProjectQuery>) -> Response {
     match crate::skills::list_installed(&query.project).await {
         Ok(skills) => Json(json!({ "skills": skills })).into_response(),
-        Err(error) => internal_error(error),
+        Err(error) => skills_error_response(error),
     }
 }
 
@@ -113,7 +138,7 @@ pub async fn install(Json(payload): Json<InstallRequest>) -> Response {
             "installed": true,
         }))
         .into_response(),
-        Err(error) => internal_error(error),
+        Err(error) => skills_error_response(error),
     }
 }
 
@@ -121,7 +146,7 @@ pub async fn install(Json(payload): Json<InstallRequest>) -> Response {
 pub async fn uninstall(Path(id): Path<String>, Query(query): Query<ProjectQuery>) -> Response {
     match crate::skills::uninstall_skill(&query.project, &id).await {
         Ok(()) => Json(json!({ "skill_id": id, "uninstalled": true })).into_response(),
-        Err(error) => internal_error(error),
+        Err(error) => skills_error_response(error),
     }
 }
 
@@ -133,7 +158,7 @@ pub async fn toggle(Path(id): Path<String>, Json(payload): Json<ToggleRequest>) 
             "enabled": payload.enabled,
         }))
         .into_response(),
-        Err(error) => internal_error(error),
+        Err(error) => skills_error_response(error),
     }
 }
 
@@ -149,7 +174,7 @@ pub async fn update_content(
             "updated": true,
         }))
         .into_response(),
-        Err(error) => internal_error(error),
+        Err(error) => skills_error_response(error),
     }
 }
 
@@ -179,6 +204,6 @@ pub async fn get_content(
             "content": content,
         }))
         .into_response(),
-        Err(error) => internal_error(crate::AgentDeckError::Io(error)),
+        Err(error) => skills_error_response(crate::AgentDeckError::Io(error)),
     }
 }

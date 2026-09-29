@@ -17,8 +17,9 @@ import { cn } from '@/lib/format'
 import { describeApproval, type ApprovalOption } from '@/lib/approvals'
 import type { ApprovalPart, ErrorPart, PlanPart, TurnSummaryPart, UsagePart } from '@/types/conversation'
 import { Button, Mono, TextField } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
-const DIM = '#7e7e86'
+const DIM = palette.ink3
 
 /* ── Usage meter ─────────────────────────────────────────────────────────── */
 
@@ -64,7 +65,7 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
 
   return (
     <View className="flex-row items-center gap-1.5">
-      {failed ? <AlertTriangle size={10} color="#db6d28" /> : <Check size={10} color="#57ab5a" />}
+      {failed ? <AlertTriangle size={10} color={palette.wait} /> : <Check size={10} color={palette.ok} />}
       {reason ? <Text className="text-[10.5px] text-ink-3">{reason}</Text> : null}
       {reason && stats.length ? <Text className="text-[10px] text-ink-3">·</Text> : null}
       {stats.length ? <Mono className="text-[10px]">{stats.join(' · ')}</Mono> : null}
@@ -78,7 +79,7 @@ export function ErrorCard({ part }: { part: ErrorPart }) {
   return (
     <View className="overflow-hidden rounded-xl border border-red-border bg-red-tint">
       <View className="flex-row items-start gap-3 px-4 pb-3 pt-3.5">
-        <AlertTriangle size={14} color="#f85149" />
+        <AlertTriangle size={14} color={palette.danger} />
         <View className="min-w-0 flex-1">
           <Text className="text-[12px] font-semibold text-red">Agent error</Text>
           <Mono className="mt-1 text-[11.5px] leading-5 text-ink-2">{part.message}</Mono>
@@ -253,7 +254,7 @@ export function Approval({
     const denied = part.decision === 'deny'
     return (
       <View className="flex-row items-center gap-2 rounded-xl border border-line bg-field px-3 py-2.5">
-        {denied ? <AlertTriangle size={12} color="#db6d28" /> : <Check size={12} color="#57ab5a" />}
+        {denied ? <AlertTriangle size={12} color={palette.wait} /> : <Check size={12} color={palette.ok} />}
         <Text className="text-[11.5px] font-medium text-ink">{decisionLabel(part.decision)}</Text>
         <Text className="text-[11px] text-ink-3">·</Text>
         <Mono className="min-w-0 flex-1 text-[11px]" numberOfLines={1}>
@@ -326,7 +327,7 @@ export function Approval({
             risky ? 'bg-red-tint' : 'bg-field',
           )}
         >
-          <Moon size={16} color={risky ? '#f85149' : DIM} />
+          <Moon size={16} color={risky ? palette.danger : DIM} />
         </View>
         <View className="min-w-0 flex-1">
           {view.header ? (

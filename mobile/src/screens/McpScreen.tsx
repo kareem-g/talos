@@ -25,6 +25,7 @@ import {
   Mono,
   PageHeader,
 } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 interface McpServer {
   name: string
@@ -111,7 +112,7 @@ export function McpScreen() {
       <FlatList
         data={servers}
         keyExtractor={(item) => item.name}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7e7e86" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
         ListHeaderComponent={
           <View className="gap-3 px-4 pt-5 pb-3">
             <View className="gap-1.5">
@@ -135,7 +136,7 @@ export function McpScreen() {
             <Card>
               <View className="flex-row items-center gap-3 p-3.5">
                 <View className="size-9 items-center justify-center rounded-lg bg-accent-tint">
-                  <Server size={16} color="#5b8def" />
+                  <Server size={16} color={palette.accent} />
                 </View>
                 <View className="min-w-0 flex-1">
                   <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>
@@ -164,7 +165,7 @@ export function McpScreen() {
                     accessibilityLabel={`Remove ${item.name}`}
                     className="size-8 items-center justify-center rounded-lg active:bg-red-tint"
                   >
-                    <Trash2 size={14} color="#7e7e86" />
+                    <Trash2 size={14} color={palette.ink3} />
                   </Pressable>
                 )}
               </View>
@@ -193,7 +194,7 @@ export function McpScreen() {
                 value={newName}
                 onChangeText={setNewName}
                 placeholder="Server name"
-                placeholderTextColor="#7e7e86"
+                placeholderTextColor={palette.ink3}
                 autoCapitalize="none"
                 autoCorrect={false}
                 className="min-h-11 rounded-lg border border-line bg-field px-3 text-[13px] text-ink"
@@ -202,7 +203,7 @@ export function McpScreen() {
                 value={newCommand}
                 onChangeText={setNewCommand}
                 placeholder="Command (optional)"
-                placeholderTextColor="#7e7e86"
+                placeholderTextColor={palette.ink3}
                 autoCapitalize="none"
                 autoCorrect={false}
                 className="min-h-11 rounded-lg border border-line bg-field px-3 font-mono text-[12px] text-ink"

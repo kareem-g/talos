@@ -13,6 +13,7 @@ import { Layers, Users, X, Zap } from 'lucide-react-native'
 import { mobileApi } from '@app/lib/api'
 import { useStore } from '@app/store'
 import { Button, GlassSurface, Mono, Segmented, TextField } from './ui'
+import { palette } from '@app/design/tokens'
 
 const BUILTIN_ROLES = [
   { id: 'worker', label: 'Worker', desc: 'General-purpose autonomous executor' },
@@ -99,13 +100,13 @@ export function SubagentModal({
         <GlassSurface effect="regular" radius={24} className="border-t border-line bg-surface/95 p-4 pb-8">
           <View className="mb-3 flex-row items-center justify-between border-b border-line pb-2.5">
             <View className="flex-row items-center gap-2">
-              {mode === 'spawn' ? <Users size={16} color="#5b8def" /> : <Layers size={16} color="#5b8def" />}
+              {mode === 'spawn' ? <Users size={16} color={palette.accent} /> : <Layers size={16} color={palette.accent} />}
               <Text className="text-[15px] font-semibold text-ink">
                 {mode === 'spawn' ? 'Spawn Subagent' : 'Fan-Out Orchestration'}
               </Text>
             </View>
             <Pressable onPress={onClose} accessibilityLabel="Close" className="size-8 items-center justify-center rounded-full active:bg-hover">
-              <X size={16} color="#7e7e86" />
+              <X size={16} color={palette.ink3} />
             </Pressable>
           </View>
 
@@ -198,7 +199,7 @@ export function SubagentModal({
                     ? 'What should this subagent investigate or build?'
                     : 'Describe the task to fan out across multiple agents…'
                 }
-                placeholderTextColor="#7e7e86"
+                placeholderTextColor={palette.ink3}
                 multiline
                 numberOfLines={4}
                 className="min-h-24 rounded-xl border border-line bg-field p-3 text-[13px] text-ink"

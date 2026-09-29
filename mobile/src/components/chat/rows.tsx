@@ -42,10 +42,11 @@ import type {
 } from '@/types/conversation'
 import { Mono } from '@app/components/ui'
 import { Prose } from './prose'
+import { palette } from '@app/design/tokens'
 
-const FAILED = '#f85149'
-const DIM = '#7e7e86'
-const GREEN = '#57ab5a'
+const FAILED = palette.danger
+const DIM = palette.ink3
+const GREEN = palette.ok
 
 /* ── Step: a tool call or shell command ──────────────────────────────────── */
 
@@ -93,7 +94,7 @@ export function Step({
       >
         <View className="size-4 shrink-0 items-center justify-center">
           {running ? (
-            <ActivityIndicator size="small" color="#5b8def" />
+            <ActivityIndicator size="small" color={palette.accent} />
           ) : (
             <StepIcon glyph={summary.glyph} failed={failed} />
           )}

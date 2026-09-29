@@ -62,7 +62,13 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "check:api": "node scripts/check-api.mjs",
+    "check:colors": "node scripts/check-colors.mjs",
+    "check:tokens": "node scripts/check-token-usage.mjs",
+    "probe:api": "node scripts/probe-api.mjs",
+    "probe:api:write": "node scripts/probe-api-write.mjs",
+    "verify": "npm run typecheck && npm test && npm run check:api && npm run check:colors && npm run check:tokens"
   },
   "private": true
 }

@@ -36,6 +36,7 @@ import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import { deriveSubagents, hasRecentError, latestPlanInfo, latestUserPrompt } from '@app/lib/sessionView'
 import { Button, GlassSurface, Mono, StatusPill } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 export type RailTab =
   | 'plan'
@@ -109,7 +110,7 @@ export function SessionRail({
             })}
           </ScrollView>
           <Pressable onPress={onClose} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
-            <X size={16} color="#b0b0b6" />
+            <X size={16} color={palette.ink2} />
           </Pressable>
         </View>
         </GlassSurface>
@@ -346,7 +347,7 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
         <View className="mt-3 flex-row flex-wrap gap-1">
           {info.relatedFiles.map((path) => (
             <View key={path} className="flex-row items-center gap-1 rounded-md bg-inset px-1.5 py-0.5">
-              <FileText size={10} color="#7e7e86" />
+              <FileText size={10} color={palette.ink3} />
               <Mono className="text-[9.5px] text-ink-2">{basename(path)}</Mono>
             </View>
           ))}
@@ -370,7 +371,7 @@ function TerminalTab({ session, conversation }: { session: Session; conversation
             value={input}
             onChangeText={setInput}
             placeholder="Type a command…"
-            placeholderTextColor="#7e7e86"
+            placeholderTextColor={palette.ink3}
             autoCapitalize="none"
             autoCorrect={false}
             className="min-h-10 flex-1 rounded-lg border border-line bg-field px-2.5 font-mono text-[12px] text-ink"

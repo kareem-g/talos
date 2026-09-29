@@ -20,6 +20,7 @@ import type { RootStackParamList } from '@app/navigation'
 import { roomsApi } from '@app/lib/api'
 import { getConversation, useStore } from '@app/store'
 import { Button, Dot, GlassSurface, IconButton, Mono, SectionLabel, TextField } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 export function SessionLeftRail({
   open,
@@ -86,10 +87,10 @@ export function SessionLeftRail({
                 </Text>
               </View>
               <IconButton label="New session here" onPress={onNewTask} className="size-9">
-                <Plus size={17} color="#f2f2f3" />
+                <Plus size={17} color={palette.ink} />
               </IconButton>
               <IconButton label="Close" onPress={onClose} className="size-9">
-                <X size={16} color="#b0b0b6" />
+                <X size={16} color={palette.ink2} />
               </IconButton>
             </View>
           </GlassSurface>
@@ -101,7 +102,7 @@ export function SessionLeftRail({
               placeholder="Search sessions…"
               autoCapitalize="none"
               autoCorrect={false}
-              leading={<Search size={14} color="#7e7e86" />}
+              leading={<Search size={14} color={palette.ink3} />}
             />
           </View>
 
@@ -170,7 +171,7 @@ export function SessionLeftRail({
                   onPress={() => room.session_id && openSession(room.session_id)}
                   className="min-h-11 flex-row items-center gap-2 rounded-control px-2.5 active:bg-hover-2"
                 >
-                  <Waypoints size={14} color="#7e7e86" />
+                  <Waypoints size={14} color={palette.ink3} />
                   <Text className="min-w-0 flex-1 text-[12.5px] text-ink-2" numberOfLines={1}>
                     {room.name}
                   </Text>

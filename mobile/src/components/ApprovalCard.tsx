@@ -18,6 +18,7 @@ import { Pressable, Text, TextInput, View } from 'react-native'
 import type { ApprovalPart } from '@/types/conversation'
 import { useStore } from '@app/store'
 import { cn } from '@/lib/format'
+import { palette } from '@app/design/tokens'
 
 const RISK_TONE: Record<string, string> = {
   low: 'text-ink-3',
@@ -86,7 +87,7 @@ export function ApprovalCard({ sessionId, part }: { sessionId: string; part: App
               value={customText}
               onChangeText={setCustomText}
               placeholder="Add a note (optional)"
-              placeholderTextColor="#7e7e86"
+              placeholderTextColor={palette.ink3}
               className="mb-2 rounded-control border border-line bg-field px-3 py-2 text-[13px] text-ink"
             />
           ) : null}

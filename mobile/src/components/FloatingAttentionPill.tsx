@@ -14,6 +14,7 @@ import { useConversation, useStore } from '@app/store'
 import { firstOpenApprovalId, sessionUIState } from '@/lib/sessionState'
 import { useOpenSession } from '@app/navigation'
 import { GlassSurface } from './Glass'
+import { palette } from '@app/design/tokens'
 
 export function FloatingAttentionPill() {
   const sessions = useStore((s) => s.sessions)
@@ -62,11 +63,11 @@ export function FloatingAttentionPill() {
         >
           <View className="min-h-11 flex-row items-center gap-2.5 px-4 py-2">
             <View className="size-2 rounded-full bg-red animate-pulse" />
-            <AlertCircle size={15} color="#f85149" />
+            <AlertCircle size={15} color={palette.danger} />
             <Text className="text-[13px] font-semibold text-ink">
               {count} {count === 1 ? 'action needs' : 'actions need'} attention
             </Text>
-            <ChevronRight size={14} color="#f85149" />
+            <ChevronRight size={14} color={palette.danger} />
           </View>
         </GlassSurface>
       </Pressable>

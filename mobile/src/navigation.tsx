@@ -36,6 +36,7 @@ import { RemoteScreen } from './screens/RemoteScreen'
 import { DaemonSettingsScreen } from './screens/DaemonSettingsScreen'
 import { AppNav } from './components/AppNav'
 import { isPaired } from './lib/pairing'
+import { palette } from '@app/design/tokens'
 
 /** Rail destinations — the desktop's exact `NavPage` set, plus management screens. */
 export type DrawerParamList = {
@@ -125,7 +126,7 @@ function MainDrawer() {
       screenOptions={{
         headerShown: false,
         drawerType: 'front',
-        drawerStyle: { width: 264, backgroundColor: '#17171b', borderRightColor: '#34343a' },
+        drawerStyle: { width: 264, backgroundColor: palette.chrome, borderRightColor: palette.lineStrong },
         overlayColor: 'rgba(0,0,0,0.65)',
         swipeEdgeWidth: 44,
       }}

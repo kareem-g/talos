@@ -25,6 +25,7 @@ import {
   PageHeader,
   SectionLabel,
 } from '@app/components/ui'
+import { palette } from '@app/design/tokens'
 
 interface TunnelEndpoint {
   base_url: string
@@ -128,7 +129,7 @@ export function RemoteScreen() {
       <PageHeader onMenu={() => navigation.openDrawer()} title="Remote Access" />
 
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7e7e86" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
         contentContainerClassName="pb-10"
       >
         <View className="gap-3 px-4 pt-5 pb-3">
@@ -231,7 +232,7 @@ export function RemoteScreen() {
                 <Card key={device.id}>
                   <View className="flex-row items-center gap-3 p-3.5">
                     <View className="size-9 items-center justify-center rounded-lg bg-accent-tint">
-                      <Smartphone size={16} color="#5b8def" />
+                      <Smartphone size={16} color={palette.accent} />
                     </View>
                     <View className="min-w-0 flex-1">
                       <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>

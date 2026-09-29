@@ -29,6 +29,7 @@ import * as Notifications from 'expo-notifications'
 import { Linking, Platform } from 'react-native'
 import type { IncomingFrame } from '@/types/protocol'
 import { readStringSet, writeStringSet } from './storage'
+import { palette } from '@app/design/tokens'
 
 const DEDUP_KEY = 'agentdeck-notified-ids'
 const CHANNEL_ID = 'agent-attention'
@@ -95,7 +96,7 @@ export async function ensureNotificationSetup(): Promise<void> {
       name: 'Agent attention',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#5b8def',
+      lightColor: palette.accent,
     })
   }
   // A single "View" action that routes into the app. It never resolves the

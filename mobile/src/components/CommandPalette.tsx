@@ -32,6 +32,7 @@ import { useOpenSession, type DrawerParamList } from '@app/navigation'
 import { basename, relativeTime } from '@/lib/format'
 import { GlassSurface, Mono, TextField } from './ui'
 import { providersApi } from '@app/lib/api'
+import { palette } from '@app/design/tokens'
 
 export function CommandPalette({
   open,
@@ -104,7 +105,7 @@ export function CommandPalette({
           >
             {/* Search Input Bar */}
             <View className="flex-row items-center border-b border-line px-3.5 py-3">
-              <Command size={18} color="#7e7e86" />
+              <Command size={18} color={palette.ink3} />
               <TextField
                 value={query}
                 onChangeText={setQuery}
@@ -119,7 +120,7 @@ export function CommandPalette({
                 accessibilityLabel="Close"
                 className="size-8 items-center justify-center rounded-full active:bg-hover"
               >
-                <X size={16} color="#7e7e86" />
+                <X size={16} color={palette.ink3} />
               </Pressable>
             </View>
 
@@ -142,7 +143,7 @@ export function CommandPalette({
                 }}
                 className="flex-row items-center gap-2.5 rounded-lg px-3 py-2.5 active:bg-hover"
               >
-                <FilePlus size={15} color="#5b8def" />
+                <FilePlus size={15} color={palette.accent} />
                 <Text className="text-[13px] font-medium text-ink">New Task</Text>
                 <Mono className="ml-auto text-[10px] text-ink-3">Create session</Mono>
               </Pressable>
@@ -152,7 +153,7 @@ export function CommandPalette({
                 disabled={busyAction !== null}
                 className="flex-row items-center gap-2.5 rounded-lg px-3 py-2.5 active:bg-hover"
               >
-                <RefreshCw size={15} color="#5b8def" className={busyAction === 'rescan' ? 'animate-spin' : ''} />
+                <RefreshCw size={15} color={palette.accent} className={busyAction === 'rescan' ? 'animate-spin' : ''} />
                 <Text className="text-[13px] font-medium text-ink">
                   {busyAction === 'rescan' ? 'Re-scanning…' : 'Re-scan $PATH & Providers'}
                 </Text>
@@ -167,7 +168,7 @@ export function CommandPalette({
                   }}
                   className="flex-row items-center gap-2.5 rounded-lg px-3 py-2.5 active:bg-hover"
                 >
-                  <Compass size={15} color="#db6d28" />
+                  <Compass size={15} color={palette.wait} />
                   <Text className="text-[13px] font-medium text-ink">Discover CLI Sessions</Text>
                   <Mono className="ml-auto text-[10px] text-ink-3">Import</Mono>
                 </Pressable>
@@ -183,42 +184,42 @@ export function CommandPalette({
                   onPress={() => navigateTo('Home')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <Home size={14} color="#b0b0b6" />
+                  <Home size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">Home</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => navigateTo('Agents')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <Bot size={14} color="#b0b0b6" />
+                  <Bot size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">Agents</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => navigateTo('Browsers')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <Globe size={14} color="#b0b0b6" />
+                  <Globe size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">Browsers</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => navigateTo('History')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <History size={14} color="#b0b0b6" />
+                  <History size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">History</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => navigateTo('Usage')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <BarChart3 size={14} color="#b0b0b6" />
+                  <BarChart3 size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">Usage</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => navigateTo('Config')}
                   className="min-h-9 flex-row items-center gap-2 rounded-lg px-2.5 active:bg-hover"
                 >
-                  <Settings size={14} color="#b0b0b6" />
+                  <Settings size={14} color={palette.ink2} />
                   <Text className="text-[12px] text-ink-2">Configuration</Text>
                 </Pressable>
               </View>

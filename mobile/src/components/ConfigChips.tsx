@@ -22,6 +22,7 @@ import { socket } from '@app/lib/socket'
 import { getConversation, useStore } from '@app/store'
 import { Button, Mono } from '@app/components/ui'
 import { GlassSurface } from '@app/components/Glass'
+import { palette } from '@app/design/tokens'
 
 /** Dimensions that are not meaningful as a chip. */
 const HIDDEN_OPTIONS = new Set(['worktree', 'cwd', 'command'])
@@ -66,7 +67,7 @@ function OptionChip({ option, onOpen }: { option: ConfigOption; onOpen: () => vo
       <Text className="max-w-[110px] text-[11px] font-medium text-ink-2" numberOfLines={1}>
         {label}
       </Text>
-      <ChevronDown size={10} color="#7e7e86" />
+      <ChevronDown size={10} color={palette.ink3} />
     </Pressable>
   )
 }
@@ -102,7 +103,7 @@ function OptionSheet({
             <View className="flex-row items-center justify-between px-3.5 py-3 pt-12">
               <Text className="text-[13px] font-medium text-ink">{option?.name ?? ''}</Text>
               <Pressable onPress={onClose} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full active:bg-hover-2">
-                <X size={16} color="#b0b0b6" />
+                <X size={16} color={palette.ink2} />
               </Pressable>
             </View>
           </GlassSurface>
@@ -128,7 +129,7 @@ function OptionSheet({
                   value={custom}
                   onChangeText={setCustom}
                   placeholder="Custom value…"
-                  placeholderTextColor="#7e7e86"
+                  placeholderTextColor={palette.ink3}
                   autoCapitalize="none"
                   autoCorrect={false}
                   className="min-h-10 flex-1 rounded-lg border border-line bg-field px-2.5 text-[12.5px] text-ink"
@@ -201,14 +202,14 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
   if (working) {
     return (
       <View className="size-6 items-center justify-center">
-        <ActivityIndicator size="small" color="#b0b0b6" />
+        <ActivityIndicator size="small" color={palette.ink2} />
       </View>
     )
   }
   if (!usage) return <View className="size-6" />
 
   const pct = usage.window ? Math.min(100, (usage.input / usage.window) * 100) : 0
-  const color = pct > 85 ? '#f85149' : pct > 60 ? '#db6d28' : '#57ab5a'
+  const color = pct > 85 ? palette.danger : pct > 60 ? palette.wait : palette.ok
 
   return (
     <>
@@ -218,7 +219,7 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
         className="size-8 items-center justify-center rounded-full active:bg-hover-2"
       >
         <Svg width={16} height={16} viewBox="0 0 14 14">
-          <Circle cx={7} cy={7} r={RING_RADIUS} stroke="#34343a" strokeWidth={2} fill="none" />
+          <Circle cx={7} cy={7} r={RING_RADIUS} stroke={palette.lineStrong} strokeWidth={2} fill="none" />
           {usage.window ? (
             <Circle
               cx={7}

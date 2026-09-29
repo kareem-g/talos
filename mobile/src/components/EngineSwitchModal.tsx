@@ -11,6 +11,7 @@ import { Bot, Cpu, X } from 'lucide-react-native'
 
 import { useStore, type MobileAgent } from '@app/store'
 import { Button, GlassSurface, Mono } from './ui'
+import { palette } from '@app/design/tokens'
 
 export function EngineSwitchModal({
   open,
@@ -67,11 +68,11 @@ export function EngineSwitchModal({
         <GlassSurface effect="regular" radius={24} className="border-t border-line bg-surface/95 p-4 pb-8">
           <View className="mb-3 flex-row items-center justify-between border-b border-line pb-2.5">
             <View className="flex-row items-center gap-2">
-              <Cpu size={16} color="#5b8def" />
+              <Cpu size={16} color={palette.accent} />
               <Text className="text-[15px] font-semibold text-ink">Switch Session Engine</Text>
             </View>
             <Pressable onPress={onClose} accessibilityLabel="Close" className="size-8 items-center justify-center rounded-full active:bg-hover">
-              <X size={16} color="#7e7e86" />
+              <X size={16} color={palette.ink3} />
             </Pressable>
           </View>
 
@@ -97,7 +98,7 @@ export function EngineSwitchModal({
                       active ? 'border-accent bg-accent-tint' : 'border-line bg-field active:bg-hover'
                     }`}
                   >
-                    <Bot size={18} color={active ? '#5b8def' : '#7e7e86'} />
+                    <Bot size={18} color={active ? palette.accent : palette.ink3} />
                     <View className="min-w-0 flex-1">
                       <Text className={`text-[13px] font-medium ${active ? 'text-ink' : 'text-ink-2'}`}>
                         {agent.name}

@@ -35,6 +35,7 @@ import {
   VerificationCard,
 } from './chat/rows'
 import { Chips, Prose } from './chat/prose'
+import { palette } from '@app/design/tokens'
 
 /* ── Tool group ──────────────────────────────────────────────────────────── */
 
@@ -68,7 +69,7 @@ function ToolGroup({ parts }: { parts: Array<MessagePart> }) {
           {running ? ' · running' : ''}
         </Mono>
         <View className="flex-1" />
-        <ChevronDown size={11} color="#7e7e86" style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
+        <ChevronDown size={11} color={palette.ink3} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
       </Pressable>
     </View>
   )
@@ -153,12 +154,12 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
       >
         <ChevronDown
           size={12}
-          color="#7e7e86"
+          color={palette.ink3}
           style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }}
         />
         <Text className="shrink-0 text-[12px] text-ink-2">{label}</Text>
         {part.durationMs && !part.streaming ? (
-          <Check size={11} color="#57ab5a" />
+          <Check size={11} color={palette.ok} />
         ) : null}
       </Pressable>
       {open && hasText ? (
