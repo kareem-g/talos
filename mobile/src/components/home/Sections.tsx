@@ -14,8 +14,8 @@
  */
 
 import * as React from 'react'
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native'
-import { Play, Plus, Trash2, X, Zap } from 'lucide-react-native'
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Eye, Play, Plus, Trash2, X, Zap } from 'lucide-react-native'
 
 import { basename, cn } from '@/lib/format'
 import { skillsApi } from '@app/lib/api'
@@ -272,6 +272,9 @@ export function SkillsSection() {
   const [available, setAvailable] = React.useState<Array<{ id: string; name: string; description?: string }>>([])
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
+  const [viewSkill, setViewSkill] = React.useState<{ id: string; name: string; content: string } | null>(null)
+  const [viewLoading, setViewLoading] = React.useState(false)
+  const [confirmUninstall, setConfirmUninstall] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (project === null && projects.length > 0) setProject(projects[0])
@@ -316,6 +319,33 @@ export function SkillsSection() {
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not install that skill')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function viewSkillContent(id: string, name: string) {
+    if (!project) return
+    setViewLoading(true)
+    try {
+      const res = await skillsApi.content(id, project)
+      setViewSkill({ id, name, content: res.content ?? '' })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not read skill content')
+    } finally {
+      setViewLoading(false)
+    }
+  }
+
+  async function uninstallSkill(name: string) {
+    if (!project) return
+    setBusy(name)
+    try {
+      await skillsApi.uninstall(name, project)
+      setConfirmUninstall(null)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not uninstall that skill')
     } finally {
       setBusy(null)
     }
@@ -367,10 +397,18 @@ export function SkillsSection() {
                 <Text className="text-[11.5px] text-ink-3">Nothing installed for this project yet.</Text>
               ) : (
                 installed.map((skill) => (
-                  <View key={skill.id} className="min-h-10 flex-row items-center gap-2">
+                  <View key={skill.id} className="min-h-10 flex-row items-center gap-1.5">
                     <Text className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
                       {skill.name}
                     </Text>
+                    <Pressable
+                      onPress={() => void viewSkillContent(skill.id, skill.name)}
+                      disabled={viewLoading}
+                      accessibilityLabel={`View ${skill.name}`}
+                      className="size-7 items-center justify-center rounded-lg active:bg-hover"
+                    >
+                      <Eye size={13} color="#7e7e86" />
+                    </Pressable>
                     <Pressable
                       onPress={() => void toggleSkill(skill.id, !skill.enabled)}
                       disabled={busy === skill.id}
@@ -383,6 +421,25 @@ export function SkillsSection() {
                     >
                       <View className={cn('size-2 rounded-full', skill.enabled ? 'bg-green' : 'bg-ink-3')} />
                     </Pressable>
+                    {confirmUninstall === skill.id ? (
+                      <Pressable
+                        onPress={() => void uninstallSkill(skill.name)}
+                        disabled={busy === skill.id}
+                        className="min-h-7 rounded-lg bg-red-tint px-2 items-center justify-center"
+                      >
+                        <Text className="text-[10.5px] font-semibold text-red">
+                          {busy === skill.id ? '…' : 'Confirm'}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        onPress={() => setConfirmUninstall(skill.id)}
+                        accessibilityLabel={`Uninstall ${skill.name}`}
+                        className="size-7 items-center justify-center rounded-lg active:bg-red-tint"
+                      >
+                        <Trash2 size={13} color="#7e7e86" />
+                      </Pressable>
+                    )}
                   </View>
                 ))
               )}
@@ -420,6 +477,33 @@ export function SkillsSection() {
           </>
         )}
       </View>
+
+      {/* Skill content viewer */}
+      <Modal visible={viewSkill !== null} transparent animationType="slide" onRequestClose={() => setViewSkill(null)}>
+        <Pressable className="flex-1 justify-end bg-black/65" onPress={() => setViewSkill(null)}>
+          <Pressable className="max-h-[80%] rounded-t-2xl border border-line bg-surface" onPress={(e) => e.stopPropagation()}>
+            <View className="flex-row items-center justify-between border-b border-line px-3.5 py-2.5">
+              <View className="min-w-0 flex-1">
+                <Mono className="text-[9.5px] uppercase tracking-wider text-ink-3">Skill content</Mono>
+                <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>
+                  {viewSkill?.name}
+                </Text>
+              </View>
+              <Pressable onPress={() => setViewSkill(null)} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
+                <X size={16} color="#b0b0b6" />
+              </Pressable>
+            </View>
+            <ScrollView className="p-3.5">
+              <TextInput
+                value={viewSkill?.content ?? ''}
+                editable={false}
+                multiline
+                className="font-mono text-[11.5px] leading-5 text-ink-2"
+              />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Card>
   )
 }

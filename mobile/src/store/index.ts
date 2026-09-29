@@ -142,6 +142,15 @@ interface StoreState {
   dismissNotice: (sessionId: string) => void
   toggleStar: (sessionId: string) => void
   isStarred: (sessionId: string) => boolean
+  removeSession: (sessionId: string) => Promise<boolean>
+  resumeSession: (sessionId: string) => Promise<boolean>
+  forkSession: (sessionId: string) => Promise<Session | undefined>
+  archiveSession: (sessionId: string, restore?: boolean) => Promise<boolean>
+  switchEngine: (sessionId: string, agent: string, model?: string) => Promise<boolean>
+  pendingActions: import('../lib/api').PendingAction[]
+  loadPending: () => Promise<void>
+  theme: 'dark' | 'midnight' | 'oled'
+  setTheme: (theme: 'dark' | 'midnight' | 'oled') => void
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -155,6 +164,8 @@ export const useStore = create<StoreState>((set, get) => ({
   notices: {},
   queues: {},
   starred: storage.getJSON<string[]>(STARRED_KEY) ?? [],
+  pendingActions: [],
+  theme: (storage.getString('agentdeck-theme') as 'dark' | 'midnight' | 'oled') || 'dark',
 
   /** Connect the socket and wire frames into the store. Idempotent. */
   start() {
@@ -374,6 +385,83 @@ export const useStore = create<StoreState>((set, get) => ({
 
   isStarred(sessionId) {
     return get().starred.includes(sessionId)
+  },
+
+  async removeSession(sessionId) {
+    try {
+      await mobileApi.remove(sessionId)
+      conversations.delete(sessionId)
+      set((state) => ({ sessions: state.sessions.filter((s) => s.id !== sessionId) }))
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  async resumeSession(sessionId) {
+    try {
+      const res = await mobileApi.resume(sessionId)
+      if (res.session) {
+        set((state) => ({ sessions: upsertSession(state.sessions, res.session!) }))
+      }
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  async forkSession(sessionId) {
+    try {
+      const res = await mobileApi.fork(sessionId)
+      if (res.session) {
+        set((state) => ({ sessions: upsertSession(state.sessions, res.session!) }))
+        return res.session
+      }
+      return undefined
+    } catch {
+      return undefined
+    }
+  },
+
+  async archiveSession(sessionId, restore = false) {
+    try {
+      if (restore) {
+        await mobileApi.restore(sessionId)
+      } else {
+        await mobileApi.archive(sessionId)
+      }
+      void get().loadSnapshot()
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  async switchEngine(sessionId, agent, model) {
+    try {
+      const res = await mobileApi.switchEngine(sessionId, agent, model)
+      if (res.switched) {
+        void get().loadSnapshot()
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  },
+
+  async loadPending() {
+    try {
+      const res = await mobileApi.pending()
+      set({ pendingActions: res.pending ?? [] })
+    } catch {
+      // offline or error
+    }
+  },
+
+  setTheme(theme) {
+    storage.set('agentdeck-theme', theme)
+    set({ theme })
   },
 }))
 

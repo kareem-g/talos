@@ -195,11 +195,36 @@ export const mobileApi = {
     request<{ restored: boolean }>(`/api/mobile/sessions/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
   remove: (id: string) =>
     request<{ deleted: boolean }>(`/api/mobile/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  config: (id: string) => request<{ config: unknown }>(`/api/mobile/sessions/${id}/config`),
+  config: (id: string) => request<{ config: unknown }>(`/api/mobile/sessions/${encodeURIComponent(id)}/config`),
   resume: (id: string) =>
-    request<{ session?: Session }>(`/api/mobile/sessions/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+    request<{ session?: Session }>(`/api/mobile/sessions/${encodeURIComponent(id)}/resume`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: id }),
+    }),
   fork: (id: string) =>
     request<{ session?: Session }>(`/api/mobile/sessions/${encodeURIComponent(id)}/fork`, { method: 'POST' }),
+  switchEngine: (id: string, agent: string, model?: string) =>
+    request<{ switched: boolean; error?: string }>(
+      `/api/mobile/sessions/${encodeURIComponent(id)}/engine`,
+      { method: 'POST', body: JSON.stringify({ agent, ...(model ? { model } : {}) }) },
+    ),
+  spawnSubagent: (
+    id: string,
+    body: { prompt: string; agent?: string; role?: string; model?: string; max_cost_usd?: number },
+  ) =>
+    request<{ child_session_id?: string; agent?: string; status?: string; reply?: string; error?: string }>(
+      `/api/mobile/sessions/${encodeURIComponent(id)}/subagents`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  orchestrate: (id: string, body: { prompt: string; agents: string[]; merge?: boolean }) =>
+    request<Record<string, unknown>>(
+      `/api/mobile/sessions/${encodeURIComponent(id)}/orchestrate`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  trajectories: (id: string) =>
+    request<{ transcripts?: unknown[]; events?: unknown[] }>(
+      `/api/mobile/sessions/${encodeURIComponent(id)}/transcripts`,
+    ),
 }
 
 /* ── Attachments ─────────────────────────────────────────────────────────── */
@@ -380,6 +405,10 @@ export const workspaceApi = {
       method: 'POST',
       body: JSON.stringify({ project }),
     }),
+  worktrees: () =>
+    request<{ worktrees: Array<{ path: string; branch?: string; head?: string }> }>(
+      '/api/mobile/worktrees',
+    ),
 }
 
 /* ── Browser (CDP) ───────────────────────────────────────────────────────── */
@@ -532,6 +561,36 @@ export const remoteApi = {
     ),
   revoke: (id: string) =>
     request<{ revoked: boolean }>(`/api/mobile/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
+export const memoryApi = {
+  config: (project?: string) =>
+    request<{ enabled: boolean; project?: string }>(
+      `/api/mobile/memory/config${project ? `?project=${encodeURIComponent(project)}` : ''}`,
+    ),
+  setConfig: (enabled: boolean, project?: string) =>
+    request<{ enabled: boolean }>(
+      `/api/mobile/memory/config${project ? `?project=${encodeURIComponent(project)}` : ''}`,
+      { method: 'PUT', body: JSON.stringify({ enabled }) },
+    ),
+  list: (project?: string) =>
+    request<{ memories: Array<{ id: string; content: string; created_at: string }> }>(
+      `/api/mobile/memory${project ? `?project=${encodeURIComponent(project)}` : ''}`,
+    ),
+  delete: (id: string) =>
+    request<{ ok: boolean }>(`/api/mobile/memory?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
+export const syncApi = {
+  discover: () =>
+    request<{
+      discovered: Array<{ id: string; name: string; agent: string; project?: string; updated_at?: string }>
+    }>('/api/sessions/discover'),
+  sync: (sessions: unknown[]) =>
+    request<{ synced: number }>('/api/sessions/sync', {
+      method: 'POST',
+      body: JSON.stringify({ sessions }),
+    }),
 }
 
 /**

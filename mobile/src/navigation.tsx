@@ -31,10 +31,13 @@ import { AgentsScreen } from './screens/AgentsScreen'
 import { BrowsersScreen } from './screens/BrowsersScreen'
 import { UsageScreen } from './screens/UsageScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { McpScreen } from './screens/McpScreen'
+import { RemoteScreen } from './screens/RemoteScreen'
+import { DaemonSettingsScreen } from './screens/DaemonSettingsScreen'
 import { AppNav } from './components/AppNav'
 import { isPaired } from './lib/pairing'
 
-/** Rail destinations — the desktop's exact `NavPage` set. */
+/** Rail destinations — the desktop's exact `NavPage` set, plus management screens. */
 export type DrawerParamList = {
   Home: undefined
   Agents: undefined
@@ -42,6 +45,9 @@ export type DrawerParamList = {
   History: undefined
   Usage: undefined
   Config: undefined
+  Mcp: undefined
+  Remote: undefined
+  DaemonSettings: undefined
 }
 
 export type RootStackParamList = {
@@ -68,6 +74,9 @@ const linking = {
           History: 'history',
           Usage: 'usage',
           Config: 'config',
+          Mcp: 'mcp',
+          Remote: 'remote',
+          DaemonSettings: 'daemon-settings',
         },
       },
       Session: 'session/:sessionId',
@@ -127,6 +136,9 @@ function MainDrawer() {
       <Drawer.Screen name="History" component={HistoryScreen} />
       <Drawer.Screen name="Usage" component={UsageScreen} />
       <Drawer.Screen name="Config" component={SettingsScreen} />
+      <Drawer.Screen name="Mcp" component={McpScreen} />
+      <Drawer.Screen name="Remote" component={RemoteScreen} />
+      <Drawer.Screen name="DaemonSettings" component={DaemonSettingsScreen} />
     </Drawer.Navigator>
   )
 }

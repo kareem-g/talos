@@ -17,7 +17,17 @@ import * as React from 'react'
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { FileText, X } from 'lucide-react-native'
 
-import { BrowserTab, FilesTab, GitTab, ProjectsTab, RoomsTab } from './SessionRailTabs'
+import {
+  BrowserTab,
+  FilesTab,
+  GitTab,
+  ProjectsTab,
+  RoomsTab,
+  SideTab,
+  TerminalsTab,
+  TrajectoriesTab,
+} from './SessionRailTabs'
+import { SubagentModal } from './SubagentModal'
 
 import { basename, cn } from '@/lib/format'
 import type { Conversation } from '@/types/conversation'
@@ -38,13 +48,11 @@ export type RailTab =
   | 'projects'
   | 'subsessions'
   | 'rooms'
+  | 'side'
   | 'terminal'
+  | 'terminals'
+  | 'trajectories'
 
-/**
- * The desktop's rail tab set (its `rightTabs.ts`), minus `side`: that tab needs a
- * per-project scratch session the desktop tracks in localStorage, and there is no
- * equivalent identity for it on the phone yet.
- */
 const TABS: Array<{ id: RailTab; label: string }> = [
   { id: 'plan', label: 'Plan' },
   { id: 'agents', label: 'Agents' },
@@ -53,10 +61,13 @@ const TABS: Array<{ id: RailTab; label: string }> = [
   { id: 'goal', label: 'Goal' },
   { id: 'browser', label: 'Browser' },
   { id: 'files', label: 'Files' },
+  { id: 'side', label: 'Side' },
   { id: 'projects', label: 'Projects' },
   { id: 'subsessions', label: 'Sub-sessions' },
   { id: 'rooms', label: 'Rooms' },
   { id: 'terminal', label: 'Terminal' },
+  { id: 'terminals', label: 'Terminals' },
+  { id: 'trajectories', label: 'Trajectories' },
 ]
 
 /* ── Sheet ───────────────────────────────────────────────────────────────── */
@@ -73,6 +84,7 @@ export function SessionRail({
   conversation: Conversation
 }) {
   const [tab, setTab] = React.useState<RailTab>('plan')
+  const [subagentOpen, setSubagentOpen] = React.useState(false)
 
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
@@ -104,26 +116,41 @@ export function SessionRail({
 
         <ScrollView contentContainerClassName="p-4 pb-10">
           {tab === 'plan' ? <PlanTab conversation={conversation} /> : null}
-          {tab === 'agents' ? <AgentsTab session={session} conversation={conversation} /> : null}
+          {tab === 'agents' ? (
+            <AgentsTab
+              session={session}
+              conversation={conversation}
+              onOpenSubagentModal={() => setSubagentOpen(true)}
+            />
+          ) : null}
           {tab === 'goal' ? <GoalTab session={session} conversation={conversation} /> : null}
           {tab === 'git-diff' || tab === 'git-files' ? <GitTab session={session} /> : null}
           {tab === 'browser' ? <BrowserTab session={session} /> : null}
           {tab === 'files' ? <FilesTab session={session} /> : null}
+          {tab === 'side' ? <SideTab session={session} /> : null}
           {tab === 'projects' ? <ProjectsTab /> : null}
           {tab === 'rooms' ? <RoomsTab /> : null}
           {tab === 'terminal' ? <TerminalTab session={session} conversation={conversation} /> : null}
+          {tab === 'terminals' ? <TerminalsTab session={session} /> : null}
+          {tab === 'trajectories' ? <TrajectoriesTab session={session} /> : null}
           {tab === 'subsessions' ? <SubSessionsTab session={session} /> : null}
         </ScrollView>
+
+        <SubagentModal
+          open={subagentOpen}
+          onClose={() => setSubagentOpen(false)}
+          sessionId={session.id}
+        />
       </View>
     </Modal>
   )
 }
 
-function ViewHeader({ eyebrow, right }: { eyebrow: string; right?: string }) {
+function ViewHeader({ eyebrow, right }: { eyebrow: string; right?: React.ReactNode }) {
   return (
     <View className="mb-3 flex-row items-center justify-between gap-2 border-b border-line pb-2">
       <Mono className="text-[10px] uppercase tracking-[0.14em] text-ink-3">{eyebrow}</Mono>
-      {right ? <Mono className="text-[10px] text-ink-3">{right}</Mono> : null}
+      {typeof right === 'string' ? <Mono className="text-[10px] text-ink-3">{right}</Mono> : right}
     </View>
   )
 }
@@ -181,22 +208,54 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
   )
 }
 
-function AgentsTab({ session, conversation }: { session: Session; conversation: Conversation }) {
+function AgentsTab({
+  session,
+  conversation,
+  onOpenSubagentModal,
+}: {
+  session: Session
+  conversation: Conversation
+  onOpenSubagentModal?: () => void
+}) {
   const subagents = deriveSubagents(conversation.messages)
   return (
     <View>
-      <ViewHeader eyebrow="Agents" right={`${subagents.length} subagents`} />
+      <ViewHeader
+        eyebrow="Agents"
+        right={
+          onOpenSubagentModal ? (
+            <Button
+              variant="surface"
+              label="+ Subagent"
+              className="min-h-7 px-2"
+              onPress={onOpenSubagentModal}
+            />
+          ) : (
+            `${subagents.length} subagents`
+          )
+        }
+      />
       <View className="flex-row items-center gap-2 py-1.5">
         <View className="size-1.5 rounded-full bg-green" />
-        <Text className="text-[11.5px] text-ink">{session.agent}</Text>
-        <Mono className="text-[9px] uppercase">primary</Mono>
+        <Text className="text-[11.5px] text-ink font-semibold">{session.agent}</Text>
+        <Mono className="text-[9px] uppercase text-accent font-semibold">primary</Mono>
       </View>
       {subagents.length === 0 ? (
-        <Text className="mt-2 text-[11.5px] text-ink-3">No subagents spawned in this session.</Text>
+        <View className="mt-2 rounded-lg border border-line bg-field p-3 gap-2">
+          <Text className="text-[11.5px] text-ink-3">No subagents running in this session.</Text>
+          {onOpenSubagentModal ? (
+            <Button
+              variant="primary"
+              label="Spawn Subagent or Fan-Out"
+              className="min-h-9"
+              onPress={onOpenSubagentModal}
+            />
+          ) : null}
+        </View>
       ) : (
         <View className="mt-1 gap-1">
           {subagents.map((agent) => (
-            <View key={agent.id} className="flex-row items-center gap-2 rounded-control px-1.5 py-1.5">
+            <View key={agent.id} className="flex-row items-center gap-2 rounded-control px-1.5 py-1.5 bg-surface border border-line">
               <View
                 className={cn(
                   'size-1.5 rounded-full',

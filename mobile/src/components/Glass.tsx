@@ -1,17 +1,19 @@
 /**
- * Glass — the iOS 26 liquid-glass chrome, with a fallback that keeps the desktop
- * look everywhere else.
+ * Glass — iOS 26 liquid-glass chrome.
  *
- * `@callstack/liquid-glass` is the native effect (not a blurred-image imitation):
- * it renders `UIVisualEffectView`-style glass that adapts to whatever scrolls
- * behind it. It only exists on iOS 26+, so on older iOS and on Android this falls
- * back to the desktop's own surface token — the same `#26262b` the dashboard
- * uses, with the same hairline — so the app never looks half-finished.
+ * Apple's design principle: "Translucent materials convey hierarchy."
+ * Glass is used for chrome that floats over scrolling content (headers,
+ * toolbars, sheets, floating pills). Content cards stay solid bg-surface
+ * because glass behind body text costs legibility.
  *
- * Where it is used deliberately: chrome only. Headers, the rail bars, the
- * composer card and the floating action sit over scrolling content, which is
- * exactly what glass is for. Content cards stay solid `bg-surface`, because that
- * is what the desktop does and glass behind body text costs legibility.
+ * Material weight encodes hierarchy:
+ *   - Headers/toolbars: regular effect (medium blur)
+ *   - Floating pills/sheets: regular + interactive (grows on touch)
+ *   - Subtle overlays: clear effect (light tint, minimal blur)
+ *
+ * Fallback: when liquid glass is unavailable (Android, older iOS), surfaces
+ * use a refined dark tone with a bright top-edge hairline that mimics light
+ * catching the edge of a physical material.
  */
 
 import * as React from 'react'
@@ -21,15 +23,12 @@ import { isLiquidGlassSupported, LiquidGlassView, LiquidGlassContainerView } fro
 
 import { cn } from '@/lib/format'
 
-/** True only where the native effect actually renders. */
 export const GLASS = Platform.OS === 'ios' && isLiquidGlassSupported
 
-// Lets NativeWind apply `className` to the native view, so call sites do not have
-// to branch on platform for styling.
 cssInterop(LiquidGlassView, { className: 'style' })
 
-/** The desktop's surface + hairline, used wherever glass is unavailable. */
-const FALLBACK = 'border border-line bg-surface'
+/** Refined fallback: surface with a bright top edge to simulate light catch. */
+const FALLBACK_BASE = 'bg-surface border-b border-line-strong'
 
 export function GlassSurface({
   effect = 'regular',
@@ -42,14 +41,17 @@ export function GlassSurface({
   ...rest
 }: ViewProps & {
   effect?: 'clear' | 'regular' | 'none'
-  /** Grows and shimmers on touch — for buttons and tappable bars. */
   interactive?: boolean
   tint?: string
   radius?: number
 }) {
   if (!GLASS) {
     return (
-      <View className={cn(FALLBACK, className)} style={style} {...rest}>
+      <View
+        className={cn(FALLBACK_BASE, className)}
+        style={[{ borderRadius: radius, overflow: 'hidden' }, style as StyleProp<ViewStyle>]}
+        {...rest}
+      >
         {children}
       </View>
     )
@@ -70,8 +72,8 @@ export function GlassSurface({
 }
 
 /**
- * Groups several glass elements so they merge into one material as they get
- * close — the behaviour iOS uses for a toolbar of separate buttons.
+ * Groups glass elements so they merge into one material when close —
+ * the behaviour iOS uses for toolbar buttons.
  */
 export function GlassGroup({
   spacing = 8,

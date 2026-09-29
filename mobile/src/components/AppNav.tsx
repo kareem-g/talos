@@ -17,10 +17,12 @@ import Clipboard from '@react-native-clipboard/clipboard'
 import {
   BarChart3,
   Bot,
+  Cloud,
   Globe,
   History as HistoryIcon,
   Home as HomeIcon,
   KeyRound,
+  Server,
   Settings as SettingsIcon,
   Smartphone,
   Wrench,
@@ -108,13 +110,13 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
   return (
     <View className="flex-1 bg-sidebar">
       {/* Brand */}
-      <View className="h-14 flex-row items-center gap-2.5 px-3.5">
-        <BrandMark />
-        <Text className="text-[15px] font-semibold text-ink">AgentDeck</Text>
+      <View className="h-14 flex-row items-center gap-3 px-4">
+        <BrandMark size={24} />
+        <Text className="text-[17px] font-bold tracking-tight text-ink">AgentDeck</Text>
       </View>
 
-      <View className="px-2.5 pb-1">
-        <Button variant="primary" label="New task" onPress={() => void newTask()} />
+      <View className="px-3 pb-2">
+        <Button variant="primary" label="New Task" onPress={() => void newTask()} />
       </View>
 
       <ScrollView contentContainerClassName="pb-4">
@@ -159,6 +161,24 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
           active={active === 'Config'}
           onPress={() => go('Config')}
         />
+        <NavItem
+          label="MCP Servers"
+          icon={<Server size={15} color="#b0b0b6" />}
+          active={active === 'Mcp'}
+          onPress={() => go('Mcp')}
+        />
+        <NavItem
+          label="Remote Access"
+          icon={<Cloud size={15} color="#b0b0b6" />}
+          active={active === 'Remote'}
+          onPress={() => go('Remote')}
+        />
+        <NavItem
+          label="Daemon Settings"
+          icon={<Wrench size={15} color="#b0b0b6" />}
+          active={active === 'DaemonSettings'}
+          onPress={() => go('DaemonSettings')}
+        />
 
         {recent.length > 0 ? (
           <>
@@ -194,16 +214,16 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
       />
 
       {/* Device card */}
-      <View className="border-t border-line p-2.5">
-        <View className="flex-row items-center gap-3 rounded-xl bg-surface p-2.5">
-          <View className="size-9 items-center justify-center rounded-lg bg-accent-tint">
-            <Smartphone size={17} color="#5b8def" />
+      <View className="border-t border-line p-3">
+        <View className="flex-row items-center gap-3 rounded-2xl bg-surface p-3">
+          <View className="size-10 items-center justify-center rounded-xl bg-accent-tint">
+            <Smartphone size={18} color="#5e9eff" />
           </View>
           <View className="min-w-0 flex-1">
-            <Text className="text-[12.5px] text-ink" numberOfLines={1}>
-              This device
+            <Text className="text-[13px] font-semibold text-ink" numberOfLines={1}>
+              This Device
             </Text>
-            <Mono className="text-[10.5px]" numberOfLines={1}>
+            <Mono className="text-[11px]" numberOfLines={1}>
               {desktopName}
             </Mono>
           </View>
@@ -213,13 +233,14 @@ export function AppNav({ navigation, state }: DrawerContentComponentProps) {
               navigation.closeDrawer()
               root?.navigate('Pairing')
             }}
+            className="size-10"
           >
-            <Smartphone size={16} color="#b0b0b6" />
+            <Smartphone size={16} color="#b5b5bc" />
           </IconButton>
         </View>
-        <View className="mt-2 flex-row items-center gap-2 px-1">
+        <View className="mt-2.5 flex-row items-center gap-2 px-1">
           <Dot tone={connectionTone(connection)} pulse={connection === 'connecting' || connection === 'reconnecting'} />
-          <Text className="text-[11px] text-ink-3">{connectionLabel(connection, true)}</Text>
+          <Text className="text-[12px] font-medium text-ink-3">{connectionLabel(connection, true)}</Text>
         </View>
       </View>
     </View>

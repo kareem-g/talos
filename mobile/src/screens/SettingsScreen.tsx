@@ -28,6 +28,7 @@ import { deviceRoutes, setDeviceBaseUrl } from '@app/lib/native'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { DrawerParamList, RootStackParamList } from '@app/navigation'
+import { ChevronRight, Server, Settings as SettingsIcon, Wifi } from 'lucide-react-native'
 import {
   Button,
   Card,
@@ -47,15 +48,8 @@ const PERMISSION_LABEL: Record<PermissionState, string> = {
   undetermined: 'Not requested yet',
 }
 
-/** Settings the desktop owns; listed so their absence here is legible. */
-const DESKTOP_ONLY = [
-  'Cloudflare tunnel',
-  'Custom API providers',
-  'Built-in agent roles',
-  'Context windows',
-  'Appearance & keyboard',
-  'MCP servers',
-]
+/** Settings that are genuinely local to this device. */
+const LOCAL_ONLY = ['Appearance & keyboard']
 
 export function SettingsScreen() {
   // Configuration lives on the rail, so the drawer is always the parent.
@@ -113,10 +107,10 @@ export function SettingsScreen() {
     <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
       <PageHeader onMenu={() => navigation.openDrawer()} title="Configuration" />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-10">
-        <View className="gap-1">
-          <Mono className="text-[10.5px] uppercase tracking-[0.16em] text-ink-3">Manage</Mono>
-          <Text className="text-[20px] font-semibold tracking-tight text-ink">{desktopName}</Text>
-          <Text className="text-[12.5px] leading-5 text-ink-2">
+        <View className="gap-1.5">
+          <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Manage</Mono>
+          <Text className="text-[24px] font-bold tracking-tight text-ink" style={{ letterSpacing: -0.5 }}>{desktopName}</Text>
+          <Text className="text-[14px] leading-5 text-ink-2">
             This device talks only to your own daemon. Nothing is sent anywhere else.
           </Text>
         </View>
@@ -194,11 +188,51 @@ export function SettingsScreen() {
           </View>
         </Card>
 
+        {/* Remote-access and daemon-config surfaces — all reachable from the phone now. */}
+        <SectionLabel>Daemon & Remote</SectionLabel>
         <Card>
-          <CardHeader title="Configured on the desktop" />
           <View className="p-1.5">
-            {DESKTOP_ONLY.map((label) => (
-              <Row key={label} primary={label} leading={<Dot tone="dim" />} trailing={<Mono className="text-[10.5px]">desktop</Mono>} />
+            <Pressable
+              onPress={() => navigation.navigate('Mcp' as keyof DrawerParamList)}
+              className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
+            >
+              <Server size={16} color="#5b8def" />
+              <View className="min-w-0 flex-1">
+                <Text className="text-[13px] font-medium text-ink">MCP Servers</Text>
+                <Text className="text-[11px] text-ink-3">Manage Model Context Protocol integrations</Text>
+              </View>
+              <ChevronRight size={16} color="#7e7e86" />
+            </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('Remote' as keyof DrawerParamList)}
+              className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
+            >
+              <Wifi size={16} color="#5b8def" />
+              <View className="min-w-0 flex-1">
+                <Text className="text-[13px] font-medium text-ink">Remote Access</Text>
+                <Text className="text-[11px] text-ink-3">Tunnels, endpoints, and paired devices</Text>
+              </View>
+              <ChevronRight size={16} color="#7e7e86" />
+            </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('DaemonSettings' as keyof DrawerParamList)}
+              className="min-h-12 flex-row items-center gap-3 rounded-lg px-2.5 active:bg-hover-2"
+            >
+              <SettingsIcon size={16} color="#5b8def" />
+              <View className="min-w-0 flex-1">
+                <Text className="text-[13px] font-medium text-ink">Daemon Settings</Text>
+                <Text className="text-[11px] text-ink-3">Read and edit daemon configuration</Text>
+              </View>
+              <ChevronRight size={16} color="#7e7e86" />
+            </Pressable>
+          </View>
+        </Card>
+
+        <Card>
+          <CardHeader title="Local to this device" />
+          <View className="p-1.5">
+            {LOCAL_ONLY.map((label) => (
+              <Row key={label} primary={label} leading={<Dot tone="dim" />} trailing={<Mono className="text-[10.5px]">local</Mono>} />
             ))}
           </View>
         </Card>

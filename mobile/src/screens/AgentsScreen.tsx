@@ -18,6 +18,7 @@ import { useNavigation } from '@react-navigation/native'
 import type { DrawerNavigationProp } from '@react-navigation/drawer'
 
 import { useStore } from '@app/store'
+import { providersApi } from '@app/lib/api'
 import type { DrawerParamList } from '@app/navigation'
 import {
   Button,
@@ -53,7 +54,14 @@ export function AgentsScreen() {
 
   async function refresh() {
     setRefreshing(true)
-    await loadSnapshot()
+    try {
+      // Force the daemon to re-probe $PATH for agent CLIs, then reload the snapshot.
+      await providersApi.refresh()
+      await loadSnapshot()
+    } catch {
+      // If refresh fails, still try to reload what we have.
+      await loadSnapshot()
+    }
     setRefreshing(false)
   }
 
@@ -69,12 +77,12 @@ export function AgentsScreen() {
         keyExtractor={(agent) => agent.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7e7e86" />}
         ListHeaderComponent={
-          <View className="p-4">
-            <SectionHeading
-              eyebrow="Products"
-              title="Coding agents"
-              description={`${ready} of ${agents.length} ready on ${desktopName}.`}
-            />
+          <View className="px-4 pt-5 pb-3">
+            <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Products</Mono>
+            <Text className="mt-1 text-[24px] font-bold tracking-tight text-ink" style={{ letterSpacing: -0.5 }}>Coding Agents</Text>
+            <Text className="mt-1.5 text-[14px] leading-5 text-ink-2">
+              {ready} of {agents.length} ready on {desktopName}.
+            </Text>
           </View>
         }
         renderItem={({ item }) => <AgentCard agent={item} />}
@@ -99,12 +107,12 @@ function AgentCard({ agent }: { agent: import('@app/store').MobileAgent }) {
     <Card>
       <CardHeader
         title={agent.name}
-        right={<Chip tone={agent.available ? 'green' : 'dim'} label={agent.available ? 'ready' : 'not found'} />}
+        right={<Chip tone={agent.available ? 'green' : 'dim'} label={agent.available ? 'Ready' : 'Not found'} />}
       />
-      <View className="gap-2.5 p-3.5">
+      <View className="gap-3 p-4">
         <View className="flex-row items-center gap-2">
           <Dot tone={agent.available ? 'green' : 'dim'} />
-          <Mono className="min-w-0 flex-1 text-[11.5px]" numberOfLines={1}>
+          <Mono className="min-w-0 flex-1 text-[12px] font-medium" numberOfLines={1}>
             {agent.id}
             {agent.protocol ? ` · ${agent.protocol}` : ''}
           </Mono>
@@ -112,8 +120,8 @@ function AgentCard({ agent }: { agent: import('@app/store').MobileAgent }) {
 
         {models.length > 0 ? (
           <View className="gap-1">
-            <Mono className="text-[9.5px] uppercase tracking-[0.14em] text-ink-3">Models</Mono>
-            <Text className="text-[12px] text-ink-2" numberOfLines={3}>
+            <Mono className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-3">Models</Mono>
+            <Text className="text-[13px] leading-5 text-ink-2" numberOfLines={3}>
               {models
                 .map((model) => (typeof model === 'string' ? model : (model as { id?: string }).id ?? ''))
                 .filter(Boolean)
@@ -124,14 +132,14 @@ function AgentCard({ agent }: { agent: import('@app/store').MobileAgent }) {
 
         {reasoning.length > 0 ? (
           <View className="gap-1">
-            <Mono className="text-[9.5px] uppercase tracking-[0.14em] text-ink-3">Reasoning</Mono>
-            <Text className="text-[12px] text-ink-2">
+            <Mono className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-3">Reasoning</Mono>
+            <Text className="text-[13px] text-ink-2">
               {reasoning.map((level) => (typeof level === 'string' ? level : (level as { id?: string }).id ?? '')).join(' · ')}
             </Text>
           </View>
         ) : null}
 
-        <View className="flex-row flex-wrap gap-1.5">
+        <View className="flex-row flex-wrap gap-1.5 pt-1">
           {CAPABILITIES.filter((capability) => capabilities[capability.key]).map((capability) => (
             <Chip key={capability.key} label={capability.label} />
           ))}

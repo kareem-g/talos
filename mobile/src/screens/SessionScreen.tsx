@@ -32,6 +32,11 @@ import { Composer } from '@app/components/Composer'
 import { SessionRail } from '@app/components/SessionRail'
 import { SessionLeftRail } from '@app/components/SessionLeftRail'
 import { NewTaskSheet } from '@app/components/NewTaskSheet'
+import { CommandPalette } from '@app/components/CommandPalette'
+import { FloatingAttentionPill } from '@app/components/FloatingAttentionPill'
+import { SubagentModal } from '@app/components/SubagentModal'
+import { EngineSwitchModal } from '@app/components/EngineSwitchModal'
+import { Search } from 'lucide-react-native'
 
 export function SessionScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
@@ -47,6 +52,9 @@ export function SessionScreen() {
   const [leftOpen, setLeftOpen] = React.useState(false)
   const [rightOpen, setRightOpen] = React.useState(false)
   const [newTask, setNewTask] = React.useState(false)
+  const [cmdOpen, setCmdOpen] = React.useState(false)
+  const [subagentOpen, setSubagentOpen] = React.useState(false)
+  const [engineOpen, setEngineOpen] = React.useState(false)
 
   React.useEffect(() => {
     void openSession(sessionId)
@@ -80,24 +88,24 @@ export function SessionScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
-      {/* Header: pane toggles either side of the title, config row beneath. */}
-      <GlassSurface radius={0} className="border-b border-line">
-        <View className="flex-row items-center gap-1 px-2 pt-2">
+      {/* Header: glass chrome with back, title, and pane toggles. */}
+      <GlassSurface effect="regular" radius={0} className="border-b border-line">
+        <View className="flex-row items-center gap-1.5 px-2 pt-2 pb-1">
           <Pressable
             onPress={() => navigation.goBack()}
             accessibilityLabel="Back"
-            className="size-9 items-center justify-center rounded-full active:bg-hover-2"
+            className="size-10 items-center justify-center rounded-full active:bg-hover-2"
           >
-            <ChevronLeft size={20} color="#f2f2f3" />
+            <ChevronLeft size={22} color="#f5f5f7" />
           </Pressable>
 
           <View className="min-w-0 flex-1 px-1">
             <View className="flex-row items-center gap-2">
               <View className="min-w-0 flex-1">
-                <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+                <Text className="text-[16px] font-bold tracking-tight text-ink" numberOfLines={1}>
                   {session?.name ?? 'Session'}
                 </Text>
-                <Mono className="text-[10.5px]" numberOfLines={1}>
+                <Mono className="text-[11px]" numberOfLines={1}>
                   {session ? session.agent : 'loading…'}
                 </Mono>
               </View>
@@ -105,6 +113,9 @@ export function SessionScreen() {
             </View>
           </View>
 
+          <IconButton label="Command palette" onPress={() => setCmdOpen(true)} className="size-9">
+            <Search size={16} color="#b0b0b6" />
+          </IconButton>
           <IconButton label="Workspace panel" onPress={() => setLeftOpen(true)} className="size-9">
             <PanelLeft size={17} color="#b0b0b6" />
           </IconButton>
@@ -156,6 +167,27 @@ export function SessionScreen() {
         initialProject={session?.project}
         onClose={() => setNewTask(false)}
         onCreated={(created) => navigation.navigate('Session', { sessionId: created.id })}
+      />
+
+      <CommandPalette
+        open={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onNewTask={() => setNewTask(true)}
+      />
+
+      <FloatingAttentionPill />
+
+      <SubagentModal
+        open={subagentOpen}
+        sessionId={sessionId}
+        onClose={() => setSubagentOpen(false)}
+      />
+
+      <EngineSwitchModal
+        open={engineOpen}
+        sessionId={sessionId}
+        currentAgent={session?.agent ?? ''}
+        onClose={() => setEngineOpen(false)}
       />
     </SafeAreaView>
   )
