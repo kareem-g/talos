@@ -69,8 +69,13 @@ jobs:
 
   build-ios:
     name: Build iOS IPA (unsigned)
-    # macos-26 because @callstack/liquid-glass compiles against the iOS 26 SDK;
-    # Xcode 16 on the older images cannot build it.
+    # The runner is pinned rather than floating. It was originally macos-26
+    # because @callstack/liquid-glass needs the iOS 26 SDK, and that dependency
+    # is gone as of the v2 redesign — but the pin stays until someone
+    # deliberately re-tests the build on an older image, because an unpinned
+    # `macos-latest` silently changes the toolchain underneath an IPA that
+    # people then install by hand. See the Xcode gate below: it is now a
+    # canary against that drift, not a hard dependency.
     runs-on: macos-26
     steps:
       - name: Check out
@@ -79,9 +84,10 @@ jobs:
       - name: Select the newest Xcode
         run: |
           set -euo pipefail
-          # Pin the toolchain instead of trusting the image default: the glass
-          # material needs the iOS 26 SDK, and a stale default fails deep inside
-          # pod install with a message that does not say why.
+          # Pin the toolchain instead of trusting the image default. A stale
+          # default fails deep inside `pod install` with a message that does
+          # not say why, and a silently different SDK produces an IPA that
+          # behaves differently on a device than the one you tested.
           XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
           if [ -z "$XCODE" ]; then
             echo "::error::No Xcode installation found on this runner"
@@ -89,8 +95,12 @@ jobs:
           fi
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
+          # Canary, not a requirement: if the image's default Xcode drops
+          # below 26 the toolchain has moved under us and the IPA is no longer
+          # the thing this job is documented to produce. Lower this together
+          # with `runs-on`, and only after a green build on the older image.
           if ! xcodebuild -version | head -1 | grep -qE 'Xcode (2[6-9]|[3-9][0-9])'; then
-            echo "::error::Xcode 26 or newer is required for @callstack/liquid-glass"
+            echo "::error::Xcode dropped below 26 on this image. Either re-pin runs-on to the image whose default is 26+, or lower this gate after a green build."
             exit 1
           fi
 
