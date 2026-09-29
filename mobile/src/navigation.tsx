@@ -118,7 +118,15 @@ export function useOpenSession(): (sessionId: string, approvalId?: string) => vo
   )
 }
 
-/** The rail. Same width as the desktop aside (224px) and its own sidebar surface. */
+/**
+ * The root drawer.
+ *
+ * Width is a thumb's reach, not the desktop's 224px aside: at 300pt the drawer
+ * is wide enough for a two-line destination and still leaves a visible sliver
+ * of the screen behind it, which is what tells a swipe gesture that the drawer
+ * closes on a tap outside. The swipe edge is 24pt rather than 44 so it does not
+ * fight a back-swipe or steal taps from the header's menu button.
+ */
 function MainDrawer() {
   return (
     <Drawer.Navigator
@@ -126,9 +134,17 @@ function MainDrawer() {
       screenOptions={{
         headerShown: false,
         drawerType: 'front',
-        drawerStyle: { width: 264, backgroundColor: palette.chrome, borderRightColor: palette.lineStrong },
-        overlayColor: 'rgba(0,0,0,0.65)',
-        swipeEdgeWidth: 44,
+        drawerStyle: {
+          width: 300,
+          backgroundColor: palette.chrome,
+          borderRightColor: palette.lineStrong,
+        },
+        overlayColor: palette.scrim,
+        swipeEdgeWidth: 24,
+        // Drawer items carry their own selection treatment, so the navigator's
+        // active-tint is switched off rather than doubling up with it.
+        drawerActiveBackgroundColor: 'transparent',
+        drawerInactiveBackgroundColor: 'transparent',
       }}
     >
       <Drawer.Screen name="Home" component={HomeScreen} />

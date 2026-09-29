@@ -1,42 +1,56 @@
 /**
- * Agents — provider discovery.
+ * Agents — what this desktop can actually run.
  *
- * Mirrors the desktop `AgentsPage`: every agent CLI the daemon found, whether it
- * is ready, and what it can do (streaming, approvals, plan mode, model switch,
- * reasoning, structured questions, terminal). Same data source shape — the
- * mobile snapshot returns the same descriptor objects as `/api/agents`.
+ * The desktop lists agents as a configuration page. On a phone the question is
+ * different and more practical: *why did my task fail with "no such agent"?*
+ * So this screen leads with readiness — how many are usable right now — and each
+ * agent is a row that can be opened, rather than a card that occupies a whole
+ * screen.
  *
- * The desktop's "Re-scan" forces the daemon to re-probe `$PATH`; the mobile API
- * has no such endpoint, so this refreshes from the daemon instead of pretending
- * to trigger a scan it cannot.
+ * The previous version rendered every agent as a full-width card with a header,
+ * an id line, a model list, a reasoning list, and a capability chip row. With
+ * eight agents installed that is roughly nine screens of scrolling to answer a
+ * yes/no question. Now: a summary, then a list whose collapsed state carries
+ * name + readiness + the two capabilities that matter most, and whose expanded
+ * state carries the detail.
+ *
+ * Capability chips are still shown, but ordered by how often they decide
+ * whether an agent is usable for a given job, rather than alphabetically.
  */
 
 import * as React from 'react'
-import { FlatList, RefreshControl, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { DrawerNavigationProp } from '@react-navigation/drawer'
+import { ChevronDown, RefreshCw } from 'lucide-react-native'
 
-import { useStore } from '@app/store'
+import { useStore, type MobileAgent } from '@app/store'
 import { providersApi } from '@app/lib/api'
 import type { DrawerParamList } from '@app/navigation'
+import { agentColor, palette } from '@app/design/tokens'
 import {
+  Badge,
   Button,
   Card,
-  CardHeader,
-  Chip,
   Dot,
   EmptyState,
+  ErrorState,
+  Eyebrow,
+  IconButton,
+  MenuButton,
   Mono,
-  PageHeader,
-  SectionHeading,
+  ScreenHeader,
+  haptic,
 } from '@app/components/ui'
-import { palette } from '@app/design/tokens'
 
-/** The capability flags the desktop renders as chips, in the same order. */
+/**
+ * The capability flags, ordered by how often they decide whether this agent can
+ * do a given job. Approvals first: a tool that cannot ask permission cannot be
+ * supervised from a phone, which is the main reason to care.
+ */
 const CAPABILITIES: Array<{ key: string; label: string }> = [
-  { key: 'supportsStreaming', label: 'stream' },
   { key: 'supportsApproval', label: 'approvals' },
+  { key: 'supportsStreaming', label: 'stream' },
   { key: 'supportsPlan', label: 'plan' },
   { key: 'supportsModelSwitch', label: 'model switch' },
   { key: 'supportsReasoning', label: 'reasoning' },
@@ -46,106 +60,263 @@ const CAPABILITIES: Array<{ key: string; label: string }> = [
 
 export function AgentsScreen() {
   const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
-  const agents = useStore((s) => s.agents)
-  const desktopName = useStore((s) => s.desktopName)
-  const loadSnapshot = useStore((s) => s.loadSnapshot)
+  const agents = useStore((state) => state.agents)
+  const desktopName = useStore((state) => state.desktopName)
+  const loadSnapshot = useStore((state) => state.loadSnapshot)
+
   const [refreshing, setRefreshing] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [expanded, setExpanded] = React.useState<string | null>(null)
 
   const ready = agents.filter((agent) => agent.available).length
 
-  async function refresh() {
+  const refresh = React.useCallback(async () => {
     setRefreshing(true)
+    setError(null)
     try {
-      // Force the daemon to re-probe $PATH for agent CLIs, then reload the snapshot.
+      // Force the daemon to re-probe $PATH for agent CLIs, then reload. If the
+      // forced scan fails, still try to show what we already had rather than
+      // replacing a working list with an error.
       await providersApi.refresh()
       await loadSnapshot()
-    } catch {
-      // If refresh fails, still try to reload what we have.
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not re-scan for agents')
       await loadSnapshot()
+    } finally {
+      setRefreshing(false)
     }
-    setRefreshing(false)
-  }
+  }, [loadSnapshot])
 
   return (
-    <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
-      <PageHeader
-        onMenu={() => navigation.openDrawer()}
+    <View className="flex-1 bg-canvas">
+      <ScreenHeader
         title="Agents"
-        right={<Button variant="ghost" label={refreshing ? '…' : 'Refresh'} className="min-h-9 px-3" onPress={() => void refresh()} />}
+        subtitle={desktopName}
+        left={<MenuButton onPress={() => navigation.openDrawer()} />}
+        right={
+          <IconButton
+            label="Re-scan for agents"
+            size={40}
+            disabled={refreshing}
+            onPress={() => {
+              void haptic('light')
+              void refresh()
+            }}
+          >
+            <RefreshCw size={18} color={refreshing ? palette.ink3 : palette.ink2} />
+          </IconButton>
+        }
       />
+
       <FlatList
         data={agents}
         keyExtractor={(agent) => agent.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
-        ListHeaderComponent={
-          <View className="px-4 pt-5 pb-3">
-            <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Products</Mono>
-            <Text className="mt-1 text-[24px] font-bold tracking-tight text-ink" style={{ letterSpacing: -0.5 }}>Coding Agents</Text>
-            <Text className="mt-1.5 text-[14px] leading-5 text-ink-2">
-              {ready} of {agents.length} ready on {desktopName}.
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => <AgentCard agent={item} />}
-        ListEmptyComponent={
-          <EmptyState
-            title="No agents detected"
-            body="Install a supported agent CLI on the desktop machine, then refresh."
+        contentContainerClassName="gap-3 px-4 pb-8 pt-4"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor={palette.ink3}
+            colors={[palette.accent]}
+            progressBackgroundColor={palette.surface}
           />
         }
-        contentContainerClassName="gap-3 px-4 pb-10"
+        ListHeaderComponent={
+          <View className="gap-3">
+            {/* The summary answers the question the screen exists for. */}
+            <Card>
+              <View className="flex-row items-center gap-3 px-4 py-4">
+                <View
+                  className="size-11 items-center justify-center rounded-full"
+                  style={{ backgroundColor: ready > 0 ? palette.okSoft : palette.dangerSoft }}
+                >
+                  <Text
+                    className="text-[17px] font-bold"
+                    style={{ color: ready > 0 ? palette.ok : palette.danger }}
+                  >
+                    {ready}
+                  </Text>
+                </View>
+                <View className="min-w-0 flex-1">
+                  <Text className="text-[15px] font-semibold text-ink">
+                    {ready === agents.length && ready > 0
+                      ? 'All agents ready'
+                      : `${ready} of ${agents.length} ready`}
+                  </Text>
+                  <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3">
+                    {ready > 0
+                      ? 'Available to start a new task from this phone.'
+                      : 'Install an agent CLI on the desktop, then re-scan.'}
+                  </Text>
+                </View>
+              </View>
+            </Card>
+            {error ? <ErrorState message={error} onRetry={() => void refresh()} /> : null}
+            {agents.length > 0 ? <Eyebrow>Detected agents</Eyebrow> : null}
+          </View>
+        }
+        renderItem={({ item }) => (
+          <AgentCard
+            agent={item}
+            expanded={expanded === item.id}
+            onToggle={() => {
+              void haptic('light')
+              setExpanded((current) => (current === item.id ? null : item.id))
+            }}
+          />
+        )}
+        ListEmptyComponent={
+          <Card>
+            <EmptyState
+              title="No agents detected"
+              body="Install a supported agent CLI — Claude Code, Codex, or OpenCode — on the desktop, then re-scan."
+              action={
+                <Button
+                  variant="primary"
+                  label="Re-scan"
+                  accessibilityLabel="Re-scan for agents"
+                  onPress={() => void refresh()}
+                />
+              }
+            />
+          </Card>
+        }
       />
-    </SafeAreaView>
+    </View>
   )
 }
 
-function AgentCard({ agent }: { agent: import('@app/store').MobileAgent }) {
+/**
+ * One agent.
+ *
+ * Collapsed it answers "is it usable and what can it do". Expanded it shows the
+ * ids and model list, which is reference information nobody needs while
+ * scanning.
+ */
+function AgentCard({
+  agent,
+  expanded,
+  onToggle,
+}: {
+  agent: MobileAgent
+  expanded: boolean
+  onToggle: () => void
+}) {
   const capabilities = (agent.capabilities ?? {}) as Record<string, boolean>
   const models = Array.isArray(agent.models) ? agent.models : []
   const reasoning = Array.isArray(agent.reasoningLevels) ? agent.reasoningLevels : []
+  const available = Boolean(agent.available)
+  const present = CAPABILITIES.filter((capability) => capabilities[capability.key])
 
   return (
     <Card>
-      <CardHeader
-        title={agent.name}
-        right={<Chip tone={agent.available ? 'green' : 'dim'} label={agent.available ? 'Ready' : 'Not found'} />}
-      />
-      <View className="gap-3 p-4">
-        <View className="flex-row items-center gap-2">
-          <Dot tone={agent.available ? 'green' : 'dim'} />
-          <Mono className="min-w-0 flex-1 text-[12px] font-medium" numberOfLines={1}>
-            {agent.id}
-            {agent.protocol ? ` · ${agent.protocol}` : ''}
-          </Mono>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={agent.name}
+        accessibilityHint={
+          available
+            ? `${present.length} capabilities. Double tap for detail.`
+            : 'Not found on the desktop. Double tap for detail.'
+        }
+        accessibilityState={{ expanded }}
+        onPress={onToggle}
+        className="min-h-16 flex-row items-center gap-3 px-4 py-3 active:bg-pressed"
+      >
+        <View
+          className="size-9 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: `${agentColor(agent.id)}22` }}
+          accessibilityElementsHidden
+        >
+          <Text className="text-[15px] font-bold" style={{ color: agentColor(agent.id) }}>
+            {agent.name.slice(0, 1).toUpperCase()}
+          </Text>
         </View>
 
-        {models.length > 0 ? (
-          <View className="gap-1">
-            <Mono className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-3">Models</Mono>
-            <Text className="text-[13px] leading-5 text-ink-2" numberOfLines={3}>
-              {models
-                .map((model) => (typeof model === 'string' ? model : (model as { id?: string }).id ?? ''))
-                .filter(Boolean)
-                .join(', ')}
+        <View className="min-w-0 flex-1 gap-1">
+          <View className="flex-row items-center gap-2">
+            <Text className="min-w-0 flex-1 text-[15px] font-semibold text-ink" numberOfLines={1}>
+              {agent.name}
             </Text>
+            <Badge tone={available ? 'ok' : 'danger'} outline>
+              {available ? 'Ready' : 'Not found'}
+            </Badge>
           </View>
-        ) : null}
-
-        {reasoning.length > 0 ? (
-          <View className="gap-1">
-            <Mono className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-3">Reasoning</Mono>
-            <Text className="text-[13px] text-ink-2">
-              {reasoning.map((level) => (typeof level === 'string' ? level : (level as { id?: string }).id ?? '')).join(' · ')}
-            </Text>
+          <View className="flex-row flex-wrap gap-1.5">
+            {present.length === 0 ? (
+              <Text className="text-[11px] text-ink-3">No capabilities reported</Text>
+            ) : (
+              present.slice(0, 3).map((capability) => (
+                <Badge key={capability.key}>{capability.label}</Badge>
+              ))
+            )}
+            {present.length > 3 ? <Badge>+{present.length - 3}</Badge> : null}
           </View>
-        ) : null}
-
-        <View className="flex-row flex-wrap gap-1.5 pt-1">
-          {CAPABILITIES.filter((capability) => capabilities[capability.key]).map((capability) => (
-            <Chip key={capability.key} label={capability.label} />
-          ))}
         </View>
-      </View>
+
+        <ChevronDown
+          size={18}
+          color={palette.ink3}
+          style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}
+        />
+      </Pressable>
+
+      {expanded ? (
+        <View className="gap-3 border-t border-line px-4 py-3">
+          <View className="flex-row items-center gap-2">
+            <Dot tone={available ? 'ok' : 'danger'} />
+            <Mono className="min-w-0 flex-1 text-[11px]" numberOfLines={1}>
+              {agent.id}
+              {agent.protocol ? ` · ${agent.protocol}` : ''}
+            </Mono>
+          </View>
+
+          {models.length > 0 ? (
+            <View className="gap-1.5">
+              <Eyebrow>Models · {models.length}</Eyebrow>
+              <View className="flex-row flex-wrap gap-1.5">
+                {models.map((model, index) => (
+                  <Badge key={index} outline>
+                    {typeof model === 'string' ? model : ((model as { id?: string }).id ?? 'unknown')}
+                  </Badge>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {reasoning.length > 0 ? (
+            <View className="gap-1.5">
+              <Eyebrow>Reasoning levels</Eyebrow>
+              <View className="flex-row flex-wrap gap-1.5">
+                {reasoning.map((level, index) => (
+                  <Badge key={index} outline>
+                    {typeof level === 'string' ? level : ((level as { id?: string }).id ?? 'unknown')}
+                  </Badge>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {present.length > 0 ? (
+            <View className="gap-1.5">
+              <Eyebrow>All capabilities</Eyebrow>
+              <View className="flex-row flex-wrap gap-1.5">
+                {present.map((capability) => (
+                  <Badge key={capability.key} tone="accent">
+                    {capability.label}
+                  </Badge>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {!available ? (
+            <Text className="text-[12px] leading-[16px] text-ink-3">
+              The daemon could not find this CLI on its PATH. Install it on the
+              desktop and re-scan.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </Card>
   )
 }
