@@ -1,10 +1,10 @@
 /**
- * Tailwind config — generated from `src/design/tokens.ts`, not hand-written.
+ * Tailwind config — generated from `src/design/tokens`, not hand-written.
  *
  * Every colour and radius below is read from the token module. That is the whole
  * point: a token is defined once, and both the class names (`text-ink-2`) and
  * the raw values components hand to icons (`palette.ink2`) come from the same
- * source. The previous version of this file duplicated the palette while the
+ * source. A previous version of this file duplicated the palette while the
  * components separately hardcoded 174 hex values, which is how the app ended up
  * with three different greys all meaning "muted".
  *
@@ -13,7 +13,7 @@
  *
  * @type {import('tailwindcss').Config}
  */
-const { palette, radius } = require('./src/design/tokens')
+const { palette, radius, diffAddSoft, diffDelSoft } = require('./src/design/tokens')
 
 /** `palette.okSoft` → the `bg-ok-soft` / `border-ok-border` colour slots. */
 const status = {
@@ -40,26 +40,33 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        /* Surfaces — a single lightness ramp, see tokens.ts. */
+        /* Surfaces — one monotonic ramp: well < canvas < chrome < surface <
+           raised < hover. See the header of tokens.ts. */
+        well: palette.well,
         canvas: palette.canvas,
         chrome: palette.chrome,
         surface: palette.surface,
         raised: palette.raised,
-        field: palette.field,
-        pressed: palette.pressed,
+        hover: palette.hover,
         selected: palette.selected,
+        field: palette.field,
 
-        /* Ink — three steps only. */
+        /* Ink — four steps, one job each. */
         ink: palette.ink,
         'ink-2': palette.ink2,
         'ink-3': palette.ink3,
+        'ink-4': palette.ink4,
 
         /* The single accent. */
         accent: palette.accent,
         'accent-hover': palette.accentHover,
+        'accent-pressed': palette.accentPressed,
         'accent-ink': palette.accentInk,
         'accent-soft': palette.accentSoft,
+        'accent-soft-strong': palette.accentSoftStrong,
         'accent-border': palette.accentBorder,
+        'badge-ink': palette.badgeInk,
+        viewfinder: palette.viewfinder,
 
         /* Status — the only colours that carry meaning. */
         ...status,
@@ -68,15 +75,22 @@ module.exports = {
         line: palette.line,
         'line-strong': palette.lineStrong,
         scrim: palette.scrim,
+        'scrim-soft': palette.scrimSoft,
 
-        /* Code wells. */
+        /* Code wells. The diff's *colours* are the status palette — see the
+           note in tokens.ts on why there is no `diff-add` here. */
         code: palette.code,
         'code-ink': palette.codeInk,
+        'code-dim': palette.codeDim,
+        'diff-add-soft': diffAddSoft,
+        'diff-del-soft': diffDelSoft,
       },
       borderRadius: {
+        xs: `${radius.xs}px`,
         sm: `${radius.sm}px`,
         md: `${radius.md}px`,
         lg: `${radius.lg}px`,
+        xl: `${radius.xl}px`,
         pill: `${radius.pill}px`,
       },
       fontFamily: {

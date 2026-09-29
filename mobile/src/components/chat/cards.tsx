@@ -1,27 +1,50 @@
 /**
  * Chat cards — the full-width blocks in an assistant turn.
  *
- * Ports of the desktop's `Plan`, `Approval` (which also renders AskUserQuestion
- * cards), `ErrorCard`, `TurnSummary` and `UsageMeter`. The approval card is the
- * most consequential: it is where a turn is unblocked, so it keeps the desktop's
- * structure — numbered options, per-option mono description, multi-select with an
- * explicit confirm, a free-text row for plan approvals, and a collapsed
- * outcome row once resolved.
+ * Ports of the desktop's `Plan`, `Approval` (which also renders
+ * AskUserQuestion cards), `ErrorCard`, `TurnSummary` and `UsageMeter`.
+ *
+ * THE APPROVAL CARD IS THE MOST IMPORTANT COMPONENT IN THE APP
+ * -----------------------------------------------------------
+ * It is where a turn is unblocked, and the situation it appears in is the
+ * reason someone is holding a phone at all: they are not at the desk, the
+ * agent is asleep, and they need to decide something in one tap. So:
+ *
+ *   - **It says what will happen, in the agent's words.** Not "Approve /
+ *     Deny" — the option's own description, verbatim, because the label is
+ *     what the agent chose and paraphrasing it is how the wrong thing gets
+ *     approved.
+ *   - **Single-select is one tap.** Selecting an `allow`-or-`deny` option
+ *     responds immediately. Requiring a second "Respond" press on a phone is
+ *     a confirm dialog nobody reads.
+ *   - **Multi-select and free-text still need a confirm**, because there the
+ *     answer is genuinely composed rather than chosen.
+ *   - **The context band is above everything.** The command, path or URL the
+ *     request is about is the thing you check before deciding, so it is the
+ *     first thing rendered, in monospace, at full width.
+ *   - **A resolved card collapses to one line** so the decision stays
+ *     visible in the transcript history instead of scrolling away.
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
-import { AlertTriangle, Check, ChevronDown, FileText, Moon, TextCursorInput } from 'lucide-react-native'
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import { AlertTriangle, Check, ChevronDown, FileText, Moon, X } from 'lucide-react-native'
 
-import { cn } from '@/lib/format'
 import { describeApproval, type ApprovalOption } from '@/lib/approvals'
-import type { ApprovalPart, ErrorPart, PlanPart, TurnSummaryPart, UsagePart } from '@/types/conversation'
-import { Button, Mono, TextField } from '@app/components/ui'
-import { palette } from '@app/design/tokens'
+import type {
+  ApprovalPart,
+  ErrorPart,
+  PlanPart,
+  TurnSummaryPart,
+  UsagePart,
+} from '@/types/conversation'
+import { palette, radius } from '@app/design/tokens'
+import { useCollapse } from '@app/components/motion'
+import { Button, CopyButton, Mono, haptic } from '@app/components/ui'
 
 const DIM = palette.ink3
 
-/* ── Usage meter ─────────────────────────────────────────────────────────── */
+/* ── Usage meter ───────────────────────────────────────────────────────────── */
 
 function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
@@ -36,10 +59,10 @@ export function UsageMeter({ part }: { part: UsagePart }) {
   if (part.outputTokens != null) bits.push(`↓${formatTokens(part.outputTokens)}`)
   if (part.cacheReadTokens != null) bits.push(`↻${formatTokens(part.cacheReadTokens)}`)
   if (bits.length === 0) return null
-  return <Mono className="text-[10px]">{bits.join('  ')}</Mono>
+  return <Mono className="text-[11px]">{bits.join('  ')}</Mono>
 }
 
-/* ── Turn summary ────────────────────────────────────────────────────────── */
+/* ── Turn summary ──────────────────────────────────────────────────────────── */
 
 const STOP_REASONS: Record<string, string> = {
   end_turn: 'Completed',
@@ -64,38 +87,78 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
   if (!reason && stats.length === 0) return null
 
   return (
-    <View className="flex-row items-center gap-1.5">
-      {failed ? <AlertTriangle size={10} color={palette.wait} /> : <Check size={10} color={palette.ok} />}
-      {reason ? <Text className="text-[10.5px] text-ink-3">{reason}</Text> : null}
-      {reason && stats.length ? <Text className="text-[10px] text-ink-3">·</Text> : null}
-      {stats.length ? <Mono className="text-[10px]">{stats.join(' · ')}</Mono> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+      {failed ? (
+        <AlertTriangle size={11} color={palette.wait} />
+      ) : (
+        <Check size={11} color={palette.ok} strokeWidth={2.6} />
+      )}
+      {reason ? <Text className="text-[11.5px] text-ink-3">{reason}</Text> : null}
+      {reason && stats.length ? <Text className="text-[11px] text-ink-4">·</Text> : null}
+      {stats.length ? <Mono className="text-[11px]">{stats.join(' · ')}</Mono> : null}
     </View>
   )
 }
 
-/* ── Error ───────────────────────────────────────────────────────────────── */
+/* ── Error ─────────────────────────────────────────────────────────────────── */
 
 export function ErrorCard({ part }: { part: ErrorPart }) {
   return (
-    <View className="overflow-hidden rounded-xl border border-red-border bg-red-tint">
-      <View className="flex-row items-start gap-3 px-4 pb-3 pt-3.5">
-        <AlertTriangle size={14} color={palette.danger} />
-        <View className="min-w-0 flex-1">
-          <Text className="text-[12px] font-semibold text-red">Agent error</Text>
-          <Mono className="mt-1 text-[11.5px] leading-5 text-ink-2">{part.message}</Mono>
+    <View
+      accessible
+      accessibilityRole="alert"
+      style={{
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.dangerBorder,
+        backgroundColor: palette.dangerSoft,
+        overflow: 'hidden',
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 14 }}>
+        <View
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: `${palette.danger}22`,
+          }}
+        >
+          <AlertTriangle size={14} color={palette.danger} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[13px] font-semibold text-danger">Agent error</Text>
+          <Mono className="mt-1 text-[12px] leading-[18px] text-ink-2">{part.message}</Mono>
         </View>
       </View>
     </View>
   )
 }
 
-/* ── Plan ────────────────────────────────────────────────────────────────── */
+/* ── Plan ──────────────────────────────────────────────────────────────────────
+ * The plan is the answer to "what is this agent about to do", so it is a card
+ * rather than prose, and it is collapsible because it is frequently longer
+ * than the answer underneath it.
+ *
+ * The progress line at the top is a thin bar, not "3/7" alone: the bar answers
+ * "how far along" without being read, and the count answers it precisely for
+ * anyone who wants the number. */
+
+const STEP_TONE: Record<string, string> = {
+  completed: palette.ok,
+  in_progress: palette.accent,
+  failed: palette.danger,
+  blocked: palette.wait,
+  pending: palette.ink4,
+}
 
 const STEP_MARK: Record<string, string> = {
   completed: '✓',
-  in_progress: '›',
-  failed: '⚠',
-  blocked: '⚠',
+  in_progress: '▸',
+  failed: '!',
+  blocked: '!',
   pending: '○',
 }
 
@@ -105,115 +168,180 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
     ? part.entries.map((entry) => ({ content: entry.content, status: entry.status ?? 'pending' }))
     : part.steps.map((content) => ({ content, status: 'pending' }))
   const done = steps.filter((step) => step.status === 'completed').length
+  const ratio = steps.length ? done / steps.length : 0
+  const collapse = useCollapse(open)
+
   const body = part.text ?? ''
   const previewLines = body.split('\n').filter((line) => line.trim().length > 0)
 
   return (
-    <View className="overflow-hidden rounded-2xl border border-line bg-inset">
+    <View
+      style={{
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.surface,
+        overflow: 'hidden',
+      }}
+    >
       <Pressable
-        onPress={() => setOpen((value) => !value)}
-        className="w-full flex-row items-center gap-2 border-b border-line bg-surface px-4 py-2.5"
+        accessibilityRole="button"
+        accessibilityLabel={`Plan, ${done} of ${steps.length} steps done`}
+        accessibilityState={{ expanded: open }}
+        onPress={() => {
+          void haptic('light')
+          setOpen((value) => !value)
+        }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 9,
+          paddingHorizontal: 14,
+          paddingVertical: 11,
+        }}
       >
-        <FileText size={13} color={DIM} />
-        <Mono className="text-[10px] font-medium uppercase tracking-[0.14em]">Plan</Mono>
-        <Mono className="text-[10px]">
+        <FileText size={14} color={DIM} />
+        <Mono className="text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+          Plan
+        </Mono>
+        <View
+          style={{
+            height: 4,
+            flex: 1,
+            borderRadius: 2,
+            backgroundColor: palette.raised,
+            overflow: 'hidden',
+          }}
+        >
+          <View
+            style={{
+              width: `${Math.max(3, ratio * 100)}%`,
+              height: '100%',
+              borderRadius: 2,
+              backgroundColor: ratio === 1 ? palette.ok : palette.accent,
+            }}
+          />
+        </View>
+        <Mono className="text-[10.5px]">
           {done}/{steps.length}
         </Mono>
-        {part.status && part.status !== 'proposed' ? (
-          <View
-            className={cn(
-              'rounded-chip border px-1.5 py-px',
-              part.status === 'approved'
-                ? 'border-green-border bg-green-tint'
-                : part.status === 'declined'
-                  ? 'border-red-border bg-red-tint'
-                  : 'border-line bg-field',
-            )}
-          >
-            <Mono className="text-[9px] uppercase">{part.status}</Mono>
-          </View>
-        ) : null}
-        <View className="flex-1" />
-        <ChevronDown size={13} color={DIM} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
+        <ChevronDown
+          size={14}
+          color={DIM}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
       </Pressable>
 
-      {open ? (
-        <>
-          <View className="gap-0.5 px-2.5 pt-2">
-            {steps.slice(0, 20).map((step, index) => {
-              const isDone = step.status === 'completed'
-              const isActive = step.status === 'in_progress'
-              const isBad = step.status === 'failed' || step.status === 'blocked'
-              return (
-                <View
-                  key={index}
-                  className={cn('flex-row items-start gap-2 rounded-lg px-1.5 py-1', isActive && 'bg-hover-2')}
+      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+        <View style={{ borderTopWidth: 1, borderTopColor: palette.line, paddingTop: 10, paddingHorizontal: 6 }}>
+          {steps.slice(0, 20).map((step, index) => {
+            const isDone = step.status === 'completed'
+            const isActive = step.status === 'in_progress'
+            return (
+              <View
+                key={index}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  gap: 9,
+                  borderRadius: radius.sm,
+                  paddingHorizontal: 8,
+                  paddingVertical: 6,
+                  backgroundColor: isActive ? palette.raised : 'transparent',
+                }}
+              >
+                <Text
+                  style={{
+                    marginTop: 1,
+                    fontSize: 12,
+                    lineHeight: 17,
+                    width: 14,
+                    color: STEP_TONE[step.status] ?? palette.ink4,
+                    fontWeight: '700',
+                  }}
                 >
-                  <Text
-                    className={cn(
-                      'mt-0.5 shrink-0 text-[11px] leading-4',
-                      isDone ? 'text-green' : isActive ? 'text-accent' : isBad ? 'text-red' : 'text-ink-3',
-                    )}
-                  >
-                    {STEP_MARK[step.status] ?? '○'}
-                  </Text>
-                  <Text
-                    className={cn(
-                      'min-w-0 flex-1 text-[12px] leading-4',
-                      isDone
-                        ? 'text-ink-3 line-through'
-                        : isActive
-                          ? 'font-medium text-ink'
-                          : 'text-ink-2',
-                    )}
-                  >
-                    {index + 1}. {step.content}
-                  </Text>
-                </View>
-              )
-            })}
-          </View>
-
-          {previewLines.length > 0 ? (
-            <View className="px-4 pb-3 pt-3">
-              {part.title ? (
-                <Text className="text-[15px] font-semibold leading-5 text-ink">{part.title}</Text>
-              ) : null}
-              <View className="mt-2 gap-1.5">
-                {previewLines.slice(0, 6).map((line, index) => {
-                  const heading = /^#{1,4}\s+/.test(line)
-                  const bullet = /^\s*[-*]\s+/.test(line)
-                  const text = line.replace(/^#{1,4}\s+/, '').replace(/^\s*[-*]\s+/, '')
-                  return (
-                    <Text
-                      key={index}
-                      className={cn(
-                        'leading-5',
-                        heading ? 'text-[13px] font-semibold text-ink' : 'text-[12.5px] text-ink-2',
-                      )}
-                    >
-                      {bullet ? '• ' : ''}
-                      {text}
-                    </Text>
-                  )
-                })}
-                {previewLines.length > 6 ? <Mono className="text-[10.5px]">…</Mono> : null}
+                  {STEP_MARK[step.status] ?? '○'}
+                </Text>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontSize: 13.5,
+                    lineHeight: 19,
+                    color: isDone ? palette.ink3 : isActive ? palette.ink : palette.ink2,
+                    textDecorationLine: isDone ? 'line-through' : 'none',
+                    fontWeight: isActive ? '600' : '400',
+                  }}
+                >
+                  {step.content}
+                </Text>
               </View>
-              {onViewPlan ? (
-                <Pressable onPress={onViewPlan} className="mt-3 flex-row items-center gap-1.5 self-start rounded-lg border border-line bg-surface px-3 py-1.5">
-                  <Text className="text-[11.5px] font-medium text-ink-2">View full plan</Text>
-                  <Text className="text-[11.5px] text-ink-3">→</Text>
-                </Pressable>
-              ) : null}
+            )
+          })}
+        </View>
+
+        {previewLines.length > 0 ? (
+          <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14, gap: 10 }}>
+            {part.title ? (
+              <Text
+                className="text-[16px] font-semibold text-ink"
+                style={{ letterSpacing: -0.2, lineHeight: 22 }}
+              >
+                {part.title}
+              </Text>
+            ) : null}
+            <View style={{ gap: 5 }}>
+              {previewLines.slice(0, 6).map((line, index) => {
+                const heading = /^#{1,4}\s+/.test(line)
+                const bullet = /^\s*[-*]\s+/.test(line)
+                const text = line.replace(/^#{1,4}\s+/, '').replace(/^\s*[-*]\s+/, '')
+                return (
+                  <Text
+                    key={index}
+                    style={{
+                      fontSize: heading ? 14 : 13.5,
+                      lineHeight: 20,
+                      fontWeight: heading ? '600' : '400',
+                      color: heading ? palette.ink : palette.ink2,
+                      marginLeft: bullet ? 10 : 0,
+                    }}
+                  >
+                    {bullet ? '• ' : ''}
+                    {text}
+                  </Text>
+                )
+              })}
+              {previewLines.length > 6 ? <Mono className="text-[11px]">…</Mono> : null}
             </View>
-          ) : null}
-        </>
-      ) : null}
+            {onViewPlan ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View the full plan in the session panel"
+                onPress={onViewPlan}
+                style={({ pressed }) => ({
+                  alignSelf: 'flex-start',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  borderRadius: radius.sm,
+                  borderWidth: 1,
+                  borderColor: palette.line,
+                  backgroundColor: pressed ? palette.raised : palette.well,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                })}
+              >
+                <Text className="text-[12.5px] font-semibold text-ink-2">View full plan</Text>
+                <Text className="text-[12.5px] text-accent">→</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
     </View>
   )
 }
 
-/* ── Approval / question ─────────────────────────────────────────────────── */
+/* ── Approval / question ────────────────────────────────────────────────────── */
 
 function decisionLabel(decision: string): string {
   if (decision === 'allow') return 'Allowed'
@@ -233,7 +361,8 @@ export function Approval({
   onRespond,
 }: {
   part: ApprovalPart
-  onRespond: (requestId: string, decision: string, meta?: { always?: boolean }) => void
+  /** The id is read off `part`, so the callback only carries the decision. */
+  onRespond: (decision: string, meta?: { always?: boolean }) => void
 }) {
   const view = React.useMemo(
     () =>
@@ -248,146 +377,269 @@ export function Approval({
   const isMulti = Boolean(view.multiSelect)
   const [selected, setSelected] = React.useState<string[]>([])
   const [custom, setCustom] = React.useState('')
+  const accent = risky ? palette.danger : palette.wait
 
-  // Resolved cards collapse to one row, so the decision stays visible in history.
+  // Resolved cards collapse to one row, so the decision stays visible in the
+  // transcript history rather than becoming a tall block of stale options.
   if (part.decision !== undefined) {
     const denied = part.decision === 'deny'
     return (
-      <View className="flex-row items-center gap-2 rounded-xl border border-line bg-field px-3 py-2.5">
-        {denied ? <AlertTriangle size={12} color={palette.wait} /> : <Check size={12} color={palette.ok} />}
-        <Text className="text-[11.5px] font-medium text-ink">{decisionLabel(part.decision)}</Text>
-        <Text className="text-[11px] text-ink-3">·</Text>
-        <Mono className="min-w-0 flex-1 text-[11px]" numberOfLines={1}>
-          {part.customText ?? view.header ?? view.context ?? view.question}
-        </Mono>
+      <View
+        accessible
+        accessibilityLabel={`${decisionLabel(part.decision)}. ${part.customText ?? view.header ?? view.question}`}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 9,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: palette.line,
+          backgroundColor: palette.well,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        }}
+      >
+        {denied ? (
+          <AlertTriangle size={13} color={palette.wait} />
+        ) : (
+          <Check size={13} color={palette.ok} strokeWidth={2.6} />
+        )}
+        <Text className="text-[12.5px] font-semibold text-ink">
+          {decisionLabel(part.decision)}
+        </Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Mono className="text-[11.5px] leading-[16px]" numberOfLines={1}>
+            {part.customText ?? view.header ?? view.context ?? view.question}
+          </Mono>
+        </View>
       </View>
     )
   }
 
   const isPlan = Boolean(part.isPlan)
-  const options: ApprovalOption[] = isPlan && view.options.length === 0
-    ? [
-        { value: 'approve', label: 'Approve plan', kind: 'allow' as const },
-        { value: 'decline', label: 'Keep planning', kind: 'deny' as const },
-        { value: 'suggest', label: 'Suggest changes', kind: 'other' as const },
-      ]
-    : view.options
+  const options: ApprovalOption[] =
+    isPlan && view.options.length === 0
+      ? [
+          { value: 'approve', label: 'Approve plan', kind: 'allow' as const },
+          { value: 'decline', label: 'Keep planning', kind: 'deny' as const },
+          { value: 'suggest', label: 'Suggest changes', kind: 'other' as const },
+        ]
+      : view.options
 
-  function submit() {
+  // A single-select `allow`/`deny` option is the common case, and it is the
+  // one the user performs one-handed while walking. One tap.
+  const instant = !isMulti && !isPlan && options.some((option) => option.kind === 'allow' || option.kind === 'deny')
+
+  function submit(values: string[]) {
+    if (values.length === 0) return
     if (isMulti) {
-      const values = selected.length === 1 ? selected[0] : JSON.stringify(selected)
-      onRespond(part.requestId, values)
+      onRespond(values.length === 1 ? values[0] : JSON.stringify(values))
       return
     }
-    const option = options.find((candidate) => candidate.value === selected[0])
-    if (option) onRespond(part.requestId, option.value, metaForValue(option))
+    const option = options.find((candidate) => candidate.value === values[0])
+    if (option) onRespond(option.value, metaForValue(option))
   }
 
-  const canSubmit = selected.length > 0
+  function choose(option: ApprovalOption) {
+    if (instant) {
+      void haptic(option.kind === 'deny' ? 'warn' : 'success')
+      onRespond(option.value, metaForValue(option))
+      return
+    }
+    setSelected((current) =>
+      isMulti
+        ? current.includes(option.value)
+          ? current.filter((value) => value !== option.value)
+          : [...current, option.value]
+        : [option.value],
+    )
+  }
 
   return (
     <View
-      className={cn(
-        'overflow-hidden rounded-2xl border bg-inset',
-        risky ? 'border-red-border' : 'border-line',
-      )}
+      accessible={false}
+      accessibilityRole="alert"
+      accessibilityLabel="The agent is waiting for you"
+      style={{
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: `${accent}55`,
+        backgroundColor: palette.surface,
+        overflow: 'hidden',
+      }}
     >
-      {/* Header */}
-      <View className="flex-row items-center gap-2 border-b border-line bg-surface px-4 py-2">
-        <Moon size={14} color={DIM} />
-        <Mono className="text-[10px] font-medium uppercase tracking-[0.14em]">Agent sleeping</Mono>
-        <View className="h-2 w-px bg-line" />
+      {/* Header: the agent is asleep. That framing is the desktop's, and it is
+          the one that makes the card legible — the user is not being asked to
+          evaluate a form, they are being asked to wake something up. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          backgroundColor: `${accent}14`,
+        }}
+      >
+        <Moon size={13} color={accent} />
+        <Mono className="text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+          Agent sleeping
+        </Mono>
+        <View style={{ width: 1, height: 12, backgroundColor: palette.lineStrong }} />
         <View
-          className={cn(
-            'rounded-chip px-1.5 py-0.5',
-            risky ? 'bg-red-tint' : 'bg-orange-tint',
-          )}
+          style={{
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            borderRadius: radius.xs,
+            backgroundColor: `${accent}22`,
+          }}
         >
-          <Mono className={cn('text-[10px] font-medium', risky ? 'text-red' : 'text-orange')}>
+          <Text style={{ color: accent, fontSize: 10, fontWeight: '700' }}>
             {risky ? 'high risk' : 'needs you'}
-          </Mono>
+          </Text>
         </View>
+        <View style={{ flex: 1 }} />
+        <Text className="text-[10.5px] text-ink-3">waiting for you</Text>
       </View>
 
-      {/* Context trace (the command/path the prompt is about) */}
+      {/* Context: the command, path or URL the request is about. First, because
+          it is what you check before deciding. */}
       {view.context ? (
-        <View className="border-b border-line bg-canvas px-4 py-3">
-          <View className="flex-row items-start gap-2">
-            <Text className="mt-0.5 text-[10px] leading-4 text-ink-3">›</Text>
-            <Mono className="min-w-0 flex-1 text-[11.5px] leading-5 text-ink-2">{view.context}</Mono>
-          </View>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 8,
+            paddingHorizontal: 14,
+            paddingVertical: 11,
+            backgroundColor: palette.well,
+            borderTopWidth: 1,
+            borderTopColor: palette.line,
+          }}
+        >
+          <Mono className="text-[12px] leading-[18px] text-ink-4">›</Mono>
+          <Mono className="flex-1 text-[12px] leading-[18px] text-ink-2">{view.context}</Mono>
         </View>
       ) : null}
 
-      {/* Question */}
-      <View className="flex-row items-start gap-3 px-4 pb-3 pt-4">
+      {/* The question, in the agent's words. */}
+      <View style={{ flexDirection: 'row', gap: 11, padding: 14, paddingBottom: 12 }}>
         <View
-          className={cn(
-            'size-8 shrink-0 items-center justify-center rounded-xl',
-            risky ? 'bg-red-tint' : 'bg-field',
-          )}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: `${accent}1A`,
+          }}
         >
-          <Moon size={16} color={risky ? palette.danger : DIM} />
+          <Moon size={15} color={accent} />
         </View>
-        <View className="min-w-0 flex-1">
+        <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
           {view.header ? (
-            <Text className="text-[11px] font-medium uppercase tracking-wide text-ink-3">{view.header}</Text>
+            <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 0.6 }}>
+              {view.header}
+            </Text>
           ) : null}
-          <Text className="text-[13px] font-medium leading-5 text-ink">{view.question}</Text>
+          <Text className="text-[14.5px] font-medium leading-[20px] text-ink" style={{ letterSpacing: -0.1 }}>
+            {view.question}
+          </Text>
           {isMulti ? (
-            <View className="mt-1.5 self-start rounded-chip bg-surface px-2 py-0.5">
-              <Mono className="text-[11px]">select all that apply</Mono>
+            <View
+              style={{
+                alignSelf: 'flex-start',
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: radius.xs,
+                backgroundColor: palette.raised,
+              }}
+            >
+              <Text className="text-[11.5px] text-ink-3">select all that apply</Text>
             </View>
           ) : null}
         </View>
       </View>
 
-      {/* Options */}
-      <View className="gap-2 border-t border-line bg-surface px-4 py-3">
+      {/* Options. Each is a full-width target with its own description in
+          monospace — the description is agent-supplied text, often a shell
+          fragment, and prose styling would misrepresent it. */}
+      <View style={{ gap: 8, paddingHorizontal: 14, paddingBottom: 14 }}>
         {options.map((option, index) => {
           const active = selected.includes(option.value)
+          const kindColor =
+            option.kind === 'allow' ? palette.ok : option.kind === 'deny' ? palette.danger : palette.ink3
           return (
             <Pressable
               key={option.value}
-              onPress={() =>
-                setSelected((current) =>
-                  isMulti
-                    ? current.includes(option.value)
-                      ? current.filter((value) => value !== option.value)
-                      : [...current, option.value]
-                    : [option.value],
-                )
-              }
-              className={cn(
-                'w-full flex-row items-center gap-3 rounded-xl border px-4 py-3',
-                active ? 'border-accent bg-accent-tint' : 'border-line bg-canvas',
-              )}
+              accessibilityRole={isMulti ? 'checkbox' : 'radio'}
+              accessibilityLabel={option.label}
+              accessibilityHint={option.description}
+              accessibilityState={{ selected: active, checked: isMulti ? active : undefined }}
+              onPress={() => choose(option)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 11,
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderColor: active ? palette.accent : palette.line,
+                backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : palette.well,
+                paddingHorizontal: 13,
+                paddingVertical: 12,
+                minHeight: 52,
+              })}
             >
               <View
-                className={cn(
-                  'size-5 shrink-0 items-center justify-center rounded-full border',
-                  active ? 'border-accent bg-accent' : 'border-line-strong',
-                )}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: isMulti ? radius.xs : 11,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1.5,
+                  borderColor: active ? palette.accent : palette.lineStrong,
+                  backgroundColor: active ? palette.accent : 'transparent',
+                }}
               >
                 {active ? (
                   isMulti ? (
-                    <Text className="text-[10px] font-bold text-accent-ink">✓</Text>
+                    <Check size={13} color={palette.accentInk} strokeWidth={3} />
                   ) : (
-                    <Text className="text-[10px] font-bold text-accent-ink">{index + 1}</Text>
+                    <View
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: 4,
+                        backgroundColor: palette.accentInk,
+                      }}
+                    />
                   )
                 ) : (
-                  <Text className="text-[10px] text-ink-3">{index + 1}</Text>
+                  <Text style={{ color: palette.ink4, fontSize: 10.5, fontWeight: '700' }}>{index + 1}</Text>
                 )}
               </View>
-              <View className="min-w-0 flex-1">
-                <Text className="text-[13px] font-medium text-ink">{option.label}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text className="text-[14px] font-medium text-ink" numberOfLines={2}>
+                  {option.label}
+                </Text>
                 {option.description ? (
-                  <Mono className="mt-0.5 text-[11px] leading-4">{option.description}</Mono>
+                  <Mono className="mt-1 text-[11.5px] leading-[16px]" numberOfLines={3}>
+                    {option.description}
+                  </Mono>
                 ) : null}
               </View>
-              {!isMulti && option.kind !== 'other' ? (
-                <View className="shrink-0 rounded-chip bg-field px-2 py-0.5">
-                  <Mono className="text-[10px]">{option.kind}</Mono>
+              {option.kind !== 'other' ? (
+                <View
+                  style={{
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: radius.xs,
+                    backgroundColor: `${kindColor}1F`,
+                  }}
+                >
+                  <Text style={{ color: kindColor, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.5 }}>
+                    {option.kind.toUpperCase()}
+                  </Text>
                 </View>
               ) : null}
             </Pressable>
@@ -396,38 +648,149 @@ export function Approval({
 
         {/* Plan approvals accept a free-text answer alongside the choices. */}
         {isPlan ? (
-          <View className="flex-row items-center gap-3 rounded-xl border border-line bg-canvas px-4 py-2.5">
-            <TextCursorInput size={14} color={DIM} />
-            <View className="min-w-0 flex-1">
-              <TextField
-                value={custom}
-                onChangeText={setCustom}
-                placeholder="Enter your answer…"
-                className="text-[12.5px]"
-              />
-            </View>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              borderRadius: radius.md,
+              borderWidth: 1,
+              borderColor: palette.line,
+              backgroundColor: palette.well,
+              paddingHorizontal: 12,
+            }}
+          >
+            <TextInput
+              value={custom}
+              onChangeText={setCustom}
+              placeholder="Or write an answer…"
+              placeholderTextColor={palette.ink4}
+              accessibilityLabel="Write an answer"
+              autoCapitalize="sentences"
+              className="flex-1 py-3 text-[14px] text-ink"
+              style={{ minHeight: 48 }}
+            />
+            {custom.trim().length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send this answer instead"
+                onPress={() => {
+                  void haptic('success')
+                  onRespond(custom.trim())
+                }}
+                hitSlop={8}
+                style={({ pressed }) => ({
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: pressed ? palette.accentHover : palette.accent,
+                })}
+              >
+                <Check size={16} color={palette.accentInk} strokeWidth={3} />
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
-        <View className="mt-1 flex-row items-center gap-2">
-          {isMulti ? (
-            <Mono className="min-w-0 flex-1 text-[11px]">
-              {selected.length} selected
-            </Mono>
-          ) : (
-            <View className="flex-1" />
-          )}
-          {isPlan && custom.trim() ? (
-            <Button variant="surface" label="Send feedback" onPress={() => onRespond(part.requestId, custom.trim())} />
-          ) : null}
-          <Button
-            variant="primary"
-            label={isMulti ? 'Confirm' : 'Respond'}
-            disabled={!canSubmit}
-            onPress={submit}
-          />
-        </View>
+        {/* Multi-select and plan approvals need a confirm: the answer is
+            composed, not chosen, and one wrong tap here is a wrong turn. */}
+        {instant ? null : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 }}>
+            {isMulti ? (
+              <Text className="flex-1 text-[12.5px] text-ink-3">
+                {selected.length === 0
+                  ? 'Pick at least one'
+                  : `${selected.length} selected — ${options.length} options`}
+              </Text>
+            ) : (
+              <View style={{ flex: 1 }} />
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              label={isMulti ? `Confirm${selected.length ? ` (${selected.length})` : ''}` : 'Respond'}
+              disabled={selected.length === 0}
+              onPress={() => {
+                void haptic('success')
+                submit(selected)
+              }}
+            />
+          </View>
+        )}
       </View>
     </View>
   )
 }
+
+/* ── A row that reports a non-blocking event ──────────────────────────────────────
+ * Progress, search, commits, verification. Each one gets a shape that matches
+ * what it is: a bar for progress, monospace for anything an agent passed to a
+ * shell, a status dot and a word for verification. */
+
+export function EventCard({
+  icon,
+  label,
+  detail,
+  meta,
+  tone,
+  children,
+}: {
+  icon?: React.ReactNode
+  label: string
+  detail?: string
+  meta?: string
+  tone?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 9,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.well,
+        paddingHorizontal: 11,
+        paddingVertical: 9,
+      }}
+    >
+      {icon}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text className="text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+          {label}
+        </Text>
+        {detail ? (
+          <Mono className="mt-0.5 text-[11px] leading-[15px]" numberOfLines={1}>
+            {detail}
+          </Mono>
+        ) : null}
+      </View>
+      {children}
+      {meta ? (
+        <Text style={{ color: tone ?? palette.ink3, fontSize: 10.5, fontWeight: '600' }} numberOfLines={1}>
+          {meta}
+        </Text>
+      ) : null}
+    </View>
+  )
+}
+
+export function CloseButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Close"
+      onPress={onPress}
+      hitSlop={10}
+      className="size-9 items-center justify-center rounded-pill active:bg-raised"
+    >
+      <X size={17} color={palette.ink3} />
+    </Pressable>
+  )
+}
+
+export { ActivityIndicator, CopyButton }

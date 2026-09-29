@@ -1,31 +1,41 @@
 /**
- * MCP Servers — manage Model Context Protocol servers.
+ * MCP servers — the tools this desktop can call.
  *
- * Lists configured MCP servers, allows adding new ones and removing existing.
- * Mirrors the desktop's MCP configuration panel.
+ * One screen, two jobs that are genuinely different and were previously both
+ * crammed into the same card: **listing** what is installed, and **adding**
+ * something new. Adding is a form sheet rather than a row of inputs injected
+ * into the list, because a form that appears and disappears with the list is a
+ * form you cannot scroll away from once you have made a mistake.
+ *
+ * Removing is two-step and immediate rather than a confirm dialog: the row
+ * swaps to "Confirm" and the tap that completes it is the one you have to aim
+ * at deliberately. A dialog for deleting one server is heavier than the action
+ * deserves, and the two-step row is the pattern iOS itself uses for exactly
+ * this case.
  */
 
 import * as React from 'react'
-import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { Pressable, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
-import type { DrawerNavigationProp } from '@react-navigation/drawer'
-import { Plus, RefreshCw, Server, Trash2 } from 'lucide-react-native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { Plus, Server } from 'lucide-react-native'
 
 import { mcpApi } from '@app/lib/api'
-import type { DrawerParamList } from '@app/navigation'
+import type { RootStackParamList } from '@app/navigation'
+import { palette, radius } from '@app/design/tokens'
+import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
+import { FormSheet } from '@app/components/Sheet'
 import {
+  Badge,
   Button,
   Card,
-  CardHeader,
-  Chip,
-  Dot,
+  Divider,
   EmptyState,
-  GlassSurface,
-  Mono,
-  PageHeader,
+  Field,
+  haptic,
+  toast,
 } from '@app/components/ui'
-import { palette } from '@app/design/tokens'
 
 interface McpServer {
   name: string
@@ -34,9 +44,9 @@ interface McpServer {
 }
 
 export function McpScreen() {
-  const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const [servers, setServers] = React.useState<McpServer[]>([])
-  const [loading, setLoading] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
   const [refreshing, setRefreshing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
@@ -44,20 +54,21 @@ export function McpScreen() {
   const [newCommand, setNewCommand] = React.useState('')
   const [addBusy, setAddBusy] = React.useState(false)
   const [confirmRemove, setConfirmRemove] = React.useState<string | null>(null)
+  const [busyRemove, setBusyRemove] = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     setError(null)
     try {
-      const res = await mcpApi.list()
-      setServers(res.servers ?? [])
+      setServers((await mcpApi.list()).servers ?? [])
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load MCP servers')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
-    setLoading(true)
-    void load().finally(() => setLoading(false))
+    void load()
   }, [load])
 
   async function refresh() {
@@ -71,156 +82,256 @@ export function McpScreen() {
     setAddBusy(true)
     setError(null)
     try {
-      await mcpApi.add({ name: newName.trim(), ...(newCommand.trim() ? { command: newCommand.trim() } : {}) })
+      await mcpApi.add({
+        name: newName.trim(),
+        ...(newCommand.trim() ? { command: newCommand.trim() } : {}),
+      })
       setNewName('')
       setNewCommand('')
       setAddOpen(false)
       await load()
+      toast({ message: `${newName.trim()} added`, tone: 'ok' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not add MCP server')
+      toast({
+        message: 'Could not add that server',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setAddBusy(false)
     }
   }
 
   async function removeServer(name: string) {
-    setError(null)
+    setBusyRemove(name)
     try {
       await mcpApi.remove(name)
       setConfirmRemove(null)
       await load()
+      toast({ message: `${name} removed`, tone: 'ok' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not remove MCP server')
+      toast({
+        message: 'Could not remove that server',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
+    } finally {
+      setBusyRemove(null)
     }
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
-      <PageHeader
-        onMenu={() => navigation.openDrawer()}
-        title="MCP Servers"
-        right={
-          <Button
-            variant="ghost"
-            label="Add"
-            className="min-h-9 px-3"
-            onPress={() => setAddOpen(true)}
-          />
-        }
-      />
-
-      <FlatList
-        data={servers}
-        keyExtractor={(item) => item.name}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
-        ListHeaderComponent={
-          <View className="gap-3 px-4 pt-5 pb-3">
-            <View className="gap-1.5">
-              <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Integration</Mono>
-              <Text className="text-[24px] font-bold tracking-tight text-ink" style={{ letterSpacing: -0.5 }}>MCP Servers</Text>
-              <Text className="text-[14px] leading-5 text-ink-2">
-                MCP servers give agents access to external tools and data sources. Configure them here
-                and they become available across all sessions.
-              </Text>
-            </View>
-
-            {error ? (
-              <View className="rounded-xl border border-red-border bg-red-tint px-3.5 py-2.5">
-                <Text className="text-[13px] leading-5 text-ink">{error}</Text>
-              </View>
-            ) : null}
-          </View>
-        }
-        renderItem={({ item }) => (
-          <View className="mx-4 mb-2">
-            <Card>
-              <View className="flex-row items-center gap-3 p-3.5">
-                <View className="size-9 items-center justify-center rounded-lg bg-accent-tint">
-                  <Server size={16} color={palette.accent} />
-                </View>
-                <View className="min-w-0 flex-1">
-                  <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  {item.command ? (
-                    <Mono className="mt-0.5 text-[10.5px] text-ink-3" numberOfLines={1}>
-                      {item.command}
-                    </Mono>
-                  ) : null}
-                </View>
-                <Chip
-                  tone={item.enabled !== false ? 'green' : 'dim'}
-                  label={item.enabled !== false ? 'active' : 'disabled'}
-                />
-                {confirmRemove === item.name ? (
-                  <Pressable
-                    onPress={() => void removeServer(item.name)}
-                    className="min-h-8 rounded-lg bg-red-tint px-2.5 items-center justify-center"
-                  >
-                    <Text className="text-[10.5px] font-semibold text-red">Confirm</Text>
-                  </Pressable>
-                ) : (
-                  <Pressable
-                    onPress={() => setConfirmRemove(item.name)}
-                    accessibilityLabel={`Remove ${item.name}`}
-                    className="size-8 items-center justify-center rounded-lg active:bg-red-tint"
-                  >
-                    <Trash2 size={14} color={palette.ink3} />
-                  </Pressable>
-                )}
-              </View>
-            </Card>
-          </View>
-        )}
-        ListEmptyComponent={
-          !loading ? (
-            <EmptyState
-              title="No MCP servers"
-              body="Add an MCP server to give agents access to external tools and data."
-            />
-          ) : null
-        }
-        contentContainerClassName="pb-10"
-      />
-
-      {/* Add server modal */}
-      {addOpen ? (
-        <View className="absolute inset-0 z-30 justify-end bg-black/65">
-          <Pressable className="absolute inset-0" onPress={() => setAddOpen(false)} accessibilityLabel="Close" />
-          <GlassSurface radius={20} className="border-t border-line">
-            <View className="p-4 pb-8 gap-3">
-              <Mono className="text-[10px] uppercase tracking-[0.14em] text-ink-3">Add MCP Server</Mono>
-              <TextInput
-                value={newName}
-                onChangeText={setNewName}
-                placeholder="Server name"
-                placeholderTextColor={palette.ink3}
-                autoCapitalize="none"
-                autoCorrect={false}
-                className="min-h-11 rounded-lg border border-line bg-field px-3 text-[13px] text-ink"
-              />
-              <TextInput
-                value={newCommand}
-                onChangeText={setNewCommand}
-                placeholder="Command (optional)"
-                placeholderTextColor={palette.ink3}
-                autoCapitalize="none"
-                autoCorrect={false}
-                className="min-h-11 rounded-lg border border-line bg-field px-3 font-mono text-[12px] text-ink"
-              />
-              <View className="flex-row gap-2">
-                <Button
-                  variant="primary"
-                  label={addBusy ? 'Adding…' : 'Add server'}
-                  disabled={addBusy || !newName.trim()}
-                  onPress={() => void addServer()}
-                />
-                <Button variant="ghost" label="Cancel" onPress={() => setAddOpen(false)} />
-              </View>
-            </View>
-          </GlassSurface>
+    <ScreenScaffold
+      title="MCP servers"
+      eyebrow="Integrations"
+      subtitle="Model Context Protocol servers give agents external tools and data. They apply to every session on the desktop."
+      onRefresh={() => void refresh()}
+      refreshing={refreshing}
+      scroll
+      contentClassName="px-4 pb-12 gap-5"
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+      headerRight={
+        // A `primary` Button rather than a hand-rolled pill: the accent fill,
+        // the label weight and the 48pt target are all the primitive's job, and
+        // re-deriving them here is how a header ends up a different button from
+        // every other one in the app.
+        <Button
+          size="sm"
+          variant="primary"
+          label="Add"
+          icon={<Plus size={15} color={palette.accentInk} strokeWidth={2.6} />}
+          accessibilityLabel="Add an MCP server"
+          onPress={() => {
+            void haptic('light')
+            setAddOpen(true)
+          }}
+        />
+      }
+    >
+      {error ? (
+        <View
+          accessible
+          accessibilityRole="alert"
+          style={{
+            gap: 9,
+            borderRadius: radius.md,
+            borderWidth: 1,
+            borderColor: palette.dangerBorder,
+            backgroundColor: palette.dangerSoft,
+            padding: 14,
+          }}
+        >
+          <Text className="text-[13.5px] font-semibold text-ink">{error}</Text>
+          <Button size="sm" variant="secondary" label="Retry" onPress={() => void load()} />
         </View>
       ) : null}
-    </SafeAreaView>
+
+      <Section eyebrow="Installed" title={servers.length > 0 ? `${servers.length} ${servers.length === 1 ? 'server' : 'servers'}` : undefined} enterIndex={0}>
+        {servers.length === 0 ? (
+          <Card>
+            <EmptyState
+              title={loading ? 'Loading servers' : 'No MCP servers'}
+              body={
+                loading
+                  ? 'Asking the desktop what is configured.'
+                  : 'Add an MCP server to give agents access to external tools and data.'
+              }
+              icon={<Server size={22} color={palette.ink3} />}
+              action={
+                loading ? null : (
+                  <Button size="sm" variant="primary" label="Add a server" onPress={() => setAddOpen(true)} />
+                )
+              }
+            />
+          </Card>
+        ) : (
+          <Card>
+            {servers.map((server, index) => (
+              <ServerRow
+                key={server.name}
+                server={server}
+                index={index}
+                confirming={confirmRemove === server.name}
+                busy={busyRemove === server.name}
+                onRemove={() => {
+                  void haptic('warn')
+                  setConfirmRemove(server.name)
+                }}
+                onConfirmRemove={() => void removeServer(server.name)}
+              />
+            ))}
+          </Card>
+        )}
+      </Section>
+
+      <FormSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        eyebrow="MCP"
+        title="Add a server"
+        submitLabel={addBusy ? 'Adding…' : 'Add server'}
+        onSubmit={() => void addServer()}
+        busy={addBusy}
+        disabled={!newName.trim()}
+      >
+        <Field
+          label="Name"
+          value={newName}
+          onChangeText={setNewName}
+          placeholder="github"
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Server name"
+        />
+        <Field
+          label="Command"
+          value={newCommand}
+          onChangeText={setNewCommand}
+          placeholder="npx -y @modelcontextprotocol/server-github"
+          autoCapitalize="none"
+          autoCorrect={false}
+          mono
+          accessibilityLabel="Server command"
+          hint="Optional — leave blank to use the desktop's default for this name."
+        />
+      </FormSheet>
+    </ScreenScaffold>
+  )
+}
+
+/**
+ * One server row.
+ *
+ * Its own component so the entry animation's value is created by a hook on a
+ * stable component rather than inside a `.map` callback.
+ */
+function ServerRow({
+  server,
+  index,
+  confirming,
+  busy,
+  onRemove,
+  onConfirmRemove,
+}: {
+  server: McpServer
+  index: number
+  confirming: boolean
+  busy: boolean
+  onRemove: () => void
+  onConfirmRemove: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      {index > 0 ? <Divider inset={60} /> : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+        <View
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: palette.accentSoft,
+          }}
+        >
+          <Server size={16} color={palette.accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+            {server.name}
+          </Text>
+          {server.command ? (
+            <Text
+              style={{ color: palette.ink3, fontSize: 11.5, fontFamily: 'Menlo', marginTop: 1 }}
+              numberOfLines={1}
+            >
+              {server.command}
+            </Text>
+          ) : null}
+        </View>
+        <Badge tone={server.enabled !== false ? 'ok' : 'muted'} outline>
+          {server.enabled !== false ? 'active' : 'disabled'}
+        </Badge>
+        {confirming ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Confirm removing ${server.name}`}
+            disabled={busy}
+            onPress={onConfirmRemove}
+            style={({ pressed }) => ({
+              minHeight: 34,
+              justifyContent: 'center',
+              borderRadius: radius.sm,
+              borderWidth: 1,
+              borderColor: palette.dangerBorder,
+              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
+              paddingHorizontal: 11,
+            })}
+          >
+            <Text style={{ color: palette.danger, fontSize: 12, fontWeight: '700' }}>
+              {busy ? '…' : 'Remove'}
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${server.name}`}
+            onPress={onRemove}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: radius.pill,
+              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
+            })}
+          >
+            <Text style={{ color: palette.ink3, fontSize: 17 }}>×</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
   )
 }

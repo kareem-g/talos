@@ -1,34 +1,57 @@
 /**
- * Composer — the prompt input, ported from the desktop's `Composer.tsx`.
+ * Composer — the prompt input.
  *
- * Same state machine, same affordances:
- *   - idle → a single send button; working → a Queue button plus a Stop button,
- *     because a mid-turn send is a follow-up for the *next* turn, not a drop;
- *   - the queue is a real list you can steer (inject now), edit, or remove;
- *   - the control row carries the session's live options (permission mode, model,
- *     thought level, agent-native mode) as chips, changed over the socket.
+ * A port of the desktop's `Composer`, with the parts the desktop hides on
+ * narrow screens moved into it, because on a phone there is no other place for
+ * them: the permission mode, the model, the thought level, the context ring and
+ * the slash-command menu all belong *here*, not in a header.
  *
- * Platform substitutions, all documented at the point of use:
- *   - the transparent-textarea-over-chip-backdrop trick has no native equivalent,
- *     so the field is a plain multiline input and inserted `/commands` stay text;
- *   - `DropdownList` (a DOM portal) becomes a bottom sheet;
- *   - attachments are omitted: `expo-image-picker` is not a dependency here and
- *     the daemon's multipart upload route is not part of the mobile API surface.
+ * THE STATE MACHINE (unchanged, because it is right)
+ * -------------------------------------------------
+ *   idle    → one Send.
+ *   working → that same control becomes Queue, and Stop appears *beside* it.
+ *
+ * Stop used to occupy the send button's slot, so the primary action jumped
+ * horizontally the moment the model started generating, and muscle memory from
+ * a thousand sends landed on Stop. The control never moves now; only its label
+ * and colour change. Queue is also the honest label: a mid-turn send is a
+ * follow-up for the *next* turn, not a drop.
+ *
+ * THE DOCK
+ * --------
+ * The control chips live in a row *inside* the composer card, above the text
+ * field, and that row scrolls horizontally. This is the desktop's
+ * `ComposerControls` exactly: on a wide screen they sit beside the send button,
+ * on a phone they sit above it. The chips are the fastest way to change a model
+ * mid-conversation, and burying them in a sheet would be the mobile equivalent
+ * of the desktop's own mistake of putting them in a header that eats 60pt.
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
-import { ArrowUp, Paperclip, Pencil, Square, Trash2, Undo2, X } from 'lucide-react-native'
-import * as ImagePicker from 'expo-image-picker'
-import * as ImageManipulator from 'expo-image-manipulator'
-import { cn } from '@/lib/format'
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import {
+  ArrowUp,
+  Brain,
+  CornerUpLeft,
+  Paperclip,
+  Pencil,
+  Square,
+  Trash2,
+  Wand2,
+  X,
+} from 'lucide-react-native'
+
 import type { UIState } from '@/lib/sessionState'
 import { attachmentsApi } from '@app/lib/api'
 import { useStore } from '@app/store'
 import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
-import { haptic, IconButton, Mono } from '@app/components/ui'
-import { GlassSurface } from '@app/components/Glass'
-import { palette } from '@app/design/tokens'
+import { palette, radius, shadowFloating } from '@app/design/tokens'
+import { useCollapse } from '@app/components/motion'
+import { haptic, Mono, Popover } from '@app/components/ui'
+import { ConfigChips, ContextRing } from '@app/components/ConfigChips'
+import * as ImagePicker from 'expo-image-picker'
+import * as ImageManipulator from 'expo-image-manipulator'
 
 /** Commands each CLI answers, mirroring the desktop's menu. */
 const BUILTIN_COMMANDS: Record<string, string[]> = {
@@ -40,8 +63,8 @@ const CUSTOM_COMMANDS = ['orchestrator', 'review', 'plan', 'worker', 'summarize'
 
 /**
  * A stable empty queue. `?? []` inside a zustand selector allocates a new array
- * on every store update, so the snapshot identity changes even when nothing about
- * this session moved.
+ * on every store update, so the snapshot identity changes even when nothing
+ * about this session moved.
  */
 const NO_QUEUE: QueuedMessage[] = []
 
@@ -49,6 +72,7 @@ const NO_QUEUE: QueuedMessage[] = []
 const MAX_UPLOAD_WIDTH = 1600
 
 export function Composer({ sessionId, uiState }: { sessionId: string; uiState: UIState }) {
+  const insets = useSafeAreaInsets()
   const connection = useStore((state) => state.connection)
   const queue = useStore((state) => state.queues[sessionId]) ?? NO_QUEUE
   const sendPrompt = useStore((state) => state.sendPrompt)
@@ -62,15 +86,18 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   const [attachments, setAttachments] = React.useState<AttachmentRef[]>([])
   const [uploading, setUploading] = React.useState(false)
   const [attachError, setAttachError] = React.useState<string | null>(null)
+  const [dockOpen, setDockOpen] = React.useState(true)
   const inputRef = React.useRef<TextInput>(null)
 
   const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
   const disabled = connection !== 'connected'
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !disabled
+  const dock = useCollapse(dockOpen)
 
   function submit() {
     const value = text.trim()
     if ((!value && attachments.length === 0) || disabled) return
+    void haptic(busy ? 'medium' : 'light')
     if (busy) queueMessage(sessionId, value, attachments)
     else sendPrompt(sessionId, value, attachments)
     setText('')
@@ -78,9 +105,9 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   }
 
   /**
-   * Pick images and upload them immediately, so the composer holds references to
-   * files the daemon already has. A failed upload leaves the draft untouched and
-   * says why rather than silently dropping the file.
+   * Pick images and upload them immediately, so the composer holds references
+   * to files the daemon already has. A failed upload leaves the draft untouched
+   * and says why rather than silently dropping the file.
    */
   async function attach() {
     setAttachError(null)
@@ -156,158 +183,339 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   const placeholder = disabled
     ? 'Waiting for connection…'
     : busy
-      ? 'Keep typing to queue a follow-up'
+      ? 'Queue a follow-up for the next turn'
       : 'Message the agent…'
 
   return (
-    <View className="shrink-0 border-t border-line bg-canvas px-3 pb-3 pt-2">
-      <View className="relative w-full">
+    <View
+      style={{
+        borderTopWidth: 1,
+        borderTopColor: palette.line,
+        backgroundColor: palette.canvas,
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: Math.max(insets.bottom, 10),
+      }}
+    >
+      <View style={{ position: 'relative' }}>
         {/* Slash-command menu, floating above the card. */}
         {commands.length > 0 ? (
-          <View className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-md border border-line-strong bg-raised">
-            <View className="border-b border-line px-2.5 py-1.5">
-              <Mono className="text-[10px] uppercase tracking-wider">Commands</Mono>
+          <View
+            style={{
+              position: 'absolute',
+              bottom: '100%',
+              left: 0,
+              right: 0,
+              zIndex: 20,
+              marginBottom: 8,
+              borderRadius: radius.lg,
+              borderWidth: 1,
+              borderColor: palette.lineStrong,
+              backgroundColor: palette.raised,
+              overflow: 'hidden',
+              ...shadowFloating,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 7,
+                borderBottomWidth: 1,
+                borderBottomColor: palette.line,
+                paddingHorizontal: 13,
+                paddingVertical: 9,
+              }}
+            >
+              <Wand2 size={13} color={palette.wait} />
+              <Mono className="text-[10px] uppercase text-ink-3" style={{ letterSpacing: 1 }}>
+                Commands
+              </Mono>
             </View>
-            <View className="py-1">
+            <View style={{ paddingVertical: 4 }}>
               {commands.map((command) => (
                 <Pressable
                   key={command}
                   accessibilityRole="button"
                   accessibilityLabel={`Insert the /${command} command`}
                   onPress={() => insertCommand(command)}
-                  className="min-h-11 flex-row items-center gap-2.5 px-3 py-2 active:bg-pressed"
+                  style={({ pressed }) => ({
+                    minHeight: 44,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 11,
+                    paddingHorizontal: 13,
+                    backgroundColor: pressed ? palette.hover : 'transparent',
+                  })}
                 >
-                  <View className="size-5 items-center justify-center rounded-sm bg-wait-soft">
-                    <Mono className="text-[10px] font-semibold text-wait">/</Mono>
+                  <View
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: radius.xs,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: palette.waitSoft,
+                    }}
+                  >
+                    <Mono className="text-[11px] font-semibold text-wait">/</Mono>
                   </View>
-                  <Mono className="min-w-0 flex-1 text-[12px] text-ink">{command}</Mono>
+                  <Mono className="flex-1 text-[13px] text-ink">{command}</Mono>
                 </Pressable>
               ))}
             </View>
           </View>
         ) : null}
 
-        <GlassSurface radius={18} className="border-line-strong">
-          {/* Queue */}
+        <View
+          style={{
+            borderRadius: radius.lg,
+            borderWidth: 1,
+            borderColor: palette.line,
+            backgroundColor: palette.surface,
+            overflow: 'hidden',
+          }}
+        >
+          {/* ── Queue ───────────────────────────────────────────────────
+              Shown *above* the field, not below: the queue is what you are
+              about to send, and it has to be read before you type the next
+              thing, not after. */}
           {queue.length > 0 ? (
-            <View className="border-b border-line bg-raised px-2 py-1.5">
-              <Mono className="px-1 pb-1 text-[9.5px] uppercase tracking-[0.12em]">
+            <View
+              style={{
+                borderBottomWidth: 1,
+                borderBottomColor: palette.line,
+                backgroundColor: palette.well,
+                padding: 8,
+                gap: 6,
+              }}
+            >
+              <Mono className="px-1 text-[9.5px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
                 Queued · {queue.length}
               </Mono>
-              <View className="gap-1">
-                {queue.map((message, index) => (
-                  <View
-                    key={message.id}
-                    className="flex-row items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1.5"
-                  >
-                    <Text className="min-w-0 flex-1 text-[12px] text-ink-2" numberOfLines={1}>
-                      {message.text || `${message.attachments.length} attachment(s)`}
-                      {message.text && message.attachments.length > 0
-                        ? `  +${message.attachments.length}`
-                        : ''}
-                    </Text>
-                    <Pressable
-                      onPress={() => steerQueued(sessionId, message.id)}
-                      accessibilityLabel="Send now"
-                      className="min-h-8 shrink-0 flex-row items-center gap-1 rounded-pill border border-line bg-raised px-2.5"
-                    >
-                      <Undo2 size={13} color={palette.ink2} />
-                      <Text className="text-[11px] font-medium text-ink-2">Steer</Text>
-                    </Pressable>
-                    <IconButton
-                      label={`Edit queued message ${index + 1} of ${queue.length}`}
-                      size={30}
-                      onPress={() => void editQueued(message)}
-                    >
-                      <Pencil size={14} color={palette.ink2} />
-                    </IconButton>
-                    <IconButton
-                      label={`Remove queued message ${index + 1} of ${queue.length}`}
-                      size={30}
-                      onPress={() => removeQueued(sessionId, message.id)}
-                    >
-                      <Trash2 size={14} color={palette.ink3} />
-                    </IconButton>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          {attachments.length > 0 ? (
-            <View className="flex-row flex-wrap gap-1.5 px-3 pt-2.5">
-              {attachments.map((attachment) => (
+              {queue.map((message, index) => (
                 <View
-                  key={attachment.ref}
-                  className="flex-row items-center gap-1.5 rounded-pill border border-line bg-raised py-1 pl-2 pr-1"
+                  key={message.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    borderRadius: radius.sm,
+                    borderWidth: 1,
+                    borderColor: palette.line,
+                    backgroundColor: palette.surface,
+                    paddingLeft: 10,
+                    paddingRight: 4,
+                    paddingVertical: 3,
+                  }}
                 >
-                  <Paperclip size={11} color={palette.ink3} />
-                  <Text className="max-w-[160px] text-[10.5px] text-ink-2" numberOfLines={1}>
-                    {attachment.fileName}
+                  <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+                    {message.text || `${message.attachments.length} attachment(s)`}
+                    {message.text && message.attachments.length > 0 ? `  +${message.attachments.length}` : ''}
                   </Text>
-                  <IconButton
-                    label={`Remove ${attachment.fileName}`}
-                    size={24}
-                    onPress={() =>
-                      setAttachments((current) => current.filter((entry) => entry.ref !== attachment.ref))
-                    }
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Send queued message ${index + 1} of ${queue.length} now`}
+                    onPress={() => {
+                      void haptic('medium')
+                      steerQueued(sessionId, message.id)
+                    }}
+                    style={({ pressed }) => ({
+                      minHeight: 30,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      borderRadius: radius.pill,
+                      borderWidth: 1,
+                      borderColor: palette.line,
+                      backgroundColor: pressed ? palette.hover : palette.raised,
+                      paddingHorizontal: 9,
+                    })}
                   >
-                    <X size={12} color={palette.ink3} />
-                  </IconButton>
+                    <CornerUpLeft size={12} color={palette.ink2} />
+                    <Text className="text-[11.5px] font-medium text-ink-2">Steer</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit queued message ${index + 1} of ${queue.length}`}
+                    onPress={() => void editQueued(message)}
+                    hitSlop={8}
+                    className="size-8 items-center justify-center rounded-pill active:bg-raised"
+                  >
+                    <Pencil size={14} color={palette.ink2} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove queued message ${index + 1} of ${queue.length}`}
+                    onPress={() => removeQueued(sessionId, message.id)}
+                    hitSlop={8}
+                    className="size-8 items-center justify-center rounded-pill active:bg-raised"
+                  >
+                    <Trash2 size={14} color={palette.ink3} />
+                  </Pressable>
                 </View>
               ))}
             </View>
           ) : null}
+
+          {attachments.length > 0 ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingTop: 10 }}>
+              {attachments.map((attachment) => (
+                <View
+                  key={attachment.ref}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 5,
+                    borderRadius: radius.pill,
+                    borderWidth: 1,
+                    borderColor: palette.line,
+                    backgroundColor: palette.raised,
+                    paddingLeft: 9,
+                    paddingRight: 2,
+                    paddingVertical: 3,
+                  }}
+                >
+                  <Paperclip size={11} color={palette.ink3} />
+                  <Text className="max-w-[150px] text-[11.5px] text-ink-2" numberOfLines={1}>
+                    {attachment.fileName}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${attachment.fileName}`}
+                    onPress={() =>
+                      setAttachments((current) => current.filter((entry) => entry.ref !== attachment.ref))
+                    }
+                    hitSlop={8}
+                    className="size-7 items-center justify-center rounded-pill active:bg-hover"
+                  >
+                    <X size={12} color={palette.ink3} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {/* ── The dock: the session's live configuration ─────────────
+              Collapsible, because eight agents' worth of dimensions is a
+              wall, and the user who needs none of them should not pay for
+              it. The context ring is always visible even when collapsed —
+              it is the one dimension you want to know without asking. */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              borderBottomWidth: 1,
+              borderBottomColor: palette.line,
+              backgroundColor: palette.well,
+              paddingLeft: 12,
+              paddingRight: 8,
+              paddingVertical: 6,
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={dockOpen ? 'Hide session controls' : 'Show session controls'}
+              accessibilityState={{ expanded: dockOpen }}
+              onPress={() => setDockOpen((value) => !value)}
+              hitSlop={10}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                minHeight: 26,
+                paddingRight: 4,
+              }}
+            >
+              <Brain size={13} color={dockOpen ? palette.accent : palette.ink3} />
+              <Text
+                className="text-[11px] font-semibold uppercase"
+                style={{ color: dockOpen ? palette.accent : palette.ink3, letterSpacing: 0.9 }}
+              >
+                Run
+              </Text>
+            </Pressable>
+
+            {!dockOpen ? <View style={{ flex: 1 }} /> : null}
+
+            <ContextRing sessionId={sessionId} working={busy} />
+          </View>
+
+          <View {...(dock.measured ? { onLayout: dock.onLayout } : {})} style={dock.style}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8 }}
+            >
+              <ConfigChips sessionId={sessionId} />
+            </ScrollView>
+          </View>
 
           <TextInput
             ref={inputRef}
             value={text}
             onChangeText={setText}
             placeholder={placeholder}
-            placeholderTextColor={palette.ink3}
+            placeholderTextColor={palette.ink4}
             multiline
             editable={!disabled}
-            className="max-h-[168px] min-h-[44px] bg-transparent px-3.5 pt-3 text-[14px] leading-5 text-ink"
+            accessibilityLabel="Message the agent"
+            className="max-h-[150px] min-h-[48px] bg-transparent px-3.5 py-3 text-[15px] leading-[21px] text-ink"
           />
 
-          {/* ── Control row ──────────────────────────────────────────────
-              The send control never changes position. When the agent is
-              working, it becomes "Queue" in the same slot and Stop appears
-              beside it — previously the two swapped, so the primary action
-              jumped horizontally the moment the model started generating, and
-              muscle memory from a thousand sends landed on Stop. */}
-          <View className="flex-row items-center gap-2 px-2 pb-2 pt-1.5">
-            <IconButton
-              label="Attach images"
-              size={36}
+          {/* ── Control row ────────────────────────────────────────────
+              Attach on the left, send on the right, Stop beside send while
+              working. The send control never changes position. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, paddingBottom: 8, paddingTop: 2 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Attach images"
               disabled={disabled || uploading}
               onPress={() => void attach()}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 40,
+                height: 40,
+                borderRadius: radius.pill,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? palette.hover : 'transparent',
+                opacity: disabled ? 0.35 : 1,
+              })}
             >
               {uploading ? (
                 <ActivityIndicator size="small" color={palette.ink3} />
               ) : (
-                <Paperclip size={17} color={disabled ? palette.ink3 : palette.ink2} />
+                <Paperclip size={18} color={palette.ink2} />
               )}
-            </IconButton>
+            </Pressable>
 
             {busy ? (
-              <IconButton
-                label="Stop this session"
-                size={40}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Stop this session"
                 onPress={() => {
                   void haptic('warn')
                   void stopSession(sessionId)
                 }}
+                style={({ pressed }) => ({
+                  width: 40,
+                  height: 40,
+                  borderRadius: radius.pill,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: pressed ? palette.dangerSoft : palette.well,
+                })}
               >
-                <Square size={15} color={palette.danger} fill={palette.danger} />
-              </IconButton>
+                <Square size={14} color={palette.danger} fill={palette.danger} />
+              </Pressable>
             ) : null}
 
-            <View className="flex-1" />
+            <View style={{ flex: 1 }} />
 
             <Pressable
-              onPress={submit}
-              disabled={!canSend}
               accessibilityRole="button"
               accessibilityLabel={busy ? 'Queue this follow-up' : 'Send message'}
               accessibilityHint={
@@ -316,30 +524,43 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                   : 'Sends this message to the agent'
               }
               accessibilityState={{ disabled: !canSend }}
-              // 44pt: this is the single most-pressed control in the app.
-              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-              className={[
-                'h-11 min-w-11 flex-row items-center justify-center gap-1.5 rounded-pill px-4',
-                canSend ? 'bg-accent active:bg-accent-hover' : 'bg-raised',
-              ].join(' ')}
+              onPress={submit}
+              disabled={!canSend}
+              style={({ pressed }) => ({
+                minWidth: 46,
+                height: 42,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                borderRadius: radius.pill,
+                paddingHorizontal: 14,
+                backgroundColor: !canSend
+                  ? palette.raised
+                  : pressed
+                    ? palette.accentPressed
+                    : palette.accent,
+              })}
             >
-              <ArrowUp size={17} color={canSend ? palette.accentInk : palette.ink3} />
+              <ArrowUp size={18} color={canSend ? palette.accentInk : palette.ink4} strokeWidth={2.6} />
               {busy ? (
                 <Text
-                  className={['text-[13px] font-bold', canSend ? 'text-accent-ink' : 'text-ink-3'].join(' ')}
+                  className="text-[13px] font-bold"
+                  style={{ color: canSend ? palette.accentInk : palette.ink4 }}
                 >
                   Queue
                 </Text>
               ) : null}
             </Pressable>
           </View>
-        </GlassSurface>
+        </View>
       </View>
 
       {attachError ? (
-        <Text className="mt-1 px-1 text-[11px] leading-4 text-danger">{attachError}</Text>
+        <Text className="mt-1.5 px-1 text-[11.5px] leading-[16px] text-danger">{attachError}</Text>
       ) : null}
-
     </View>
   )
 }
+
+export { Popover }

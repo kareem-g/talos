@@ -1,28 +1,47 @@
 /**
  * Chat rows — the compact activity lines in an assistant turn.
  *
- * Each row is a faithful port of the desktop's counterpart, at the same height,
- * type scale and colour: `Step` (tool/command) at 24px with its glyph, diffstat,
- * exit code, duration and expandable raw input/output; the `FileChips` group;
- * the `DiffView` line colouring; and the AI-event rows (subagent, orchestration,
+ * Each row is a port of the desktop's counterpart at the same height, type
+ * scale and colour: `Step` (tool/command), the `FileChips` group, the
+ * `DiffView` line colouring, and the AI-event rows (subagent, orchestration,
  * progress, search, git commit, browser step, verification).
  *
- * Two platform rules applied throughout: `truncate`/`line-clamp` become
- * `numberOfLines`, and CSS `hover:`/`group-hover:` reveals become either
- * press-to-expand or always-visible affordances — a phone has no hover.
+ * THE STEP ROW IS THE MOST COMMON THING ON THE SCREEN
+ * ---------------------------------------------------
+ * A busy agent emits dozens of tool calls per turn, so this row is where
+ * density is either won or lost. Three decisions carry it:
+ *
+ *   1. **A single tool renders bare; a run of tools folds into one card.** The
+ *      desktop does this and it is right — card chrome on every step would
+ *      turn a turn of twenty tools into a wall of boxes, and the boxes are not
+ *      the information. The run's card footer carries the only summary that
+ *      matters: how many steps, how long, and did any fail.
+ *   2. **The diffstat and the exit code are right-aligned and tabular.** You
+ *      scan a run of steps for *what changed*, not for *what ran*, so the
+ *      numbers sit in a column where the eye can run down them.
+ *   3. **A step in flight keeps its row height.** The spinner replaces the
+ *      glyph rather than the row collapsing, so the transcript does not jump
+ *      every time a tool starts or finishes — which on a live stream is
+ *      several times a second.
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native'
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   FileText,
+  FolderSearch,
+  GitCommitHorizontal,
+  Globe,
+  Keyboard,
+  MousePointerClick,
   Pencil,
   Search as SearchIcon,
   Sparkle,
   SquareTerminal,
+  Terminal,
 } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'
@@ -40,108 +59,43 @@ import type {
   ToolPart,
   VerificationPart,
 } from '@/types/conversation'
-import { Mono } from '@app/components/ui'
+import { diffAddSoft, diffDelSoft, palette, radius } from '@app/design/tokens'
+import { useCollapse } from '@app/components/motion'
+import {
+  CopyButton,
+  Mono,
+  Well,
+  haptic,
+} from '@app/components/ui'
 import { Prose } from './prose'
-import { palette } from '@app/design/tokens'
+import { EventCard } from './cards'
 
 const FAILED = palette.danger
-const DIM = palette.ink3
-const GREEN = palette.ok
 
-/* ── Step: a tool call or shell command ──────────────────────────────────── */
+/* ── Step: a tool call or shell command ──────────────────────────────────────── */
 
-function StepIcon({ glyph, failed }: { glyph: string; failed: boolean }) {
-  const color = failed ? FAILED : DIM
-  const size = glyph === 'search' ? 13 : 12
-  if (failed) return <AlertTriangle size={12} color={FAILED} />
-  if (glyph === 'edit') return <Pencil size={size} color={color} />
-  if (glyph === 'read' || glyph === 'file') return <FileText size={size} color={color} />
-  if (glyph === 'run') return <SquareTerminal size={size} color={color} />
-  if (glyph === 'search') return <SearchIcon size={size} color={color} />
-  return <Sparkle size={size} color={color} />
+function StepGlyph({ glyph, failed, size = 13 }: { glyph: string; failed: boolean; size?: number }) {
+  if (failed) return <AlertTriangle size={size} color={FAILED} />
+  switch (glyph) {
+    case 'edit':
+      return <Pencil size={size} color={palette.ink3} />
+    case 'read':
+    case 'file':
+      return <FileText size={size} color={palette.ink3} />
+    case 'run':
+      return <SquareTerminal size={size} color={palette.ink3} />
+    case 'search':
+      return <SearchIcon size={size} color={palette.ink3} />
+    default:
+      return <Sparkle size={size} color={palette.ink3} />
+  }
 }
 
-/**
- * One agent step. `[icon] Verb(dim) arg — +N / exit N / Failed / duration`.
- * Collapsed to a single 24px row; expands to the raw input and output.
- */
-export function Step({
-  part,
-  simple,
-}: {
-  part: ToolPart | CommandPart
-  simple?: boolean
-}) {
-  const isCommand = part.kind === 'command'
-  const failed = part.status === 'failed'
-  const running = part.status === 'running'
-  const summary = describeTool(part)
-  const [open, setOpen] = React.useState(false)
-
-  // Commands echo their own text as the argument; tools show a basename.
-  const arg = summary.arg
-  const argDir = arg && arg.includes('/') ? arg.slice(0, arg.lastIndexOf('/') + 1) : ''
-  const argName = arg && argDir ? arg.slice(argDir.length) : arg
-  const expandable = !simple && Boolean(part.output || (!isCommand && part.input))
-  const diffLines = part.kind === 'tool' ? countAddedLines(part) : 0
-
-  return (
-    <View className="min-w-0">
-      <Pressable
-        onPress={expandable ? () => setOpen((value) => !value) : undefined}
-        disabled={!expandable}
-        className="h-6 w-full flex-row items-center gap-1.5 rounded-md px-1.5"
-      >
-        <View className="size-4 shrink-0 items-center justify-center">
-          {running ? (
-            <ActivityIndicator size="small" color={palette.accent} />
-          ) : (
-            <StepIcon glyph={summary.glyph} failed={failed} />
-          )}
-        </View>
-
-        <Text className="shrink-0 text-[12px] leading-4 text-ink-2">{summary.label}</Text>
-
-        {arg ? (
-          <Mono className="min-w-0 flex-1 text-[11.5px] leading-4 text-ink" numberOfLines={1}>
-            {argDir ? <Mono className="text-ink-3">{argDir}</Mono> : null}
-            {argName}
-          </Mono>
-        ) : (
-          <View className="flex-1" />
-        )}
-
-        {!running && diffLines > 0 && !isCommand ? (
-          <Mono className="shrink-0 text-[10.5px] text-green">+{diffLines}</Mono>
-        ) : null}
-        {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
-          <Mono className="shrink-0 text-[10.5px] text-red">exit {part.exitCode}</Mono>
-        ) : null}
-        {failed ? (
-          <Text className="shrink-0 text-[10.5px] font-medium text-red underline">Failed</Text>
-        ) : null}
-        {part.durationMs && !simple ? (
-          <Mono className="shrink-0 text-[10.5px]">{formatMs(part.durationMs)}</Mono>
-        ) : null}
-        {expandable ? (
-          <ChevronDown size={11} color={DIM} style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }} />
-        ) : null}
-      </Pressable>
-
-      {open && expandable ? (
-        <View className="mb-1 ml-[13px] mt-0.5 flex-col gap-1 border-l border-line py-1 pl-3">
-          {part.kind === 'tool' && part.input ? (
-            <Mono className="text-[10.5px] leading-4">{part.input}</Mono>
-          ) : null}
-          {part.output ? (
-            <Mono className="max-h-64 overflow-hidden rounded-md bg-inset px-2 py-1.5 text-[11px] leading-4 text-ink-2">
-              {part.output}
-            </Mono>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-  )
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const minutes = Math.floor(ms / 60_000)
+  return `${minutes}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
 /** `+N` diffstat for write tools, from the tool's own output. */
@@ -155,39 +109,318 @@ function countAddedLines(part: ToolPart): number {
   return added
 }
 
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
+export function Step({
+  part,
+  simple,
+}: {
+  part: ToolPart | CommandPart
+  simple?: boolean
+}) {
+  const isCommand = part.kind === 'command'
+  const failed = part.status === 'failed'
+  const running = part.status === 'running'
+  const summary = describeTool(part)
+  const [open, setOpen] = React.useState(false)
+  const collapse = useCollapse(open)
 
-/* ── Diff ────────────────────────────────────────────────────────────────── */
+  // Commands echo their own text as the argument; tools show a basename.
+  const arg = summary.arg
+  const argDir = arg && arg.includes('/') ? arg.slice(0, arg.lastIndexOf('/') + 1) : ''
+  const argName = arg && argDir ? arg.slice(argDir.length) : arg
+  const expandable = !simple && Boolean(part.output || (!isCommand && part.input))
+  const diffLines = part.kind === 'tool' ? countAddedLines(part) : 0
 
-/** Unified-diff lines, coloured by prefix exactly as the desktop does. */
-export function DiffView({ diff }: { diff: string }) {
   return (
-    <View className="max-h-72 overflow-hidden rounded-b-lg border-t border-line bg-inset px-3 py-2">
-      {diff.split('\n').map((line, index) => {
-        const tone =
-          line.startsWith('+') && !line.startsWith('+++')
-            ? 'text-green'
-            : line.startsWith('-') && !line.startsWith('---')
-              ? 'text-red'
-              : line.startsWith('@@')
-                ? 'text-accent'
-                : 'text-ink-2'
-        return (
-          <Mono key={index} className={cn('text-[11px] leading-5', tone)}>
-            {line.length === 0 ? ' ' : line}
+    <View style={{ minWidth: 0 }}>
+      <Pressable
+        accessibilityRole={expandable ? 'button' : 'text'}
+        accessibilityLabel={`${summary.label}${arg ? ` ${arg}` : ''}`}
+        accessibilityHint={expandable ? 'Shows the raw input and output' : undefined}
+        accessibilityState={{ expanded: expandable ? open : undefined }}
+        onPress={
+          expandable
+            ? () => {
+                void haptic('light')
+                setOpen((value) => !value)
+              }
+            : undefined
+        }
+        style={{
+          minHeight: 30,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          borderRadius: radius.xs,
+          paddingHorizontal: 6,
+        }}
+      >
+        {/* Fixed 18pt slot: a spinner must not change the row's rhythm. */}
+        <View style={{ width: 18, alignItems: 'center', justifyContent: 'center' }}>
+          {running ? (
+            <ActivityIndicator size="small" color={palette.accent} />
+          ) : (
+            <StepGlyph glyph={summary.glyph} failed={failed} />
+          )}
+        </View>
+
+        <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={1}>
+          {summary.label}
+        </Text>
+
+        {arg ? (
+          <Mono className="min-w-0 flex-1 text-[12px] leading-[17px] text-ink" numberOfLines={1}>
+            {argDir ? <Mono className="text-ink-3">{argDir}</Mono> : null}
+            {argName}
           </Mono>
-        )
-      })}
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+
+        {!running && diffLines > 0 && !isCommand ? (
+          <Mono className="shrink-0 text-[11px] text-diff-add">+{diffLines}</Mono>
+        ) : null}
+        {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
+          <Mono className="shrink-0 text-[11px] text-diff-del">exit {part.exitCode}</Mono>
+        ) : null}
+        {failed ? (
+          <Text className="shrink-0 text-[11px] font-semibold text-danger">Failed</Text>
+        ) : null}
+        {part.durationMs && !simple ? (
+          <Mono className="shrink-0 text-[11px]">{formatMs(part.durationMs)}</Mono>
+        ) : null}
+        {expandable ? (
+          <ChevronDown
+            size={12}
+            color={palette.ink4}
+            style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }}
+          />
+        ) : null}
+      </Pressable>
+
+      {expandable ? (
+        <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+          <View
+            style={{
+              marginLeft: 15,
+              marginTop: 4,
+              marginBottom: 6,
+              paddingLeft: 11,
+              borderLeftWidth: 1,
+              borderLeftColor: palette.line,
+              gap: 6,
+            }}
+          >
+            {part.kind === 'tool' && part.input ? (
+              <Mono className="text-[11px] leading-[16px] text-ink-3">{part.input}</Mono>
+            ) : null}
+            {part.output ? (
+              <Well
+                className="max-h-[200px] px-2.5 py-2"
+                style={{ borderRadius: radius.sm }}
+              >
+                <ScrollView nestedScrollEnabled>
+                  <Mono className="text-[11px] leading-[16px] text-ink-2">{part.output}</Mono>
+                </ScrollView>
+              </Well>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
     </View>
   )
 }
 
-/* ── Files changed ───────────────────────────────────────────────────────── */
+/* ── Tool group ─────────────────────────────────────────────────────────────── */
 
-/** The "N files changed" group, with each path expandable to its diff. */
+export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
+  const [open, setOpen] = React.useState(true)
+  const collapse = useCollapse(open)
+  const failed = parts.some((part) => part.status === 'failed')
+  const running = parts.some((part) => part.status === 'running')
+  const totalMs = parts.reduce((sum, part) => sum + (part.durationMs ?? 0), 0)
+
+  // A lone tool gets no card — see the file header.
+  if (parts.length === 1) return <Step part={parts[0]} />
+
+  return (
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.surface,
+        overflow: 'hidden',
+      }}
+    >
+      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+        <View style={{ gap: 1, padding: 4 }}>
+          {parts.map((part, index) => (
+            <Step key={index} part={part} />
+          ))}
+        </View>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${parts.length} tool steps${failed ? ', some failed' : ''}`}
+        accessibilityState={{ expanded: open }}
+        onPress={() => {
+          void haptic('light')
+          setOpen((value) => !value)
+        }}
+        style={{
+          minHeight: 30,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          borderTopWidth: 1,
+          borderTopColor: palette.line,
+          backgroundColor: palette.well,
+          paddingHorizontal: 10,
+        }}
+      >
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            backgroundColor: running ? palette.accent : failed ? palette.danger : palette.ok,
+          }}
+        />
+        {running ? <ActivityIndicator size="small" color={palette.accent} /> : null}
+        <Mono className="text-[10.5px]">
+          {parts.length} steps{totalMs > 0 ? ` · ${formatMs(totalMs)}` : ''}
+          {failed ? ' · failed' : ''}
+          {running ? ' · running' : ''}
+        </Mono>
+        <View style={{ flex: 1 }} />
+        <ChevronDown
+          size={12}
+          color={palette.ink4}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
+      </Pressable>
+    </View>
+  )
+}
+
+/* ── Diff ──────────────────────────────────────────────────────────────────────
+ * The desktop's `DiffViewer` rules, unchanged, because they are the right ones:
+ * the `+`/`-` sign is the redundant encoding, so the state survives with no
+ * colour vision at all, and the line-number gutters are what make a diff
+ * navigable on a phone.
+ *
+ * A diff is horizontally scrollable, never wrapped. A wrapped diff is
+ * unreadable, and a diff that is not scrollable silently hides the right-hand
+ * side — which is where the new code is. */
+
+export function DiffView({ diff, maxHeight = 280 }: { diff: string; maxHeight?: number }) {
+  const lines = React.useMemo(() => diff.split('\n'), [diff])
+  return (
+    <Well style={{ maxHeight, borderTopWidth: 1, borderTopColor: palette.line }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView nestedScrollEnabled style={{ maxHeight }}>
+          <View style={{ paddingVertical: 8 }}>
+            {lines.map((line, index) => {
+              const add = line.startsWith('+') && !line.startsWith('+++')
+              const del = line.startsWith('-') && !line.startsWith('---')
+              const hunk = line.startsWith('@@')
+              // The sign character in the line itself is the redundant
+              // encoding, so the colour is reinforcement rather than the only
+              // signal — and it is the *status* palette doing the colouring,
+              // which is why there is no separate diff palette to keep in sync.
+              const color = add ? palette.ok : del ? palette.danger : hunk ? palette.info : palette.ink2
+              return (
+                <View
+                  key={index}
+                  style={{
+                    flexDirection: 'row',
+                    backgroundColor: add ? diffAddSoft : del ? diffDelSoft : 'transparent',
+                    paddingRight: 16,
+                  }}
+                >
+                  <Mono className="w-9 pr-2 text-right text-[10.5px] leading-[16px] text-ink-4">
+                    {line.length === 0 ? ' ' : line}
+                  </Mono>
+                  <Mono className="text-[11.5px] leading-[16px]" style={{ color }}>
+                    {line.length === 0 ? ' ' : line}
+                  </Mono>
+                </View>
+              )
+            })}
+          </View>
+        </ScrollView>
+      </ScrollView>
+    </Well>
+  )
+}
+
+/** A diff with a header that names the file and the size of the change. */
+export function DiffCard({
+  path,
+  diff,
+  status,
+  added,
+  removed,
+}: {
+  path: string
+  diff: string
+  status?: string
+  added?: number
+  removed?: number
+}) {
+  const stat = React.useMemo(() => {
+    let plus = 0
+    let minus = 0
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) plus += 1
+      else if (line.startsWith('-') && !line.startsWith('---')) minus += 1
+    }
+    return { plus: added ?? plus, minus: removed ?? minus }
+  }, [added, diff, removed])
+
+  return (
+    <View
+      style={{
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.surface,
+        overflow: 'hidden',
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 12,
+          paddingVertical: 9,
+          borderBottomWidth: 1,
+          borderBottomColor: palette.line,
+        }}
+      >
+        {status ? (
+          <Text style={{ color: palette.ink3, fontSize: 10.5, fontWeight: '700', fontFamily: 'Menlo' }}>
+            {status}
+          </Text>
+        ) : null}
+        <Mono className="min-w-0 flex-1 text-[12px] text-ink-2" numberOfLines={1}>
+          {path}
+        </Mono>
+        {stat.plus > 0 ? <Mono className="text-[11px] text-diff-add">+{stat.plus}</Mono> : null}
+        {stat.minus > 0 ? <Mono className="text-[11px] text-diff-del">−{stat.minus}</Mono> : null}
+        <CopyButton value={diff} label="Copy diff" accessibilityLabel={`Copy the diff for ${path}`} />
+      </View>
+      <DiffView diff={diff} />
+    </View>
+  )
+}
+
+/* ── Files changed ──────────────────────────────────────────────────────────────
+ * One card per turn, collapsed to a list of paths. Each row expands to its
+ * diff, fetched on demand — a turn that changed forty files must not fetch
+ * forty diffs to render a summary of forty paths. */
+
 export function FileChips({
   parts,
   onLoadDiff,
@@ -195,19 +428,62 @@ export function FileChips({
   parts: FileChangePart[]
   onLoadDiff?: (path: string) => Promise<string | null>
 }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const visible = expanded ? parts : parts.slice(0, 6)
+
   return (
-    <View className="overflow-hidden rounded-lg border border-line bg-surface">
-      <View className="flex-row items-center gap-1.5 border-b border-line bg-inset px-2.5 py-1">
-        <FileText size={11} color={DIM} />
-        <Mono className="text-[10px] uppercase tracking-wider">
-          {parts.length} file{parts.length === 1 ? '' : 's'} changed
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.surface,
+        overflow: 'hidden',
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderBottomWidth: 1,
+          borderBottomColor: palette.line,
+          backgroundColor: palette.well,
+        }}
+      >
+        <FileText size={12} color={palette.ink3} />
+        <Mono className="text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1 }}>
+          {parts.length} {parts.length === 1 ? 'file' : 'files'} changed
         </Mono>
       </View>
-      <View className="flex-col gap-0.5 p-1">
-        {parts.map((part) => (
+
+      <View style={{ padding: 4 }}>
+        {visible.map((part) => (
           <FileChip key={part.path} part={part} onLoadDiff={onLoadDiff} />
         ))}
       </View>
+
+      {parts.length > 6 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Show fewer files' : `Show all ${parts.length} files`}
+          onPress={() => setExpanded((value) => !value)}
+          style={{
+            minHeight: 34,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderTopWidth: 1,
+            borderTopColor: palette.line,
+            backgroundColor: palette.well,
+          }}
+        >
+          <Text className="text-[12px] font-semibold text-ink-3">
+            {expanded ? 'Show fewer' : `Show all ${parts.length}`}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   )
 }
@@ -222,6 +498,8 @@ function FileChip({
   const [open, setOpen] = React.useState(false)
   const [diff, setDiff] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(false)
+  const collapse = useCollapse(open)
 
   async function toggle() {
     if (open) {
@@ -229,200 +507,249 @@ function FileChip({
       return
     }
     setOpen(true)
-    if (diff !== null || error !== null) return
+    if (diff !== null || error !== null || loading) return
     if (!onLoadDiff) {
-      setError('Diff is not available for this session.')
+      setError('No workspace on this session, so there is no diff to show.')
       return
     }
-    const next = await onLoadDiff(part.path)
-    if (next === null) setError('No diff available for this file.')
-    else setDiff(next)
+    setLoading(true)
+    try {
+      const next = await onLoadDiff(part.path)
+      if (next === null) setError('The working tree has moved on — no diff for this file.')
+      else setDiff(next)
+    } catch {
+      setError('Could not read that diff.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <View className="overflow-hidden rounded-md">
-      <Pressable onPress={() => void toggle()} className="h-6 flex-row items-center gap-1.5 rounded-md px-2">
-        {part.ok ? <Check size={11} color={GREEN} /> : <AlertTriangle size={11} color={FAILED} />}
-        <Mono className="min-w-0 flex-1 text-[11px] text-ink" numberOfLines={1}>
+    <View style={{ borderRadius: radius.sm, overflow: 'hidden' }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={part.path}
+        accessibilityHint={open ? 'Hides the diff' : 'Shows the diff'}
+        accessibilityState={{ expanded: open }}
+        onPress={() => void toggle()}
+        style={{
+          minHeight: 30,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 8,
+        }}
+      >
+        {part.ok ? (
+          <Check size={12} color={palette.ok} strokeWidth={2.6} />
+        ) : (
+          <AlertTriangle size={12} color={FAILED} />
+        )}
+        <Mono className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
           {part.path}
         </Mono>
-        <Mono className="shrink-0 text-[9.5px]">{open ? 'hide' : 'diff'}</Mono>
-        <ChevronDown size={11} color={DIM} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
+        <Mono className="shrink-0 text-[10.5px]">{open ? 'hide' : 'diff'}</Mono>
+        <ChevronDown
+          size={12}
+          color={palette.ink4}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
       </Pressable>
-      {open ? (
-        error ? (
-          <Mono className="px-3 py-2 text-[11px]">{error}</Mono>
-        ) : diff === null ? (
-          <Mono className="px-3 py-2 text-[11px]">Loading diff…</Mono>
-        ) : (
-          <DiffView diff={diff} />
-        )
-      ) : null}
+      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+        {loading ? (
+          <View style={{ padding: 14, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={palette.ink3} />
+          </View>
+        ) : error ? (
+          <Text className="px-3 py-2.5 text-[12px] text-ink-3">{error}</Text>
+        ) : diff ? (
+          <DiffView diff={diff} maxHeight={240} />
+        ) : null}
+      </View>
     </View>
   )
 }
 
-/* ── AI-event rows ───────────────────────────────────────────────────────── */
-
-function EventRow({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <View className={cn('flex-row items-center gap-2 rounded-lg border border-line bg-inset px-2 py-1.5', className)}>
-      {children}
-    </View>
-  )
-}
+/* ── AI-event rows ──────────────────────────────────────────────────────────── */
 
 export function SubagentRow({ part }: { part: SubagentPart }) {
   const tone =
-    part.status === 'failed' ? 'bg-red' : part.status === 'running' ? 'bg-accent' : 'bg-green'
+    part.status === 'failed'
+      ? palette.danger
+      : part.status === 'running'
+        ? palette.accent
+        : palette.ok
   return (
-    <EventRow>
-      <View className={cn('size-[7px] rounded-full', tone)} />
-      <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-        Subagent {part.status} · {part.name}
-      </Text>
-      <Mono className="shrink-0 text-[9px] uppercase">{part.kindType}</Mono>
-    </EventRow>
+    <EventCard
+      icon={<View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: tone }} />}
+      label={`Subagent ${part.status} · ${part.name}`}
+      meta={part.kindType?.toUpperCase()}
+    />
   )
 }
 
 export function OrchestrationRow({ part }: { part: OrchestrationPart }) {
   const names = part.names?.length ? part.names : part.agents
   const label =
-    part.status === 'merging' ? 'Merging answers' : part.status === 'running' ? 'Fan-out running' : `Fan-out ${part.status}`
+    part.status === 'merging'
+      ? 'Merging answers'
+      : part.status === 'running'
+        ? 'Fan-out running'
+        : `Fan-out ${part.status}`
   const okCount = part.children?.filter((child) => child.status === 'ok').length
   return (
-    <EventRow className="flex-col items-stretch">
-      <View className="flex-row items-center gap-2">
-        <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-          {label} · {names.slice(0, 4).join(' + ')}
-        </Text>
-        <Mono className="shrink-0 text-[9px] uppercase">
-          {part.children ? `${okCount ?? 0}/${part.children.length} ok` : `${part.agents.length} agents`}
-        </Mono>
-      </View>
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.well,
+        overflow: 'hidden',
+      }}
+    >
+      <EventCard
+        icon={<Sparkle size={13} color={palette.accent} />}
+        label={`${label} · ${names.slice(0, 4).join(' + ')}`}
+        meta={part.children ? `${okCount ?? 0}/${part.children.length} ok` : `${part.agents.length} agents`}
+      />
       {part.reply ? (
-        <View className="mt-1.5 border-t border-line pt-1.5">
+        <View style={{ borderTopWidth: 1, borderTopColor: palette.line, padding: 12 }}>
           <Prose text={part.reply} />
         </View>
       ) : null}
-    </EventRow>
+    </View>
   )
 }
 
 export function ProgressRow({ part }: { part: ProgressPart }) {
   const pct = Math.max(0, Math.min(100, part.percent ?? 0))
   return (
-    <EventRow>
-      <View className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-field">
-        <View className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.well,
+        paddingHorizontal: 11,
+        paddingVertical: 10,
+        gap: 7,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+        {part.message ? (
+          <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+            {part.message}
+          </Text>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+        <Mono className="text-[10.5px]">{part.percent !== undefined ? `${Math.round(pct)}%` : '…'}</Mono>
       </View>
-      <Mono className="shrink-0 text-[9.5px]">{part.percent !== undefined ? `${Math.round(pct)}%` : '…'}</Mono>
-      {part.message ? (
-        <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-          {part.message}
-        </Text>
-      ) : null}
-    </EventRow>
+      <View style={{ height: 3, borderRadius: 2, backgroundColor: palette.raised, overflow: 'hidden' }}>
+        <View
+          style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: palette.accent }}
+        />
+      </View>
+    </View>
   )
 }
 
 export function SearchRow({ part }: { part: SearchPart }) {
   return (
-    <EventRow className="items-start">
-      <Text className="mt-0.5 shrink-0 text-[11px]">🔍</Text>
-      <View className="min-w-0 flex-1">
-        <Text className="text-[11px] text-ink-2" numberOfLines={1}>
-          Search: {part.query}
-        </Text>
-        {part.results?.[0] ? (
-          <Mono className="text-[9.5px]" numberOfLines={1}>
-            {part.results[0]}
-          </Mono>
-        ) : null}
-      </View>
-    </EventRow>
+    <EventCard
+      icon={<FolderSearch size={13} color={palette.ink3} />}
+      label={`Search: ${part.query}`}
+      detail={part.results?.[0]}
+    />
   )
 }
 
 export function GitCommitRow({ part }: { part: GitCommitPart }) {
   return (
-    <EventRow>
-      <Mono className="shrink-0 text-[10px] font-semibold text-green">⬆</Mono>
-      <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-        Committed — {part.message ?? part.sha.slice(0, 7)}
-      </Text>
-      {part.files?.length ? (
-        <Mono className="shrink-0 text-[9px]">{part.files.length} files</Mono>
-      ) : null}
-    </EventRow>
+    <EventCard
+      icon={<GitCommitHorizontal size={13} color={palette.ok} />}
+      label={`Committed — ${part.message ?? part.sha.slice(0, 7)}`}
+      meta={part.files?.length ? `${part.files.length} files` : undefined}
+    />
   )
 }
 
-const BROWSER_ICON: Record<string, string> = {
-  goto: '🌐',
-  click: '🖱',
-  type: '⌨',
-  press: '⌨',
-  check: '☑',
-  select: '▾',
-  scroll: '↕',
-  screenshot: '📷',
-  assert: '✅',
-  wait_for: '⏳',
-  cursor_move: '✋',
-  cursor_click: '🖱',
-  cursor_type: '⌨',
-  cursor_keypress: '⌨',
+const BROWSER_ICON: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
+  goto: Globe,
+  click: MousePointerClick,
+  type: Keyboard,
+  press: Keyboard,
+  check: Check,
+  select: ChevronDown,
+  scroll: ChevronDown,
+  screenshot: Globe,
+  assert: Check,
+  wait_for: Sparkle,
+  cursor_move: MousePointerClick,
+  cursor_click: MousePointerClick,
+  cursor_type: Keyboard,
+  cursor_keypress: Keyboard,
 }
 
 export function BrowserStepRow({ part }: { part: BrowserStepPart }) {
-  const tone = part.status === 'failed' ? 'bg-red' : part.status === 'running' ? 'bg-accent' : 'bg-green'
+  const tone =
+    part.status === 'failed' ? palette.danger : part.status === 'running' ? palette.accent : palette.ok
+  const Glyph = BROWSER_ICON[part.action] ?? Globe
   return (
-    <EventRow>
-      <Text className="shrink-0 text-[11px]">{BROWSER_ICON[part.action] ?? '🌐'}</Text>
-      <View className="min-w-0 flex-1 flex-row items-center gap-1.5">
-        <Mono className="text-[9px] uppercase">{part.action}</Mono>
-        <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-          {part.detail ?? part.target ?? ''}
-        </Text>
-      </View>
-      <View className={cn('size-1.5 shrink-0 rounded-full', tone)} />
-      <Mono className="shrink-0 text-[9px] uppercase">{part.status}</Mono>
-    </EventRow>
+    <EventCard
+      icon={<Glyph size={13} color={palette.ink3} />}
+      label={part.action}
+      detail={part.detail ?? part.target ?? undefined}
+      meta={part.status}
+      tone={tone}
+    />
   )
 }
 
-export function VerificationCard({ part, simple }: { part: VerificationPart; simple?: boolean }) {
+export function VerificationCard({
+  part,
+  simple,
+}: {
+  part: VerificationPart
+  simple?: boolean
+}) {
   const tone =
     part.status === 'failed'
-      ? 'bg-red'
+      ? palette.danger
       : part.status === 'passed'
-        ? 'bg-green'
+        ? palette.ok
         : part.status === 'running'
-          ? 'bg-orange'
-          : 'bg-ink-3'
+          ? palette.wait
+          : palette.ink4
   return (
-    <EventRow className="items-start">
-      <View className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', tone)} />
-      <View className="min-w-0 flex-1">
-        <View className="flex-row items-center gap-2">
-          <Text className="min-w-0 flex-1 text-[11px] text-ink-2" numberOfLines={1}>
-            Tests {part.status}
-          </Text>
-          {!simple ? (
-            <Mono className="shrink-0 text-[9.5px]" numberOfLines={1}>
-              {part.command}
-            </Mono>
-          ) : null}
-        </View>
-        {part.output && !simple ? (
-          <Mono className="mt-1 max-h-28 overflow-hidden rounded bg-canvas px-2 py-1 text-[10px] leading-4 text-ink-2">
-            {part.output}
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: `${tone}44`,
+        backgroundColor: `${tone}0F`,
+        overflow: 'hidden',
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, padding: 11 }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} />
+        <Text className="flex-1 text-[12.5px] font-medium text-ink" numberOfLines={1}>
+          Tests {part.status}
+        </Text>
+        {!simple && part.command ? (
+          <Mono className="max-w-[45%] text-[11px]" numberOfLines={1}>
+            {part.command}
           </Mono>
         ) : null}
       </View>
-    </EventRow>
+      {part.output && !simple ? (
+        <Well style={{ maxHeight: 110, borderTopWidth: 1, borderTopColor: palette.line }}>
+          <ScrollView nestedScrollEnabled>
+            <Mono className="px-3 py-2 text-[11px] leading-[16px] text-ink-2">{part.output}</Mono>
+          </ScrollView>
+        </Well>
+      ) : null}
+    </View>
   )
 }
 
@@ -444,8 +771,20 @@ export function ChatImage({
       onLoad={() => setLoaded(true)}
       onError={() => setFailed(true)}
       resizeMode="contain"
-      className={cn('rounded-xl border border-line', loaded ? 'opacity-100' : 'opacity-0')}
-      style={{ maxHeight: 256, width: '100%' }}
+      accessibilityLabel={`Attachment: ${fileName}`}
+      style={{
+        maxHeight: 260,
+        width: '100%',
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: palette.well,
+        // Fades in rather than popping: an image that appears at full size
+        // makes the transcript jump by its own height.
+        opacity: loaded ? 1 : 0,
+      }}
     />
   )
 }
+
+export { Terminal, cn }

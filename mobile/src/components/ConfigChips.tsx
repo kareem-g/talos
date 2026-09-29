@@ -1,32 +1,39 @@
 /**
- * ConfigChips — the session's live configuration, for the header row.
+ * ConfigChips and the context ring — the session's live configuration.
  *
- * The desktop keeps these in the composer's control row on wide screens and moves
- * them into a "Model & permissions" layer on narrow ones. On the phone they live
- * in the header, beside the pane toggles, so the run's settings are visible while
- * the transcript scrolls and the composer stays purely about typing.
+ * The desktop keeps these in the composer's control row on wide screens and
+ * moves them into a "Model & permissions" layer on narrow ones. Mobile has
+ * only the narrow case, so they live in the composer's dock, scrolling
+ * horizontally, where they are one tap from the field you are typing into.
  *
- * Changes go over the socket (`set_config`), which is the same command surface the
- * desktop uses — the mobile HTTP API has no config PATCH, and the daemon routes
+ * Changes go over the socket (`set_config`), the same command surface the
+ * desktop uses — the mobile HTTP API has no config PATCH and the daemon routes
  * both WebSocket paths into one handler.
+ *
+ * DIMENSIONS ARE DATA
+ * -------------------
+ * The desktop treats a config dimension as data: a new one renders with no code
+ * change, because `ConfigOption[]` is what the agent reports. This does too.
+ * That is why there is no `ModelChip` and `PermissionChip` and `ThoughtChip`
+ * component here, and why adding a new capability to an agent shows up on the
+ * phone with no mobile release.
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { ChevronDown, X } from 'lucide-react-native'
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 
-import { cn } from '@/lib/format'
 import type { ConfigOption } from '@/types/provider'
 import { socket } from '@app/lib/socket'
 import { getConversation, useStore } from '@app/store'
-import { Button, Mono } from '@app/components/ui'
-import { GlassSurface } from '@app/components/Glass'
-import { palette } from '@app/design/tokens'
+import { palette, radius, shadowOverlay } from '@app/design/tokens'
+import { PickerSheet } from '@app/components/Sheet'
+import { haptic, KeyValue, ProgressBar } from '@app/components/ui'
 
 /** Dimensions that are not meaningful as a chip. */
 const HIDDEN_OPTIONS = new Set(['worktree', 'cwd', 'command'])
 
+/** The chip row. Horizontally scrollable, never wrapped. */
 export function ConfigChips({ sessionId }: { sessionId: string }) {
   const config = useStore((state) => state.configs[sessionId])
   const [openId, setOpenId] = React.useState<string | null>(null)
@@ -35,22 +42,25 @@ export function ConfigChips({ sessionId }: { sessionId: string }) {
     (option) => !HIDDEN_OPTIONS.has(option.id) && option.mutability !== 'start_only',
   )
 
+  if (options.length === 0) {
+    return (
+      <Text className="py-1 text-[11.5px] text-ink-4">
+        This agent exposes no live settings
+      </Text>
+    )
+  }
+
   return (
     <>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerClassName="flex-row items-center gap-1.5 px-3 pb-2"
-      >
-        {options.map((option) => (
-          <OptionChip key={option.id} option={option} onOpen={() => setOpenId(option.id)} />
-        ))}
-        {options.length === 0 ? (
-          <Mono className="text-[10.5px]">No live options for this session</Mono>
-        ) : null}
-      </ScrollView>
+      {options.map((option) => (
+        <OptionChip key={option.id} option={option} onOpen={() => setOpenId(option.id)} />
+      ))}
 
-      <OptionSheet sessionId={sessionId} options={options} openId={openId} onClose={() => setOpenId(null)} />
+      <OptionSheet
+        sessionId={sessionId}
+        option={options.find((candidate) => candidate.id === openId) ?? null}
+        onClose={() => setOpenId(null)}
+      />
     </>
   )
 }
@@ -58,98 +68,103 @@ export function ConfigChips({ sessionId }: { sessionId: string }) {
 function OptionChip({ option, onOpen }: { option: ConfigOption; onOpen: () => void }) {
   const current = option.choices.find((choice) => choice.value === option.currentValue)
   const label = current?.name || option.currentValue || option.name
+  const live = option.mutability === 'live'
+
   return (
     <Pressable
-      onPress={onOpen}
-      className="min-h-7 flex-row items-center gap-1.5 rounded-lg border border-line bg-surface px-2"
+      accessibilityRole="button"
+      accessibilityLabel={`${option.name}: ${label}`}
+      accessibilityHint="Opens the list of values"
+      onPress={() => {
+        void haptic('light')
+        onOpen()
+      }}
+      style={({ pressed }) => ({
+        minHeight: 30,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderRadius: radius.sm,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: pressed ? palette.hover : palette.well,
+        paddingLeft: 8,
+        paddingRight: 7,
+      })}
     >
-      <Text className="text-[11px] text-ink-3">{option.name}</Text>
-      <Text className="max-w-[110px] text-[11px] font-medium text-ink-2" numberOfLines={1}>
+      <Text className="text-[11px] text-ink-3" numberOfLines={1}>
+        {option.name}
+      </Text>
+      <Text className="max-w-[120px] text-[11.5px] font-semibold text-ink-2" numberOfLines={1}>
         {label}
       </Text>
-      <ChevronDown size={10} color={palette.ink3} />
+      {/* A live dimension gets an accent dot; one that only applies on the
+          next run does not, because the difference matters and the word
+          "next_run" is not somewhere to find out. */}
+      {live ? (
+        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: palette.accent }} />
+      ) : (
+        <View
+          style={{
+            paddingHorizontal: 4,
+            paddingVertical: 1,
+            borderRadius: 3,
+            backgroundColor: palette.raised,
+          }}
+        >
+          <Text style={{ color: palette.ink3, fontSize: 8.5, fontWeight: '700' }}>NEXT</Text>
+        </View>
+      )}
     </Pressable>
   )
 }
 
-/** The native stand-in for the desktop's anchored `DropdownList`. */
 function OptionSheet({
   sessionId,
-  options,
-  openId,
+  option,
   onClose,
 }: {
   sessionId: string
-  options: ConfigOption[]
-  openId: string | null
+  option: ConfigOption | null
   onClose: () => void
 }) {
-  const option = options.find((candidate) => candidate.id === openId) ?? null
-  const [custom, setCustom] = React.useState('')
-
-  React.useEffect(() => setCustom(''), [openId])
-
   function choose(value: string) {
     if (!option) return
     socket.setConfig(sessionId, option.id, value)
+    haptic('success')
     onClose()
   }
 
   return (
-    <Modal visible={option !== null} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-end bg-black/65" onPress={onClose}>
-        <Pressable className="max-h-[80%] overflow-hidden rounded-t-2xl border-t border-line bg-canvas" onPress={() => {}}>
-          <GlassSurface radius={0} className="border-b border-line">
-            <View className="flex-row items-center justify-between px-3.5 py-3 pt-12">
-              <Text className="text-[13px] font-medium text-ink">{option?.name ?? ''}</Text>
-              <Pressable onPress={onClose} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full active:bg-hover-2">
-                <X size={16} color={palette.ink2} />
-              </Pressable>
-            </View>
-          </GlassSurface>
-          <ScrollView contentContainerClassName="p-1.5">
-            {option?.choices.map((choice) => {
-              const active = choice.value === option.currentValue
-              return (
-                <Pressable
-                  key={choice.value}
-                  onPress={() => choose(choice.value)}
-                  className={cn('min-h-11 flex-row items-center gap-2 rounded-control px-2.5', active && 'bg-hover')}
-                >
-                  <Text className="min-w-0 flex-1 text-[12.5px] text-ink" numberOfLines={1}>
-                    {choice.name || choice.value}
-                  </Text>
-                  {active ? <View className="size-1.5 rounded-full bg-green" /> : null}
-                </Pressable>
-              )
-            })}
-            {option?.allowsCustomValue ? (
-              <View className="flex-row items-center gap-2 px-2.5 py-2">
-                <TextInput
-                  value={custom}
-                  onChangeText={setCustom}
-                  placeholder="Custom value…"
-                  placeholderTextColor={palette.ink3}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  className="min-h-10 flex-1 rounded-lg border border-line bg-field px-2.5 text-[12.5px] text-ink"
-                />
-                <Button
-                  variant="surface"
-                  label="Use"
-                  disabled={custom.trim().length === 0}
-                  onPress={() => choose(custom.trim())}
-                />
-              </View>
-            ) : null}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <PickerSheet
+      open={option !== null}
+      onClose={onClose}
+      title={option?.name ?? ''}
+      subtitle={
+        option?.mutability === 'live'
+          ? 'Applies immediately'
+          : 'Applies to the next run of this session'
+      }
+      value={option?.currentValue}
+      onSelect={choose}
+      options={(option?.choices ?? []).map((choice) => ({
+        value: choice.value,
+        label: choice.name || choice.value,
+        hint: choice.description,
+      }))}
+      allowsCustomValue={option?.allowsCustomValue}
+      customPlaceholder="Any value this agent accepts"
+      emptyLabel="This agent reported no options for this setting."
+    />
   )
 }
 
-/* ── Context ring ────────────────────────────────────────────────────────── */
+/* ── Context ring ──────────────────────────────────────────────────────────────
+ * The desktop's context-usage ring, unchanged in meaning: the newest reported
+ * turn against the configured window, amber past 60% and red past 85%. Tapping
+ * opens the same breakdown, in a popover rather than a sheet, because this is a
+ * glance-and-leave read and a sheet would cover the transcript you were reading
+ * to decide whether to keep going. */
 
 const RING_RADIUS = 5.5
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
@@ -161,18 +176,21 @@ function formatTokens(tokens: number): string {
   return String(tokens)
 }
 
-/**
- * The desktop's context-usage ring: the newest reported turn against the
- * configured window, amber past 60% and red past 85%. Tapping opens the same
- * breakdown the desktop shows in its popover.
- */
+interface Usage {
+  input: number
+  output: number
+  cached: number
+  cost: number
+  window?: number
+}
+
 export function ContextRing({ sessionId, working }: { sessionId: string; working: boolean }) {
   // The revision counter is what re-derives usage as turns stream in.
   const revision = useStore((state) => state.revisions[sessionId] ?? 0)
   const options = useStore((state) => state.configs[sessionId]?.options)
   const [open, setOpen] = React.useState(false)
 
-  const usage = React.useMemo(() => {
+  const usage = React.useMemo<Usage | undefined>(() => {
     const messages = getConversation(sessionId).messages
     let found:
       | { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; costUsd?: number }
@@ -201,12 +219,12 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
 
   if (working) {
     return (
-      <View className="size-6 items-center justify-center">
-        <ActivityIndicator size="small" color={palette.ink2} />
+      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="small" color={palette.ink3} />
       </View>
     )
   }
-  if (!usage) return <View className="size-6" />
+  if (!usage) return <View style={{ width: 30, height: 30 }} />
 
   const pct = usage.window ? Math.min(100, (usage.input / usage.window) * 100) : 0
   const color = pct > 85 ? palette.danger : pct > 60 ? palette.wait : palette.ok
@@ -214,11 +232,23 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
   return (
     <>
       <Pressable
-        onPress={() => setOpen(true)}
-        accessibilityLabel="Context window"
-        className="size-8 items-center justify-center rounded-full active:bg-hover-2"
+        accessibilityRole="button"
+        accessibilityLabel={`Context window, ${usage.window ? `${Math.round(pct)} percent used` : 'unknown size'}`}
+        accessibilityHint="Shows the context breakdown"
+        onPress={() => {
+          void haptic('light')
+          setOpen(true)
+        }}
+        style={({ pressed }) => ({
+          width: 30,
+          height: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: radius.pill,
+          backgroundColor: pressed ? palette.hover : 'transparent',
+        })}
       >
-        <Svg width={16} height={16} viewBox="0 0 14 14">
+        <Svg width={17} height={17} viewBox="0 0 14 14">
           <Circle cx={7} cy={7} r={RING_RADIUS} stroke={palette.lineStrong} strokeWidth={2} fill="none" />
           {usage.window ? (
             <Circle
@@ -237,50 +267,115 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
         </Svg>
       </Pressable>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <Pressable className="flex-1 justify-end bg-black/65" onPress={() => setOpen(false)}>
-          <Pressable className="overflow-hidden rounded-t-2xl border-t border-line bg-canvas p-4 pt-12" onPress={() => {}}>
-            <View className="flex-row items-center justify-between">
-              <Text className="text-[12px] font-medium text-ink">Context window</Text>
-              <Mono className="text-[11px]">
-                {formatTokens(usage.input)}
-                {usage.window ? ` / ${formatTokens(usage.window)} (${Math.round(pct)}%)` : ' sent'}
-              </Mono>
-            </View>
-            {usage.window ? (
-              <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-field">
-                <View
-                  className="h-full rounded-full"
-                  style={{ width: `${Math.max(2, pct)}%`, backgroundColor: color }}
-                />
-              </View>
-            ) : null}
-            <View className="mt-3 gap-1.5">
-              <UsageRow label="Context sent" value={formatTokens(usage.input)} />
-              <UsageRow label="Last output" value={formatTokens(usage.output)} />
-              <UsageRow label="Cache reads" value={formatTokens(usage.cached)} />
-              {usage.cost > 0 ? <UsageRow label="Cost" value={`$${usage.cost.toFixed(4)}`} /> : null}
-            </View>
-            {pct >= 90 ? (
-              <Text className="mt-3 text-[11px] leading-4 text-orange">
-                The window is nearly full; older messages are compressed automatically.
-              </Text>
-            ) : null}
-          </Pressable>
+      {open ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close the context breakdown"
+          onPress={() => setOpen(false)}
+          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, zIndex: 30 }}
+        >
+          <View style={{ flex: 1 }} />
         </Pressable>
-      </Modal>
+      ) : null}
+
+      {open ? (
+        <View
+          style={{
+            position: 'absolute',
+            right: 8,
+            bottom: 44,
+            width: 262,
+            zIndex: 31,
+          }}
+        >
+          <ContextPopover usage={usage} pct={pct} color={color} onClose={() => setOpen(false)} />
+        </View>
+      ) : null}
     </>
   )
 }
 
-function UsageRow({ label, value }: { label: string; value: string }) {
+function ContextPopover({
+  usage,
+  pct,
+  color,
+  onClose,
+}: {
+  usage: Usage
+  pct: number
+  color: string
+  onClose: () => void
+}) {
   return (
-    <View className="flex-row items-center justify-between">
-      <View className="flex-row items-center gap-1.5">
-        <View className="size-1.5 rounded-full bg-accent" />
-        <Text className="text-[11.5px] text-ink-2">{label}</Text>
+    <View
+      accessibilityViewIsModal
+      style={{
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.lineStrong,
+        backgroundColor: palette.raised,
+        padding: 13,
+        gap: 10,
+        ...shadowOverlay,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text className="text-[13px] font-semibold text-ink">Context windows</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          hitSlop={10}
+          className="size-7 items-center justify-center rounded-pill active:bg-hover"
+        >
+          <Text style={{ color: palette.ink3, fontSize: 15, fontWeight: '600' }}>×</Text>
+        </Pressable>
       </View>
-      <Mono className="text-[11px] text-ink">{value}</Mono>
+
+      <View style={{ gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <Text style={{ color: color, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+            {formatTokens(usage.input)}
+            {usage.window ? ` / ${formatTokens(usage.window)}` : ''}
+          </Text>
+          {usage.window ? (
+            <Text style={{ color: palette.ink3, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+              {Math.round(pct)}%
+            </Text>
+          ) : null}
+        </View>
+        {usage.window ? <ProgressBar value={pct / 100} tone={pct > 85 ? 'danger' : pct > 60 ? 'wait' : 'ok'} /> : null}
+      </View>
+
+      <View style={{ height: 1, backgroundColor: palette.line }} />
+
+      <View style={{ gap: 4 }}>
+        <KeyValue label="Context sent" value={formatTokens(usage.input)} />
+        <KeyValue label="Last output" value={formatTokens(usage.output)} />
+        <KeyValue label="Cache reads" value={formatTokens(usage.cached)} />
+        {usage.cost > 0 ? <KeyValue label="Cost" value={`$${usage.cost.toFixed(4)}`} /> : null}
+      </View>
+
+      {pct >= 90 ? (
+        <View
+          style={{
+            borderRadius: radius.sm,
+            backgroundColor: palette.dangerSoft,
+            paddingHorizontal: 9,
+            paddingVertical: 7,
+          }}
+        >
+          <Text className="text-[11.5px] leading-[16px] text-danger">
+            The window is nearly full. Older messages are compressed automatically to continue.
+          </Text>
+        </View>
+      ) : pct >= 60 ? (
+        <Text className="text-[11.5px] leading-[16px] text-wait">
+          Auto-compression will activate when the window fills.
+        </Text>
+      ) : null}
     </View>
   )
 }
+
+export { ScrollView }

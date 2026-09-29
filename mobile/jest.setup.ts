@@ -71,16 +71,3 @@ jest.mock('@react-native-clipboard/clipboard', () => ({
     getString: jest.fn(async () => clipboardWrites[clipboardWrites.length - 1] ?? ''),
   },
 }))
-
-// Liquid glass is an iOS TurboModule, so it has to be stubbed for Jest. Reporting
-// it as unsupported exercises the fallback path, which is also what Android and
-// pre-iOS-26 devices take — the same styling, without the native material.
-jest.mock('@callstack/liquid-glass', () => {
-  const { View } = require('react-native')
-  return {
-    __esModule: true,
-    isLiquidGlassSupported: false,
-    LiquidGlassView: View,
-    LiquidGlassContainerView: View,
-  }
-})

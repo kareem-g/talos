@@ -1,224 +1,343 @@
 /**
- * Subagent & Orchestration (Fan-out) Modals — desktop parity.
+ * Subagents — spawn a focused child agent, or fan a task out across several.
  *
- * Exposes the harness multi-agent execution primitives directly from the phone:
- * - Spawn subagent: run a specialized child agent under this session.
- * - Orchestrate: fan out one prompt to multiple agents concurrently and merge responses.
+ * The desktop exposes these as a `WorkerModal` in the composer. On a phone the
+ * composer is for typing, and the multi-agent controls are a decision made
+ * *before* the prompt, not a control pressed after it. So this is a full sheet
+ * with a clear mode switch at the top, and the two modes are genuinely
+ * different flows rather than a toggle on one form:
+ *
+ *   - **Single subagent**: pick a role, write a task. One child, one answer.
+ *   - **Fan-out**: pick several agents, decide whether to merge, write one
+ *     task. The merge choice is a first-class switch rather than a checkbox
+ *     because it changes the shape of the *result*: merged gives you one
+ *     synthesised answer, unmerged gives you each worker's answer in sequence.
+ *
+ * Both write into the same transcript the primary agent reads, so the results
+ * arrive where the user is already looking.
  */
 
 import * as React from 'react'
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { Layers, Users, X, Zap } from 'lucide-react-native'
+import { Pressable, Text, TextInput, View } from 'react-native'
+import { Layers, Users } from 'lucide-react-native'
 
 import { mobileApi } from '@app/lib/api'
 import { useStore } from '@app/store'
-import { Button, GlassSurface, Mono, Segmented, TextField } from './ui'
-import { palette } from '@app/design/tokens'
+import { palette, radius } from '@app/design/tokens'
+import { FormSheet } from '@app/components/Sheet'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
+import {
+  AgentAvatar,
+  CheckRow,
+  Segmented,
+  ToggleRow,
+  haptic,
+  toast,
+} from '@app/components/ui'
+
+type Mode = 'spawn' | 'orchestrate'
 
 const BUILTIN_ROLES = [
   { id: 'worker', label: 'Worker', desc: 'General-purpose autonomous executor' },
-  { id: 'reviewer', label: 'Reviewer', desc: 'Read-only code & design auditor' },
+  { id: 'reviewer', label: 'Reviewer', desc: 'Read-only code and design auditor' },
   { id: 'planner', label: 'Planner', desc: 'High-level task decomposition' },
   { id: 'summarizer', label: 'Summarizer', desc: 'Compact synthesis of progress' },
 ]
 
-export function SubagentModal({
+export function SubagentSheet({
   open,
   onClose,
   sessionId,
-  onSpawned,
+  onOpenSession,
 }: {
   open: boolean
   onClose: () => void
   sessionId: string
-  onSpawned?: (childId: string) => void
+  onOpenSession?: (childId: string) => void
 }) {
-  const [mode, setMode] = React.useState<'spawn' | 'orchestrate'>('spawn')
+  const agents = useStore((s) => s.agents)
+  const readyAgents = agents.filter((a) => a.available)
+
+  const [mode, setMode] = React.useState<Mode>('spawn')
   const [role, setRole] = React.useState('worker')
   const [prompt, setPrompt] = React.useState('')
-  const [selectedAgents, setSelectedAgents] = React.useState<string[]>([])
+  const [selected, setSelected] = React.useState<string[]>([])
   const [merge, setMerge] = React.useState(true)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const agents = useStore((s) => s.agents)
-  const readyAgents = agents.filter((a) => a.available)
-
   React.useEffect(() => {
-    if (open) {
-      setPrompt('')
-      setError(null)
-      if (readyAgents.length > 0 && selectedAgents.length === 0) {
-        setSelectedAgents([readyAgents[0].id])
-      }
-    }
+    if (!open) return
+    setPrompt('')
+    setError(null)
+    setSelected(readyAgents.length > 0 ? [readyAgents[0].id] : [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   function toggleAgent(agentId: string) {
-    setSelectedAgents((prev) =>
-      prev.includes(agentId) ? prev.filter((a) => a !== agentId) : [...prev, agentId],
+    setSelected((current) =>
+      current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId],
     )
   }
 
-  async function handleExecute() {
+  async function execute() {
     if (!prompt.trim()) return
     setBusy(true)
     setError(null)
     try {
       if (mode === 'spawn') {
-        const res = await mobileApi.spawnSubagent(sessionId, {
-          role,
-          prompt: prompt.trim(),
-        })
-        if (res.child_session_id) {
-          onSpawned?.(res.child_session_id)
-        }
-        onClose()
+        const res = await mobileApi.spawnSubagent(sessionId, { role, prompt: prompt.trim() })
+        toast({ message: 'Subagent started', tone: 'ok' })
+        if (res.child_session_id && onOpenSession) onOpenSession(res.child_session_id)
       } else {
-        if (selectedAgents.length === 0) {
-          setError('Select at least one agent')
-          setBusy(false)
+        if (selected.length === 0) {
+          setError('Pick at least one agent to fan the task out to.')
           return
         }
-        await mobileApi.orchestrate(sessionId, {
-          prompt: prompt.trim(),
-          agents: selectedAgents,
-          merge,
-        })
-        onClose()
+        await mobileApi.orchestrate(sessionId, { prompt: prompt.trim(), agents: selected, merge })
+        toast({ message: `Fanned out to ${selected.length} ${selected.length === 1 ? 'agent' : 'agents'}`, tone: 'ok' })
       }
+      setPrompt('')
+      onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Action failed')
+      setError(cause instanceof Error ? cause.message : 'That action failed')
     } finally {
       setBusy(false)
     }
   }
 
+  const roleDescription = BUILTIN_ROLES.find((entry) => entry.id === role)?.desc
+
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <View className="flex-1 justify-end bg-black/60">
-        <GlassSurface effect="regular" radius={24} className="border-t border-line bg-surface/95 p-4 pb-8">
-          <View className="mb-3 flex-row items-center justify-between border-b border-line pb-2.5">
-            <View className="flex-row items-center gap-2">
-              {mode === 'spawn' ? <Users size={16} color={palette.accent} /> : <Layers size={16} color={palette.accent} />}
-              <Text className="text-[15px] font-semibold text-ink">
-                {mode === 'spawn' ? 'Spawn Subagent' : 'Fan-Out Orchestration'}
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      eyebrow="Multi-agent"
+      title={mode === 'spawn' ? 'Spawn a subagent' : 'Fan out a task'}
+      submitLabel={mode === 'spawn' ? 'Spawn subagent' : `Fan out to ${selected.length || 0}`}
+      onSubmit={() => void execute()}
+      busy={busy}
+      error={error}
+      disabled={!prompt.trim()}
+    >
+      <Segmented
+        label="Multi-agent mode"
+        value={mode}
+        onChange={(value) => setMode(value as Mode)}
+        options={[
+          { value: 'spawn', label: 'One subagent' },
+          { value: 'orchestrate', label: 'Fan-out' },
+        ]}
+      />
+
+      {mode === 'spawn' ? (
+        <View style={{ gap: 9, marginTop: 12 }}>
+          <Text
+            style={{
+              color: palette.ink3,
+              fontSize: 10,
+              fontWeight: '600',
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              fontFamily: 'Menlo',
+            }}
+          >
+            Role
+          </Text>
+          <View style={{ gap: 6 }}>
+            {BUILTIN_ROLES.map((entry, index) => (
+              <RoleChoice
+                key={entry.id}
+                role={entry}
+                index={index}
+                active={entry.id === role}
+                onPress={() => {
+                  void haptic('select')
+                  setRole(entry.id)
+                }}
+              />
+            ))}
+          </View>
+          {roleDescription ? (
+            <Text className="text-[12.5px] leading-[17px] text-ink-3">{roleDescription}</Text>
+          ) : null}
+        </View>
+      ) : (
+        <View style={{ gap: 12, marginTop: 12 }}>
+          <View style={{ gap: 7 }}>
+            <Text
+              style={{
+                color: palette.ink3,
+                fontSize: 10,
+                fontWeight: '600',
+                letterSpacing: 1.2,
+                textTransform: 'uppercase',
+                fontFamily: 'Menlo',
+              }}
+            >
+              Target agents
+            </Text>
+            {readyAgents.length === 0 ? (
+              <Text className="text-[13px] leading-[18px] text-ink-3">
+                No agent is ready on the desktop.
               </Text>
-            </View>
-            <Pressable onPress={onClose} accessibilityLabel="Close" className="size-8 items-center justify-center rounded-full active:bg-hover">
-              <X size={16} color={palette.ink3} />
-            </Pressable>
-          </View>
-
-          <View className="mb-3">
-            <Segmented
-              options={[
-                { value: 'spawn', label: 'Single Subagent' },
-                { value: 'orchestrate', label: 'Fan-Out (Multi-Agent)' },
-              ]}
-              value={mode}
-              onChange={(m) => setMode(m as 'spawn' | 'orchestrate')}
-            />
-          </View>
-
-          {error ? <Text className="mb-2 text-[12px] text-red">{error}</Text> : null}
-
-          <ScrollView className="max-h-[380px]">
-            {mode === 'spawn' ? (
-              <View className="gap-2.5">
-                <Mono className="text-[10px] uppercase tracking-wider text-ink-3">Built-in Role</Mono>
-                <View className="flex-row flex-wrap gap-1.5">
-                  {BUILTIN_ROLES.map((r) => {
-                    const active = r.id === role
-                    return (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => setRole(r.id)}
-                        className={`min-h-9 flex-row items-center gap-1.5 rounded-lg border px-3 ${
-                          active ? 'border-accent bg-accent-tint' : 'border-line bg-field'
-                        }`}
-                      >
-                        <Text className={`text-[12px] font-medium ${active ? 'text-ink' : 'text-ink-2'}`}>
-                          {r.label}
-                        </Text>
-                      </Pressable>
-                    )
-                  })}
-                </View>
-                <Text className="text-[11px] text-ink-3">
-                  {BUILTIN_ROLES.find((r) => r.id === role)?.desc}
-                </Text>
-              </View>
             ) : (
-              <View className="gap-2.5">
-                <Mono className="text-[10px] uppercase tracking-wider text-ink-3">Target Agents</Mono>
-                <View className="flex-row flex-wrap gap-1.5">
-                  {readyAgents.map((agent) => {
-                    const active = selectedAgents.includes(agent.id)
-                    return (
-                      <Pressable
-                        key={agent.id}
-                        onPress={() => toggleAgent(agent.id)}
-                        className={`min-h-9 flex-row items-center gap-1.5 rounded-lg border px-3 ${
-                          active ? 'border-accent bg-accent-tint' : 'border-line bg-field'
-                        }`}
-                      >
-                        <View
-                          className={`size-2.5 rounded-full ${active ? 'bg-accent' : 'border border-line-strong'}`}
-                        />
-                        <Text className={`text-[12px] font-medium ${active ? 'text-ink' : 'text-ink-2'}`}>
-                          {agent.name}
-                        </Text>
-                      </Pressable>
-                    )
-                  })}
-                </View>
-                <Pressable
-                  onPress={() => setMerge(!merge)}
-                  className="flex-row items-center gap-2 py-1"
-                >
-                  <View
-                    className={`size-4 items-center justify-center rounded border ${
-                      merge ? 'border-accent bg-accent' : 'border-line-strong'
-                    }`}
-                  >
-                    {merge ? <Text className="text-[10px] text-canvas font-bold">✓</Text> : null}
-                  </View>
-                  <Text className="text-[12px] text-ink">Merge synthesis (synthesizes one final answer)</Text>
-                </Pressable>
+              <View style={{ gap: 6 }}>
+                {readyAgents.map((agent, index) => (
+                  <AgentToggle
+                    key={agent.id}
+                    agent={agent}
+                    index={index}
+                    checked={selected.includes(agent.id)}
+                    onPress={() => {
+                      void haptic('select')
+                      toggleAgent(agent.id)
+                    }}
+                  />
+                ))}
               </View>
             )}
-
-            <View className="mt-3 gap-1.5">
-              <Mono className="text-[10px] uppercase tracking-wider text-ink-3">Prompt / Task</Mono>
-              <TextInput
-                value={prompt}
-                onChangeText={setPrompt}
-                placeholder={
-                  mode === 'spawn'
-                    ? 'What should this subagent investigate or build?'
-                    : 'Describe the task to fan out across multiple agents…'
-                }
-                placeholderTextColor={palette.ink3}
-                multiline
-                numberOfLines={4}
-                className="min-h-24 rounded-xl border border-line bg-field p-3 text-[13px] text-ink"
-              />
-            </View>
-          </ScrollView>
-
-          <View className="mt-4 flex-row items-center gap-2">
-            <Button variant="ghost" label="Cancel" onPress={onClose} className="flex-1" />
-            <Button
-              variant="primary"
-              label={busy ? 'Running…' : mode === 'spawn' ? 'Spawn subagent' : 'Fan out task'}
-              disabled={busy || !prompt.trim()}
-              onPress={() => void handleExecute()}
-              className="flex-1"
-            />
           </View>
-        </GlassSurface>
+
+          <ToggleRow
+            label="Merge synthesis"
+            description="Combines the workers' answers into one. Off keeps each answer separate."
+            value={merge}
+            onChange={setMerge}
+            leading={<Layers size={17} color={palette.ink3} />}
+          />
+        </View>
+      )}
+
+      <View style={{ gap: 7, marginTop: 14 }}>
+        <Text
+          style={{
+            color: palette.ink3,
+            fontSize: 10,
+            fontWeight: '600',
+            letterSpacing: 1.2,
+            textTransform: 'uppercase',
+            fontFamily: 'Menlo',
+          }}
+        >
+          {mode === 'spawn' ? 'What should it do?' : 'The task to fan out'}
+        </Text>
+        <TaskInput
+          value={prompt}
+          onChangeText={setPrompt}
+          placeholder={
+            mode === 'spawn'
+              ? 'Investigate the flaky auth test and report what you find…'
+              : 'Describe the task every worker should tackle…'
+          }
+        />
       </View>
-    </Modal>
+    </FormSheet>
+  )
+}
+
+/** The task field. Its own component so the hook above it stays unconditional. */
+function TaskInput({
+  value,
+  onChangeText,
+  placeholder,
+}: {
+  value: string
+  onChangeText: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={palette.ink4}
+      accessibilityLabel="Task for the subagent"
+      multiline
+      className="min-h-[110px] rounded-md border border-line bg-field px-3.5 py-3 text-[14.5px] leading-[21px] text-ink"
+      style={{ textAlignVertical: 'top' }}
+    />
+  )
+}
+
+function RoleChoice({
+  role,
+  index,
+  active,
+  onPress,
+}: {
+  role: { id: string; label: string; desc: string }
+  index: number
+  active: boolean
+  onPress: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      <Pressable
+        accessibilityRole="radio"
+        accessibilityLabel={role.label}
+        accessibilityHint={role.desc}
+        accessibilityState={{ selected: active }}
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 11,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: active ? palette.accent : palette.line,
+          backgroundColor: active
+            ? palette.accentSoft
+            : pressed
+              ? palette.raised
+              : palette.well,
+          paddingHorizontal: 13,
+          paddingVertical: 11,
+          minHeight: 50,
+        })}
+      >
+        <Users size={16} color={active ? palette.accent : palette.ink3} />
+        <Text
+          className="flex-1 text-[14.5px]"
+          style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
+        >
+          {role.label}
+        </Text>
+      </Pressable>
+    </View>
+  )
+}
+
+/**
+ * One target agent in the fan-out picker.
+ *
+ * `CheckRow` rather than a bespoke card: the whole point of this list is the
+ * checked state, and a primitive that draws the box, reports it to assistive
+ * tech and keeps the 48pt target is the thing that makes every multi-select in
+ * the app behave the same. The only thing this adds is the agent's avatar,
+ * because a fan-out list of three bare names is a list you have to read.
+ */
+function AgentToggle({
+  agent,
+  index,
+  checked,
+  onPress,
+}: {
+  agent: { id: string; name: string }
+  index: number
+  checked: boolean
+  onPress: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      <CheckRow
+        label={agent.name}
+        checked={checked}
+        onPress={onPress}
+        leading={<AgentAvatar agent={agent.id} size={26} name={agent.name} />}
+      />
+    </View>
   )
 }

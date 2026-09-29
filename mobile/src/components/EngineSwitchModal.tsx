@@ -1,19 +1,35 @@
 /**
- * Engine Switch Modal — desktop parity.
+ * Engine switch — move a live session onto a different CLI or model.
  *
- * Switch the engine backing an existing session to another ready CLI or API
- * provider while keeping the same session row, workspace and transcript.
+ * The desktop's `EngineModelMenu` is a two-level anchored dropdown: pick the
+ * provider, then the model, with the model list filtered to what that provider
+ * reports. On a phone a dropdown that opens upward over a transcript is a
+ * dropdown you cannot read, and a two-level one is worse — so this is a sheet,
+ * and it is honest about what the operation does:
+ *
+ * **Switching is not free.** A digest of the previous turns is handed to the
+ * new provider so the conversation survives, which means a new process, a new
+ * cost, and a context that is no longer byte-identical to what the old agent
+ * saw. Saying so up front is the difference between a switch and a trap, and
+ * it is why the current engine is labelled and the confirm button is disabled
+ * until you pick something different.
+ *
+ * The model list is the provider's own. Model ids are opaque — never split on
+ * `/`, never lowercased — because some providers namespace ids and the case is
+ * part of them.
  */
 
 import * as React from 'react'
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native'
-import { Bot, Cpu, X } from 'lucide-react-native'
+import { Pressable, Text, View } from 'react-native'
+import { Check, Cpu } from 'lucide-react-native'
 
-import { useStore, type MobileAgent } from '@app/store'
-import { Button, GlassSurface, Mono } from './ui'
-import { palette } from '@app/design/tokens'
+import { useStore } from '@app/store'
+import { palette, radius } from '@app/design/tokens'
+import { FormSheet } from '@app/components/Sheet'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
+import { AgentAvatar, Mono, haptic, toast } from '@app/components/ui'
 
-export function EngineSwitchModal({
+export function EngineSwitchSheet({
   open,
   onClose,
   sessionId,
@@ -34,26 +50,39 @@ export function EngineSwitchModal({
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    if (open) {
-      setSelectedAgent(currentAgent ?? readyAgents[0]?.id ?? '')
-      setSelectedModel(undefined)
-      setError(null)
-    }
+    if (!open) return
+    setSelectedAgent(currentAgent ?? readyAgents[0]?.id ?? '')
+    setSelectedModel(undefined)
+    setError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, currentAgent])
 
-  const agentObj = agents.find((a) => a.id === selectedAgent)
-  const models = Array.isArray(agentObj?.models) ? (agentObj!.models as Array<string | { id?: string }>) : []
+  const agent = agents.find((a) => a.id === selectedAgent)
+  const models = React.useMemo(() => {
+    if (!Array.isArray(agent?.models)) return [] as string[]
+    return (agent!.models as Array<string | { id?: string }>)
+      .map((model) => (typeof model === 'string' ? model : (model.id ?? '')))
+      .filter(Boolean)
+  }, [agent])
 
-  async function handleSwitch() {
+  const unchanged = selectedAgent === currentAgent && !selectedModel
+  const canSubmit = Boolean(selectedAgent) && readyAgents.length > 0 && !unchanged
+
+  async function submit() {
     if (!selectedAgent) return
     setBusy(true)
     setError(null)
     try {
       const ok = await switchEngine(sessionId, selectedAgent, selectedModel)
       if (ok) {
+        toast({
+          message: `Running on ${agent?.name ?? selectedAgent}`,
+          detail: selectedModel ? `Model: ${selectedModel}` : undefined,
+          tone: 'ok',
+        })
         onClose()
       } else {
-        setError('Could not switch session engine')
+        setError('The desktop refused to switch that session.')
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Switch failed')
@@ -63,96 +92,224 @@ export function EngineSwitchModal({
   }
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <View className="flex-1 justify-end bg-black/60">
-        <GlassSurface effect="regular" radius={24} className="border-t border-line bg-surface/95 p-4 pb-8">
-          <View className="mb-3 flex-row items-center justify-between border-b border-line pb-2.5">
-            <View className="flex-row items-center gap-2">
-              <Cpu size={16} color={palette.accent} />
-              <Text className="text-[15px] font-semibold text-ink">Switch Session Engine</Text>
-            </View>
-            <Pressable onPress={onClose} accessibilityLabel="Close" className="size-8 items-center justify-center rounded-full active:bg-hover">
-              <X size={16} color={palette.ink3} />
-            </Pressable>
-          </View>
-
-          <Text className="mb-3 text-[12px] leading-5 text-ink-2">
-            Switch the agent process running this session. A digest of the previous turns is handed over to the new provider so context is preserved.
-          </Text>
-
-          {error ? <Text className="mb-2 text-[12px] text-red">{error}</Text> : null}
-
-          <ScrollView className="max-h-[320px]">
-            <Mono className="mb-2 text-[10px] uppercase tracking-wider text-ink-3">Available Agents</Mono>
-            <View className="gap-1.5">
-              {readyAgents.map((agent) => {
-                const active = agent.id === selectedAgent
-                return (
-                  <Pressable
-                    key={agent.id}
-                    onPress={() => {
-                      setSelectedAgent(agent.id)
-                      setSelectedModel(undefined)
-                    }}
-                    className={`min-h-12 flex-row items-center gap-3 rounded-xl border p-2.5 ${
-                      active ? 'border-accent bg-accent-tint' : 'border-line bg-field active:bg-hover'
-                    }`}
-                  >
-                    <Bot size={18} color={active ? palette.accent : palette.ink3} />
-                    <View className="min-w-0 flex-1">
-                      <Text className={`text-[13px] font-medium ${active ? 'text-ink' : 'text-ink-2'}`}>
-                        {agent.name}
-                      </Text>
-                      <Mono className="text-[10px] text-ink-3">{agent.id}</Mono>
-                    </View>
-                    {agent.id === currentAgent ? (
-                      <Mono className="rounded bg-line px-1.5 py-0.5 text-[9.5px] uppercase text-ink-3">
-                        current
-                      </Mono>
-                    ) : null}
-                  </Pressable>
-                )
-              })}
-            </View>
-
-            {models.length > 0 ? (
-              <View className="mt-3 gap-1.5">
-                <Mono className="text-[10px] uppercase tracking-wider text-ink-3">Model (optional)</Mono>
-                <View className="flex-row flex-wrap gap-1.5">
-                  {models.map((m, idx) => {
-                    const modelId = typeof m === 'string' ? m : m.id ?? ''
-                    const active = selectedModel === modelId
-                    return (
-                      <Pressable
-                        key={idx}
-                        onPress={() => setSelectedModel(active ? undefined : modelId)}
-                        className={`min-h-8 items-center justify-center rounded-lg border px-2.5 ${
-                          active ? 'border-accent bg-accent-tint' : 'border-line bg-field'
-                        }`}
-                      >
-                        <Text className={`text-[11.5px] ${active ? 'text-ink font-medium' : 'text-ink-2'}`}>
-                          {modelId}
-                        </Text>
-                      </Pressable>
-                    )
-                  })}
-                </View>
-              </View>
-            ) : null}
-          </ScrollView>
-
-          <View className="mt-4 flex-row items-center gap-2">
-            <Button variant="ghost" label="Cancel" onPress={onClose} className="flex-1" />
-            <Button
-              variant="primary"
-              label={busy ? 'Switching…' : 'Switch engine'}
-              disabled={busy || !selectedAgent || selectedAgent === currentAgent}
-              onPress={() => void handleSwitch()}
-              className="flex-1"
-            />
-          </View>
-        </GlassSurface>
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      eyebrow="Session"
+      title="Switch agent"
+      submitLabel={busy ? 'Switching…' : 'Switch agent'}
+      onSubmit={() => void submit()}
+      busy={busy}
+      error={error}
+      disabled={!canSubmit}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: 11,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: palette.line,
+          backgroundColor: palette.well,
+          padding: 13,
+        }}
+      >
+        <Cpu size={17} color={palette.ink3} />
+        <Text className="flex-1 text-[13px] leading-[18px] text-ink-2">
+          A digest of the previous turns is handed to the new agent so the conversation survives.
+          That means a new process, a new cost, and a context that is a summary rather than the
+          original.
+        </Text>
       </View>
-    </Modal>
+
+      <View style={{ gap: 7, marginTop: 14 }}>
+        <SectionLabel>Agent</SectionLabel>
+        {readyAgents.length === 0 ? (
+          <Text className="text-[13.5px] leading-[19px] text-ink-3">
+            No agent is ready on the desktop. Install a supported CLI there, then re-scan from the
+            Agents tab.
+          </Text>
+        ) : (
+          readyAgents.map((entry, index) => (
+            <AgentRow
+              key={entry.id}
+              id={entry.id}
+              name={entry.name}
+              index={index}
+              active={entry.id === selectedAgent}
+              current={entry.id === currentAgent}
+              onPress={() => {
+                void haptic('select')
+                setSelectedAgent(entry.id)
+                setSelectedModel(undefined)
+              }}
+            />
+          ))
+        )}
+      </View>
+
+      {models.length > 0 ? (
+        <View style={{ gap: 7, marginTop: 16 }}>
+          <SectionLabel>Model — optional</SectionLabel>
+          <View style={{ gap: 6 }}>
+            <ModelRow
+              label="Keep the current model"
+              active={selectedModel === undefined}
+              onPress={() => setSelectedModel(undefined)}
+            />
+            {models.map((model) => (
+              <ModelRow
+                key={model}
+                label={model}
+                mono
+                active={selectedModel === model}
+                onPress={() => setSelectedModel(model)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </FormSheet>
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text
+      style={{
+        color: palette.ink3,
+        fontSize: 10,
+        fontWeight: '600',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
+        fontFamily: 'Menlo',
+      }}
+    >
+      {children}
+    </Text>
+  )
+}
+
+function AgentRow({
+  id,
+  name,
+  index,
+  active,
+  current,
+  onPress,
+}: {
+  id: string
+  name: string
+  index: number
+  active: boolean
+  current: boolean
+  onPress: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      <Pressable
+        accessibilityRole="radio"
+        accessibilityLabel={name}
+        accessibilityHint={current ? 'This session is already running on this agent' : undefined}
+        accessibilityState={{ selected: active }}
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: active ? palette.accent : palette.line,
+          backgroundColor: active
+            ? palette.accentSoft
+            : pressed
+              ? palette.raised
+              : palette.well,
+          paddingHorizontal: 13,
+          paddingVertical: 11,
+          minHeight: 54,
+        })}
+      >
+        <AgentAvatar agent={id} size={32} name={name} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+            {name}
+          </Text>
+          <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+            {id}
+          </Mono>
+        </View>
+        {current ? (
+          <View
+            style={{
+              paddingHorizontal: 7,
+              paddingVertical: 3,
+              borderRadius: radius.xs,
+              backgroundColor: palette.raised,
+            }}
+          >
+            <Text style={{ color: palette.ink3, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 }}>
+              CURRENT
+            </Text>
+          </View>
+        ) : null}
+        {active && !current ? <Check size={17} color={palette.accent} strokeWidth={2.6} /> : null}
+      </Pressable>
+    </View>
+  )
+}
+
+function ModelRow({
+  label,
+  mono,
+  active,
+  onPress,
+}: {
+  label: string
+  mono?: boolean
+  active: boolean
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      onPress={() => {
+        void haptic('select')
+        onPress()
+      }}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderRadius: radius.sm,
+        borderWidth: 1,
+        borderColor: active ? palette.accent : palette.line,
+        backgroundColor: active
+          ? palette.accentSoft
+          : pressed
+            ? palette.raised
+            : palette.well,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        minHeight: 46,
+      })}
+    >
+      {/* Model ids are opaque — namespaced, mixed-case, and not English. The
+          mono face is not decoration here: it is the typeface that makes
+          `claude-opus-4-6` read as one identifier rather than three
+          hyphenated words, which is the difference between picking the model
+          you meant and picking a plausible-looking one. */}
+      <Text
+        className="flex-1 text-[13.5px]"
+        style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '400' }}
+        numberOfLines={1}
+      >
+        {mono ? <Mono className="text-[13.5px]">{label}</Mono> : label}
+      </Text>
+      {active ? <Check size={16} color={palette.accent} strokeWidth={2.6} /> : null}
+    </Pressable>
   )
 }

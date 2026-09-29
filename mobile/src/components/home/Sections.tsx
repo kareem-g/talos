@@ -1,30 +1,47 @@
 /**
- * Home sections — Automations and Skills, matching the desktop home composition
- * (sessions → pair → automations → skills → settings).
+ * Home sections — Automations and Skills.
+ *
+ * Two very different things that happen to sit below the fold on the Deck,
+ * kept in one file because they are the two "configuration you keep on a phone"
+ * surfaces and they share a shape: a list of named things you can toggle, run
+ * and delete.
  *
  * Two honest differences from the desktop, both inherent to porting them:
  *
  *   - **Automations are per-device.** On the desktop the list lives in
  *     `localStorage`; here the same template catalog and the same shape live in
- *     MMKV. Neither side has a scheduler — on both, "run now" spawns a session —
- *     and the two lists do not sync, because nothing on the daemon stores them.
+ *     MMKV. Neither side has a scheduler — on both, "Run" spawns a real session
+ *     — and the two lists do not sync, because nothing on the daemon stores
+ *     them. Saying so is the whole honesty of this section: a "scheduled
+ *     automation" that does not schedule anything, presented without that
+ *     caveat, is a lie told by omission.
  *   - **Skills are shared**, because they are real: the daemon owns
  *     `.agentdeck/skills/` per project, so toggling one here changes what the
- *     desktop sees.
+ *     desktop injects into every turn.
  */
 
 import * as React from 'react'
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { Eye, Play, Plus, Trash2, X, Zap } from 'lucide-react-native'
+import { Pressable, ScrollView, Text, View } from 'react-native'
+import { Eye, Play, Plus, Trash2, Zap } from 'lucide-react-native'
 
-import { basename, cn } from '@/lib/format'
+import { basename } from '@/lib/format'
 import { skillsApi } from '@app/lib/api'
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
-import { Button, Card, CardHeader, Chip, Mono } from '@app/components/ui'
-import { palette } from '@app/design/tokens'
+import { palette, radius } from '@app/design/tokens'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
+import { PickerSheet, Sheet } from '@app/components/Sheet'
+import {
+  Button,
+  Card,
+  Mono,
+  ToggleRow,
+  Well,
+  haptic,
+  toast,
+} from '@app/components/ui'
 
-/* ── Automations ─────────────────────────────────────────────────────────── */
+/* ── Automations ───────────────────────────────────────────────────────────── */
 
 type AutomationKind = 'scheduled' | 'idle'
 
@@ -38,28 +55,27 @@ interface Automation {
   lastRun?: string
 }
 
-/** Same storage key semantics as the desktop, so the shape stays identical. */
 const STORAGE_KEY = 'agentdeck-automations'
 const KEEP_AWAKE_KEY = 'agentdeck-keep-awake'
 
 const IDLE_TEMPLATES: Array<Omit<Automation, 'id' | 'enabled'>> = [
   {
-    name: 'Standup Git Summary',
+    name: 'Standup git summary',
     prompt: 'Summarize commits, module changes, and follow-ups from this week.',
-    cadence: 'Soonest available',
+    cadence: 'When the machine is idle',
     kind: 'idle',
   },
   {
-    name: 'CI Failures & Flaky Test Report',
+    name: 'CI failures & flaky tests',
     prompt: 'Review recent CI failures, flaky tests, and likely causes.',
-    cadence: 'Soonest available',
+    cadence: 'When the machine is idle',
     kind: 'idle',
   },
   {
-    name: 'Documentation sync check',
+    name: 'Documentation drift',
     prompt:
       'Check whether README files, docs, configuration guidance, and usage examples match the current code.',
-    cadence: 'Soonest available',
+    cadence: 'When the machine is idle',
     kind: 'idle',
   },
 ]
@@ -73,7 +89,8 @@ const SCHEDULED_TEMPLATES: Array<Omit<Automation, 'id' | 'enabled'>> = [
   },
   {
     name: 'Risk scan',
-    prompt: 'Inspect changes from the last 24 hours and report high-confidence risks with direct evidence.',
+    prompt:
+      'Inspect changes from the last 24 hours and report high-confidence risks with direct evidence.',
     cadence: 'Daily at 10:00',
     kind: 'scheduled',
   },
@@ -94,7 +111,7 @@ export function AutomationsSection() {
   )
   const [keepAwake, setKeepAwake] = React.useState(() => storage.getString(KEEP_AWAKE_KEY) === '1')
   const [picker, setPicker] = React.useState<AutomationKind | null>(null)
-  const [notice, setNotice] = React.useState<string | null>(null)
+  const [confirmRemove, setConfirmRemove] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     storage.setJSON(STORAGE_KEY, automations)
@@ -109,7 +126,8 @@ export function AutomationsSection() {
       { ...template, id: `automation-${Date.now()}`, enabled: true },
     ])
     setPicker(null)
-    setNotice(`${template.name} added`)
+    void haptic('success')
+    toast({ message: `“${template.name}” added`, tone: 'ok' })
   }
 
   function toggle(id: string) {
@@ -122,15 +140,17 @@ export function AutomationsSection() {
 
   function remove(id: string) {
     setAutomations((current) => current.filter((automation) => automation.id !== id))
+    setConfirmRemove(null)
   }
 
   /** Run now spawns a session carrying the automation's prompt — same as desktop. */
   async function runNow(automation: Automation) {
     const ready = agents.find((agent) => agent.available)
     if (!ready) {
-      setNotice('No agent is ready on the desktop.')
+      toast({ message: 'No agent is ready on the desktop', tone: 'danger' })
       return
     }
+    void haptic('medium')
     const project = sessions.find((session) => session.project)?.project ?? undefined
     const session = await createSession({
       agent: ready.id,
@@ -143,124 +163,245 @@ export function AutomationsSection() {
         entry.id === automation.id ? { ...entry, lastRun: new Date().toISOString() } : entry,
       ),
     )
-    setNotice(session ? `Started “${automation.name}”` : 'Could not start that automation')
+    toast(
+      session
+        ? { message: `Started “${automation.name}”`, tone: 'ok' }
+        : { message: `Could not start “${automation.name}”`, tone: 'danger' },
+    )
   }
 
   return (
-    <Card>
-      <CardHeader
-        title="Automations"
-        right={<Chip tone={automations.length ? 'accent' : 'dim'} label={`${automations.length}`} />}
-      />
-      <View className="gap-3 p-3.5">
-        <Text className="text-[11.5px] leading-5 text-ink-2">
-          Templates you can start on demand. Nothing is scheduled by the daemon: “Run” spawns a real
-          session with the prompt, on the desktop as well as here.
-        </Text>
+    <View style={{ gap: 10 }}>
+      <Card>
+        <View style={{ gap: 12, padding: 14 }}>
+          <Text className="text-[13px] leading-[18px] text-ink-2">
+            Templates you start on demand. Nothing is scheduled by the daemon: “Run” spawns a real
+            session with the prompt, on the desktop as well as here.
+          </Text>
 
-        {automations.length === 0 ? (
-          <Text className="text-[11.5px] text-ink-3">No automations yet.</Text>
-        ) : (
-          automations.map((automation) => (
+          {automations.length === 0 ? (
             <View
-              key={automation.id}
-              className="flex-row items-center gap-2 rounded-lg border border-line bg-inset px-2.5 py-2"
+              style={{
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderStyle: 'dashed',
+                borderColor: palette.line,
+                padding: 14,
+              }}
             >
-              <Zap size={13} color={automation.enabled ? palette.wait : palette.ink3} />
-              <View className="min-w-0 flex-1">
-                <Text className="text-[12.5px] text-ink" numberOfLines={1}>
-                  {automation.name}
-                </Text>
-                <Mono className="mt-0.5 text-[10px]" numberOfLines={1}>
-                  {automation.kind === 'idle' ? 'idle · ' : ''}
-                  {automation.cadence}
-                </Mono>
-              </View>
-              <Pressable
-                onPress={() => toggle(automation.id)}
-                accessibilityRole="switch"
-                accessibilityState={{ checked: automation.enabled }}
-                className={cn(
-                  'size-7 items-center justify-center rounded-lg',
-                  automation.enabled ? 'bg-green-tint' : 'bg-surface',
-                )}
-              >
-                <View className={cn('size-2 rounded-full', automation.enabled ? 'bg-green' : 'bg-ink-3')} />
-              </Pressable>
-              <Pressable
-                onPress={() => void runNow(automation)}
-                accessibilityLabel={`Run ${automation.name}`}
-                className="size-7 items-center justify-center rounded-lg active:bg-hover-2"
-              >
-                <Play size={13} color={palette.ink2} />
-              </Pressable>
-              <Pressable
-                onPress={() => remove(automation.id)}
-                accessibilityLabel={`Delete ${automation.name}`}
-                className="size-7 items-center justify-center rounded-lg active:bg-red-tint"
-              >
-                <Trash2 size={13} color={palette.ink3} />
-              </Pressable>
-            </View>
-          ))
-        )}
-
-        <View className="flex-row items-center gap-2">
-          <Button variant="surface" label="Add scheduled" className="min-h-9 px-3" onPress={() => setPicker('scheduled')} />
-          <Button variant="surface" label="Add idle-time" className="min-h-9 px-3" onPress={() => setPicker('idle')} />
-        </View>
-
-        <Pressable
-          onPress={() => setKeepAwake((value) => !value)}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: keepAwake }}
-          className="flex-row items-center gap-2"
-        >
-          <View className={cn('size-3.5 rounded border', keepAwake ? 'border-accent bg-accent' : 'border-line-strong')} />
-          <Text className="text-[11.5px] text-ink-2">Keep the machine awake while agents run</Text>
-        </Pressable>
-
-        {notice ? <Text className="text-[11px] text-accent">{notice}</Text> : null}
-      </View>
-
-      <Modal visible={picker !== null} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
-        <Pressable className="flex-1 justify-end bg-black/65" onPress={() => setPicker(null)}>
-          <Pressable className="rounded-t-2xl border border-line bg-surface" onPress={() => {}}>
-            <View className="flex-row items-center justify-between border-b border-line px-3.5 py-2.5">
-              <Text className="text-[13px] font-medium text-ink">
-                {picker === 'idle' ? 'Idle-time templates' : 'Scheduled templates'}
+              <Text className="text-[13.5px] text-ink-3">
+                No automations yet. Add one to keep a prompt you run often.
               </Text>
-              <Pressable onPress={() => setPicker(null)} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
-                <X size={16} color={palette.ink2} />
-              </Pressable>
             </View>
-            <ScrollView contentContainerClassName="p-2">
-              {(picker === 'idle' ? IDLE_TEMPLATES : SCHEDULED_TEMPLATES).map((template) => (
-                <Pressable
-                  key={template.name}
-                  onPress={() => addTemplate(template)}
-                  className="min-h-11 flex-row items-center gap-2 rounded-control px-2.5 active:bg-hover-2"
-                >
-                  <Plus size={14} color={palette.ink3} />
-                  <View className="min-w-0 flex-1">
-                    <Text className="text-[12.5px] text-ink" numberOfLines={1}>
-                      {template.name}
-                    </Text>
-                    <Mono className="text-[10px]" numberOfLines={1}>
-                      {template.cadence}
-                    </Mono>
-                  </View>
-                </Pressable>
+          ) : (
+            <View style={{ gap: 6 }}>
+              {automations.map((automation, index) => (
+                <AutomationRow
+                  key={automation.id}
+                  automation={automation}
+                  index={index}
+                  confirming={confirmRemove === automation.id}
+                  onToggle={() => {
+                    void haptic('select')
+                    toggle(automation.id)
+                  }}
+                  onRun={() => void runNow(automation)}
+                  onRemove={() => {
+                    void haptic('warn')
+                    setConfirmRemove(automation.id)
+                  }}
+                  onConfirmRemove={() => remove(automation.id)}
+                />
               ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </Card>
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Button
+              size="sm"
+              variant="secondary"
+              label="Add a scheduled template"
+              icon={<Plus size={14} color={palette.ink2} />}
+              onPress={() => setPicker('scheduled')}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              label="Add an idle template"
+              onPress={() => setPicker('idle')}
+            />
+          </View>
+
+          <View style={{ height: 1, backgroundColor: palette.line }} />
+
+          <ToggleRow
+            label="Keep the machine awake"
+            description="Ask the desktop not to sleep while agents are running."
+            value={keepAwake}
+            onChange={(next) => {
+              void haptic('select')
+              setKeepAwake(next)
+            }}
+            leading={<Zap size={17} color={keepAwake ? palette.wait : palette.ink3} />}
+          />
+        </View>
+      </Card>
+
+      <PickerSheet
+        open={picker !== null}
+        onClose={() => setPicker(null)}
+        title={picker === 'idle' ? 'Idle-time templates' : 'Scheduled templates'}
+        subtitle="Stored on this device"
+        searchable
+        value={undefined}
+        onSelect={(value) => {
+          const template = (picker === 'idle' ? IDLE_TEMPLATES : SCHEDULED_TEMPLATES).find(
+            (entry) => entry.name === value,
+          )
+          if (template) addTemplate(template)
+        }}
+        options={(picker === 'idle' ? IDLE_TEMPLATES : SCHEDULED_TEMPLATES).map((template) => ({
+          value: template.name,
+          label: template.name,
+          hint: template.prompt,
+        }))}
+      />
+    </View>
   )
 }
 
-/* ── Skills ──────────────────────────────────────────────────────────────── */
+function AutomationRow({
+  automation,
+  index,
+  confirming,
+  onToggle,
+  onRun,
+  onRemove,
+  onConfirmRemove,
+}: {
+  automation: Automation
+  index: number
+  confirming: boolean
+  onToggle: () => void
+  onRun: () => void
+  onRemove: () => void
+  onConfirmRemove: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: automation.enabled ? palette.accentBorder : palette.line,
+          backgroundColor: automation.enabled ? palette.accentSoft : palette.well,
+          paddingLeft: 12,
+          paddingRight: 6,
+          paddingVertical: 8,
+        }}
+      >
+        <Zap size={14} color={automation.enabled ? palette.wait : palette.ink4} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[13.5px] font-medium text-ink" numberOfLines={1}>
+            {automation.name}
+          </Text>
+          <Text className="mt-0.5 text-[11px] text-ink-3" numberOfLines={1}>
+            {automation.kind === 'idle' ? 'idle · ' : ''}
+            {automation.cadence}
+            {automation.lastRun ? ' · ran' : ''}
+          </Text>
+        </View>
+
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityLabel={`${automation.name} enabled`}
+          accessibilityState={{ checked: automation.enabled }}
+          onPress={onToggle}
+          hitSlop={8}
+          style={({ pressed }) => ({
+            width: 34,
+            height: 34,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radius.pill,
+            backgroundColor: pressed ? palette.hover : 'transparent',
+          })}
+        >
+          <View
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: 5,
+              backgroundColor: automation.enabled ? palette.accent : palette.ink4,
+            }}
+          />
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Run ${automation.name} now`}
+          onPress={onRun}
+          hitSlop={8}
+          style={({ pressed }) => ({
+            width: 34,
+            height: 34,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radius.pill,
+            backgroundColor: pressed ? palette.hover : 'transparent',
+          })}
+        >
+          <Play size={15} color={palette.ink2} />
+        </Pressable>
+
+        {confirming ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Confirm deleting ${automation.name}`}
+            onPress={onConfirmRemove}
+            style={({ pressed }) => ({
+              minHeight: 30,
+              justifyContent: 'center',
+              borderRadius: radius.sm,
+              backgroundColor: pressed ? palette.dangerSoft : palette.dangerSoft,
+              paddingHorizontal: 9,
+            })}
+          >
+            <Text style={{ color: palette.danger, fontSize: 11.5, fontWeight: '700' }}>Delete</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${automation.name}`}
+            onPress={onRemove}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: radius.pill,
+              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
+            })}
+          >
+            <Trash2 size={15} color={palette.ink3} />
+          </Pressable>
+        )}
+      </View>
+    </View>
+  )
+}
+
+/* ── Skills ────────────────────────────────────────────────────────────────────
+ * The one home-page section that is genuinely remote control: the daemon owns
+ * `.agentdeck/skills/` per project, so a toggle here changes what the desktop
+ * injects into every subsequent turn. That is worth saying on the card, because
+ * a user tapping a switch on a phone and expecting it to stay local would be
+ * wrong about the most consequential thing this section does. */
 
 export function SkillsSection() {
   const sessions = useStore((state) => state.sessions)
@@ -268,12 +409,13 @@ export function SkillsSection() {
     () => Array.from(new Set(sessions.map((session) => session.project).filter(Boolean))) as string[],
     [sessions],
   )
-  const [project, setProject] = React.useState<string | null>(projects[0] ?? null)
+  const [project, setProject] = React.useState<string | null>(null)
   const [installed, setInstalled] = React.useState<Array<{ id: string; name: string; enabled: boolean }>>([])
   const [available, setAvailable] = React.useState<Array<{ id: string; name: string; description?: string }>>([])
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
-  const [viewSkill, setViewSkill] = React.useState<{ id: string; name: string; content: string } | null>(null)
+  const [projectPicker, setProjectPicker] = React.useState(false)
+  const [viewSkill, setViewSkill] = React.useState<{ name: string; content: string } | null>(null)
   const [viewLoading, setViewLoading] = React.useState(false)
   const [confirmUninstall, setConfirmUninstall] = React.useState<string | null>(null)
 
@@ -282,11 +424,16 @@ export function SkillsSection() {
   }, [projects, project])
 
   const load = React.useCallback(async () => {
+    if (!project) {
+      setInstalled([])
+      setAvailable([])
+      return
+    }
     setError(null)
     try {
       const [catalog, list] = await Promise.all([
         skillsApi.available().catch(() => ({ skills: [] })),
-        project ? skillsApi.installed(project) : Promise.resolve({ skills: [] }),
+        skillsApi.installed(project),
       ])
       setAvailable(catalog.skills ?? [])
       setInstalled(list.skills ?? [])
@@ -305,8 +452,13 @@ export function SkillsSection() {
     try {
       await skillsApi.toggle(id, project, enabled)
       await load()
+      void haptic('select')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not change that skill')
+      toast({
+        message: 'Could not change that skill',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setBusy(null)
     }
@@ -318,8 +470,13 @@ export function SkillsSection() {
     try {
       await skillsApi.install({ skill_id: id, project })
       await load()
+      toast({ message: 'Skill installed', tone: 'ok' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not install that skill')
+      toast({
+        message: 'Could not install that skill',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setBusy(null)
     }
@@ -330,181 +487,290 @@ export function SkillsSection() {
     setViewLoading(true)
     try {
       const res = await skillsApi.content(id, project)
-      setViewSkill({ id, name, content: res.content ?? '' })
+      setViewSkill({ name, content: res.content ?? '' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not read skill content')
+      toast({
+        message: 'Could not read that skill',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setViewLoading(false)
     }
   }
 
-  async function uninstallSkill(name: string) {
+  async function uninstall(name: string) {
     if (!project) return
     setBusy(name)
     try {
       await skillsApi.uninstall(name, project)
       setConfirmUninstall(null)
       await load()
+      toast({ message: 'Skill uninstalled', tone: 'ok' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not uninstall that skill')
+      toast({
+        message: 'Could not uninstall that skill',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setBusy(null)
     }
   }
 
   const installedIds = new Set(installed.map((skill) => skill.name))
+  const catalog = available.filter((skill) => !installedIds.has(skill.name))
+
+  if (projects.length === 0) {
+    return (
+      <Card>
+        <View style={{ padding: 14 }}>
+          <Text className="text-[13.5px] leading-[19px] text-ink-3">
+            No workspace yet. Skills install per project, so start a session first.
+          </Text>
+        </View>
+      </Card>
+    )
+  }
 
   return (
-    <Card>
-      <CardHeader
-        title="Skills"
-        right={project ? <Chip label={basename(project)} /> : undefined}
-      />
-      <View className="gap-3 p-3.5">
-        {projects.length === 0 ? (
-          <Text className="text-[11.5px] text-ink-3">
-            No workspace yet. Skills are installed per project, so start a session first.
+    <View style={{ gap: 10 }}>
+      <Card>
+        <View style={{ gap: 12, padding: 14 }}>
+          <Text className="text-[13px] leading-[18px] text-ink-2">
+            Skills install to <Mono className="text-[12px]">.agentdeck/skills/</Mono> in the project
+            and are injected into every turn by the context assembler — on the desktop as well as
+            here. A switch here is not local.
           </Text>
-        ) : (
-          <>
-            {/* Workspace picker — skills are per project, exactly as on the desktop. */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-1.5">
-              {projects.map((candidate) => {
-                const active = candidate === project
-                return (
-                  <Pressable
-                    key={candidate}
-                    onPress={() => setProject(candidate)}
-                    className={cn(
-                      'min-h-8 flex-row items-center gap-1.5 rounded-control border px-2.5',
-                      active ? 'border-accent bg-accent-tint' : 'border-line bg-surface',
-                    )}
-                  >
-                    <Text className={cn('text-[11.5px]', active ? 'text-ink' : 'text-ink-2')}>
-                      {basename(candidate)}
-                    </Text>
-                  </Pressable>
-                )
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+              Project
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Skills for ${project ? basename(project) : 'no project'}. Tap to change.`}
+              onPress={() => setProjectPicker(true)}
+              style={({ pressed }) => ({
+                flex: 1,
+                minHeight: 36,
+                justifyContent: 'center',
+                borderRadius: radius.sm,
+                borderWidth: 1,
+                borderColor: palette.line,
+                backgroundColor: pressed ? palette.raised : palette.well,
+                paddingHorizontal: 11,
               })}
-            </ScrollView>
-
-            {error ? <Text className="text-[11.5px] text-red">{error}</Text> : null}
-
-            <View>
-              <Mono className="mb-1 text-[9.5px] uppercase tracking-wider">
-                Installed · {installed.length}
+            >
+              <Mono className="text-[12.5px] text-ink" numberOfLines={1}>
+                {project ? basename(project) : 'Choose a project'}
               </Mono>
-              {installed.length === 0 ? (
-                <Text className="text-[11.5px] text-ink-3">Nothing installed for this project yet.</Text>
-              ) : (
-                installed.map((skill) => (
-                  <View key={skill.id} className="min-h-10 flex-row items-center gap-1.5">
-                    <Text className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
+            </Pressable>
+          </View>
+
+          {error ? (
+            <View
+              style={{
+                borderRadius: radius.sm,
+                borderWidth: 1,
+                borderColor: palette.dangerBorder,
+                backgroundColor: palette.dangerSoft,
+                padding: 10,
+              }}
+            >
+              <Text className="text-[12.5px] leading-[17px] text-danger">{error}</Text>
+            </View>
+          ) : null}
+
+          <View style={{ gap: 4 }}>
+            <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+              Installed · {installed.length}
+            </Text>
+            {installed.length === 0 ? (
+              <Text className="py-2 text-[13px] text-ink-3">Nothing installed for this project.</Text>
+            ) : (
+              installed.map((skill) => (
+                <View
+                  key={skill.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    minHeight: 40,
+                  }}
+                >
+                  <Text className="min-w-0 flex-1 text-[13.5px] text-ink" numberOfLines={1}>
+                    {skill.name}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Read ${skill.name}`}
+                    disabled={viewLoading}
+                    onPress={() => void viewSkillContent(skill.id, skill.name)}
+                    hitSlop={8}
+                    style={({ pressed }) => ({
+                      width: 34,
+                      height: 34,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: radius.pill,
+                      backgroundColor: pressed ? palette.raised : 'transparent',
+                    })}
+                  >
+                    <Eye size={15} color={palette.ink3} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="switch"
+                    accessibilityLabel={`${skill.name} enabled`}
+                    accessibilityState={{ checked: skill.enabled }}
+                    disabled={busy === skill.id}
+                    onPress={() => void toggleSkill(skill.id, !skill.enabled)}
+                    hitSlop={8}
+                    style={({ pressed }) => ({
+                      width: 34,
+                      height: 34,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: radius.pill,
+                      backgroundColor: pressed ? palette.raised : 'transparent',
+                    })}
+                  >
+                    <View
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 5,
+                        backgroundColor: skill.enabled ? palette.accent : palette.ink4,
+                      }}
+                    />
+                  </Pressable>
+                  {confirmUninstall === skill.id ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Confirm uninstalling ${skill.name}`}
+                      disabled={busy === skill.id}
+                      onPress={() => void uninstall(skill.name)}
+                      style={({ pressed }) => ({
+                        minHeight: 30,
+                        justifyContent: 'center',
+                        borderRadius: radius.sm,
+                        backgroundColor: pressed ? palette.dangerSoft : palette.dangerSoft,
+                        paddingHorizontal: 9,
+                      })}
+                    >
+                      <Text style={{ color: palette.danger, fontSize: 11.5, fontWeight: '700' }}>
+                        Uninstall
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Uninstall ${skill.name}`}
+                      onPress={() => {
+                        void haptic('warn')
+                        setConfirmUninstall(skill.id)
+                      }}
+                      hitSlop={8}
+                      style={({ pressed }) => ({
+                        width: 34,
+                        height: 34,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: radius.pill,
+                        backgroundColor: pressed ? palette.dangerSoft : 'transparent',
+                      })}
+                    >
+                      <Trash2 size={15} color={palette.ink3} />
+                    </Pressable>
+                  )}
+                </View>
+              ))
+            )}
+          </View>
+
+          {catalog.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+                From the catalog
+              </Text>
+              {catalog.slice(0, 8).map((skill) => (
+                <View key={skill.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 }}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text className="text-[13.5px] text-ink" numberOfLines={1}>
                       {skill.name}
                     </Text>
-                    <Pressable
-                      onPress={() => void viewSkillContent(skill.id, skill.name)}
-                      disabled={viewLoading}
-                      accessibilityLabel={`View ${skill.name}`}
-                      className="size-7 items-center justify-center rounded-lg active:bg-hover"
-                    >
-                      <Eye size={13} color={palette.ink3} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => void toggleSkill(skill.id, !skill.enabled)}
-                      disabled={busy === skill.id}
-                      accessibilityRole="switch"
-                      accessibilityState={{ checked: skill.enabled }}
-                      className={cn(
-                        'size-7 items-center justify-center rounded-lg',
-                        skill.enabled ? 'bg-green-tint' : 'bg-surface',
-                      )}
-                    >
-                      <View className={cn('size-2 rounded-full', skill.enabled ? 'bg-green' : 'bg-ink-3')} />
-                    </Pressable>
-                    {confirmUninstall === skill.id ? (
-                      <Pressable
-                        onPress={() => void uninstallSkill(skill.name)}
-                        disabled={busy === skill.id}
-                        className="min-h-7 rounded-lg bg-red-tint px-2 items-center justify-center"
-                      >
-                        <Text className="text-[10.5px] font-semibold text-red">
-                          {busy === skill.id ? '…' : 'Confirm'}
-                        </Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable
-                        onPress={() => setConfirmUninstall(skill.id)}
-                        accessibilityLabel={`Uninstall ${skill.name}`}
-                        className="size-7 items-center justify-center rounded-lg active:bg-red-tint"
-                      >
-                        <Trash2 size={13} color={palette.ink3} />
-                      </Pressable>
-                    )}
+                    {skill.description ? (
+                      <Text className="mt-0.5 text-[11.5px] leading-[15px] text-ink-3" numberOfLines={2}>
+                        {skill.description}
+                      </Text>
+                    ) : null}
                   </View>
-                ))
-              )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    label={busy === skill.id ? '…' : 'Install'}
+                    disabled={busy !== null}
+                    onPress={() => void install(skill.id)}
+                  />
+                </View>
+              ))}
             </View>
+          ) : null}
+        </View>
+      </Card>
 
-            {available.filter((skill) => !installedIds.has(skill.name)).length > 0 ? (
-              <View>
-                <Mono className="mb-1 text-[9.5px] uppercase tracking-wider">From the catalog</Mono>
-                {available
-                  .filter((skill) => !installedIds.has(skill.name))
-                  .slice(0, 8)
-                  .map((skill) => (
-                    <View key={skill.id} className="min-h-10 flex-row items-center gap-2">
-                      <View className="min-w-0 flex-1">
-                        <Text className="text-[12px] text-ink" numberOfLines={1}>
-                          {skill.name}
-                        </Text>
-                        {skill.description ? (
-                          <Mono className="text-[10px]" numberOfLines={1}>
-                            {skill.description}
-                          </Mono>
-                        ) : null}
-                      </View>
-                      <Button
-                        variant="ghost"
-                        label={busy === skill.id ? '…' : 'Install'}
-                        className="min-h-8 px-2.5"
-                        disabled={busy !== null}
-                        onPress={() => void install(skill.id)}
-                      />
-                    </View>
-                  ))}
-              </View>
-            ) : null}
-          </>
-        )}
-      </View>
+      <PickerSheet
+        open={projectPicker}
+        onClose={() => setProjectPicker(false)}
+        title="Skills are per project"
+        subtitle="Installed into .agentdeck/skills/ on the desktop"
+        searchable
+        value={project ?? undefined}
+        onSelect={(value) => setProject(value)}
+        options={projects.map((candidate) => ({
+          value: candidate,
+          label: basename(candidate),
+          hint: candidate,
+        }))}
+      />
 
-      {/* Skill content viewer */}
-      <Modal visible={viewSkill !== null} transparent animationType="slide" onRequestClose={() => setViewSkill(null)}>
-        <Pressable className="flex-1 justify-end bg-black/65" onPress={() => setViewSkill(null)}>
-          <Pressable className="max-h-[80%] rounded-t-2xl border border-line bg-surface" onPress={(e) => e.stopPropagation()}>
-            <View className="flex-row items-center justify-between border-b border-line px-3.5 py-2.5">
-              <View className="min-w-0 flex-1">
-                <Mono className="text-[9.5px] uppercase tracking-wider text-ink-3">Skill content</Mono>
-                <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>
-                  {viewSkill?.name}
-                </Text>
-              </View>
-              <Pressable onPress={() => setViewSkill(null)} accessibilityLabel="Close" className="size-9 items-center justify-center rounded-full">
-                <X size={16} color={palette.ink2} />
-              </Pressable>
-            </View>
-            <ScrollView className="p-3.5">
-              <TextInput
-                value={viewSkill?.content ?? ''}
-                editable={false}
-                multiline
-                className="font-mono text-[11.5px] leading-5 text-ink-2"
-              />
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </Card>
+      <SkillViewer skill={viewSkill} onClose={() => setViewSkill(null)} />
+    </View>
+  )
+}
+
+/**
+ * The skill's own text.
+ *
+ * Read-only and horizontally scrollable rather than a wrapped paragraph: this
+ * is a prompt, and a prompt re-wrapped at phone width is a prompt whose
+ * structure you cannot see.
+ */
+function SkillViewer({
+  skill,
+  onClose,
+}: {
+  skill: { name: string; content: string } | null
+  onClose: () => void
+}) {
+  return (
+    <Sheet
+      open={skill !== null}
+      onClose={onClose}
+      title={skill?.name ?? ''}
+      eyebrow="Skill"
+      snapPoints={[0.6, 0.92]}
+    >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView style={{ maxHeight: 420 }} nestedScrollEnabled>
+          <Well className="p-[13px]" style={{ borderRadius: radius.md }}>
+            <Mono className="text-[12px] leading-[18px] text-code-ink">
+              {skill?.content ?? ''}
+            </Mono>
+          </Well>
+        </ScrollView>
+      </ScrollView>
+      <Button variant="secondary" label="Close" full onPress={onClose} />
+    </Sheet>
   )
 }

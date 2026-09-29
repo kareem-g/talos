@@ -2,7 +2,7 @@
  * The primitives, tested as the user meets them.
  *
  * The redesign's whole claim is that a screen can be built from these and get
- * 44pt targets, correct roles, and token colours for free. That claim is only
+ * 48pt targets, correct roles, and token colours for free. That claim is only
  * worth anything if it is checked, so these assert the three things a
  * regression would actually break:
  *
@@ -19,7 +19,7 @@
  */
 
 import * as React from 'react'
-import { Text, View } from 'react-native'
+import { Text } from 'react-native'
 import TestRenderer from 'react-test-renderer'
 import type { ReactTestInstance } from 'react-test-renderer'
 
@@ -27,23 +27,24 @@ import {
   Badge,
   Button,
   Card,
+  CheckRow,
   Dot,
   EmptyState,
   ErrorState,
   Field,
   IconButton,
+  ListRow,
   Loading,
-  Row,
-  ScreenHeader,
   Segmented,
   StatusPill,
   ToggleRow,
   TOUCH_MIN,
-  compatTone,
+  formatCount,
+  formatCost,
   haptic,
   palette,
+  toneColor,
 } from '@app/components/ui'
-import { toneColor } from '@app/design/tokens'
 
 /* ── Tree helpers ─────────────────────────────────────────────────────────── */
 
@@ -273,6 +274,14 @@ describe('ToggleRow', () => {
   })
 })
 
+describe('CheckRow', () => {
+  it('is a checkbox that reports its state', () => {
+    const root = render(<CheckRow label="Allow edit" checked onPress={() => {}} />)
+    const box = hosts(root, (n) => n.props?.accessibilityRole === 'checkbox')[0]
+    expect(box.props.accessibilityState).toMatchObject({ checked: true })
+  })
+})
+
 describe('Segmented', () => {
   const options = [
     { value: 'all' as const, label: 'All' },
@@ -288,7 +297,7 @@ describe('Segmented', () => {
 
   it('reports the chosen option', () => {
     const onChange = jest.fn()
-    const root = render(<Segmented options={options} value="all" onChange={onChange} />)
+    const root = render(<Segmented options={options} value="all" onChange={onChange} label="Filter" />)
     press(pressable(root, 'Live'))
     expect(onChange).toHaveBeenCalledWith('active')
   })
@@ -296,9 +305,9 @@ describe('Segmented', () => {
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
 
-describe('Row', () => {
+describe('ListRow', () => {
   it('names itself and hints at its detail', () => {
-    const root = render(<Row primary="api-gateway" secondary="claude · 2m ago" onPress={() => {}} />)
+    const root = render(<ListRow title="api-gateway" subtitle="claude · 2m ago" onPress={() => {}} />)
     const row = pressable(root, 'api-gateway')
     expect(row.props.accessibilityLabel).toBe('api-gateway')
     expect(row.props.accessibilityHint).toBe('claude · 2m ago')
@@ -306,13 +315,13 @@ describe('Row', () => {
 
   it('opens on press', () => {
     const onPress = jest.fn()
-    const root = render(<Row primary="api-gateway" onPress={onPress} />)
+    const root = render(<ListRow title="api-gateway" onPress={onPress} />)
     press(pressable(root, 'api-gateway'))
     expect(onPress).toHaveBeenCalled()
   })
 
   it('is not a button when it has no action', () => {
-    const root = render(<Row primary="Read-only" />)
+    const root = render(<ListRow title="Read-only" />)
     expect(hosts(root, (n) => n.props?.accessibilityRole === 'button').length).toBe(0)
   })
 })
@@ -341,41 +350,44 @@ describe('error and empty states tell the user what to do', () => {
   })
 
   it('Loading announces what it is waiting for', () => {
-    const root = render(<Loading label="Loading sessions…" />)
-    expect(hosts(root, (n) => n.props?.accessibilityLabel === 'Loading sessions…').length).toBeGreaterThan(0)
+    const root = render(<Loading label="Loading sessions" />)
+    expect(hosts(root, (n) => n.props?.accessibilityLabel === 'Loading sessions').length).toBeGreaterThan(0)
   })
 })
 
-describe('ScreenHeader and Card', () => {
-  it('shows a title and subtitle', () => {
-    const text = textOf(render(<ScreenHeader title="MacBook" subtitle="Connected" />))
-    expect(text).toContain('MacBook')
-    expect(text).toContain('Connected')
+describe('Card', () => {
+  it('renders its children', () => {
+    expect(textOf(render(<Card><Text>inside</Text></Card>))).toContain('inside')
+  })
+})
+
+/* ── Number formatting ────────────────────────────────────────────────────── */
+
+/**
+ * Numbers are `tabular-nums` and abbreviated so a column of them stays
+ * readable. These are the desktop's rules, and the mobile copy has to agree
+ * with it or the same fleet reports two different costs.
+ */
+describe('number formatting matches the desktop', () => {
+  it('abbreviates at the same thresholds', () => {
+    expect(formatCount(999)).toBe('999')
+    expect(formatCount(1_000)).toBe('1.0k')
+    expect(formatCount(12_400)).toBe('12k')
+    expect(formatCount(1_200_000)).toBe('1.2M')
   })
 
-  it('Card renders its children', () => {
-    expect(textOf(render(<Card><Text>inside</Text></Card>))).toContain('inside')
+  it('renders a sub-cent cost rather than $0.00', () => {
+    // `$0.00` reads as "free"; a real number reads as "small". The difference
+    // matters when you are deciding whether a session is worth stopping.
+    expect(formatCost(0.004)).toBe('< $0.01')
+    expect(formatCost(0)).toBe('—')
+    expect(formatCost(1.5)).toBe('$1.50')
   })
 })
 
 /* ── Token discipline ─────────────────────────────────────────────────────── */
 
-describe('tone compatibility', () => {
-  it('maps legacy tone names to current ones', () => {
-    // The old vocabulary named hues; the new one names meanings. Screens
-    // mid-migration pass either and must get the same colour either way.
-    expect(compatTone('green')).toBe('ok')
-    expect(compatTone('orange')).toBe('wait')
-    expect(compatTone('red')).toBe('danger')
-    expect(compatTone('dim')).toBe('muted')
-    expect(compatTone('accent')).toBe('accent')
-  })
-
-  it('leaves current tone names alone', () => {
-    expect(compatTone('ok')).toBe('ok')
-    expect(compatTone('wait')).toBe('wait')
-  })
-
+describe('tone vocabulary', () => {
   it('gives every tone a distinct colour', () => {
     const tones = ['ok', 'wait', 'danger', 'info', 'accent', 'muted'] as const
     expect(new Set(tones.map((tone) => toneColor[tone])).size).toBe(tones.length)

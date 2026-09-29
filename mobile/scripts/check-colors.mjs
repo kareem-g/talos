@@ -26,6 +26,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
 
 const ALLOWED_FILES = new Set([
+  // The one place a colour may be written by hand: the palette, and the two
+  // `ViewStyle` shadow presets, whose `shadowColor` the platform reads as a raw
+  // string and would render as nothing if it were a token name.
   join('src', 'design', 'tokens.ts'),
   'tailwind.config.js',
   'global.css',

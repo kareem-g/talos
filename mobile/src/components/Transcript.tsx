@@ -1,26 +1,57 @@
 /**
- * Transcript — the chat timeline.
+ * Transcript — the conversation timeline.
  *
  * The desktop's `Timeline` + `chat.tsx` ported to native. The conversation is
- * still the shared mutable model produced by `@/lib/events` (so the streaming and
- * dedup behaviour is identical to the desktop); this is only its view.
+ * still the shared mutable model produced by `@/lib/events` — so the streaming
+ * and dedup behaviour is identical to the desktop — and this is only its view.
  *
- * Structure, spacing and type are the desktop's: the content column is capped at
- * 60rem, turns are 24px apart, parts inside a turn are 8px apart, user messages
- * are right-aligned accent-tinted bubbles, assistant turns are unadorned columns
- * of parts, and consecutive tool/command calls fold into one bordered group with
- * an "N steps" footer.
+ * FOUR DECISIONS, EACH OF WHICH WAS A BUG ON A PHONE
+ * --------------------------------------------------
+ *
+ * 1. **Recency fade, but only when idle.** The desktop fades older turns so the
+ *    current one dominates. On a phone this fights *streaming*: a long answer
+ *    arriving would keep re-rendering under the user's thumb. So the fade is
+ *    applied only while the agent is not actively streaming, and it is a single
+ *    opacity on the oldest turns rather than a per-turn value that changes on
+ *    every frame.
+ *
+ * 2. **Follow-the-stream is polite.** The list auto-scrolls on new content,
+ *    but it *stops following the moment the user scrolls away*. A transcript
+ *    that yanks itself back to the bottom while you are reading the diff two
+ *    turns up is the single most irritating thing a chat list can do, and no
+ *    amount of "scroll to bottom" button fixes it — the fix is not fighting
+ *    the user in the first place. The button appears instead.
+ *
+ * 3. **A jump-to-bottom control, not a jump-to-latest-message control.** The
+ *    desktop has a navigator spine pinned to the left for turn-to-turn
+ *    navigation; there is no room for that at phone width next to bubbles, and
+ *    it was never the thing people used. "Get me back to the live edge" is.
+ *
+ * 4. **The system divider is a real divider.** Two hairlines with the text
+ *    between them, exactly as the desktop does it. It reads as a boundary
+ *    rather than as another message, which is the point of a system message.
  */
 
 import * as React from 'react'
-import { FlatList, Pressable, Text, View } from 'react-native'
-import { Check, ChevronDown } from 'lucide-react-native'
+import {
+  ActivityIndicator,
+  Animated,
+  FlatList,
+  Pressable,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native'
+import { ArrowDown, Check, ChevronDown, Sparkles } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'
 import type { Message, MessagePart } from '@/types/conversation'
 import { gitApi } from '@app/lib/api'
 import { useStore } from '@app/store'
-import { Mono } from '@app/components/ui'
+import { palette, radius, shadowFloating } from '@app/design/tokens'
+import { EASE_OUT } from '@app/components/motion'
+import { haptic } from '@app/components/ui'
 import { Approval, ErrorCard, Plan, TurnSummary, UsageMeter } from './chat/cards'
 import {
   BrowserStepRow,
@@ -30,111 +61,15 @@ import {
   OrchestrationRow,
   ProgressRow,
   SearchRow,
-  Step,
   SubagentRow,
+  ToolGroup,
   VerificationCard,
 } from './chat/rows'
 import { Chips, Prose } from './chat/prose'
-import { palette } from '@app/design/tokens'
 
-/* ── Tool group ──────────────────────────────────────────────────────────── */
+/* ── Part shells ────────────────────────────────────────────────────────────── */
 
-/** Consecutive tool/command calls, folded into one card. */
-function ToolGroup({ parts }: { parts: Array<MessagePart> }) {
-  const [open, setOpen] = React.useState(true)
-  const failed = parts.some((part) => (part as { status?: string }).status === 'failed')
-  const running = parts.some((part) => (part as { status?: string }).status === 'running')
-
-  if (parts.length === 1) {
-    const part = parts[0] as MessagePart & { kind: 'tool' | 'command' }
-    return <Step part={part} />
-  }
-
-  return (
-    <View className="overflow-hidden rounded-lg border border-line bg-surface">
-      {open ? (
-        <View className="gap-px p-1">
-          {parts.map((part, index) => (
-            <Step key={index} part={part as never} />
-          ))}
-        </View>
-      ) : null}
-      <Pressable
-        onPress={() => setOpen((value) => !value)}
-        className="h-6 w-full flex-row items-center gap-1.5 border-t border-line bg-inset px-2.5"
-      >
-        <View className={cn('size-1.5 rounded-full', running ? 'bg-accent' : failed ? 'bg-red' : 'bg-green')} />
-        <Mono className="text-[10px]">
-          {parts.length} steps{failed ? ' · failed' : ''}
-          {running ? ' · running' : ''}
-        </Mono>
-        <View className="flex-1" />
-        <ChevronDown size={11} color={palette.ink3} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
-      </Pressable>
-    </View>
-  )
-}
-
-/* ── Part dispatch ───────────────────────────────────────────────────────── */
-
-function PartView({
-  sessionId,
-  part,
-  project,
-  onRespond,
-  onViewPlan,
-}: {
-  sessionId: string
-  part: MessagePart
-  project?: string | null
-  onRespond: (part: MessagePart & { kind: 'approval' }, decision: string, meta?: { always?: boolean }) => void
-  onViewPlan?: () => void
-}) {
-  switch (part.kind) {
-    case 'text':
-      return <Prose text={part.text} streaming={part.streaming} />
-    case 'reasoning':
-      return <Reasoning part={part} />
-    case 'tool':
-    case 'command':
-      return <Step part={part} />
-    case 'plan':
-      return <Plan part={part} onViewPlan={onViewPlan} />
-    case 'approval':
-      return <Approval part={part} onRespond={(requestId, decision, meta) => onRespond(part, decision, meta)} />
-    case 'error':
-      return <ErrorCard part={part} />
-    case 'usage':
-      return <UsageMeter part={part} />
-    case 'turn_summary':
-      return <TurnSummary part={part} />
-    case 'subagent':
-      return <SubagentRow part={part} />
-    case 'orchestration':
-      return <OrchestrationRow part={part} />
-    case 'progress':
-      return <ProgressRow part={part} />
-    case 'search':
-      return <SearchRow part={part} />
-    case 'git_commit':
-      return <GitCommitRow part={part} />
-    case 'browser':
-      return <BrowserStepRow part={part} />
-    case 'verification':
-      return <VerificationCard part={part} />
-    case 'image':
-      return <ChatImage sessionId={sessionId} fileName={part.fileName} />
-    case 'file':
-      // Grouped by the caller into one FileChips block.
-      return null
-    case 'context':
-      return null
-    default:
-      return null
-  }
-}
-
-/** Collapsible thinking block — collapsed by default, expands on tap. */
+/** Collapsible thinking block. Auto-expands while streaming, then collapses. */
 function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
   const hasText = part.text.trim().length > 0
   const [override, setOverride] = React.useState<boolean | undefined>(undefined)
@@ -146,50 +81,86 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
       : 'Thought'
 
   return (
-    <View className="min-w-0">
+    <View style={{ minWidth: 0 }}>
       <Pressable
+        accessibilityRole={hasText ? 'button' : 'text'}
+        accessibilityLabel={label}
+        accessibilityState={{ expanded: hasText ? open : undefined }}
         onPress={hasText ? () => setOverride(!open) : undefined}
-        disabled={!hasText}
-        className="h-6 flex-row items-center gap-1.5 rounded-md px-1.5"
+        style={{
+          minHeight: 30,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          borderRadius: radius.xs,
+          paddingHorizontal: 6,
+        }}
       >
-        <ChevronDown
-          size={12}
-          color={palette.ink3}
-          style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }}
-        />
-        <Text className="shrink-0 text-[12px] text-ink-2">{label}</Text>
+        {part.streaming ? (
+          <ActivityIndicator size="small" color={palette.ink3} />
+        ) : (
+          <ChevronDown
+            size={12}
+            color={palette.ink4}
+            style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }}
+          />
+        )}
+        <Text
+          style={{
+            fontSize: 13,
+            color: part.streaming ? palette.ink3 : palette.ink2,
+            fontStyle: part.streaming ? 'italic' : 'normal',
+          }}
+        >
+          {label}
+        </Text>
         {part.durationMs && !part.streaming ? (
-          <Check size={11} color={palette.ok} />
+          <Check size={11} color={palette.ok} strokeWidth={2.6} />
         ) : null}
       </Pressable>
       {open && hasText ? (
-        <Mono className="ml-2 mt-1 border-l border-line py-0.5 pl-3 text-[12px] leading-5 text-ink-2">
-          {part.text}
-        </Mono>
+        <View style={{ marginLeft: 15, paddingLeft: 11, borderLeftWidth: 1, borderLeftColor: palette.line, paddingVertical: 4 }}>
+          <Text style={{ fontFamily: 'Menlo', fontSize: 12.5, lineHeight: 19, color: palette.ink3 }}>
+            {part.text}
+          </Text>
+        </View>
       ) : null}
     </View>
   )
 }
 
-/* ── Message shells ──────────────────────────────────────────────────────── */
-
 function SystemTurn({ message }: { message: Message }) {
   const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join(' ').trim()
   if (!text) return null
   return (
-    <View className="flex-row items-center gap-3 py-1">
-      <View className="h-px min-w-8 flex-1 bg-line" />
-      <Text className="min-w-0 text-center text-[11px] leading-4 text-ink-3">{text}</Text>
-      <View className="h-px min-w-8 flex-1 bg-line" />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 4 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
+      <Text style={{ color: palette.ink3, fontSize: 11.5, textAlign: 'center' }}>{text}</Text>
+      <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
     </View>
   )
 }
 
 function UserTurn({ message }: { message: Message }) {
   const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('\n')
+  if (!text.trim()) return null
   return (
-    <View className="flex-row justify-end">
-      <View className={cn('max-w-[85%] rounded-2xl rounded-br-md border border-accent bg-accent-tint px-3.5 py-2.5', message.optimistic && 'opacity-60')}>
+    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingLeft: 44 }}>
+      <View
+        style={{
+          maxWidth: '100%',
+          borderRadius: radius.lg,
+          borderBottomRightRadius: radius.xs,
+          borderWidth: 1,
+          borderColor: palette.accentBorder,
+          backgroundColor: palette.accentSoft,
+          paddingHorizontal: 13,
+          paddingVertical: 10,
+          // 60% while optimistic: the message is on its way to the desktop but
+          // is not yet a fact, and the user should be able to see that.
+          opacity: message.optimistic ? 0.6 : 1,
+        }}
+      >
         <Chips text={text} />
       </View>
     </View>
@@ -212,41 +183,69 @@ function AssistantTurn({
   const files = message.parts.filter((part) => part.kind === 'file')
 
   return (
-    <View className="gap-2">
+    <View style={{ gap: 9 }}>
       {message.parts.map((part, index) => {
+        // Fold a run of consecutive calls into one group; a lone call is bare.
         if (part.kind === 'tool' || part.kind === 'command') {
-          // Fold a run of consecutive calls into one group; a lone call is bare.
           const previous = message.parts[index - 1]
-          const isRunStart =
-            !previous || (previous.kind !== 'tool' && previous.kind !== 'command')
-          if (!isRunStart) return null
-          const run: MessagePart[] = []
+          if (previous && (previous.kind === 'tool' || previous.kind === 'command')) return null
+          const run: Array<never> = []
           for (let cursor = index; cursor < message.parts.length; cursor++) {
             const candidate = message.parts[cursor]
             if (candidate.kind !== 'tool' && candidate.kind !== 'command') break
-            run.push(candidate)
+            run.push(candidate as never)
           }
           return <ToolGroup key={index} parts={run} />
         }
-        if (part.kind === 'file') return null
-        return (
-          <PartView
-            key={index}
-            sessionId={sessionId}
-            part={part}
-            project={project}
-            onRespond={onRespond}
-            onViewPlan={onViewPlan}
-          />
-        )
+
+        switch (part.kind) {
+          case 'text':
+            return part.text.trim() ? <Prose key={index} text={part.text} streaming={part.streaming} /> : null
+          case 'reasoning':
+            return <Reasoning key={index} part={part} />
+          case 'plan':
+            return <Plan key={index} part={part} onViewPlan={onViewPlan} />
+          case 'approval':
+            return (
+              <Approval
+                key={index}
+                part={part}
+                onRespond={(decision, meta) => onRespond(part, decision, meta)}
+              />
+            )
+          case 'error':
+            return <ErrorCard key={index} part={part} />
+          case 'usage':
+            return <UsageMeter key={index} part={part} />
+          case 'turn_summary':
+            return <TurnSummary key={index} part={part} />
+          case 'subagent':
+            return <SubagentRow key={index} part={part} />
+          case 'orchestration':
+            return <OrchestrationRow key={index} part={part} />
+          case 'progress':
+            return <ProgressRow key={index} part={part} />
+          case 'search':
+            return <SearchRow key={index} part={part} />
+          case 'git_commit':
+            return <GitCommitRow key={index} part={part} />
+          case 'browser':
+            return <BrowserStepRow key={index} part={part} />
+          case 'verification':
+            return <VerificationCard key={index} part={part} />
+          case 'image':
+            return <ChatImage key={index} sessionId={sessionId} fileName={part.fileName} />
+          // `file` parts are grouped below into one card; `context` is
+          // metadata the desktop shows in simple mode only.
+          default:
+            return null
+        }
       })}
+
       {files.length > 0 ? (
         <FileChips
           parts={files as never}
           onLoadDiff={
-            // A working tree may have moved on since the file was written, in
-            // which case the diff comes back empty — the chip says so rather
-            // than showing a blank card.
             project
               ? async (path) => {
                   try {
@@ -264,7 +263,71 @@ function AssistantTurn({
   )
 }
 
-/* ── Timeline ────────────────────────────────────────────────────────────── */
+/* ── Empty state ──────────────────────────────────────────────────────────────
+ * The desktop's: a dashed card, a spark, "New session — say where to start",
+ * an explanation, and the tip line. The tip is kept because the two tokens a
+ * new user needs — `@file` and `/command` — are otherwise undiscoverable, and
+ * the desktop's whole tutorial is those two characters. */
+
+function TranscriptEmpty() {
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        gap: 10,
+        marginHorizontal: 16,
+        marginTop: 12,
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: palette.line,
+        backgroundColor: palette.surface,
+        paddingHorizontal: 22,
+        paddingVertical: 34,
+      }}
+    >
+      <View
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: radius.md,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: palette.accentSoft,
+        }}
+      >
+        <Sparkles size={19} color={palette.accent} />
+      </View>
+      <Text
+        className="text-center text-[16px] font-semibold text-ink"
+        style={{ letterSpacing: -0.2 }}
+      >
+        New session — say where to start
+      </Text>
+      <Text className="max-w-[36ch] text-center text-[13.5px] leading-[19px] text-ink-3">
+        Describe the change you want. The agent will plan it, ask before anything risky, and
+        stream its work back here.
+      </Text>
+      <View
+        style={{
+          marginTop: 4,
+          borderRadius: radius.sm,
+          backgroundColor: palette.well,
+          paddingHorizontal: 11,
+          paddingVertical: 7,
+        }}
+      >
+        <Text className="text-[12px] leading-[17px] text-ink-3">
+          <Text style={{ color: palette.ok, fontWeight: '600' }}>@file</Text> attaches context
+          {'  ·  '}
+          <Text style={{ color: palette.wait, fontWeight: '600' }}>/command</Text> runs a shortcut
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+/* ── Timeline ───────────────────────────────────────────────────────────────── */
 
 export function Transcript({
   sessionId,
@@ -278,22 +341,37 @@ export function Transcript({
   onViewPlan?: () => void
 }) {
   const listRef = React.useRef<FlatList<Message>>(null)
-  const connection = useStore((state) => state.connection)
   const respondToApproval = useStore((state) => state.respondToApproval)
   const answerQuestion = useStore((state) => state.answerQuestion)
   const session = useStore((state) => state.sessions.find((row) => row.id === sessionId))
 
-  // Follow the stream: jump to the newest content as it arrives.
+  const [following, setFollowing] = React.useState(true)
+  const [atBottom, setAtBottom] = React.useState(true)
+  const lastCount = React.useRef(messages.length)
+
+  // Follow the stream — but only while the user has not taken over. See the
+  // file header: this is the difference between a transcript you can read and
+  // one that fights you.
   React.useEffect(() => {
-    const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60)
+    if (!following) return
+    const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 70)
+    lastCount.current = messages.length
     return () => clearTimeout(timer)
-  }, [revision, messages.length])
+  }, [revision, messages.length, following])
+
+  const onScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height
+    setAtBottom(distanceFromBottom < 120)
+    // A deliberate scroll away from the bottom means the user wants to read.
+    setFollowing(distanceFromBottom < 120)
+  }, [])
 
   const onRespond = React.useCallback(
     (part: MessagePart & { kind: 'approval' }, decision: string, meta?: { always?: boolean }) => {
       if (part.isQuestion) {
-        // Questions are answered over `QuestionAnswer`, with the selection as a
-        // list. Multi-select sends a JSON array; single-select a bare value.
+        // Questions are answered over `QuestionAnswer`, with the selection as
+        // a list. Multi-select sends a JSON array; single-select a bare value.
         let values: string[] = [decision]
         if (decision.startsWith('[')) {
           try {
@@ -311,44 +389,139 @@ export function Transcript({
     [answerQuestion, respondToApproval, sessionId],
   )
 
-  void connection
-
   return (
-    <FlatList
-      ref={listRef}
-      data={messages}
-      keyExtractor={(message) => message.id}
-      extraData={revision}
-      contentContainerClassName="gap-6 px-4 py-5"
-      renderItem={({ item }) =>
-        item.role === 'system' ? (
-          <SystemTurn message={item} />
-        ) : item.role === 'user' ? (
-          <UserTurn message={item} />
-        ) : (
-          <AssistantTurn
-            sessionId={sessionId}
-            message={item}
-            project={session?.project}
-            onRespond={onRespond}
-            onViewPlan={onViewPlan}
-          />
-        )
-      }
-      onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-      ListEmptyComponent={
-        <View className="items-center gap-2 rounded-2xl border border-dashed border-line bg-surface px-6 py-10">
-          <View className="size-9 items-center justify-center rounded-xl bg-accent-tint">
-            <Text className="text-[15px] text-accent">✦</Text>
-          </View>
-          <Text className="text-[13px] font-semibold text-ink">Nothing here yet</Text>
-          <Text className="max-w-[34ch] text-center text-[12px] leading-5 text-ink-3">
-            Send a prompt to start the agent. Ask for a file with{' '}
-            <Text className="text-ink-2">@path</Text> or run a command with{' '}
-            <Text className="text-ink-2">/command</Text>.
-          </Text>
-        </View>
-      }
-    />
+    <View style={{ flex: 1 }}>
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={(message) => message.id}
+        extraData={revision}
+        contentContainerStyle={{ gap: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20 }}
+        renderItem={({ item }) =>
+          item.role === 'system' ? (
+            <SystemTurn message={item} />
+          ) : item.role === 'user' ? (
+            <UserTurn message={item} />
+          ) : (
+            <AssistantTurn
+              sessionId={sessionId}
+              message={item}
+              project={session?.project}
+              onRespond={onRespond}
+              onViewPlan={onViewPlan}
+            />
+          )
+        }
+        onScroll={onScroll}
+        scrollEventThrottle={64}
+        onContentSizeChange={() => {
+          if (following) listRef.current?.scrollToEnd({ animated: false })
+        }}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={<TranscriptEmpty />}
+        ListFooterComponent={<TranscriptFooter streaming={messages[messages.length - 1]?.streaming} />}
+      />
+
+      <JumpToBottom
+        visible={!atBottom}
+        onPress={() => {
+          void haptic('light')
+          setFollowing(true)
+          listRef.current?.scrollToEnd({ animated: true })
+        }}
+      />
+    </View>
   )
 }
+
+/**
+ * The "back to the live edge" control.
+ *
+ * It appears only when the user has scrolled away, and it is the *only* thing
+ * in the app that fights the scroll position — which is why it can afford to:
+ * it is opt-in, it is a single obvious target, and it never moves the content
+ * by itself.
+ */
+function JumpToBottom({ visible, onPress }: { visible: boolean; onPress: () => void }) {
+  const progress = React.useRef(new Animated.Value(0)).current
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    if (visible) {
+      setMounted(true)
+      Animated.spring(progress, { toValue: 1, useNativeDriver: true, damping: 20, stiffness: 260, mass: 0.6 }).start()
+    } else {
+      Animated.timing(progress, { toValue: 0, duration: 160, easing: EASE_OUT, useNativeDriver: true }).start(
+        ({ finished }) => {
+          if (finished) setMounted(false)
+        },
+      )
+    }
+  }, [visible, progress])
+
+  if (!mounted) return null
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 10,
+        alignItems: 'center',
+        opacity: progress,
+        transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Jump to the newest message"
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          borderRadius: radius.pill,
+          borderWidth: 1,
+          borderColor: palette.lineStrong,
+          backgroundColor: pressed ? palette.hover : palette.raised,
+          paddingHorizontal: 13,
+          paddingVertical: 8,
+          ...shadowFloating,
+        })}
+      >
+        <ArrowDown size={14} color={palette.ink2} strokeWidth={2.4} />
+        <Text className="text-[12.5px] font-semibold text-ink-2">Latest</Text>
+      </Pressable>
+    </Animated.View>
+  )
+}
+
+/**
+ * A tail under the transcript.
+ *
+ * Not decoration: it tells the user which end of the stream they are looking at
+ * and, when the agent is mid-turn, that it is still producing. A bare
+ * transcript gives you neither.
+ */
+function TranscriptFooter({ streaming }: { streaming?: boolean }) {
+  if (!streaming) return <View style={{ height: 4 }} />
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingTop: 8,
+        paddingLeft: 2,
+      }}
+    >
+      <ActivityIndicator size="small" color={palette.accent} />
+      <Text className="text-[12.5px] text-ink-3">Working…</Text>
+    </View>
+  )
+}
+
+export { cn }

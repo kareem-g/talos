@@ -1,31 +1,41 @@
 /**
- * Remote Access — tunnel management and paired devices.
+ * Remote access — tunnels and paired devices.
  *
- * Combines the desktop's tunnel status/start/stop controls with the paired-devices
- * list/revoke surface. All six remoteApi methods are wired here.
+ * The desktop's tunnels panel and its paired-devices list are two surfaces in
+ * two places. From a phone they are one screen, because the question behind
+ * both is the same: **can this phone reach the desktop, and who else can?**
+ *
+ * Reachability is the headline. A list of endpoints with a green dot each is
+ * four rows to read to answer a yes/no question, so the reachable one is
+ * promoted to a card and the unreachable ones are listed beneath it as
+ * fallbacks. The paired-devices list matters for a different reason — it is
+ * how you cut off a phone you lost — so it gets its own section and its own
+ * confirm.
  */
 
 import * as React from 'react'
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { Pressable, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
-import type { DrawerNavigationProp } from '@react-navigation/drawer'
-import { Cloud, Power, Shield, Smartphone, Wifi, WifiOff } from 'lucide-react-native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { Cloud, Power, Smartphone } from 'lucide-react-native'
 
 import { remoteApi } from '@app/lib/api'
-import type { DrawerParamList } from '@app/navigation'
+import type { RootStackParamList } from '@app/navigation'
+import { palette, radius } from '@app/design/tokens'
+import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
+  Badge,
   Button,
   Card,
-  CardHeader,
-  Chip,
+  CopyButton,
+  Divider,
   Dot,
   EmptyState,
   Mono,
-  PageHeader,
-  SectionLabel,
+  haptic,
+  toast,
 } from '@app/components/ui'
-import { palette } from '@app/design/tokens'
 
 interface TunnelEndpoint {
   base_url: string
@@ -46,11 +56,10 @@ interface PairedDevice {
 }
 
 export function RemoteScreen() {
-  const navigation = useNavigation<DrawerNavigationProp<DrawerParamList>>()
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const [endpoints, setEndpoints] = React.useState<TunnelEndpoint[]>([])
   const [devices, setDevices] = React.useState<PairedDevice[]>([])
-  const [tunnelStatus, setTunnelStatus] = React.useState<Record<string, unknown>>({})
-  const [loading, setLoading] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
   const [refreshing, setRefreshing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
@@ -59,22 +68,21 @@ export function RemoteScreen() {
   const load = React.useCallback(async () => {
     setError(null)
     try {
-      const [epRes, devRes, statusRes] = await Promise.all([
+      const [epRes, devRes] = await Promise.all([
         remoteApi.endpoints().catch(() => ({ endpoints: [] })),
         remoteApi.devices().catch(() => ({ devices: [] })),
-        remoteApi.status().catch(() => ({})),
       ])
       setEndpoints(epRes.endpoints ?? [])
       setDevices(devRes.devices ?? [])
-      setTunnelStatus(statusRes)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load remote access info')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
-    setLoading(true)
-    void load().finally(() => setLoading(false))
+    void load()
   }, [load])
 
   async function refresh() {
@@ -83,28 +91,32 @@ export function RemoteScreen() {
     setRefreshing(false)
   }
 
-  async function startTunnel(kind: 'tailscale' | 'cloudflare') {
-    setBusy(`start-${kind}`)
+  async function toggleTunnel(kind: 'tailscale' | 'cloudflare') {
+    const stopping = endpoints.some((endpoint) => endpoint.source === kind && endpoint.reachable)
+    setBusy(`${kind}-${stopping ? 'stop' : 'start'}`)
     setError(null)
     try {
-      const res = await remoteApi.start(kind)
-      if (!res.ok && res.error) setError(res.error)
+      // The daemon answers a start with `{ ok, error? }` and a stop with an
+      // empty body, so both are narrowed to the same shape before use rather
+      // than being spread with a cast at the call site.
+      const result: { ok: boolean; error?: string } = stopping
+        ? await remoteApi.stop(kind)
+        : await remoteApi.start(kind)
+      if (!result.ok && result.error) setError(result.error)
       await load()
+      toast({
+        message: `${kind === 'tailscale' ? 'Tailscale' : 'Cloudflare'} tunnel ${
+          result.ok ? (stopping ? 'stopped' : 'started') : 'did not start'
+        }`,
+        detail: result.error,
+        tone: result.ok ? 'ok' : 'danger',
+      })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Could not start ${kind}`)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function stopTunnel(kind: 'tailscale' | 'cloudflare') {
-    setBusy(`stop-${kind}`)
-    setError(null)
-    try {
-      await remoteApi.stop(kind)
-      await load()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Could not stop ${kind}`)
+      toast({
+        message: 'That tunnel action failed',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setBusy(null)
     }
@@ -112,166 +124,318 @@ export function RemoteScreen() {
 
   async function revokeDevice(id: string) {
     setBusy(`revoke-${id}`)
-    setError(null)
     try {
       await remoteApi.revoke(id)
       setConfirmRevoke(null)
       await load()
+      toast({ message: 'Device revoked', tone: 'ok' })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not revoke device')
+      toast({
+        message: 'Could not revoke that device',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
     } finally {
       setBusy(null)
     }
   }
 
+  const reachable = endpoints.filter((endpoint) => endpoint.reachable)
+  const unreachable = endpoints.filter((endpoint) => !endpoint.reachable)
+  const tunnelState = (kind: 'tailscale' | 'cloudflare') =>
+    endpoints.some((endpoint) => endpoint.source === kind && endpoint.reachable)
+
   return (
-    <SafeAreaView className="flex-1 bg-canvas" edges={['top']}>
-      <PageHeader onMenu={() => navigation.openDrawer()} title="Remote Access" />
-
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.ink3} />}
-        contentContainerClassName="pb-10"
-      >
-        <View className="gap-3 px-4 pt-5 pb-3">
-          <View className="gap-1.5">
-            <Mono className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3">Connectivity</Mono>
-            <Text className="text-[24px] font-bold tracking-tight text-ink" style={{ letterSpacing: -0.5 }}>Remote Access</Text>
-            <Text className="text-[14px] leading-5 text-ink-2">
-              Manage tunnels that let this phone reach the desktop daemon outside your local
-              network, and control which devices are paired.
-            </Text>
-          </View>
-
-          {error ? (
-            <View className="rounded-xl border border-red-border bg-red-tint px-3.5 py-2.5">
-              <Text className="text-[13px] leading-5 text-ink">{error}</Text>
-            </View>
-          ) : null}
-
-          {/* Tunnel Controls */}
-            <Card>
-              <CardHeader
-                title="Tunnels"
-                right={
-                  <Chip
-                    tone={endpoints.some((e) => e.reachable) ? 'green' : 'dim'}
-                    label={endpoints.some((e) => e.reachable) ? 'reachable' : 'local only'}
-                  />
-                }
-              />
-              <View className="gap-3 p-3.5">
-                {endpoints.length === 0 ? (
-                  <Text className="text-[11.5px] text-ink-3">
-                    No tunnel endpoints configured. Start a tunnel to reach this daemon from outside
-                    your local network.
-                  </Text>
-                ) : (
-                  endpoints.map((ep, idx) => (
-                    <View key={idx} className="flex-row items-center gap-2 rounded-lg border border-line bg-inset px-2.5 py-2">
-                      <Dot tone={ep.reachable ? 'green' : 'dim'} />
-                      <View className="min-w-0 flex-1">
-                        <Mono className="text-[11px] text-ink" numberOfLines={1}>
-                          {ep.base_url}
-                        </Mono>
-                        <Mono className="text-[9.5px] text-ink-3">
-                          {ep.source}{ep.via ? ` via ${ep.via}` : ''} · {ep.secure ? 'secure' : 'insecure'}
-                        </Mono>
-                      </View>
-                      <Chip tone={ep.reachable ? 'green' : 'orange'} label={ep.reachable ? 'up' : 'down'} />
-                    </View>
-                  ))
-                )}
-
-                <View className="border-t border-line pt-3 gap-2">
-                  <Mono className="text-[9.5px] uppercase tracking-wider text-ink-3">Tunnel Controls</Mono>
-                  <View className="flex-row flex-wrap gap-2">
-                    <Button
-                      variant="surface"
-                      label={busy === 'start-tailscale' ? '…' : 'Start Tailscale'}
-                      disabled={busy !== null}
-                      className="min-h-9 px-3"
-                      onPress={() => void startTunnel('tailscale')}
-                    />
-                    <Button
-                      variant="surface"
-                      label={busy === 'stop-tailscale' ? '…' : 'Stop Tailscale'}
-                      disabled={busy !== null}
-                      className="min-h-9 px-3"
-                      onPress={() => void stopTunnel('tailscale')}
-                    />
-                    <Button
-                      variant="surface"
-                      label={busy === 'start-cloudflare' ? '…' : 'Start Cloudflare'}
-                      disabled={busy !== null}
-                      className="min-h-9 px-3"
-                      onPress={() => void startTunnel('cloudflare')}
-                    />
-                    <Button
-                      variant="surface"
-                      label={busy === 'stop-cloudflare' ? '…' : 'Stop Cloudflare'}
-                      disabled={busy !== null}
-                      className="min-h-9 px-3"
-                      onPress={() => void stopTunnel('cloudflare')}
-                    />
-                  </View>
-                </View>
-              </View>
-            </Card>
-
-            {/* Paired Devices */}
-            <SectionLabel>Paired Devices</SectionLabel>
-            {devices.length === 0 ? (
-              <Card>
-                <EmptyState
-                  title="No paired devices"
-                  body="Devices that pair with this daemon will appear here."
-                />
-              </Card>
-            ) : (
-              devices.map((device) => (
-                <Card key={device.id}>
-                  <View className="flex-row items-center gap-3 p-3.5">
-                    <View className="size-9 items-center justify-center rounded-lg bg-accent-tint">
-                      <Smartphone size={16} color={palette.accent} />
-                    </View>
-                    <View className="min-w-0 flex-1">
-                      <Text className="text-[13px] font-medium text-ink" numberOfLines={1}>
-                        {device.name}
-                      </Text>
-                      <Mono className="mt-0.5 text-[10px] text-ink-3" numberOfLines={1}>
-                        {device.fingerprint?.slice(0, 16) ?? device.id.slice(0, 16)}
-                      </Mono>
-                      {device.last_seen ? (
-                        <Mono className="text-[9.5px] text-ink-3">
-                          Last seen: {new Date(device.last_seen).toLocaleDateString()}
-                        </Mono>
-                      ) : null}
-                    </View>
-                    {confirmRevoke === device.id ? (
-                      <Pressable
-                        onPress={() => void revokeDevice(device.id)}
-                        disabled={busy === `revoke-${device.id}`}
-                        className="min-h-8 rounded-lg bg-red-tint px-2.5 items-center justify-center"
-                      >
-                        <Text className="text-[10.5px] font-semibold text-red">
-                          {busy === `revoke-${device.id}` ? '…' : 'Confirm'}
-                        </Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable
-                        onPress={() => setConfirmRevoke(device.id)}
-                        accessibilityLabel={`Revoke ${device.name}`}
-                        className="min-h-8 rounded-lg border border-line bg-surface px-2.5 items-center justify-center active:bg-red-tint"
-                      >
-                        <Text className="text-[10.5px] text-ink-2">Revoke</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </Card>
-              ))
-            )}
+    <ScreenScaffold
+      title="Remote access"
+      eyebrow="Connectivity"
+      subtitle="Tunnels that let this phone reach the desktop from outside your local network, and the devices allowed to."
+      onRefresh={() => void refresh()}
+      refreshing={refreshing}
+      scroll
+      contentClassName="px-4 pb-12 gap-5"
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+    >
+      {error ? (
+        <View
+          accessible
+          accessibilityRole="alert"
+          style={{
+            gap: 9,
+            borderRadius: radius.md,
+            borderWidth: 1,
+            borderColor: palette.dangerBorder,
+            backgroundColor: palette.dangerSoft,
+            padding: 14,
+          }}
+        >
+          <Text className="text-[13.5px] font-semibold text-ink">{error}</Text>
+          <Button size="sm" variant="secondary" label="Retry" onPress={() => void load()} />
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      ) : null}
+
+      {/* ── Reachability ────────────────────────────────────────────── */}
+      <Section eyebrow="Reachability" title={reachable.length > 0 ? 'Reachable now' : 'Not reachable off-LAN'} enterIndex={0}>
+        {reachable.length === 0 ? (
+          <Card>
+            <EmptyState
+              title={loading ? 'Checking routes' : 'Local network only'}
+              body={
+                loading
+                  ? 'Asking the desktop which routes answer.'
+                  : 'No tunnel is up. Start one to reach this daemon from outside your local network.'
+              }
+            />
+          </Card>
+        ) : (
+          <Card>
+            {reachable.map((endpoint, index) => (
+              <EndpointRow key={endpoint.base_url} endpoint={endpoint} index={index} primary />
+            ))}
+          </Card>
+        )}
+      </Section>
+
+      {/* ── Tunnels ─────────────────────────────────────────────────── */}
+      <Section eyebrow="Managed on the desktop" title="Tunnels" enterIndex={1}>
+        <Card>
+          <View style={{ gap: 12, padding: 14 }}>
+            <TunnelRow
+              name="Tailscale"
+              hint="Best when you already run a tailnet — the phone joins it and the daemon needs no open ports."
+              running={tunnelState('tailscale')}
+              busy={busy}
+              onToggle={() => void toggleTunnel('tailscale')}
+            />
+            <View style={{ height: 1, backgroundColor: palette.line }} />
+            <TunnelRow
+              name="Cloudflare"
+              hint="A public HTTPS URL, no account on your network required. Use when Tailscale is not available."
+              running={tunnelState('cloudflare')}
+              busy={busy}
+              onToggle={() => void toggleTunnel('cloudflare')}
+            />
+          </View>
+        </Card>
+      </Section>
+
+      {/* ── Other routes ────────────────────────────────────────────── */}
+      {unreachable.length > 0 ? (
+        <Section eyebrow="Not answering" title="Other routes" enterIndex={2}>
+          <Card>
+            {unreachable.map((endpoint, index) => (
+              <EndpointRow key={endpoint.base_url} endpoint={endpoint} index={index} />
+            ))}
+          </Card>
+        </Section>
+      ) : null}
+
+      {/* ── Paired devices ──────────────────────────────────────────── */}
+      <Section eyebrow="Security" title="Paired devices" enterIndex={3}>
+        {devices.length === 0 ? (
+          <Card>
+            <EmptyState
+              title="No paired devices"
+              body="Devices that pair with this daemon appear here. Revoke one to cut it off immediately."
+            />
+          </Card>
+        ) : (
+          <Card>
+            {devices.map((device, index) => (
+              <DeviceRow
+                key={device.id}
+                device={device}
+                index={index}
+                confirming={confirmRevoke === device.id}
+                busy={busy === `revoke-${device.id}`}
+                onRevoke={() => {
+                  void haptic('warn')
+                  setConfirmRevoke(device.id)
+                }}
+                onConfirmRevoke={() => void revokeDevice(device.id)}
+              />
+            ))}
+          </Card>
+        )}
+      </Section>
+    </ScreenScaffold>
+  )
+}
+
+function EndpointRow({
+  endpoint,
+  index,
+  primary,
+}: {
+  endpoint: TunnelEndpoint
+  index: number
+  primary?: boolean
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      {index > 0 ? <Divider inset={16} /> : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14 }}>
+        <Dot tone={endpoint.reachable ? 'ok' : 'muted'} />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Mono className="text-[12.5px] text-ink" numberOfLines={1}>
+            {endpoint.base_url}
+          </Mono>
+          <Text className="text-[11.5px] text-ink-3" numberOfLines={1}>
+            {endpoint.source}
+            {endpoint.via ? ` via ${endpoint.via}` : ''} · {endpoint.secure ? 'secure' : 'insecure'}
+          </Text>
+        </View>
+        {primary ? (
+          <Badge tone="ok" outline>
+            reachable
+          </Badge>
+        ) : null}
+        <CopyButton
+          value={endpoint.base_url}
+          label="Copy"
+          accessibilityLabel={`Copy ${endpoint.base_url}`}
+        />
+      </View>
+    </View>
+  )
+}
+
+function TunnelRow({
+  name,
+  hint,
+  running,
+  busy,
+  onToggle,
+}: {
+  name: string
+  hint: string
+  running: boolean
+  busy: string | null
+  onToggle: () => void
+}) {
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: running ? palette.okSoft : palette.raised,
+          }}
+        >
+          <Cloud size={16} color={running ? palette.ok : palette.ink3} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[15px] font-semibold text-ink">{name}</Text>
+          <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
+            {hint}
+          </Text>
+        </View>
+        <Badge tone={running ? 'ok' : 'muted'} outline>
+          {running ? 'up' : 'down'}
+        </Badge>
+      </View>
+      <Button
+        size="sm"
+        variant={running ? 'secondary' : 'primary'}
+        label={busy ? 'Working…' : running ? `Stop ${name}` : `Start ${name}`}
+        icon={<Power size={14} color={palette.ink2} />}
+        disabled={busy !== null}
+        onPress={onToggle}
+      />
+    </View>
+  )
+}
+
+function DeviceRow({
+  device,
+  index,
+  confirming,
+  busy,
+  onRevoke,
+  onConfirmRevoke,
+}: {
+  device: PairedDevice
+  index: number
+  confirming: boolean
+  busy: boolean
+  onRevoke: () => void
+  onConfirmRevoke: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <View style={rowEnterStyle(enter)}>
+      {index > 0 ? <Divider inset={60} /> : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+        <View
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: palette.accentSoft,
+          }}
+        >
+          <Smartphone size={16} color={palette.accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+            {device.name}
+          </Text>
+          <Mono className="mt-0.5 text-[11px] text-ink-3" numberOfLines={1}>
+            {device.fingerprint?.slice(0, 16) ?? device.id.slice(0, 16)}
+          </Mono>
+          {device.last_seen ? (
+            <Text className="mt-0.5 text-[11px] text-ink-4">
+              Last seen {new Date(device.last_seen).toLocaleDateString()}
+            </Text>
+          ) : null}
+        </View>
+        {confirming ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Confirm revoking ${device.name}`}
+            disabled={busy}
+            onPress={onConfirmRevoke}
+            style={({ pressed }) => ({
+              minHeight: 34,
+              justifyContent: 'center',
+              borderRadius: radius.sm,
+              borderWidth: 1,
+              borderColor: palette.dangerBorder,
+              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
+              paddingHorizontal: 11,
+            })}
+          >
+            <Text style={{ color: palette.danger, fontSize: 12, fontWeight: '700' }}>
+              {busy ? '…' : 'Revoke'}
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Revoke ${device.name}`}
+            onPress={onRevoke}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              minHeight: 34,
+              justifyContent: 'center',
+              borderRadius: radius.sm,
+              borderWidth: 1,
+              borderColor: palette.line,
+              backgroundColor: pressed ? palette.raised : 'transparent',
+              paddingHorizontal: 11,
+            })}
+          >
+            <Text style={{ color: palette.ink2, fontSize: 12, fontWeight: '600' }}>Revoke</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
   )
 }

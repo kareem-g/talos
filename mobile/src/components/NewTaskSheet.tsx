@@ -1,33 +1,48 @@
 /**
- * New task — the desktop's `NewSessionLayer`, as a native sheet.
+ * New task — the app's only verb, as a two-step sheet.
  *
- * Two steps, same as the desktop: pick the workspace, then pick the agent and
- * configure the run. Step 2 is where the configuration lives — model, thought
- * level and permission mode — because "start a chat in one tap" is not what the
- * desktop offers, and a phone that skips it can only ever start a default run.
+ * The desktop opens a three-step layer: provider → project → prompt. Two of
+ * those steps are the *same decision* seen twice ("which agent, in which
+ * folder"), and on a phone they are one scroll. So this is two steps:
  *
- * `model` and `thought` are accepted at creation and applied before the first
- * prompt; every other dimension is set over the socket once the session exists,
+ *   1. **Where** — the workspace. A vertical list of the folders you actually
+ *      use, most-used first, with the Inbox at the bottom, plus a way to type a
+ *      path the desktop has never seen. Nothing about the agent yet, because
+ *      the folder does not change which agents are available.
+ *   2. **What and how** — the agent, the first prompt, and the three settings
+ *      that matter at creation time (model, thought level, permissions).
+ *
+ * WHY THE SETTINGS ARE ON THIS SCREEN AND NOT AFTERWARDS
+ * ------------------------------------------------------
+ * A phone that skips configuration can only ever start a default run, and
+ * "default" is the one run you do not want: `permission_mode: ask` on a
+ * long task means you spend the run approving files one at a time from a
+ * device in your pocket. So the permission mode is right here, defaulted and
+ * pre-explained, rather than buried in the session's dock.
+ *
+ * `model` and `thought` are applied at creation (the daemon takes them with the
+ * create call); permission mode is set over the socket once the session exists,
  * which is exactly the order the desktop uses.
  */
 
 import * as React from 'react'
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { ChevronLeft, ChevronRight, Folder, Inbox, X } from 'lucide-react-native'
+import { Animated, Pressable, Text, TextInput, View } from 'react-native'
+import { Check, ChevronLeft, Folder, Inbox, Sparkles } from 'lucide-react-native'
 
-import { basename, cn } from '@/lib/format'
+import { basename } from '@/lib/format'
 import { useStore } from '@app/store'
 import type { Session } from '@/types/session'
-import { Button, Chip, Mono, SectionLabel } from '@app/components/ui'
-import { GlassSurface } from '@app/components/Glass'
-import { palette } from '@app/design/tokens'
+import { palette, radius, toneColor } from '@app/design/tokens'
+import { Sheet, PickerSheet } from '@app/components/Sheet'
+import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
+import { AgentAvatar, Button, Eyebrow, Mono, haptic, toast } from '@app/components/ui'
 
 /** The desktop's four permission modes, same ids and labels. */
 const PERMISSION_MODES = [
-  { value: 'ask', label: 'Ask before changes' },
-  { value: 'auto_edit', label: 'Edit automatically' },
-  { value: 'plan', label: 'Plan mode' },
-  { value: 'full', label: 'Full access' },
+  { value: 'ask', label: 'Ask before changes', hint: 'Pause for you before any file change.' },
+  { value: 'auto_edit', label: 'Edit automatically', hint: 'Apply edits; still asks for commands.' },
+  { value: 'plan', label: 'Plan mode', hint: 'Produce a plan first and wait for approval.' },
+  { value: 'full', label: 'Full access', hint: 'Run with fewer confirmations.' },
 ]
 
 /** Providers report models and reasoning levels in either shape. */
@@ -44,6 +59,8 @@ function choicesOf(value: unknown): Array<{ value: string; label: string }> {
     .filter((entry): entry is { value: string; label: string } => entry !== null)
 }
 
+type Step = 1 | 2
+
 export function NewTaskSheet({
   open,
   onClose,
@@ -55,7 +72,7 @@ export function NewTaskSheet({
   onClose: () => void
   onCreated: (session: Session) => void
   initialProject?: string | null
-  /** Pre-select an agent — set by the home screen's quick launch. */
+  /** Pre-selects an agent and jumps to step 2 — set by a quick launch. */
   initialAgent?: string
 }) {
   const agents = useStore((state) => state.agents)
@@ -63,17 +80,18 @@ export function NewTaskSheet({
   const createSession = useStore((state) => state.createSession)
   const setConfig = useStore((state) => state.setConfig)
 
-  const [step, setStep] = React.useState<1 | 2>(1)
+  const [step, setStep] = React.useState<Step>(1)
   const [project, setProject] = React.useState('')
   const [customPath, setCustomPath] = React.useState('')
   const [agentId, setAgentId] = React.useState<string | undefined>()
   const [prompt, setPrompt] = React.useState('')
   const [model, setModel] = React.useState<string | undefined>()
   const [thought, setThought] = React.useState<string | undefined>()
-  const [permission, setPermission] = React.useState<string>('ask')
+  const [permission, setPermission] = React.useState('ask')
   const [picker, setPicker] = React.useState<'model' | 'thought' | 'permission' | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [showCustom, setShowCustom] = React.useState(false)
 
   const ready = agents.filter((agent) => agent.available)
   const selected = ready.find((agent) => agent.id === agentId)
@@ -84,7 +102,10 @@ export function NewTaskSheet({
     for (const session of sessions) {
       if (session.project) counts.set(session.project, (counts.get(session.project) ?? 0) + 1)
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([path]) => path)
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([path, count]) => ({ path, count }))
   }, [sessions])
 
   // Reset when the sheet opens. Deliberately keyed on `open` alone: `recent`
@@ -94,23 +115,23 @@ export function NewTaskSheet({
   recentRef.current = recent
   React.useEffect(() => {
     if (!open) return
-    setStep(1)
+    setStep(initialAgent ? 2 : 1)
     setError(null)
     setPrompt('')
     setCustomPath('')
+    setShowCustom(false)
     setModel(undefined)
     setThought(undefined)
     setPermission('ask')
-    setProject(initialProject ?? recentRef.current[0] ?? '')
+    setProject(initialProject ?? recentRef.current[0]?.path ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialProject])
+  }, [open, initialProject, initialAgent])
 
   // Quick launch wins over a stale choice; otherwise default to the first ready
   // agent so step 2 is immediately usable.
   React.useEffect(() => {
     if (open && initialAgent) {
       setAgentId(initialAgent)
-      setStep(2)
       return
     }
     if (agentId || ready.length === 0) return
@@ -119,6 +140,8 @@ export function NewTaskSheet({
   }, [open, initialAgent, agentId, ready])
 
   const effectiveProject = customPath.trim() || project
+  const modelChoices = choicesOf(selected?.models)
+  const thoughtChoices = choicesOf(selected?.reasoningLevels)
 
   async function create() {
     if (!selected) return
@@ -141,300 +164,470 @@ export function NewTaskSheet({
       onCreated(session)
       onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not start the session')
+      setError(cause instanceof Error ? cause.message : 'Could not start that session')
     } finally {
       setBusy(false)
     }
   }
 
-  const modelChoices = choicesOf(selected?.models)
-  const thoughtChoices = choicesOf(selected?.reasoningLevels)
+  const canStart = Boolean(selected) && ready.length > 0
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <View className="flex-1 justify-end bg-black/65">
-        <View className="max-h-[88%] overflow-hidden rounded-t-2xl border-t border-line bg-canvas">
-          {/* Glass header: back/step, title, close */}
-          <GlassSurface radius={0} className="border-b border-line">
-            <View className="flex-row items-center gap-2 px-3 pt-14 pb-3">
-              {step === 2 ? (
-                <Pressable
-                  onPress={() => setStep(1)}
-                  accessibilityLabel="Back"
-                  className="size-9 items-center justify-center rounded-full active:bg-hover-2"
-                >
-                  <ChevronLeft size={18} color={palette.ink} />
-                </Pressable>
-              ) : (
-                <View className="size-9" />
-              )}
-              <View className="min-w-0 flex-1">
-                <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
-                  {step === 1 ? 'New task' : `Start in ${effectiveProject ? basename(effectiveProject) : 'Inbox'}`}
-                </Text>
-                <Mono className="text-[10px] uppercase tracking-wider">
-                  Step {step} of 2 · {step === 1 ? 'workspace' : 'agent & config'}
-                </Mono>
-              </View>
-              <Pressable
-                onPress={onClose}
-                accessibilityLabel="Close"
-                className="size-9 items-center justify-center rounded-full active:bg-hover-2"
-              >
-                <X size={17} color={palette.ink2} />
-              </Pressable>
-            </View>
-          </GlassSurface>
-
-          {step === 1 ? (
-            <ScrollView contentContainerClassName="gap-1 p-2 pb-6">
-              <SectionLabel>Recent workspaces</SectionLabel>
-              {recent.length === 0 ? (
-                <Text className="px-2.5 py-2 text-[12px] text-ink-3">
-                  No workspaces yet. Start in the Inbox, or type a path on the desktop.
-                </Text>
-              ) : (
-                recent.map((path) => (
-                  <Pressable
-                    key={path}
-                    onPress={() => {
-                      setProject(path)
-                      setCustomPath('')
-                    }}
-                    className={cn(
-                      'min-h-12 flex-row items-center gap-2.5 rounded-xl px-2.5',
-                      project === path && !customPath ? 'bg-accent-tint' : 'active:bg-hover-2',
-                    )}
-                  >
-                    <Folder size={15} color={palette.ink3} />
-                    <View className="min-w-0 flex-1">
-                      <Text className="text-[13px] text-ink" numberOfLines={1}>
-                        {basename(path)}
-                      </Text>
-                      <Mono className="text-[10.5px]" numberOfLines={1}>
-                        {path}
-                      </Mono>
-                    </View>
-                    {project === path && !customPath ? <ChevronRight size={15} color={palette.accent} /> : null}
-                  </Pressable>
-                ))
-              )}
-
-              <SectionLabel>Or no workspace</SectionLabel>
-              <Pressable
-                onPress={() => {
-                  setProject('')
-                  setCustomPath('')
-                }}
-                className={cn(
-                  'min-h-12 flex-row items-center gap-2.5 rounded-xl px-2.5',
-                  !effectiveProject ? 'bg-accent-tint' : 'active:bg-hover-2',
-                )}
-              >
-                <Inbox size={15} color={palette.ink3} />
-                <Text className="flex-1 text-[13px] text-ink">Inbox</Text>
-              </Pressable>
-
-              <SectionLabel>Other path on the desktop</SectionLabel>
-              <TextInput
-                value={customPath}
-                onChangeText={setCustomPath}
-                placeholder="/home/you/project"
-                placeholderTextColor={palette.ink3}
-                autoCapitalize="none"
-                autoCorrect={false}
-                className="min-h-11 rounded-xl border border-line bg-field px-3 text-[12.5px] text-ink"
-              />
-
-              <View className="px-2.5 pt-3">
-                <Button variant="primary" label="Next — pick an agent" onPress={() => setStep(2)} />
-              </View>
-            </ScrollView>
+    <>
+      <Sheet
+        open={open}
+        onClose={onClose}
+        title={step === 1 ? 'New task' : 'Start a task'}
+        eyebrow={`Step ${step} of 2 · ${step === 1 ? 'workspace' : 'agent & configuration'}`}
+        snapPoints={[0.62, 0.94]}
+        footer={
+          step === 1 ? (
+            <Button
+              variant="primary"
+              label="Next — pick an agent"
+              full
+              onPress={() => {
+                void haptic('light')
+                setStep(2)
+              }}
+            />
           ) : (
-            <ScrollView contentContainerClassName="gap-3 p-3 pb-6" keyboardShouldPersistTaps="handled">
-              <View>
-                <SectionLabel className="px-0">Agent</SectionLabel>
-                <View className="flex-row flex-wrap gap-1.5">
-                  {ready.map((agent) => {
-                    const active = agent.id === agentId
-                    return (
-                      <Pressable
-                        key={agent.id}
-                        onPress={() => {
-                          setAgentId(agent.id)
-                          setModel(undefined)
-                          setThought(undefined)
-                        }}
-                        className={cn(
-                          'min-h-11 flex-row items-center gap-2 rounded-xl border px-3',
-                          active ? 'border-accent bg-accent-tint' : 'border-line bg-surface',
-                        )}
-                      >
-                        <View className={cn('size-1.5 rounded-full', active ? 'bg-accent' : 'bg-green')} />
-                        <Text className={cn('text-[12.5px]', active ? 'text-ink' : 'text-ink-2')}>{agent.name}</Text>
-                      </Pressable>
-                    )
-                  })}
-                  {ready.length === 0 ? (
-                    <Text className="text-[12px] text-ink-3">
-                      No agent is ready on the desktop. Install a supported CLI there first.
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-
-              <View>
-                <SectionLabel className="px-0">First prompt</SectionLabel>
-                <TextInput
-                  value={prompt}
-                  onChangeText={setPrompt}
-                  placeholder="What should it do?"
-                  placeholderTextColor={palette.ink3}
-                  multiline
-                  className="min-h-[92px] rounded-xl border border-line bg-field px-3 py-2.5 text-[13px] leading-5 text-ink"
-                />
-              </View>
-
-              <View>
-                <SectionLabel className="px-0">Configuration</SectionLabel>
-                <View className="gap-1.5">
-                  <ConfigRow
-                    label="Model"
-                    value={model ?? 'Default'}
-                    disabled={modelChoices.length === 0}
-                    onPress={() => setPicker('model')}
-                  />
-                  <ConfigRow
-                    label="Thought level"
-                    value={thought ?? 'Default'}
-                    disabled={thoughtChoices.length === 0}
-                    onPress={() => setPicker('thought')}
-                  />
-                  <ConfigRow
-                    label="Permissions"
-                    value={PERMISSION_MODES.find((mode) => mode.value === permission)?.label ?? 'Ask'}
-                    onPress={() => setPicker('permission')}
-                  />
-                </View>
-              </View>
-
-              {error ? <Text className="text-[11.5px] leading-5 text-red">{error}</Text> : null}
-
+            <View style={{ gap: 8 }}>
+              {error ? (
+                <Text style={{ color: palette.danger, fontSize: 12.5, lineHeight: 17 }} numberOfLines={2}>
+                  {error}
+                </Text>
+              ) : null}
               <Button
                 variant="primary"
                 label={busy ? 'Starting…' : 'Start session'}
-                disabled={busy || !selected}
+                full
+                disabled={busy || !canStart}
                 onPress={() => void create()}
               />
-            </ScrollView>
-          )}
-        </View>
-      </View>
+            </View>
+          )
+        }
+      >
+        {step === 1 ? (
+          <View style={{ gap: 10 }}>
+            {recent.length === 0 ? (
+              <Text className="py-2 text-[13.5px] leading-[19px] text-ink-3">
+                No workspaces yet. Start in the Inbox, or type a path that exists on the desktop.
+              </Text>
+            ) : (
+              <View style={{ marginHorizontal: -16 }}>
+                {recent.map((entry, index) => (
+                  <WorkspaceChoice
+                    key={entry.path}
+                    name={basename(entry.path)}
+                    path={entry.path}
+                    count={entry.count}
+                    index={index}
+                    active={entry.path === project && !customPath.trim()}
+                    onPress={() => {
+                      void haptic('select')
+                      setProject(entry.path)
+                      setCustomPath('')
+                      setShowCustom(false)
+                    }}
+                  />
+                ))}
+              </View>
+            )}
 
-      <ChoiceOverlay
+            <View style={{ marginHorizontal: -16 }}>
+              <WorkspaceRow
+                name="Inbox"
+                path="No folder — runs in the daemon's working directory"
+                icon={<Inbox size={17} color={palette.ink3} />}
+                active={!effectiveProject}
+                onPress={() => {
+                  void haptic('select')
+                  setProject('')
+                  setCustomPath('')
+                  setShowCustom(false)
+                }}
+              />
+            </View>
+
+            {showCustom ? (
+              <View style={{ gap: 8, paddingTop: 4 }}>
+                <View style={{ height: 1, backgroundColor: palette.line }} />
+                <TextInput
+                  value={customPath}
+                  onChangeText={(value) => {
+                    setCustomPath(value)
+                    setProject('')
+                  }}
+                  placeholder="/home/you/project"
+                  placeholderTextColor={palette.ink4}
+                  accessibilityLabel="Project path on the desktop"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  className="min-h-12 rounded-md border border-line bg-field px-3.5 text-[14px] text-ink"
+                />
+                <Text className="text-[12px] leading-[16px] text-ink-3">
+                  The path is resolved on the desktop, not on this phone.
+                </Text>
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Enter a project path manually"
+                onPress={() => {
+                  void haptic('light')
+                  setShowCustom(true)
+                }}
+                style={({ pressed }) => ({
+                  minHeight: 46,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: radius.md,
+                  borderWidth: 1,
+                  borderStyle: 'dashed',
+                  borderColor: palette.line,
+                  backgroundColor: pressed ? palette.raised : 'transparent',
+                })}
+              >
+                <Text className="text-[13px] font-semibold text-ink-3">Use another path…</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <View style={{ gap: 16 }}>
+            {/* ── Agent ────────────────────────────────────────────────────
+                Cards, not chips: an agent is a decision with a name, a hue and
+                a readiness, and a 40pt pill cannot carry that. */}
+            <View style={{ gap: 8 }}>
+              <Eyebrow>Agent</Eyebrow>
+              {ready.length === 0 ? (
+                <View
+                  style={{
+                    borderRadius: radius.md,
+                    borderWidth: 1,
+                    borderColor: palette.line,
+                    backgroundColor: palette.well,
+                    padding: 14,
+                    gap: 10,
+                  }}
+                >
+                  <Text className="text-[13.5px] leading-[19px] text-ink-2">
+                    No agent is ready on the desktop. Install a supported CLI there, then re-scan
+                    from the Agents tab.
+                  </Text>
+                </View>
+              ) : (
+                ready.map((agent, index) => (
+                  <AgentChoice
+                    key={agent.id}
+                    agent={agent}
+                    index={index}
+                    active={agent.id === agentId}
+                    onPress={() => {
+                      void haptic('select')
+                      setAgentId(agent.id)
+                      setModel(undefined)
+                      setThought(undefined)
+                    }}
+                  />
+                ))
+              )}
+            </View>
+
+            {/* ── First prompt ───────────────────────────────────────────── */}
+            <View style={{ gap: 8 }}>
+              <Eyebrow>First prompt</Eyebrow>
+              <TextInput
+                value={prompt}
+                onChangeText={setPrompt}
+                placeholder="What should it do?"
+                placeholderTextColor={palette.ink4}
+                accessibilityLabel="First prompt for the agent"
+                multiline
+                className="min-h-[96px] rounded-md border border-line bg-field px-3.5 py-3 text-[14.5px] leading-[21px] text-ink"
+              />
+              <Text className="text-[12px] leading-[16px] text-ink-3">
+                Optional — you can send it from the session instead. If you leave this blank the
+                session opens empty and ready.
+              </Text>
+            </View>
+
+            {/* ── Configuration ─────────────────────────────────────────── */}
+            <View style={{ gap: 8 }}>
+              <Eyebrow>Configuration</Eyebrow>
+              <View style={{ gap: 6 }}>
+                <ConfigRow
+                  label="Model"
+                  value={model ?? 'Default'}
+                  disabled={modelChoices.length === 0}
+                  hint={modelChoices.length === 0 ? 'This agent has no model list' : undefined}
+                  onPress={() => setPicker('model')}
+                />
+                <ConfigRow
+                  label="Thought level"
+                  value={thought ?? 'Default'}
+                  disabled={thoughtChoices.length === 0}
+                  hint={thoughtChoices.length === 0 ? 'This agent reports none' : undefined}
+                  onPress={() => setPicker('thought')}
+                />
+                <ConfigRow
+                  label="Permissions"
+                  value={PERMISSION_MODES.find((mode) => mode.value === permission)?.label ?? 'Ask'}
+                  hint={PERMISSION_MODES.find((mode) => mode.value === permission)?.hint}
+                  tone="wait"
+                  onPress={() => setPicker('permission')}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+      </Sheet>
+
+      <PickerSheet
+        open={picker !== null}
+        onClose={() => setPicker(null)}
         title={picker === 'model' ? 'Model' : picker === 'thought' ? 'Thought level' : 'Permissions'}
-        choices={
+        subtitle={picker === 'permission' ? 'How much this run may do without stopping' : effectiveProject || 'Inbox'}
+        value={picker === 'model' ? model : picker === 'thought' ? thought : permission}
+        onSelect={(value) => {
+          if (picker === 'model') setModel(value)
+          else if (picker === 'thought') setThought(value)
+          else setPermission(value)
+        }}
+        options={
           picker === 'model'
             ? modelChoices
             : picker === 'thought'
               ? thoughtChoices
-              : PERMISSION_MODES
+              : PERMISSION_MODES.map((mode) => ({ value: mode.value, label: mode.label, hint: mode.hint }))
         }
-        selected={picker === 'model' ? model : picker === 'thought' ? thought : permission}
-        onClose={() => setPicker(null)}
-        onChoose={(value) => {
-          if (picker === 'model') setModel(value)
-          else if (picker === 'thought') setThought(value)
-          else setPermission(value)
-          setPicker(null)
-        }}
+        searchable={picker === 'permission' ? false : true}
+        allowsCustomValue={picker === 'model' || picker === 'thought'}
+        customPlaceholder="Any model id this agent accepts"
       />
-    </Modal>
+    </>
+  )
+}
+
+/**
+ * One workspace option.
+ *
+ * Its own component so the entry animation's `Animated.Value` is created by a
+ * hook on a stable component rather than inside a `.map` callback — a hook in a
+ * loop is a hook whose order depends on the list length, which is exactly the
+ * class of bug that only shows up after a session is archived.
+ */
+function WorkspaceChoice({
+  name,
+  path,
+  count,
+  index,
+  active,
+  onPress,
+}: {
+  name: string
+  path: string
+  count: number
+  index: number
+  active: boolean
+  onPress: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <Animated.View style={rowEnterStyle(enter)}>
+      <WorkspaceRow
+        name={name}
+        path={path}
+        detail={`${count} ${count === 1 ? 'session' : 'sessions'}`}
+        active={active}
+        onPress={onPress}
+      />
+    </Animated.View>
+  )
+}
+
+function AgentChoice({
+  agent,
+  index,
+  active,
+  onPress,
+}: {
+  agent: { id: string; name: string; protocol?: string }
+  index: number
+  active: boolean
+  onPress: () => void
+}) {
+  const enter = useEnter(staggerDelay(index), false)
+  return (
+    <Animated.View style={rowEnterStyle(enter)}>
+      <Pressable
+        accessibilityRole="radio"
+        accessibilityLabel={agent.name}
+        accessibilityState={{ selected: active }}
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: active ? palette.accent : palette.line,
+          backgroundColor: active
+            ? palette.accentSoft
+            : pressed
+              ? palette.raised
+              : palette.well,
+          paddingHorizontal: 13,
+          paddingVertical: 12,
+          minHeight: 58,
+        })}
+      >
+        <AgentAvatar agent={agent.id} size={34} name={agent.name} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+            {agent.name}
+          </Text>
+          <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+            {agent.id}
+            {agent.protocol ? ` · ${agent.protocol}` : ''}
+          </Mono>
+        </View>
+        {active ? (
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: palette.accent,
+            }}
+          >
+            <Check size={13} color={palette.accentInk} strokeWidth={3} />
+          </View>
+        ) : null}
+      </Pressable>
+    </Animated.View>
+  )
+}
+
+function WorkspaceRow({
+  name,
+  path,
+  detail,
+  icon,
+  active,
+  onPress,
+}: {
+  name: string
+  path: string
+  detail?: string
+  icon?: React.ReactNode
+  active: boolean
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={name}
+      accessibilityHint={path}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        minHeight: 58,
+        backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : 'transparent',
+      })}
+    >
+      {icon ?? (
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: active ? palette.accentSoft : palette.raised,
+          }}
+        >
+          <Folder size={16} color={active ? palette.accent : palette.ink3} />
+        </View>
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          className="text-[15px]"
+          style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
+          numberOfLines={1}
+        >
+          {name}
+        </Text>
+        <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+          {detail ?? path}
+        </Mono>
+      </View>
+      {active ? <Check size={18} color={palette.accent} strokeWidth={2.6} /> : null}
+    </Pressable>
   )
 }
 
 function ConfigRow({
   label,
   value,
+  hint,
   onPress,
   disabled,
+  tone,
 }: {
   label: string
   value: string
+  hint?: string
   onPress: () => void
   disabled?: boolean
+  tone?: 'wait'
 }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      accessibilityHint={hint}
       onPress={onPress}
       disabled={disabled}
-      className={cn(
-        'min-h-12 flex-row items-center gap-2 rounded-xl border border-line bg-surface px-3',
-        disabled && 'opacity-45',
-      )}
+      style={({ pressed }) => ({
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.line,
+        backgroundColor: pressed ? palette.raised : palette.well,
+        paddingHorizontal: 13,
+        paddingVertical: 11,
+        minHeight: 52,
+        opacity: disabled ? 0.4 : 1,
+      })}
     >
-      <Text className="text-[12.5px] text-ink-2">{label}</Text>
-      <View className="flex-1" />
-      <Text className="max-w-[55%] text-[12.5px] text-ink" numberOfLines={1}>
-        {value}
-      </Text>
-      <ChevronRight size={14} color={palette.ink3} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text className="text-[13.5px] text-ink-2">{label}</Text>
+        <View style={{ flex: 1 }} />
+        {tone === 'wait' && value !== 'Ask before changes' ? (
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: toneColor.wait }} />
+        ) : null}
+        <Text
+          className="max-w-[55%] text-[14px] font-semibold text-ink"
+          numberOfLines={1}
+        >
+          {value}
+        </Text>
+      </View>
+      {hint ? (
+        <Text className="mt-1 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
+          {hint}
+        </Text>
+      ) : null}
     </Pressable>
   )
 }
 
-/**
- * Choice picker, rendered inside the sheet rather than as a second Modal — iOS
- * does not present a modal on top of a modal, so this is an overlay in the same
- * window.
- */
-function ChoiceOverlay({
-  title,
-  choices,
-  selected,
-  onClose,
-  onChoose,
-}: {
-  title: string
-  choices: Array<{ value: string; label: string }>
-  selected?: string
-  onClose: () => void
-  onChoose: (value: string) => void
-}) {
-  if (choices.length === 0) return null
-  return (
-    <View className="absolute inset-0 z-30 items-center justify-center bg-black/70 p-6">
-      <Pressable className="absolute inset-0" onPress={onClose} accessibilityLabel="Close" />
-      <View className="w-full max-w-sm overflow-hidden rounded-2xl border border-line bg-surface">
-        <GlassSurface radius={0} className="border-b border-line">
-          <View className="flex-row items-center justify-between px-3.5 py-3">
-            <Text className="text-[13px] font-medium text-ink">{title}</Text>
-            <View className="flex-row items-center gap-2">
-              <Chip label={`${choices.length}`} />
-              <Pressable onPress={onClose} accessibilityLabel="Close" className="size-7 items-center justify-center rounded-full active:bg-hover-2">
-                <X size={15} color={palette.ink2} />
-              </Pressable>
-            </View>
-          </View>
-        </GlassSurface>
-        <ScrollView contentContainerClassName="p-1.5" style={{ maxHeight: 340 }}>
-          {choices.map((choice) => {
-            const active = choice.value === selected
-            return (
-              <Pressable
-                key={choice.value}
-                onPress={() => onChoose(choice.value)}
-                className={cn('min-h-11 flex-row items-center gap-2 rounded-control px-2.5', active && 'bg-hover')}
-              >
-                <Text className="min-w-0 flex-1 text-[12.5px] text-ink" numberOfLines={1}>
-                  {choice.label}
-                </Text>
-                {active ? <View className="size-1.5 rounded-full bg-green" /> : null}
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      </View>
-    </View>
-  )
-}
+export { ChevronLeft, Sparkles, toast }

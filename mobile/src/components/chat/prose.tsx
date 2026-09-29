@@ -1,28 +1,41 @@
 /**
  * Prose — assistant text with the desktop's inline markdown treatment.
  *
- * Ports the same three layers the desktop uses, so a message reads identically:
- *   `splitFences`  → fenced blocks become Code cards, the rest stays prose;
+ * The same three layers the desktop uses, so a message reads identically:
+ *   `splitFences`  → fenced blocks become code cards, the rest stays prose;
  *   `parseBlocks`  → headings, bullets and numbered lists become real rows;
- *   `inlineMarkdown` / `inlineChips` → `code`, **bold** and @/$#/ tokens get
- *   their own styling inside a paragraph.
+ *   `inlineMarkdown` → `code`, **bold** and @/$#/ tokens get their own
+ *   styling inside a paragraph.
  *
- * Native differences, all forced by the platform:
+ * Mobile differences, all forced by the platform:
  *   - `numberOfLines` replaces `truncate`/`line-clamp-*`;
- *   - the streaming caret is an animated bar, not a `::after` pseudo-element;
+ *   - the streaming caret is an animated view, not a `::after` pseudo-element;
  *   - text wraps natively, so `whitespace-pre-wrap`/`break-words` are the
  *     default rather than classes.
+ *
+ * BODY SIZE
+ * ---------
+ * The desktop sets agent prose at 14px. Mobile sets it at 15px/21px. That is
+ * the single largest typographic decision in the app: an agent's answer is the
+ * one piece of text on this screen that is genuinely long-form, and it is
+ * read at arm's length in whatever light the room has. 14px is fine at 60cm
+ * and tiring at 30.
  */
 
 import * as React from 'react'
-import { Animated, Text, View, type TextStyle } from 'react-native'
+import { Animated, ScrollView, Text, View, type TextStyle } from 'react-native'
 
 import { cn } from '@/lib/format'
-import { CopyButton, Mono } from '@app/components/ui'
+import { agentHue, palette, radius } from '@app/design/tokens'
+import {
+  CopyButton,
+  Mono,
+  Well,
+} from '@app/components/ui'
 
-/* ── Fences ──────────────────────────────────────────────────────────────── */
+/* ── Fences ──────────────────────────────────────────────────────────────────── */
 
-interface Segment {
+export interface Segment {
   code: boolean
   lang?: string
   body: string
@@ -47,9 +60,9 @@ export function splitFences(text: string): Segment[] {
   return segments
 }
 
-/* ── Block parsing ───────────────────────────────────────────────────────── */
+/* ── Block parsing ──────────────────────────────────────────────────────────── */
 
-type Block =
+export type Block =
   | { kind: 'heading'; level: number; text: string }
   | { kind: 'bullets'; items: string[] }
   | { kind: 'ordered'; items: string[] }
@@ -102,12 +115,12 @@ export function parseBlocks(text: string): Block[] {
   return blocks
 }
 
-/* ── Inline styling ──────────────────────────────────────────────────────── */
+/* ── Inline styling ─────────────────────────────────────────────────────────── */
 
-const INLINE_RE = /(`[^`]+`|\*\*[^*]+\*\*)/
+const INLINE_RE = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/
 const TOKEN_RE = /([@$#/])(\S+)/
 
-/** `code`, **bold**, and @/$#/ tokens inside one line of prose. */
+/** `code`, **bold**, links, and @/$#/ tokens inside one line of prose. */
 function InlineText({
   text,
   className,
@@ -125,7 +138,15 @@ function InlineText({
     if (!piece) return
     if (piece.startsWith('`') && piece.endsWith('`') && piece.length > 2) {
       nodes.push(
-        <Text key={`c${pieceIndex}`} className="font-mono text-[11.5px] text-ink-2">
+        <Text
+          key={`c${pieceIndex}`}
+          style={{
+            fontFamily: 'Menlo',
+            fontSize: 13.5,
+            color: palette.codeInk,
+            backgroundColor: palette.field,
+          }}
+        >
           {' '}
           {piece.slice(1, -1)}{' '}
         </Text>,
@@ -134,8 +155,22 @@ function InlineText({
     }
     if (piece.startsWith('**') && piece.endsWith('**') && piece.length > 4) {
       nodes.push(
-        <Text key={`b${pieceIndex}`} className="font-medium text-ink">
+        <Text key={`b${pieceIndex}`} style={{ fontWeight: '600', color: palette.ink }}>
           {piece.slice(2, -2)}
+        </Text>,
+      )
+      return
+    }
+    const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(piece)
+    if (link) {
+      // A link is the one inline thing that must be distinguishable without
+      // colour too, so it is underlined as well as tinted.
+      nodes.push(
+        <Text
+          key={`l${pieceIndex}`}
+          style={{ color: palette.accent, textDecorationLine: 'underline' }}
+        >
+          {link[1]}
         </Text>,
       )
       return
@@ -154,17 +189,21 @@ function InlineText({
       }
       const sigil = match[1]
       const label = match[2].replace(/\(.*\)$/, '').replace(/\/$/, '')
-      const tone =
+      // `@file` green, `$skill` violet, `#conversation` blue, `/command` amber.
+      // Violet is the one hue here that is not a status colour, and it is
+      // deliberate: a skill reference names a *kind of thing*, not a state, and
+      // borrowing a status hue would make it read as "this is wrong".
+      const color =
         sigil === '@'
-          ? 'bg-green-tint text-green'
+          ? palette.ok
           : sigil === '$'
-            ? 'bg-accent-tint text-accent'
+            ? agentHue.opencode
             : sigil === '#'
-              ? 'bg-accent-tint text-accent'
-              : 'bg-orange-tint text-orange'
+              ? palette.info
+              : palette.wait
       nodes.push(
-        <Text key={`k${pieceIndex}-${chunkIndex}`} className={cn('text-[12px] font-medium', tone)}>
-          <Text className="opacity-60">{sigil}</Text>
+        <Text key={`k${pieceIndex}-${chunkIndex}`} style={{ color, fontWeight: '600' }}>
+          <Text style={{ opacity: 0.55 }}>{sigil}</Text>
           {label}
         </Text>,
       )
@@ -177,21 +216,54 @@ function InlineText({
   )
 }
 
-/* ── Code ────────────────────────────────────────────────────────────────── */
+/* ── Code ──────────────────────────────────────────────────────────────────────
+ * A code block on a phone is a *scrolling* object, not a paragraph. It is
+ * horizontally scrollable and never wraps: a wrapped diff is unreadable, and
+ * a code block that is not scrollable silently truncates the right-hand side,
+ * which for a shell command is the part that matters. */
 
 export function Code({ lang, body }: { lang?: string; body: string }) {
   return (
-    <View className="my-0.5 overflow-hidden rounded-lg border border-line bg-inset">
-      <View className="flex-row items-center justify-between border-b border-line bg-surface px-2.5 py-1">
-        <Mono className="text-[10px] uppercase tracking-wider">{lang ?? 'code'}</Mono>
+    <Well className="overflow-hidden border border-line" style={{ borderRadius: radius.md }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderBottomWidth: 1,
+          borderBottomColor: palette.line,
+          backgroundColor: palette.well,
+          paddingHorizontal: 12,
+          paddingVertical: 7,
+        }}
+      >
+        <Mono className="text-[10px] uppercase text-ink-3" style={{ letterSpacing: 0.8 }}>
+          {lang ?? 'code'}
+        </Mono>
         <CopyButton value={body} />
       </View>
-      <Mono className="px-3 py-2.5 text-[11.5px] leading-5 text-ink-2">{body}</Mono>
-    </View>
+      <Scrollable>
+        <Mono className="px-3 py-2.5 text-[12.5px] leading-[19px] text-code-ink">{body}</Mono>
+      </Scrollable>
+    </Well>
   )
 }
 
-/* ── Streaming caret ─────────────────────────────────────────────────────── */
+/** A horizontal scroller for anything that must not wrap. */
+function Scrollable({ children, maxHeight }: { children: React.ReactNode; maxHeight?: number }) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={maxHeight ? { maxHeight } : undefined}
+      contentContainerStyle={{ minWidth: '100%' }}
+    >
+      {children}
+    </ScrollView>
+  )
+}
+
+/* ── Streaming caret ────────────────────────────────────────────────────────── */
 
 /** The blinking accent bar the desktop shows on the last streaming paragraph. */
 export function Caret() {
@@ -199,23 +271,42 @@ export function Caret() {
   React.useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0, duration: 550, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 550, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 520, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 520, useNativeDriver: true }),
       ]),
     )
     loop.start()
     return () => loop.stop()
   }, [opacity])
-  return <Animated.View style={{ opacity }} className="ml-0.5 h-4 w-[3px] self-end rounded-full bg-accent" />
+  return (
+    <Animated.View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        opacity,
+        marginLeft: 3,
+        height: 17,
+        width: 3,
+        alignSelf: 'flex-end',
+        borderRadius: 2,
+        backgroundColor: palette.accent,
+      }}
+    />
+  )
 }
 
-/* ── Prose ───────────────────────────────────────────────────────────────── */
+/* ── Prose ──────────────────────────────────────────────────────────────────────
+ * Block spacing is 10pt between blocks and 2pt between list items. A dense
+ * document is not what this is: it is a stream of answers, and the spacing has
+ * to make the *shape* of one answer readable at a glance before you read it. */
 
-const HEADING_SIZE: Record<number, string> = {
-  1: 'text-[16px]',
-  2: 'text-[14.5px]',
-  3: 'text-[13.5px]',
-  4: 'text-[13.5px]',
+const HEADING_STYLE: Record<number, TextStyle> = {
+  1: { fontSize: 19, fontWeight: '700', letterSpacing: -0.3, color: palette.ink },
+  2: { fontSize: 17, fontWeight: '700', letterSpacing: -0.25, color: palette.ink },
+  3: { fontSize: 15.5, fontWeight: '600', letterSpacing: -0.15, color: palette.ink },
+  // h4 is the "fine print heading" level: same weight, one step quieter, which
+  // is the only thing distinguishing it from body text.
+  4: { fontSize: 15, fontWeight: '600', color: palette.ink2 },
 }
 
 export function Prose({
@@ -230,7 +321,7 @@ export function Prose({
   const segments = React.useMemo(() => splitFences(text), [text])
 
   return (
-    <View className="flex flex-col gap-2.5">
+    <View style={{ gap: 10 }}>
       {segments.map((segment, segmentIndex) => {
         const last = segmentIndex === segments.length - 1
         if (segment.code) {
@@ -238,7 +329,7 @@ export function Prose({
         }
         const blocks = parseBlocks(segment.body)
         return (
-          <View key={segmentIndex} className="flex flex-col gap-2">
+          <View key={segmentIndex} style={{ gap: 10 }}>
             {blocks.map((block, blockIndex) => {
               const isLastBlock = streaming && last && blockIndex === blocks.length - 1
               if (block.kind === 'heading') {
@@ -246,22 +337,22 @@ export function Prose({
                   <InlineText
                     key={blockIndex}
                     text={block.text}
-                    className={cn('font-semibold text-ink', HEADING_SIZE[block.level] ?? 'text-[13.5px]')}
+                    style={HEADING_STYLE[block.level] ?? HEADING_STYLE[3]}
                     chips={chips}
                   />
                 )
               }
               if (block.kind === 'bullets' || block.kind === 'ordered') {
                 return (
-                  <View key={blockIndex} className="flex flex-col gap-1.5">
+                  <View key={blockIndex} style={{ gap: 6 }}>
                     {block.items.map((item, itemIndex) => (
-                      <View key={itemIndex} className="flex-row gap-2">
-                        <Mono className="mt-0.5 w-4 shrink-0 text-[11.5px] text-ink-3">
+                      <View key={itemIndex} style={{ flexDirection: 'row', gap: 9 }}>
+                        <Mono className="w-4 text-[13px] leading-[21px] text-ink-3">
                           {block.kind === 'bullets' ? '•' : `${itemIndex + 1}.`}
                         </Mono>
                         <InlineText
                           text={item}
-                          className="flex-1 text-[14px] leading-6 text-ink"
+                          style={{ flex: 1, fontSize: 15, lineHeight: 21, color: palette.ink }}
                           chips={chips}
                         />
                       </View>
@@ -270,10 +361,10 @@ export function Prose({
                 )
               }
               return (
-                <View key={blockIndex} className="flex-row">
+                <View key={blockIndex} style={{ flexDirection: 'row' }}>
                   <InlineText
                     text={block.text}
-                    className="flex-1 text-[14px] leading-6 text-ink"
+                    style={{ flex: 1, fontSize: 15, lineHeight: 22, color: palette.ink }}
                     chips={chips}
                   />
                   {isLastBlock ? <Caret /> : null}
@@ -289,5 +380,7 @@ export function Prose({
 
 /** User-message text: prose with inline token chips and `code`/bold styling. */
 export function Chips({ text }: { text: string }) {
-  return <InlineText text={text} className="text-[14px] leading-6 text-ink" chips />
+  return <InlineText text={text} style={{ fontSize: 15, lineHeight: 22, color: palette.ink }} chips />
 }
+
+export { cn }
