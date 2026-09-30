@@ -100,7 +100,7 @@ export function Sheet({
   footer,
   snapPoints,
   defaultSnap,
-  maxHeightRatio = 0.88,
+  maxHeightRatio = 0.92,
   hideGrabber,
   contentClassName,
   onSnapChange,
@@ -341,12 +341,15 @@ export function Sheet({
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
-              onLayout={(event) => {
+              onContentSizeChange={(_width, height) => {
                 // Only a content-sized sheet needs to measure itself; a detent
-                // sheet already fills the screen.
+                // sheet already fills the screen. The *content* size is the
+                // number that matters: measuring the ScrollView's own frame
+                // was circular — the frame is derived from the sheet height,
+                // which is derived from this measurement — and content-sized
+                // sheets collapsed to a header and a sliver of body.
                 if (detents) return
-                const next = event.nativeEvent.layout.height
-                setContentHeight((current) => (Math.abs(current - next) < 1 ? current : next))
+                setContentHeight((current) => (Math.abs(current - height) < 1 ? current : height))
               }}
             >
               {children}
@@ -728,14 +731,18 @@ export function PickerSheet({
       onClose={onClose}
       title={title}
       eyebrow={subtitle}
-      snapPoints={visible.length > 7 ? [0.55, 0.88] : undefined}
+      // Long lists get a detent pair but open at the TALL one: a picker that
+      // opens half-height hides the very options the user opened it for, and
+      // dragging up is an extra gesture nobody asked for. Drag down to shrink.
+      snapPoints={visible.length > 7 ? [0.6, 0.92] : undefined}
+      defaultSnap={visible.length > 7 ? 1 : undefined}
       footer={footer}
     >
       {wantsSearch ? (
         <SearchField value={query} onChangeText={setQuery} placeholder={`Filter ${options.length} options`} />
       ) : null}
 
-      <View style={{ marginHorizontal: -16, marginTop: 4 }}>
+      <View style={{ gap: 6 }}>
         {visible.length === 0 ? (
           <Text className="px-4 py-6 text-center text-[13.5px] text-ink-3">{emptyLabel}</Text>
         ) : (
@@ -752,11 +759,40 @@ export function PickerSheet({
                   onSelect(option.value)
                   onClose()
                 }}
-                className="min-h-13 flex-row items-center gap-3 px-4 py-2.5 active:bg-raised"
+                style={({ pressed }) => ({
+                  minHeight: 52,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  borderRadius: radius.md,
+                  borderWidth: 1,
+                  paddingHorizontal: 13,
+                  paddingVertical: 10,
+                  borderColor: active ? palette.accentBorder : palette.line,
+                  backgroundColor: active
+                    ? palette.accentSoft
+                    : pressed
+                      ? palette.raised
+                      : palette.surface,
+                })}
               >
+                {/* Radio ring: the selection state is readable without the
+                    colour, and the ring reads as "one of these" at a glance. */}
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 9,
+                    borderWidth: active ? 5.5 : 1.5,
+                    borderColor: active ? palette.accent : palette.lineStrong,
+                    backgroundColor: active ? palette.accentInk : 'transparent',
+                  }}
+                />
                 <View className="min-w-0 flex-1">
                   <Text
-                    className="text-[15px]"
+                    className="text-[15px] leading-[20px]"
                     style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '400' }}
                     numberOfLines={1}
                   >
@@ -878,6 +914,7 @@ export function FormSheet({
       title={title}
       eyebrow={eyebrow}
       snapPoints={[0.6, 0.92]}
+      defaultSnap={1}
       footer={
         <View style={{ gap: 8 }}>
           {error ? (

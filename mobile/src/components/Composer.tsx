@@ -397,54 +397,12 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
           {/* ── The dock: the session's live configuration ─────────────
               Collapsible, because eight agents' worth of dimensions is a
               wall, and the user who needs none of them should not pay for
-              it. The context ring is always visible even when collapsed —
-              it is the one dimension you want to know without asking. */}
+              it. The toggle lives in the strip below the field; the options
+              open ABOVE the text so the caret never jumps. */}
           <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              borderBottomWidth: 1,
-              borderBottomColor: palette.line,
-              paddingLeft: 14,
-              paddingRight: 9,
-              paddingVertical: 6,
-            }}
+            {...(dock.measured ? { onLayout: dock.onLayout } : {})}
+            style={[dock.style, { borderBottomWidth: dockOpen ? 1 : 0, borderBottomColor: palette.line }]}
           >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={dockOpen ? 'Hide session controls' : 'Show session controls'}
-              accessibilityState={{ expanded: dockOpen }}
-              onPress={() => setDockOpen((value) => !value)}
-              hitSlop={10}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 5,
-                minHeight: 28,
-                paddingRight: 4,
-              }}
-            >
-              <Brain size={13} color={dockOpen ? palette.accent : palette.ink3} />
-              <Text
-                className="text-[11px] font-semibold uppercase"
-                style={{ color: dockOpen ? palette.accent : palette.ink3, letterSpacing: 0.9 }}
-              >
-                Run
-              </Text>
-              <ChevronDown
-                size={12}
-                color={palette.ink4}
-                style={{ transform: [{ rotate: dockOpen ? '180deg' : '0deg' }] }}
-              />
-            </Pressable>
-
-            {!dockOpen ? <View style={{ flex: 1 }} /> : null}
-
-            <ContextRing sessionId={sessionId} working={busy} />
-          </View>
-
-          <View {...(dock.measured ? { onLayout: dock.onLayout } : {})} style={dock.style}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -464,13 +422,17 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
             multiline
             editable={!disabled}
             accessibilityLabel="Message the agent"
-            className="max-h-[150px] min-h-[48px] bg-transparent px-4 py-3 text-[15.5px] leading-[22px] text-ink"
+            className="max-h-[132px] min-h-[44px] bg-transparent px-4 pb-1 pt-3 text-[15.5px] leading-[22px] text-ink"
           />
 
-          {/* ── Control row ────────────────────────────────────────────
-              Attach on the left, send on the right, Stop beside send while
-              working. The send control never changes position. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 2 }}>
+          {/* ── Control strip ───────────────────────────────────────────
+              Pinned to the bottom edge of the card, ChatGPT-style: attach
+              and the Run toggle on the left, the context ring, then Stop
+              beside Send on the right. Because the strip sits *below* the
+              growing field instead of after it, the send control stays on
+              screen no matter how tall the text gets — the field grows
+              upward into the space above it, capped at ~132px. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 10, paddingBottom: 10, paddingTop: 4 }}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Attach images"
@@ -494,6 +456,38 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               )}
             </Pressable>
 
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={dockOpen ? 'Hide session controls' : 'Show session controls'}
+              accessibilityState={{ expanded: dockOpen }}
+              onPress={() => setDockOpen((value) => !value)}
+              hitSlop={10}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                minHeight: 36,
+                paddingRight: 4,
+              }}
+            >
+              <Brain size={14} color={dockOpen ? palette.accent : palette.ink3} />
+              <Text
+                className="text-[11px] font-semibold uppercase"
+                style={{ color: dockOpen ? palette.accent : palette.ink3, letterSpacing: 0.9 }}
+              >
+                Run
+              </Text>
+              <ChevronDown
+                size={12}
+                color={palette.ink4}
+                style={{ transform: [{ rotate: dockOpen ? '180deg' : '0deg' }] }}
+              />
+            </Pressable>
+
+            <View style={{ flex: 1 }} />
+
+            <ContextRing sessionId={sessionId} working={busy} />
+
             {busy ? (
               <Pressable
                 accessibilityRole="button"
@@ -505,6 +499,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 style={({ pressed }) => ({
                   width: 36,
                   height: 36,
+                  marginLeft: 4,
                   borderRadius: radius.pill,
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -514,8 +509,6 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 <Square size={13} color={palette.danger} fill={palette.danger} />
               </Pressable>
             ) : null}
-
-            <View style={{ flex: 1 }} />
 
             <Pressable
               accessibilityRole="button"
@@ -531,6 +524,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               style={({ pressed }) => ({
                 minWidth: busy ? 46 : 36,
                 height: 36,
+                marginLeft: 4,
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',

@@ -250,7 +250,11 @@ export function RootNavigator() {
     >
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen name="Session" component={SessionScreen} />
-      <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_bottom' }} />
+      {/* The desktop's right rail: the panel slides in from the RIGHT, like a
+          pushed screen, because that is the direction "this session's tools
+          live over there" on a phone. slide_from_bottom read as a modal, and a
+          tool surface is not a modal. */}
+      <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="AgentDetail" component={AgentDetailScreen} />
       <Stack.Screen name="Usage" component={UsageScreen} />
       <Stack.Screen name="Browsers" component={BrowsersScreen} />
