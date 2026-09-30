@@ -1,16 +1,14 @@
 /**
- * Remote access — tunnels and paired devices.
+ * Remote access — kiln tunnels and paired devices.
  *
- * The desktop's tunnels panel and its paired-devices list are two surfaces in
- * two places. From a phone they are one screen, because the question behind
- * both is the same: **can this phone reach the desktop, and who else can?**
- *
- * Reachability is the headline. A list of endpoints with a green dot each is
- * four rows to read to answer a yes/no question, so the reachable one is
- * promoted to a card and the unreachable ones are listed beneath it as
- * fallbacks. The paired-devices list matters for a different reason — it is
- * how you cut off a phone you lost — so it gets its own section and its own
- * two-step revoke.
+ * EMBER CLAY
+ * ----------
+ * One question — **can this phone reach the kiln, and who else can?** — so
+ * tunnels and devices share a screen. Reachability is the lit headline slab
+ * (the reachable route promoted, ember-edged); tunnels are firebox controls
+ * with start/stop; unreachable routes list beneath as cold fallbacks; paired
+ * devices get their own security section with two-step revoke. Same
+ * endpoints/start/stop/revoke handlers.
  */
 
 import * as React from 'react'
@@ -163,7 +161,7 @@ export function RemoteScreen() {
       ) : null}
 
       {/* ── Reachability ────────────────────────────────────────────── */}
-      <Section eyebrow="Reachability" title={reachable.length > 0 ? 'Reachable now' : 'Not reachable off-LAN'} enterIndex={0}>
+      <Section eyebrow="Kiln heat" title={reachable.length > 0 ? 'Reachable now' : 'Not reachable off-LAN'} enterIndex={0}>
         {reachable.length === 0 ? (
           <Card>
             <EmptyState

@@ -2,37 +2,36 @@
  * The design tokens — AgentDeck's single source of truth for colour, type,
  * spacing, radius and motion on mobile.
  *
- * THE PALETTE — "midnight studio"
- * -------------------------------
- * The v3 visual language. Where the previous palette was a warm terminal room,
- * this one is a calm, near-black studio: a cool graphite ramp with almost no
- * chroma, one electric-blue accent used only for what is actionable, and four
- * status hues that are never decoration. It is modelled on the chat surfaces
- * people already trust (ChatGPT, Linear, Zed): content reads as luminous type
- * floating on true darkness, chrome disappears until it is needed, and every
- * container is a soft-cornered sheet with a hairline rather than a border-heavy
- * box. The rules that make it work:
+ * THE PALETTE — "ember clay"
+ * --------------------------
+ * A warm, earthen dark language built for the phone: baked-clay surfaces with
+ * a golden-hour cast, luminous parchment ink, and one ember-tangerine accent
+ * reserved for what is actionable. Where the previous language was a cool
+ * graphite studio with an electric-blue accent, this one reads like a workshop
+ * at dusk — chrome sinks into warm shadow, cards are sun-baked slabs with a
+ * hairline of light, and attention arrives as heat rather than neon.
  *
- *   1. **The surfaces are a monotonic ramp, and elevation is a lift.**
+ * The rules that make it work:
+ *
+ *   1. **The surfaces are a monotonic warm ramp, and elevation is a lift.**
  *
  *        well  <  canvas  <  chrome  <  surface  <  raised  <  hover
  *
  *      `well` is a hole (code, terminal, search fields). `canvas` is the page.
  *      `surface` is a card. `raised` is a card on a card or a filled control.
- *      `hover` is only ever a press state. Each step is ~5% lightness — enough
- *      to separate on a cheap panel, small enough to never band on OLED.
+ *      `hover` is only ever a press state. Each step lifts lightness enough to
+ *      separate on a cheap panel without banding on OLED.
  *
- *   2. **Ink is a four-step ramp with a fixed job per step.** `ink` is body
- *      copy, `ink2` is secondary prose and labels, `ink3` is metadata, `ink4`
- *      is disabled-only. `ink`/`ink2` clear WCAG AA on every surface; `ink3`
- *      clears the large-text bar; `__tests__/contrast.test.ts` computes the
- *      ratios rather than trusting this comment.
+ *   2. **Ink is a four-step parchment ramp with a fixed job per step.** `ink`
+ *      is body copy, `ink2` is secondary prose and labels, `ink3` is metadata,
+ *      `ink4` is disabled-only. `ink`/`ink2` clear WCAG AA on every surface;
+ *      `ink3` clears the large-text bar; `__tests__/contrast.test.ts` computes
+ *      the ratios rather than trusting this comment.
  *
- *   3. **Exactly ONE accent.** An electric periwinkle-blue, the desktop's hue
- *      pushed brighter so it glows against near-black. Reserved for: the
- *      primary action, the active tab, selection, links, a live mark, progress.
- *      Never decoration — with four status hues in the app, every decorative
- *      colour competes with a meaning.
+ *   3. **Exactly ONE accent.** A burnt ember-tangerine that glows against the
+ *      clay. Reserved for: the primary action, the active tab, selection,
+ *      links, a live mark, progress. Never decoration — with four status hues
+ *      in the app, every decorative colour competes with a meaning.
  *
  *   4. **Status is the only place colour carries meaning, and never the only
  *      channel.** `ok` = alive, `wait` = needs a human, `danger` = failed,
@@ -44,86 +43,84 @@
 
 export const palette = {
   /** A hole in the page — code blocks, terminal output, search wells. */
-  well: '#08080A',
+  well: '#0B0A08',
   /** The page itself. Everything else is a lift off this. */
-  canvas: '#0C0C0E',
+  canvas: '#141210',
   /** Navigation chrome and headers: tab bar, app bar, sticky sub-bars. */
-  chrome: '#121215',
+  chrome: '#1C1915',
   /** A resting card, list row, or sheet. */
-  surface: '#17171B',
+  surface: '#242019',
   /** A card on a card: nested grouping, filled buttons, selected rows. */
-  raised: '#1F1F25',
+  raised: '#302A21',
   /** Pressed / hovered state for a `raised` surface. */
-  hover: '#2A2A32',
+  hover: '#3D362B',
 
-  /** A selected row: `raised` cooled toward the accent. */
-  selected: '#191C2A',
+  /** A selected row: `raised` warmed toward the ember. */
+  selected: '#2B2418',
   /** The tappable body of a control sitting on `surface`. */
-  field: '#0E0E11',
+  field: '#171410',
 
   /** Scrim behind a sheet, dialog or drawer. */
-  scrim: 'rgba(4,4,6,0.66)',
+  scrim: 'rgba(8,6,4,0.66)',
   /** A lighter scrim for stacked overlays (a picker over a sheet). */
-  scrimSoft: 'rgba(4,4,6,0.5)',
+  scrimSoft: 'rgba(8,6,4,0.5)',
 
   /* ── Ink ────────────────────────────────────────────────────────────────
-   * Measured against `canvas` (#0C0C0E): `ink` 17.6:1, `ink2` 8.8:1,
-   * `ink3` 4.6:1, `ink4` 2.2:1. See `__tests__/contrast.test.ts`. */
-  ink: '#F3F3F5',
-  ink2: '#ABAEB8',
-  ink3: '#7A7A86',
+   * Parchment on clay. Measured against `canvas` (#141210); see
+   * `__tests__/contrast.test.ts`. */
+  ink: '#F6F1E7',
+  ink2: '#C9C0AE',
+  ink3: '#A39A86',
   /** Disabled / placeholder only. Never for information. */
-  ink4: '#4E4E58',
+  ink4: '#6E675B',
 
   /* ── Accent ──────────────────────────────────────────────────────────────
-   * The desktop's blue, pushed brighter for near-black surfaces. */
-  accent: '#7A9BFF',
-  accentHover: '#8FABFF',
-  accentPressed: '#6689F2',
-  /** Text drawn ON `accent`. Near-black with the accent's cast. */
-  accentInk: '#0A1024',
+   * Burnt ember-tangerine. Glows against clay without going neon. */
+  accent: '#FF8A3D',
+  accentHover: '#FF9E5C',
+  accentPressed: '#E06E1F',
+  /** Text drawn ON `accent`. Scorched umber. */
+  accentInk: '#241000',
   /** A wash of accent — selected rows, quiet emphasis. */
-  accentSoft: 'rgba(122,155,255,0.13)',
-  accentSoftStrong: 'rgba(122,155,255,0.22)',
-  accentBorder: 'rgba(122,155,255,0.38)',
+  accentSoft: 'rgba(255,138,61,0.14)',
+  accentSoftStrong: 'rgba(255,138,61,0.24)',
+  accentBorder: 'rgba(255,138,61,0.42)',
 
   /* ── Status ──────────────────────────────────────────────────────────────
    * The only colours that carry meaning. Each pairs with a distinct dot size
    * and a word, so colour is never the sole channel. */
-  ok: '#52C58B',
-  okSoft: 'rgba(82,197,139,0.13)',
-  okBorder: 'rgba(82,197,139,0.36)',
+  ok: '#57C98D',
+  okSoft: 'rgba(87,201,141,0.13)',
+  okBorder: 'rgba(87,201,141,0.36)',
 
   /** "Needs you" — a human is blocking the run. The app's most important state. */
-  wait: '#E8A03E',
-  waitSoft: 'rgba(232,160,62,0.13)',
-  waitBorder: 'rgba(232,160,62,0.38)',
+  wait: '#EAB308',
+  waitSoft: 'rgba(234,179,8,0.14)',
+  waitBorder: 'rgba(234,179,8,0.40)',
 
-  danger: '#F45B66',
-  dangerSoft: 'rgba(244,91,102,0.13)',
-  dangerBorder: 'rgba(244,91,102,0.38)',
+  danger: '#F26D6D',
+  dangerSoft: 'rgba(242,109,109,0.13)',
+  dangerBorder: 'rgba(242,109,109,0.40)',
 
   /** Informational — queued, paused, or otherwise held but not broken. */
-  info: '#74B6E8',
-  infoSoft: 'rgba(116,182,232,0.13)',
-  infoBorder: 'rgba(116,182,232,0.36)',
+  info: '#6CB8E8',
+  infoSoft: 'rgba(108,184,232,0.13)',
+  infoBorder: 'rgba(108,184,232,0.36)',
 
   /* ── Hairlines ────────────────────────────────────────────────────────────
-   * Alpha white, never a grey: a grey hairline picks up the colour of whatever
-   * is behind it and looks dirty on a tinted surface, whereas an alpha-white
-   * one always reads as "a thin bit of light on the edge". */
-  line: 'rgba(255,255,255,0.065)',
-  lineStrong: 'rgba(255,255,255,0.13)',
+   * Warm alpha light, never a grey: reads as a thin bit of dusk on the edge. */
+  line: 'rgba(255,240,220,0.08)',
+  lineStrong: 'rgba(255,240,220,0.16)',
 
   /* ── Code wells ───────────────────────────────────────────────────────────
    * The densest text in the app, on its own darker well. */
-  code: '#0A0A0D',
-  codeInk: '#DCE0EA',
+  code: '#0F0E0C',
+  codeInk: '#E8E0D2',
   /** The gutter / line-number column inside a diff. */
-  codeDim: '#54555E',
+  codeDim: '#7A7468',
 
   /** The shimmer band that runs across a skeleton while it loads. */
-  shimmer: 'rgba(255,255,255,0.05)',
+  shimmer: 'rgba(255,240,220,0.06)',
 
   /**
    * The camera viewfinder behind the pairing scanner.
@@ -137,9 +134,9 @@ export const palette = {
 
   /**
    * Ink for a badge drawn on a *saturated* fill (danger count, accent pill).
-   * Near-white, tuned for dark text-on-fill legibility at small sizes.
+   * Warm paper on ember.
    */
-  badgeInk: '#F5F7FC',
+  badgeInk: '#FFF8EC',
 } as const
 
 /* ── Diff ──────────────────────────────────────────────────────────────────────
@@ -156,8 +153,8 @@ export const palette = {
  * has no status equivalent: they are the row backgrounds behind a +/- line, and
  * they exist purely so the gutter reads as belonging to its line. */
 
-export const diffAddSoft = 'rgba(82,197,139,0.10)'
-export const diffDelSoft = 'rgba(244,91,102,0.10)'
+export const diffAddSoft = 'rgba(87,201,141,0.10)'
+export const diffDelSoft = 'rgba(242,109,109,0.10)'
 
 /* ── Elevation ────────────────────────────────────────────────────────────────
  * The app has exactly one shadow, and overlays get it. A shadow on a content
@@ -262,21 +259,20 @@ export const toneClass = {
 } as const
 
 /* ── Radii ───────────────────────────────────────────────────────────────────
- * Six steps, each with a job. The v3 language is soft: containers read as
- * sheets of glass on the page, so cards and controls are one step rounder
- * than the previous vocabulary. */
+ * Six steps, each with a job. The ember language is hewn, not glassy:
+ * slabs and ingots with a tight edge, pills only where a thumb lands. */
 
 export const radius = {
   /** Inline code, tiny tags, 1px-ish affordances. */
-  xs: 7,
+  xs: 6,
   /** Badges, chips, small controls. */
-  sm: 11,
+  sm: 10,
   /** Buttons, inputs, list rows. The workhorse. */
-  md: 15,
+  md: 14,
   /** Cards and panels. */
-  lg: 20,
+  lg: 18,
   /** Sheets, dialogs, the tab bar's floating elements. */
-  xl: 28,
+  xl: 26,
   /** Full pill — segmented controls, FABs, chips. */
   pill: 999,
 } as const
@@ -378,21 +374,21 @@ export const DISMISS_VELOCITY = 900
 /* ── Agent identity ────────────────────────────────────────────────────────────
  * A separate, deliberately narrow hue set. These identify WHICH agent is
  * running, not what STATE it is in — so they are allowed to be colourful where
- * the status palette is not, and they never appear on a status control. The
- * six-slot cycle is the desktop's, so a session looks identical in both. */
+ * the status palette is not, and they never appear on a status control. Warm
+ * kiln hues, tuned to sit on clay without going neon. */
 
 export const agentHue = {
-  claude: '#6396CC',
-  codex: '#A78BFA',
-  opencode: '#5FBF8F',
-  grok: '#E07A5F',
-  gemini: '#7FA8D8',
-  copilot: '#D96A8A',
-  kimi: '#C084FC',
+  claude: '#E8A06A',
+  codex: '#C9A0DC',
+  opencode: '#6ED3A7',
+  grok: '#F08A4B',
+  gemini: '#7AB8E6',
+  copilot: '#E06A8A',
+  kimi: '#D8B45C',
 } as const
 
 /** The hashed cycle for agents the daemon reports that we do not know by name. */
-const AGENT_CYCLE = ['#6396CC', '#A78BFA', '#5FBF8F', '#E07A5F', '#D96A8A', '#E8B45C']
+const AGENT_CYCLE = ['#E8A06A', '#C9A0DC', '#6ED3A7', '#F08A4B', '#E06A8A', '#D8B45C']
 
 /**
  * A stable hue for an agent id, so unknown agents still look owned.

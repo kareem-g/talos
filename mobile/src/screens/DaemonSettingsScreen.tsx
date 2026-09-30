@@ -1,32 +1,13 @@
 /**
- * Daemon settings — read and edit the desktop daemon's own configuration.
+ * Daemon settings — read and stoke the kiln's own configuration.
  *
- * The previous version rendered one text field per top-level key, which is a
- * JSON editor with the labels taken off. Three things are wrong with that on a
- * phone:
- *
- *   1. **The value is inferred from the current one.** A key that is `true`
- *      gets a switch; one that is `123` gets a numeric field with a numeric
- *      keyboard; one that is a nested object gets a multi-line field. The
- *      daemon's config is untyped, so the *existing* value is the only type
- *      information there is — using it is the difference between editing a
- *      setting and editing a string that happens to contain `true`.
- *   2. **Edits are typed back on save, not on keystroke.** A user who types
- *      `007` into a port field means `7`. The previous code ran
- *      `/^\d+$/` over the text on save, which gets that right, but it also
- *      turned a string value of `"7"` into the number `7` — a silent type
- *      change the daemon may or may not tolerate. This remembers the original
- *      type and converts back to it.
- *   3. **Only edited keys are sent.** The previous code sent the whole object.
- *      Between the load and the save the daemon's config may have changed (the
- *      desktop is running), and sending a stale copy back would clobber it.
- *
- * Each key is its own soft-cornered card: the key name in mono up top, the
- * value in a well chip below (a switch row for booleans, a numeric field for
- * numbers, a multi-line mono field for JSON). A key that has been edited is
- * lifted onto the accent — a tinted card, a `modified — was …` line, and an
- * undo button that reverts just that one key, so a bad edit is one tap rather
- * than a reload.
+ * EMBER CLAY
+ * ----------
+ * Each key is its own clay tablet: key in mono up top, value in a well chip
+ * below (switch for booleans, numeric field for numbers, mono well for JSON).
+ * An edited key lifts onto the ember — tinted tablet, `modified — was …`
+ * line, one-tap undo. Only edited keys are sent, so nothing the desktop
+ * changed mid-edit is clobbered. Same load/save/coerce handlers.
  */
 
 import * as React from 'react'
@@ -244,7 +225,7 @@ export function DaemonSettingsScreen() {
           />
         </Card>
       ) : (
-        <Section eyebrow="Configuration" title={`${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`} enterIndex={0}>
+      <Section eyebrow="Kiln configuration" title={`${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`} enterIndex={0}>
           <View className="gap-3">
             {Object.keys(settings).length > 10 ? (
               <SearchField

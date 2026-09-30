@@ -1,36 +1,14 @@
 /**
- * Overlays — sheets, dialogs, action menus, pickers, confirmations.
+ * Overlays — kiln sheets, dialogs, action menus, pickers, confirmations.
  *
- * WHY THIS FILE IS REBUILT RATHER THAN TUNED
- * -------------------------------------------
- * The previous `Sheet` was a `Modal` with `animationType="none"` and a single
- * `Animated.timing` on `translateY`. It looked like a menu sliding up; it did
- * not feel like an object being picked up. Concretely, it could not be
- * dragged, it had no detents, its dismiss animation was the same speed as its
- * present animation, and it re-measured its own height on every keyboard event.
- *
- * This is a real sheet:
- *   - a grabber you can actually drag, with the content following the finger
- *     1:1 and a rubber-band at the top;
- *   - snap points, so a tall sheet can start at a peek height and be pulled up;
- *   - asymmetric timing: it arrives fast and leaves faster, because a dismissal
- *     the user committed to should not make them wait;
- *   - velocity-projected dismissal — a fast flick dismisses even if the finger
- *     barely moved, which is how every native sheet behaves;
- *   - keyboard-aware layout, so a picker with a search field is usable with the
- *     keyboard up rather than hidden behind it.
- *
- * WHY A BOTTOM SHEET RATHER THAN A CENTRED MODAL
- * -----------------------------------------------
- * On a phone, a sheet that rises from the bottom is reachable with a thumb and
- * says "this is a temporary layer over what you were doing". A centred dialog
- * says "this is modal and blocking". That is the right distinction for almost
- * everything here: the user is mid-task and wants to peek at a menu without
- * losing the transcript behind it. `Dialog` is reserved for the case where the
- * answer is genuinely binary and proceeding wrongly destroys something.
- *
- * One implementation, so a screen cannot get the gesture, the animation, the
- * safe area, or the hardware-back handling wrong.
+ * EMBER CLAY — how panes open.
+ * -----------------------------
+ * Bottom sheets rise like kiln shelves (spring up, dismiss down with
+ * velocity-projected flick); pushed workbenches slide from the right (the
+ * tools live over there); reference lookups rise from the bottom. Every sheet
+ * carries the kiln grammar: warm scrim, ember grabber, ember tick beside its
+ * eyebrow, 26pt hewn top corners. One implementation, so no screen gets the
+ * gesture, animation, safe area, or back handling wrong.
  */
 
 import * as React from 'react'
@@ -283,16 +261,19 @@ export function Sheet({
               style,
             ]}
           >
-            {/* The grabber is the primary dismissal affordance — the thing a
-                thumb reaches for first. It is a real target, not decoration. */}
+            {/* Ember edge: the shelf is lit. */}
+            <View style={{ height: 3, backgroundColor: palette.accent, opacity: 0.9 }} />
+            {/* The grabber is the primary dismissal affordance — ember, so the
+                thumb finds it first. */}
             {hideGrabber ? null : (
               <View {...pan.panHandlers} style={{ height: 26, alignItems: 'center', justifyContent: 'center' }}>
                 <View
                   style={{
-                    width: 42,
-                    height: 4.5,
+                    width: 48,
+                    height: 5,
                     borderRadius: 3,
-                    backgroundColor: palette.ink4,
+                    backgroundColor: palette.accent,
+                    opacity: 0.85,
                   }}
                 />
               </View>
@@ -303,6 +284,7 @@ export function Sheet({
                 {...pan.panHandlers}
                 className="flex-row items-center gap-3 border-b border-line px-4 pb-3 pt-1"
               >
+                <View style={{ width: 3, height: 18, borderRadius: 2, backgroundColor: palette.accent }} />
                 <View className="min-w-0 flex-1">
                   {eyebrow ? <Eyebrow className="mb-1">{eyebrow}</Eyebrow> : null}
                   <Text

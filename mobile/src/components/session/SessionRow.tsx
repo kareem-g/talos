@@ -1,10 +1,11 @@
 /**
  * Session presentation — the rows and cards a session list is made of.
  *
- * These are shared by the Deck, the Activity log, the session switcher and the
- * panel's project picker, so a session looks the same wherever it appears.
- * That is not tidiness for its own sake: a user learning "amber stripe on the
- * left means it is waiting on me" has to only learn it once.
+ * EMBER CLAY — kiln rows and slabs.
+ *
+ * Shared by the Deck, the Activity log, the session switcher and the panel's
+ * project picker, so a session looks the same wherever it appears. A user
+ * learning "ember edge on top means it burns for you" learns it once.
  *
  * THE ROW
  * -------
@@ -13,17 +14,12 @@
  * ▎           agent · workspace · 4m ago
  * ```
  *
- * A soft rounded row — the press state rounds with it — floating on its
- * surface, one meta line of 12px metadata under a 15.5px title, the status
- * pill on the right. The stripe on the left is the load-bearing part. A phone
- * list is scanned in peripheral vision while scrolling, and a coloured dot
- * next to a name is too small a target for that; a full-height 3pt stripe at
- * the very edge of the row is read at a glance from arm's length, and it is
- * the same idea as the desktop's triage card's vertical rule.
- *
- * The stripe is never the only signal — the status pill repeats the state in
- * words on the same row — so the list is still readable with any form of
- * colour vision.
+ * A hewn slab — press state rounds with it — floating on its surface, one
+ * meta line under a 15.5px title, the status pill on the right. The heat edge
+ * on the left is the load-bearing part: a full-height 4pt kiln edge at the
+ * very rim, readable at a glance while scrolling, like the desktop triage
+ * card's vertical rule. It never stands alone — the pill repeats the state in
+ * words on the same row.
  *
  * SWIPE
  * -----
@@ -307,15 +303,15 @@ export function SessionRow({
             onOpen()
           }}
           onLongPress={onMore}
-          className="min-h-16 flex-row items-center overflow-hidden rounded-md active:bg-raised"
+          className="min-h-16 flex-row items-center overflow-hidden rounded-lg active:bg-raised"
         >
-          {/* The stripe: state, readable at a glance while scrolling. Clipped
-              to the row's radius so it reads as part of the rounded sheet. */}
+          {/* The heat edge: state, readable at a glance while scrolling.
+              Clipped to the row's radius so it reads as part of the slab. */}
           <View
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
             style={{
-              width: 3,
+              width: 4,
               alignSelf: 'stretch',
               backgroundColor: human ? toneColor[tone] : 'transparent',
             }}
@@ -402,9 +398,11 @@ export function AttentionCard({
           void haptic('light')
           onOpen()
         }}
-        className="rounded-md active:opacity-85"
+        className="rounded-lg active:opacity-85"
       >
-        <Card tone={tone} className="gap-3 p-4">
+        <Card tone={tone} className="gap-3 overflow-hidden p-4">
+          {/* Ember edge: heat when it burns for you. */}
+          <View style={{ marginHorizontal: -16, marginTop: -16, height: 3, backgroundColor: toneColor[tone] }} />
           <View className="flex-row items-start gap-3">
             <View className="min-w-0 flex-1 gap-0.5">
               <Text

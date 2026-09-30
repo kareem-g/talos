@@ -1,23 +1,23 @@
 /**
  * The tab bar.
  *
+ * EMBER CLAY — the kiln shelf.
+ *
  * The four things you do with this app are *check what needs you*, *see what
  * the agents are*, *look back at what happened*, and *change how it is
  * configured*. Those are the four tabs, and they are the tabs forever — not
  * because four is a magic number, but because anything else is a page you open
  * *from* one of them, not a place you *are*.
  *
- * WHY THE FAB IS IN THE MIDDLE
- * ----------------------------
- * Starting a task is the app's only verb. It is the one action that is
- * available from every tab, that the user performs more often than any other,
- * and that has no natural home on any particular page. A centre action is the
- * pattern for exactly that, and it puts the button under the thumb on both
- * hands rather than in a corner. The tab row is 2 | 2 around it so the
- * composition is symmetrical instead of weighted to one side.
+ * WHY THE EMBER IS IN THE MIDDLE
+ * -------------------------------
+ * Starting a task is the app's only verb. A centre action puts it under the
+ * thumb on both hands rather than in a corner. The tab row is 2 | 2 around it
+ * so the composition stays symmetrical. The ember ingot sits proud of the
+ * shelf and grows on press — a primary control findable without reading.
  *
- * The whole bar is translucent with a real blur, because it floats over content
- * — a bar that only looks like chrome is chrome that wastes 64pt of screen.
+ * The whole shelf is translucent warm chrome with a real blur, because it
+ * floats over content.
  */
 
 import * as React from 'react'
@@ -190,8 +190,8 @@ export function TabBar({ state, navigation, onNewTask }: TabBarProps) {
         backgroundColor: 'transparent',
       }}
     >
-      {/* Translucent chrome: a real blur under a wash of `chrome`, so content
-          reads through the bar without tinting the glyphs above it. */}
+      {/* Translucent kiln chrome: a real blur under a wash of warm chrome, so
+          content reads through the shelf without tinting the glyphs. */}
       <BlurView intensity={52} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
       <View
         style={{
@@ -200,7 +200,7 @@ export function TabBar({ state, navigation, onNewTask }: TabBarProps) {
           right: 0,
           top: 0,
           bottom: 0,
-          backgroundColor: 'rgba(12,12,14,0.86)',
+          backgroundColor: 'rgba(20,18,16,0.86)',
           borderBottomWidth: 1,
           borderBottomColor: palette.line,
         }}
@@ -305,11 +305,10 @@ function ComposeButton() {
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: palette.accent,
-          // A hairline ring of the bar's own colour separates the button from
-          // the blur behind it, replacing the old 3pt border: the v3 language
-          // separates planes with light, not with heavy outlines.
+          // A hairline of kiln light separates the ingot from the blur behind
+          // it: planes separate with light, not heavy outlines.
           borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.22)',
+          borderColor: palette.accentBorder,
           shadowColor: palette.accent,
           shadowOpacity: 0.5,
           shadowRadius: 16,

@@ -1,34 +1,25 @@
 /**
  * Session panel — the desktop's right rail, as a full screen.
  *
- * WHY NOT A SHEET
- * ---------------
- * The rail holds a plan, a Git diff, a file tree, a browser mirror and a
- * terminal. A bottom sheet caps at 88% of the screen and has to share that with
- * a header and a grabber; at phone width, a diff with line-number gutters in a
- * 55%-height sheet has ~180pt of usable height and is unreadable. Every one of
- * those views is *content*, and content deserves the whole screen.
+ * EMBER CLAY REDESIGN — "the workbench"
+ * -------------------------------------
+ * A phone-native cousin of the desktop RightRail, not a copy. The desktop is
+ * a browser-style Agent Workspace: a tab strip with an open-tab picker, a slim
+ * toolbar (workspace path + refresh + widen), and content where open tabs stay
+ * mounted so browser URL and scroll survive switching. This screen keeps that
+ * skeleton but benches it for one thumb:
  *
- * So this is a pushed screen with its own app bar, its own horizontal tab
- * strip, and its own scrolling body — the same structure as the rail, with the
- * width the rail had.
+ *   - **Kiln tab strip.** Browser-style tabs with an ember dot on the live
+ *     one, scrolling rather than wrapping, `+` opening the picker of the
+ *     rest. Long-press still closes — tools you cannot put away are clutter.
+ *   - **Slim workbench bar.** Workspace leaf + open-tab count + session state,
+ *     like the desktop's slim toolbar minus the widen control (a phone fills
+ *     whatever width it gets).
+ *   - **Full-screen content.** A plan, diff, file tree, browser mirror and
+ *     terminal do not fit in a sheet; content deserves the whole screen.
  *
- * THE TABS
- * --------
- * The rail's tab set is a registry on the desktop, with the four that matter
- * open by default and a picker for the rest. That maps to a phone exactly: a
- * scrolling strip of rounded-pill chips, and a `+` that opens a picker of the
- * rest. Opening a fifth tab is one tap and the strip scrolls to it; there is no
- * drawer, no overflow menu nested three deep, and no way to lose a tab you
- * opened. Long-press still closes — the strip is a tool rail, and tools you
- * cannot put away are clutter.
- *
- * WHICH FOUR
- * ----------
- * Plan, Agents, Goal and Git are the rail's own default set and they are the
- * right default for a phone too: they are the answers to "what is it about to
- * do", "what is it running", "why is it running" and "what has it changed".
- * Everything else is a thing you go and look at deliberately.
+ * Default tabs (Plan, Agents, Goal, Git) are the desktop's own defaults: what
+ * it is about to do, what it is running, why, and what it changed.
  */
 
 import * as React from 'react'
@@ -146,18 +137,18 @@ export function SessionPanelScreen() {
         subtitle={railSession.project ?? 'Inbox'}
         left={<BackButton onPress={() => navigation.goBack()} label="Back to the session" />}
         right={
-          <View style={{ paddingRight: 6 }}>
-            <Eyebrow>Tools</Eyebrow>
+          <View style={{ paddingRight: 8, alignItems: 'flex-end', gap: 1 }}>
+            <Eyebrow>Workbench</Eyebrow>
+            <Text className="text-[10.5px] leading-[13px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+              {open.length} open
+            </Text>
           </View>
         }
       />
 
-      {/* ── Tab strip ─────────────────────────────────────────────────────
-          A horizontally scrolling rail of rounded-pill chips on the chrome,
-          with the live tab lifted (raised fill, hairline, an accent dot) and
-          the `+` at the end that opens the picker. Scrolling rather than
-          wrapping: a wrapped strip becomes two rows of buttons and pushes the
-          content down, which is the opposite of what a tool panel is for. */}
+      {/* ── Kiln tab strip ────────────────────────────────────────────────
+          Browser-style tabs with an ember dot on the live one, scrolling
+          rather than wrapping, `+` opening the picker. Long-press closes. */}
       <View className="border-b border-line bg-chrome">
         <View className="flex-row items-center">
           <ScrollView
@@ -181,23 +172,21 @@ export function SessionPanelScreen() {
                   }}
                   onLongPress={() => closeTab(id)}
                   className={cn(
-                    'mr-1.5 h-9 flex-row items-center gap-2 rounded-pill border px-3.5',
+                    'mr-1.5 h-9 flex-row items-center gap-2 rounded-md border px-3.5',
                     isActive
-                      ? 'border-line-strong bg-raised'
+                      ? 'border-accent-border bg-accent-soft'
                       : 'border-transparent active:bg-raised/60',
                   )}
                 >
-                  {isActive ? (
-                    <View
-                      className="size-1.5 rounded-full"
-                      style={{ backgroundColor: palette.accent }}
-                    />
-                  ) : null}
+                  <View
+                    className="size-1.5 rounded-full"
+                    style={{ backgroundColor: isActive ? palette.accent : palette.ink4 }}
+                  />
                   <Text
                     style={{
                       fontSize: 13,
                       lineHeight: 16,
-                      fontWeight: isActive ? '600' : '500',
+                      fontWeight: isActive ? '700' : '500',
                       color: isActive ? palette.ink : palette.ink3,
                     }}
                   >
@@ -217,10 +206,26 @@ export function SessionPanelScreen() {
               setPickerOpen(true)
             }}
             hitSlop={8}
-            className="ml-0.5 mr-2.5 size-9 items-center justify-center rounded-pill border border-line active:bg-raised"
+            className="ml-0.5 mr-2.5 size-9 items-center justify-center rounded-md border border-line-strong bg-raised active:bg-hover"
           >
-            <Plus size={17} color={palette.ink2} />
+            <Plus size={17} color={palette.accent} />
           </Pressable>
+        </View>
+
+        {/* ── Slim workbench bar ──────────────────────────────────────────
+            The desktop's slim toolbar, minus widen: workspace leaf + live tab
+            hint + session state. It names the ground the tools operate on. */}
+        <View className="flex-row items-center gap-2 border-t border-line px-4 py-1.5">
+          <Mono className="min-w-0 flex-1 text-[11px] text-ink-3" numberOfLines={1}>
+            {railSession.project?.split('/').filter(Boolean).pop() ?? 'inbox'}
+          </Mono>
+          <Text className="shrink-0 text-[10.5px] uppercase text-ink-3" style={{ letterSpacing: 0.8 }}>
+            {TABS.find((entry) => entry.id === active)?.group ?? ''}
+          </Text>
+          <View
+            className="size-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: session ? palette.ok : palette.ink4 }}
+          />
         </View>
       </View>
 
@@ -311,10 +316,10 @@ function useConversationFor(sessionId: string, _revision: number): Conversation 
 }
 
 /* ── Panel chrome ───────────────────────────────────────────────────────────────
- * Every panel opens the same way: a mono eyebrow and a count. It is the single
- * most recognisable piece of the desktop's visual language, and reproducing it
- * on a phone is what makes a rail tab feel like the same object as a rail tab
- * on the desktop rather than a different screen. */
+ * Every workbench pane opens the same way: a mono eyebrow, an ember tick, and
+ * a hairline. It is the kiln's version of the desktop's panel header — the
+ * tick says "this tool is lit" the way the desktop's rule says "this tab is
+ * open". */
 
 export function PanelHeader({
   eyebrow,
@@ -336,7 +341,10 @@ export function PanelHeader({
         borderBottomColor: palette.line,
       }}
     >
-      <Eyebrow>{eyebrow}</Eyebrow>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1, minWidth: 0 }}>
+        <View style={{ width: 3, height: 14, borderRadius: 2, backgroundColor: palette.accent }} />
+        <Eyebrow>{eyebrow}</Eyebrow>
+      </View>
       {right}
     </View>
   )

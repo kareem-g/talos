@@ -1,34 +1,11 @@
 /**
- * Chat cards — the full-width blocks in an assistant turn.
+ * Chat cards — the full-width kiln blocks in an assistant turn.
  *
- * Ports of the desktop's `Plan`, `Approval` (which also renders
- * AskUserQuestion cards), `ErrorCard`, `TurnSummary` and `UsageMeter`.
- *
- * THE APPROVAL CARD IS THE MOST IMPORTANT COMPONENT IN THE APP
- * -----------------------------------------------------------
- * It is where a turn is unblocked, and the situation it appears in is the
- * reason someone is holding a phone at all: they are not at the desk, the
- * agent is asleep, and they need to decide something in one tap. So:
- *
- *   - **It says what will happen, in the agent's words.** Not "Approve /
- *     Deny" — the option's own description, verbatim, because the label is
- *     what the agent chose and paraphrasing it is how the wrong thing gets
- *     approved.
- *   - **Single-select is one tap.** Selecting an `allow`-or-`deny` option
- *     responds immediately. Requiring a second "Respond" press on a phone is
- *     a confirm dialog nobody reads.
- *   - **Multi-select and free-text still need a confirm**, because there the
- *     answer is genuinely composed rather than chosen.
- *   - **The context band is above everything.** The command, path or URL the
- *     request is about is the thing you check before deciding, so it is the
- *     first thing rendered, in monospace, at full width.
- *   - **A resolved card collapses to one line** so the decision stays
- *     visible in the transcript history instead of scrolling away.
- *
- * V3: the approval is the one LOUD element in the transcript — a soft tone
- * fill with a tone border, a "Needs you" pill in the header band, generous
- * option rows whose radio ring fills with the accent, and a full-width
- * primary Confirm. Everything else on the screen defers to it.
+ * EMBER CLAY: Plan is a clay tablet with an ember progress edge; Approval
+ * stays the one LOUD element (heat fill + tone border + "Needs you" pill +
+ * ember radio rings + full-width ember Confirm) because it is where a pocket
+ * run unblocks. Resolved approvals collapse to one row so the decision stays
+ * in history. Same respond/describeApproval handlers.
  */
 
 import * as React from 'react'

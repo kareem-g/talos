@@ -1,40 +1,34 @@
 /**
  * Navigation.
  *
- * THE STRUCTURE, AND WHY
- * ----------------------
+ * EMBER CLAY — the kiln map.
+ * --------------------------
  * ```
- * Pairing ──▶ Main (tabs)  ─┬─ Deck        what needs you, what is live
- *                           ├─ Agents      what can run here
- *                           ├─ Activity    what happened, and what it cost
- *                           └─ Settings    how this is configured
+ * Pairing ──▶ Main (tabs)  ─┬─ Deck        what burns, what is warming
+ *                           ├─ Agents      what can fire here
+ *                           ├─ Activity    what fired, and what it cost
+ *                           └─ Settings    how this is stoked
  *
  * (root stack, pushed over the tabs)
- *   Session          one conversation
- *   SessionPanel     that session's tools — the desktop's right rail
- *   AgentDetail      one agent in full
- *   Usage · Browsers · Mcp · Remote · Daemon
+ *   Session          one conversation — slides in from the right (deeper)
+ *   SessionPanel     that session's workbench — slides in from the right (over there)
+ *   AgentDetail      one agent in full — rises as a kiln sheet
+ *   Usage · Browsers · Mcp · Remote · Daemon — rise as kiln sheets
  * ```
  *
  * Three decisions live here.
  *
- * **Tabs, not a drawer.** The app had a 300pt swipe-in drawer with nine
- * destinations in three invented groups. On a phone that makes every screen
- * two taps away and costs a hamburger in every header. Four tabs cover what
- * you *do*; everything else is a screen you open *from* one of them, which is
- * what a pushed stack is for.
+ * **Tabs, not a drawer.** Four tabs cover what you *do*; everything else is a
+ * page you open *from* one of them.
  *
- * **The action bar is a FAB, not a header button.** Starting a task is the
- * app's only verb. It has no home on any page, it is used more than any other
- * action, and it should be reachable without looking — so it sits in the tab
- * bar where a thumb already is. See `TabBar.tsx`.
+ * **The ember is in the middle, not in a header.** Starting a task is the
+ * app's only verb — it sits in the tab shelf where a thumb already is.
  *
- * **The desktop's right rail becomes a pushed screen, not a sheet.** The rail
- * holds a plan, a diff, a file tree and a terminal. A sheet caps at 88% of the
- * screen and its body has to share that with a header; at phone width a diff
- * with line numbers in a 60%-height sheet is unreadable. Full screen, with its
- * own tab strip and its own header, is the mobile-native version of a
- * resizable side panel. `SessionPanelScreen` is that screen.
+ * **Panes open by kind.** Conversations and workbenches slide from the RIGHT
+ * (you went deeper / the tools live over there). Reference sheets — agent
+ * detail, usage, browsers, MCP, remote, daemon — rise from the BOTTOM as kiln
+ * sheets, because they are lookups you dismiss back down, not places you go.
+ * Sheets and pickers handle their own spring entrance.
  *
  * Deep links: every destination is addressable, because a notification, a push
  * link and a shared URL all need to land somewhere specific rather than "on the
@@ -225,14 +219,14 @@ function MainTabs() {
 }
 
 /* ── Screen transitions ───────────────────────────────────────────────────────
- * Pushed screens slide from the right (iOS convention, and the direction that
- * matches "you went deeper"). Sheets and modals handle their own entrance, so
- * they are `presentation: 'modal'` with no animation of their own.
+ * Panes open by kind: conversations and the workbench slide from the RIGHT
+ * (iOS convention — you went deeper / the tools live over there). Reference
+ * sheets rise from the BOTTOM as kiln sheets (a lookup you dismiss back down,
+ * not a place you go). Pairing fades — it is a gate, not a destination.
  *
- * `gestureEnabled` is on for the session and its panel and off for settings
- * pages: an interactive back-swipe on a settings page you arrived at from a
- * settings list is a nice touch, and on a form it is a way to lose what you
- * typed. */
+ * `gestureEnabled` stays on for the session and its workbench. Kiln sheets
+ * keep the swipe-down-to-dismiss gesture and lose the edge-swipe, so a form
+ * with typed text cannot be flung away sideways. */
 
 export function RootNavigator() {
   // Land on Pairing until a device token exists. Evaluated at render, and App
@@ -250,17 +244,18 @@ export function RootNavigator() {
     >
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen name="Session" component={SessionScreen} />
-      {/* The desktop's right rail: the panel slides in from the RIGHT, like a
-          pushed screen, because that is the direction "this session's tools
-          live over there" on a phone. slide_from_bottom read as a modal, and a
-          tool surface is not a modal. */}
+      {/* The workbench slides in from the RIGHT, like a pushed screen, because
+          that is the direction "this session's tools live over there" on a
+          phone. slide_from_bottom would read as a modal, and a tool surface
+          is not a modal. */}
       <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
-      <Stack.Screen name="AgentDetail" component={AgentDetailScreen} />
-      <Stack.Screen name="Usage" component={UsageScreen} />
-      <Stack.Screen name="Browsers" component={BrowsersScreen} />
-      <Stack.Screen name="Mcp" component={McpScreen} />
-      <Stack.Screen name="Remote" component={RemoteScreen} />
-      <Stack.Screen name="Daemon" component={DaemonSettingsScreen} />
+      {/* Kiln sheets: lookups that rise and dismiss back down. */}
+      <Stack.Screen name="AgentDetail" component={AgentDetailScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Usage" component={UsageScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Browsers" component={BrowsersScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Mcp" component={McpScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Remote" component={RemoteScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Daemon" component={DaemonSettingsScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen
         name="Pairing"
         component={PairingScreen}

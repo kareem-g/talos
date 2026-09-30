@@ -1,24 +1,13 @@
 /**
- * Screen scaffolding — the frame every page is mounted in.
+ * Screen scaffolding — the kiln shelf every page is fired on.
  *
- * THE PATTERN
- * -----------
+ * EMBER CLAY
+ * ----------
  * A large title that *collapses into* a compact app bar as the page scrolls,
- * exactly as iOS does it and exactly as the desktop's sticky header does it.
- * Two things fall out of that, and they are the reason it is worth the
- * complexity:
- *
- *   1. **The title is the page's headline, not chrome.** At the top of a long
- *      session list the user can see what page they are on without reading a
- *      17px label in a bar. Once they scroll, the compact title takes over so
- *      the title never leaves the screen.
- *   2. **The bar earns its hairline.** The border fades in only once content is
- *      sliding under the bar, so a page at rest is not wearing a line of
- *      chrome it has not earned.
- *
- * Everything else here is the boring part done once: safe areas, a scroll
- * container with the right content insets, pull-to-refresh, and a keyboard
- * behaviour. Screens should be writing a list, not re-deriving `paddingTop`.
+ * like iOS and like the desktop's sticky header. The title is the headline,
+ * not chrome; the bar earns its hairline only once content slides under it.
+ * Every section header carries a 3pt ember tick beside its eyebrow, so a long
+ * page reads as one document fired in the same kiln.
  */
 
 import * as React from 'react'
@@ -84,7 +73,7 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
   })
 
   return (
-    <View style={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12 }}>
+    <View style={{ paddingHorizontal: 18, paddingTop: 2, paddingBottom: 10 }}>
       <Animated.View
         style={{
           opacity: largeOpacity,
@@ -112,7 +101,7 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
       </Animated.View>
 
       {below ? (
-        <Animated.View style={{ opacity: detailOpacity, marginTop: 12 }}>
+        <Animated.View style={{ opacity: detailOpacity, marginTop: 8 }}>
           {below}
         </Animated.View>
       ) : null}
@@ -405,10 +394,9 @@ function ConnectionStrip() {
 }
 
 /* ── Section ──────────────────────────────────────────────────────────────────────
- * A titled block of a scrolling page. The `enter` index staggers the first few
- * sections so a page assembles itself rather than appearing all at once —
- * capped, because a page with twelve sections must not take half a second to
- * become readable. */
+ * A titled block of a scrolling page, fired in the kiln grammar: ember tick +
+ * eyebrow + title + action. The `enter` index staggers the first few sections
+ * so a page assembles itself rather than appearing all at once. */
 
 export function Section({
   eyebrow,
@@ -459,7 +447,12 @@ export function Section({
       {eyebrow || title || action ? (
         <View className="flex-row items-end justify-between gap-3">
           <View className="min-w-0 flex-1 gap-1">
-            {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
+            {eyebrow ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <View style={{ width: 3, height: 13, borderRadius: 2, backgroundColor: palette.accent }} />
+                <Eyebrow>{eyebrow}</Eyebrow>
+              </View>
+            ) : null}
             {title ? (
               <Text className="text-[17.5px] leading-[23px] font-bold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={2}>
                 {title}

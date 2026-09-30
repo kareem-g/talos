@@ -1,32 +1,11 @@
 /**
- * Chat rows — the compact activity lines in an assistant turn.
+ * Chat rows — the compact kiln lines in an assistant turn.
  *
- * Each row is a port of the desktop's counterpart at the same height, type
- * scale and colour: `Step` (tool/command), the `FileChips` group, the
- * `DiffView` line colouring, and the AI-event rows (subagent, orchestration,
- * progress, search, git commit, browser step, verification).
- *
- * THE STEP ROW IS THE MOST COMMON THING ON THE SCREEN
- * ---------------------------------------------------
- * A busy agent emits dozens of tool calls per turn, so this row is where
- * density is either won or lost. Three decisions carry it:
- *
- *   1. **A single tool renders bare; a run of tools folds into one card.** The
- *      desktop does this and it is right — card chrome on every step would
- *      turn a turn of twenty tools into a wall of boxes, and the boxes are not
- *      the information. The run's card footer carries the only summary that
- *      matters: how many steps, how long, and did any fail.
- *   2. **The diffstat and the exit code are right-aligned and tabular.** You
- *      scan a run of steps for *what changed*, not for *what ran*, so the
- *      numbers sit in a column where the eye can run down them.
- *   3. **A step in flight keeps its row height.** The spinner replaces the
- *      glyph rather than the row collapsing, so the transcript does not jump
- *      every time a tool starts or finishes — which on a live stream is
- *      several times a second.
- *
- * V3: the step is a *slim quiet row* — a 22pt circular tile holding the glyph
- * (or the spinner), a 13px ink-2 label, and tiny mono meta on the right. The
- * row is chrome; the numbers are the content.
+ * EMBER CLAY: a lone tool renders bare; a run folds into one clay tablet
+ * whose footer counts steps/time/failures. Diffstat + exit code stay
+ * right-aligned tabular; a step in flight keeps its height (spinner swaps the
+ * glyph) so the stream never jumps. Slim 22pt ember-glow tiles hold glyphs;
+ * numbers are the content. Same describeTool/diff handlers.
  */
 
 import * as React from 'react'

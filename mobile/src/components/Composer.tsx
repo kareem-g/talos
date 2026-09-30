@@ -19,8 +19,8 @@
  *
  * THE DOCK
  * --------
- * The dock is a rounded surface card floating on the canvas: the multiline
- * field is integrated directly into it (no nested field chrome), the queue and
+ * The dock is a kiln slab floating on the canvas: the multiline field is
+ * integrated directly into it (no nested field chrome), the queue and
  * attachment chips stack above the text, and the 'Run' row — the session's
  * live configuration, scrolling horizontally — folds away beneath it. The
  * context ring stays visible even when the rest is collapsed: it is the one
@@ -268,7 +268,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
 
         <View
           style={{
-            borderRadius: 24,
+            borderRadius: radius.lg,
             borderWidth: 1,
             borderColor: palette.lineStrong,
             backgroundColor: palette.surface,

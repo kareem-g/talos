@@ -1,21 +1,16 @@
 /**
- * Agents — what this desktop can actually run.
+ * Agents — what this kiln can actually fire.
  *
- * The desktop lists agents as a configuration page with a card per agent. The
- * phone asks a different and more practical question, and it is almost always
- * asked from the wrong screen: **why did my task fail?** — which is usually
- * because a CLI is not installed, or not on the daemon's PATH, or needs auth.
- *
- * So this page leads with *readiness* — one large figure, because the answer
- * to "can I work right now" is a count, not a paragraph — and every agent is a
- * row that opens a detail screen rather than a card that occupies a whole
- * screen. With eight agents installed, a card per agent is roughly nine screens
- * of scrolling to answer a yes/no question; a row is nine lines.
- *
- * The capability chips are ordered by how often they decide whether an agent is
- * usable for a given job, not alphabetically — approvals first, because a tool
- * that cannot ask permission cannot be supervised from a phone, which is the
- * main reason to care.
+ * EMBER CLAY
+ * ----------
+ * The phone asks one practical question, usually from the wrong screen:
+ * **why did my task fail?** — a CLI missing, off PATH, or unauthed. So this
+ * page leads with *readiness* as one kiln slab: a large fired figure (how many
+ * can work right now), ember-edged when all ready, with connection truth
+ * beside it. Every agent is a row opening a detail kiln sheet rather than a
+ * card per agent. Capability chips stay ordered by what decides a job —
+ * approvals first, because a tool that cannot ask cannot be supervised from a
+ * pocket.
  */
 
 import * as React from 'react'
@@ -133,8 +128,10 @@ export function AgentsScreen() {
         </IconButton>
       }
     >
-      <Section enterIndex={0} title="Readiness" eyebrow="This desktop">
-        <Card>
+      <Section enterIndex={0} title="Readiness" eyebrow="Firebox">
+        <Card className="overflow-hidden">
+          {/* Ember edge: lit when something can fire. */}
+          <View style={{ height: 3, backgroundColor: ready > 0 ? palette.ok : palette.line }} />
           {/* The hero figure is the answer to the question this page exists for.
               Everything else on the card is commentary on it. */}
           <View className="flex-row items-center gap-4 p-4">
@@ -173,7 +170,7 @@ export function AgentsScreen() {
       </Section>
 
       {capabilities.length > 0 ? (
-        <Section enterIndex={1} eyebrow="Across this fleet" title="Capabilities">
+        <Section enterIndex={1} eyebrow="Across the kiln" title="Capabilities">
           <Card>
             <View className="flex-row flex-wrap gap-2 p-4">
               {capabilities.map((capability) => (

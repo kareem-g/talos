@@ -35,6 +35,10 @@
  * turns are full-width clean prose — no bubble, no card — separated by clear
  * vertical rhythm; user messages sit in a compact right-aligned raised bubble
  * with one small corner; reasoning is a quiet collapsible row.
+ *
+ * EMBER CLAY: user turns are kiln ingots — a warm selected slab with an ember
+ * hairline — so your words read as fired clay against the assistant's open
+ * parchment prose.
  */
 
 import * as React from 'react'
@@ -149,7 +153,9 @@ function UserTurn({ message }: { message: Message }) {
           maxWidth: '86%',
           borderRadius: radius.lg,
           borderBottomRightRadius: 6,
-          backgroundColor: palette.raised,
+          borderWidth: 1,
+          borderColor: palette.accentBorder,
+          backgroundColor: palette.selected,
           paddingHorizontal: 14,
           paddingVertical: 10,
           // 60% while optimistic: the message is on its way to the desktop but

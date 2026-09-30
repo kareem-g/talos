@@ -1,34 +1,39 @@
 /**
  * Deck — the home.
  *
- * THE INFORMATION HIERARCHY *IS* THE DESIGN
- * ------------------------------------------
- * This app is a remote control for a fleet of agents, and exactly one question
- * dominates: **is anything waiting on me?** Everything on this page is ordered
- * by that question, not by what the data happens to be grouped into.
+ * EMBER CLAY REDESIGN — "the kiln board"
+ * --------------------------------------
+ * A phone-native cousin of the desktop StationHome, not a copy of it. The
+ * desktop reads as a mission-control grid: a sticky control-deck header, a
+ * triage timeline pinned left, workspaces grouped right, a filter tablist and
+ * search riding above the workspace column. This page keeps that skeleton but
+ * stacks it for one thumb:
  *
- *   1. Needs you   — a human is blocked. Approvable in place, from the list.
- *   2. Live        — working right now. Ambient, glanceable, no actions.
- *   3. Workspaces  — everything else, grouped by the folder it belongs to.
+ *   1. Fleet hero   — the desktop's "fleet state is the hero" thesis as one
+ *      kiln slab: a single large need-you number, live + workspace counts, and
+ *      the connection truth. A statement, not a toolbar.
+ *   2. Signal       — the desktop's triage timeline (vertical rule, state dots)
+ *      compressed to phone width. Approvable in place.
+ *   3. In motion    — the desktop's active grid as a horizontal rail of slabs.
+ *      Ambient, glanceable, no actions.
+ *   4. Ground       — the desktop's right column: filter tabs + search pinned
+ *      above workspace slabs grouped by folder.
  *
- * Why that order and not the desktop's (filter bar, then a two-column grid of
- * triage-left / workspaces-right): on a phone there is no second column to put
- * triage beside, so a two-column layout either squeezes both into unreadable
- * halves or becomes a top/bottom stack — which is this. The desktop's left
- * column *is* the first thing you read; so is this.
- *
- * The header is the shared `ScreenScaffold` large title — the desktop's name is
- * the page's headline, the two counts answer the page's question beside it, and
- * search/filter live in the app bar where they stay reachable while scrolled.
- *
- * Ranking, headlines, and grouping all come from the shared `deriveHomeView`,
- * so a session floats to the top here for exactly the reasons it does on the
- * desktop. Only the presentation is native.
+ * Ranking, headlines and grouping still come from the shared `deriveHomeView`,
+ * so a session surfaces here for exactly the reasons it does on the desktop.
+ * Only the presentation is native.
  */
 
 import * as React from 'react'
-import { ScrollView, Text, View } from 'react-native'
-import { Search, SlidersHorizontal, Sparkles } from 'lucide-react-native'
+import { Pressable, ScrollView, Text, View } from 'react-native'
+import {
+  ChevronRight,
+  Flame,
+  Play,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+} from 'lucide-react-native'
 
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
 import { firstOpenApprovalId } from '@/lib/sessionState'
@@ -38,10 +43,11 @@ import { deviceBaseUrl, deviceRoutes } from '@app/lib/native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useNewTask, useOpenSession, type RootStackParamList } from '@app/navigation'
-import { palette } from '@app/design/tokens'
+import { agentColor, palette } from '@app/design/tokens'
 import { ConfirmDialog, PickerSheet } from '@app/components/Sheet'
 import {
   Badge,
+  BrandMark,
   Button,
   Card,
   CardHeader,
@@ -51,6 +57,7 @@ import {
   FilterChips,
   IconButton,
   Mono,
+  SearchField,
   StatusPill,
   haptic,
   toast,
@@ -58,12 +65,11 @@ import {
 import { ScreenScaffold, Section } from '@app/components/Screen'
 import {
   AllClear,
-  AttentionCard,
-  LiveRow,
   SessionActionsSheet,
   SessionListSkeleton,
   SessionRow,
   WorkspaceGroup,
+  stateTone,
 } from '@app/components/session/SessionRow'
 import { AutomationsSection, SkillsSection } from '@app/components/home/Sections'
 
@@ -182,10 +188,15 @@ export function DeckScreen() {
   return (
     <ScreenScaffold
       title={desktopName}
-      eyebrow="Control deck"
+      eyebrow="Fleet board"
       onRefresh={() => void onRefresh()}
       refreshing={refreshing}
       contentClassName="gap-6 pb-12"
+      headerLeft={
+        <View style={{ paddingLeft: 8, justifyContent: 'center' }}>
+          <BrandMark size={22} />
+        </View>
+      }
       headerRight={
         <View className="flex-row items-center gap-0.5">
           <IconButton
@@ -213,126 +224,104 @@ export function DeckScreen() {
         </View>
       }
       below={
-        /* The counts sit under the title, not in a bar: "3 need you" is a
-            statement about the whole station, and it belongs next to the name
-            of the station. They scroll away with the title — the list itself
-            takes over the answer once you are reading it. */
+        /* The desktop's subtle filter bar, as a scrolling line: how many
+           sessions, how many paused, and whether the system is live. It
+           scrolls away with the title — the hero below takes over. */
         <View className="flex-row items-center gap-2">
-          <StatusPill
-            tone={needsYou > 0 ? 'wait' : 'ok'}
-            label={needsYou > 0 ? `${needsYou} need you` : 'All clear'}
-            size="sm"
-          />
-          {view.counts.running > 0 ? (
-            <Badge tone="accent" outline>
-              {view.counts.running} live
-            </Badge>
-          ) : null}
+          <Text className="text-[11.5px] leading-[15px] text-ink-3">
+            {view.counts.total} sessions
+            {view.counts.paused > 0 ? ` · ${view.counts.paused} paused` : ''}
+          </Text>
           <View style={{ flex: 1 }} />
           <View className="flex-row items-center gap-1.5">
             <Dot tone={live ? 'ok' : 'danger'} pulse={!live} />
-            <Text className="text-[11.5px] leading-[15px] text-ink-3">{live ? 'Live' : 'Offline'}</Text>
+            <Text className="text-[11.5px] leading-[15px] text-ink-3">
+              {live ? 'system live' : 'offline'}
+            </Text>
           </View>
         </View>
       }
     >
-      {/* ── 1. Needs you ───────────────────────────────────────────────
-          Highest priority, always first. Absent entirely when nothing needs
-          attention *and* nothing is running — no empty section, no reserved
-          space. When something is running but nothing is blocked, "All
-          clear" is still shown: the difference between "nothing needs you"
-          and "the app is disconnected" matters, and silence does not
-          distinguish them. */}
+      {/* ── 0. Fleet hero ───────────────────────────────────────────────
+          The desktop's thesis ("the fleet's state is the hero") as one kiln
+          slab: a single large need-you number, live + workspace counts beside
+          it, and the connection truth. Tapping it filters to what needs you. */}
+      <View className="px-4">
+        <FleetHero
+          needsYou={needsYou}
+          running={view.counts.running}
+          workspaces={view.workspaces.length}
+          live={live}
+          onPress={() => {
+            void haptic('light')
+            setFilter(needsYou > 0 ? 'attention' : 'active')
+          }}
+        />
+      </View>
+
+      {/* ── 1. Signal ───────────────────────────────────────────────────
+          The desktop's triage timeline: a vertical rule with state dots, one
+          row per blocked session. Approvable in place — the situations where
+          a session waits on you are exactly when you are doing something else. */}
       {!filtering && needsYou > 0 ? (
-        <Section eyebrow="Triage" title="Needs you" enterIndex={0}>
-          <View className="gap-3">
-            {view.attention.map((entry, index) => (
-              <AttentionCard
+        <Section eyebrow="Signal" title="Needs you" enterIndex={0}>
+          <TriageTimeline
+            entries={view.attention}
+            onApprove={(id, uiState) => {
+              if (uiState === 'approval') approve(id)
+            }}
+            onOpen={(id) => openSession(id)}
+          />
+        </Section>
+      ) : null}
+
+      {/* ── 2. In motion ────────────────────────────────────────────────
+          The desktop's active grid as a horizontal rail: one slab per running
+          agent, task + runtime + provider. Ambient — it moves itself to
+          Signal when it needs you. */}
+      {!filtering && view.active.length > 0 ? (
+        <Section
+          eyebrow={`${view.active.length} running`}
+          title="In motion"
+          enterIndex={needsYou > 0 ? 1 : 0}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}
+            style={{ marginHorizontal: -16 }}
+          >
+            {view.active.map((entry) => (
+              <LiveSlab
                 key={entry.session.id}
-                session={entry.session}
-                headline={entry.headline}
-                uiState={entry.uiState}
-                idleFor={entry.idleFor}
-                providerName={entry.providerName}
-                enterIndex={index}
-                onApprove={entry.uiState === 'approval' ? () => approve(entry.session.id) : undefined}
+                name={entry.task ?? entry.session.name}
+                provider={providerNameFor(entry.session.agent)}
+                runtime={entry.runtime}
+                agentId={entry.session.agent}
                 onOpen={() => openSession(entry.session.id)}
               />
             ))}
-          </View>
+          </ScrollView>
         </Section>
       ) : null}
 
-      {/* ── 2. Live ────────────────────────────────────────────────────
-          Ambient. No actions: a running agent needs attention only when it
-          *changes* state, and when it does it moves itself to "Needs you".
-          A live halo is the whole affordance — enough to know something is
-          in flight from across the room, not enough to nag. */}
-      {!filtering && view.active.length > 0 ? (
-        <Section eyebrow={`${view.active.length} running`} title="Live" enterIndex={needsYou > 0 ? 1 : 0}>
-          <Card>
-            {view.active.map((entry, index) => (
-              <View key={entry.session.id}>
-                {index > 0 ? <View className="h-px bg-line" style={{ marginLeft: 16 }} /> : null}
-                <LiveRow
-                  session={entry.session}
-                  task={entry.task}
-                  runtime={entry.runtime}
-                  providerName={providerNameFor(entry.session.agent)}
-                  onOpen={() => openSession(entry.session.id)}
-                />
-              </View>
-            ))}
-          </Card>
-        </Section>
-      ) : null}
-
-      {/* ── The all-clear state ─────────────────────────────────────────
-          Shown when nothing is blocked *and* nothing is live, so the page is
-          never just an empty list with no explanation. */}
       {!filtering && needsYou === 0 && view.active.length === 0 ? (
         <View className="px-4">
           <AllClear count={0} />
         </View>
       ) : null}
 
-      {/* ── The filter row ──────────────────────────────────────────────
-          Deliberately *here* and not above the fold. On a small phone a
-          filter row pinned under the header pushes the triage list — the
-          reason this page exists — below the fold. Down here it is one tap
-          from the content it filters and out of the way of the question the
-          page is answering, and it is reachable from the app bar's funnel
-          too for anyone who wants it first. */}
-      {view.filtered.length > 0 || filtering ? (
-        <View className="px-4">
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="pr-4">
-            <FilterChips
-              label="Filter sessions"
-              value={filter}
-              onChange={(value) => {
-                void haptic('light')
-                setFilter(value as HomeFilter)
-              }}
-              options={[
-                { value: 'all' as HomeFilter, label: 'Everything', count: view.counts.total },
-                { value: 'attention' as HomeFilter, label: 'Needs you', count: view.counts.attention },
-                { value: 'active' as HomeFilter, label: 'Live', count: view.counts.running },
-                { value: 'starred' as HomeFilter, label: 'Starred', count: starred.length },
-                { value: 'archived' as HomeFilter, label: 'Archived', count: view.counts.archived },
-              ]}
-            />
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {/* ── 4. Workspaces ──────────────────────────────────────────────
-          Grouped by folder, because "which project is this?" is the
-          question that makes a long session list navigable. Collapsed by
-          default when a workspace is quiet, open when it has something
-          waiting, so the list opens at the right altitude. */}
+      {/* ── 3. Ground ───────────────────────────────────────────────────
+          The desktop's right column: the filter tablist and search ride above
+          the workspace slabs, because they describe the list below them — not
+          the page above. Workspaces stay grouped by folder. */}
       <Section
-        eyebrow={filtering ? 'Filtered' : 'Workspaces'}
-        title={filtering ? `${view.filtered.length} matching` : `${view.workspaces.length} ${view.workspaces.length === 1 ? 'workspace' : 'workspaces'}`}
+        eyebrow={filtering ? 'Filtered' : 'Ground'}
+        title={
+          filtering
+            ? `${view.filtered.length} matching`
+            : `${view.workspaces.length} ${view.workspaces.length === 1 ? 'workspace' : 'workspaces'}`
+        }
         enterIndex={2}
         action={
           filtering ? (
@@ -349,6 +338,30 @@ export function DeckScreen() {
           ) : null
         }
       >
+        <SearchField
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search workspaces, sessions, agents…"
+          accessibilityLabel="Search sessions"
+        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="pr-4">
+          <FilterChips
+            label="Filter sessions"
+            value={filter}
+            onChange={(value) => {
+              void haptic('light')
+              setFilter(value as HomeFilter)
+            }}
+            options={[
+              { value: 'all' as HomeFilter, label: 'Everything', count: view.counts.total },
+              { value: 'attention' as HomeFilter, label: 'Needs you', count: view.counts.attention },
+              { value: 'active' as HomeFilter, label: 'Live', count: view.counts.running },
+              { value: 'starred' as HomeFilter, label: 'Starred', count: starred.length },
+              { value: 'archived' as HomeFilter, label: 'Archived', count: view.counts.archived },
+            ]}
+          />
+        </ScrollView>
+
         {sessionsLoading && sessions.length === 0 ? (
           <SessionListSkeleton />
         ) : view.workspaces.length === 0 ? (
@@ -425,26 +438,15 @@ export function DeckScreen() {
         )}
       </Section>
 
-      {/* ── Automations ────────────────────────────────────────────────
-          Configuration, not triage, so it sits below the fold rather than
-          competing with sessions for the eye. */}
+      {/* ── Below the fold: configuration, not triage ─────────────────── */}
       <Section eyebrow="Automations" title="Run on demand" enterIndex={3}>
         <AutomationsSection />
       </Section>
 
-      {/* ── Skills ─────────────────────────────────────────────────────
-          Shared with the desktop: the daemon owns `.agentdeck/skills/`, so
-          toggling one here changes what the desktop injects into every
-          turn. That makes this the one home-page section that is genuinely
-          remote control rather than a local convenience. */}
       <Section eyebrow="Prompt library" title="Skills" enterIndex={4}>
         <SkillsSection />
       </Section>
 
-      {/* ── This device ─────────────────────────────────────────────────
-          Last, because it is rarely the thing you are looking for — but it
-          is the answer to "why did my task fail with a network error", so
-          it has to be on the page rather than three menus deep. */}
       <Section eyebrow="This device" title="Routes" enterIndex={5}>
         <ConnectionCard />
       </Section>
@@ -531,9 +533,225 @@ export function DeckScreen() {
   )
 }
 
-/* ── Connection card ──────────────────────────────────────────────────────────────
- * Which route the app is using, and what it can fall back to. Every route has a
- * copy button, because the first thing anyone does with a "cannot reach your
+/* ── Fleet hero ────────────────────────────────────────────────────────────────
+ * The desktop's "fleet state is the hero" as one kiln slab: a single large
+ * need-you number on the left, live + workspace counts stacked right, the
+ * ember edge underneath when something burns. Tapping filters to Signal. */
+
+function FleetHero({
+  needsYou,
+  running,
+  workspaces,
+  live,
+  onPress,
+}: {
+  needsYou: number
+  running: number
+  workspaces: number
+  live: boolean
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={needsYou > 0 ? `${needsYou} sessions need you` : 'Nothing needs you'}
+      accessibilityHint="Filters the list to what needs you"
+      onPress={onPress}
+      className="overflow-hidden rounded-lg border border-line bg-surface active:bg-raised"
+    >
+      {/* Ember edge: heat when something burns, quiet hairline when clear. */}
+      <View style={{ height: 3, backgroundColor: needsYou > 0 ? palette.wait : palette.line }} />
+      <View className="flex-row items-center gap-4 px-4 py-4">
+        <View
+          className="size-11 items-center justify-center rounded-md"
+          style={{ backgroundColor: needsYou > 0 ? palette.waitSoft : palette.okSoft }}
+        >
+          <Flame size={20} color={needsYou > 0 ? palette.wait : palette.ok} />
+        </View>
+        <View className="min-w-0 flex-1">
+          <Text
+            className="text-ink"
+            style={{ fontSize: 34, lineHeight: 38, fontWeight: '800', letterSpacing: -0.8, fontVariant: ['tabular-nums'] }}
+            numberOfLines={1}
+          >
+            {needsYou}
+          </Text>
+          <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+            {needsYou === 0 ? 'All clear — nothing waits on you' : needsYou === 1 ? 'session needs you' : 'sessions need you'}
+          </Text>
+        </View>
+        <View className="shrink-0 items-end gap-1.5">
+          {running > 0 ? (
+            <Badge tone="accent" outline>
+              {running} live
+            </Badge>
+          ) : null}
+          <Text className="text-[11.5px] leading-[15px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+            {workspaces} {workspaces === 1 ? 'workspace' : 'workspaces'}
+          </Text>
+          <View className="flex-row items-center gap-1.5">
+            <Dot tone={live ? 'ok' : 'danger'} pulse={!live} />
+            <Text className="text-[11px] leading-[14px] text-ink-3">{live ? 'Live' : 'Offline'}</Text>
+          </View>
+        </View>
+      </View>
+    </Pressable>
+  )
+}
+
+/* ── Triage timeline ───────────────────────────────────────────────────────────
+ * The desktop's triage timeline, compressed: a vertical rule with state dots,
+ * one row per blocked session. The dot + pill repeat the state in two
+ * channels; the headline is the ask; Approve sits inline. */
+
+function TriageTimeline({
+  entries,
+  onApprove,
+  onOpen,
+}: {
+  entries: Array<{
+    session: { id: string; name: string; agent: string }
+    headline: string
+    uiState: string
+    idleFor?: string
+    providerName?: string
+  }>
+  onApprove: (sessionId: string, uiState: string) => void
+  onOpen: (sessionId: string) => void
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <View style={{ position: 'relative' }}>
+        {/* The rule the dots sit on. */}
+        <View
+          style={{
+            position: 'absolute',
+            left: 27,
+            top: 18,
+            bottom: 18,
+            width: 1,
+            backgroundColor: palette.lineStrong,
+          }}
+        />
+        {entries.map((entry, index) => {
+          const tone = stateTone(entry.uiState)
+          return (
+            <View key={entry.session.id}>
+              {index > 0 ? <View className="h-px bg-line" style={{ marginLeft: 52 }} /> : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${entry.session.name}. ${entry.headline}`}
+                accessibilityHint="Opens the session"
+                onPress={() => {
+                  void haptic('light')
+                  onOpen(entry.session.id)
+                }}
+                className="flex-row gap-3 px-4 py-3.5 active:bg-raised"
+              >
+                <View style={{ width: 20, alignItems: 'center', paddingTop: 4 }}>
+                  <Dot tone={tone} />
+                </View>
+                <View className="min-w-0 flex-1 gap-1">
+                  <View className="flex-row items-center gap-2">
+                    <Text className="min-w-0 flex-1 text-[15px] leading-[20px] font-semibold text-ink" numberOfLines={1}>
+                      {entry.session.name}
+                    </Text>
+                    <StatusPill tone={tone} label={entry.uiState === 'approval' ? 'Approval' : entry.uiState === 'failed' ? 'Failed' : 'Needs you'} size="sm" />
+                  </View>
+                  <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
+                    {entry.providerName ?? entry.session.agent}
+                    {entry.idleFor ? ` · waiting ${entry.idleFor}` : ''}
+                  </Text>
+                  {entry.headline ? (
+                    <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={2}>
+                      {entry.headline}
+                    </Text>
+                  ) : null}
+                  <View className="mt-1.5 flex-row items-center gap-2">
+                    {entry.uiState === 'approval' ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        label="Approve"
+                        accessibilityLabel={`Approve the pending request in ${entry.session.name}`}
+                        onPress={() => {
+                          void haptic('success')
+                          onApprove(entry.session.id, entry.uiState)
+                        }}
+                      />
+                    ) : null}
+                    <View className="flex-row items-center gap-1">
+                      <Text className="text-[12.5px] font-semibold text-ink-2">Open</Text>
+                      <ChevronRight size={14} color={palette.ink3} />
+                    </View>
+                  </View>
+                </View>
+              </Pressable>
+            </View>
+          )
+        })}
+      </View>
+    </Card>
+  )
+}
+
+/* ── Live slab ─────────────────────────────────────────────────────────────────
+ * One running agent as a kiln slab in the horizontal rail: agent dot + runtime
+ * on top, task as the title, provider beneath. Tapping opens the session. */
+
+function LiveSlab({
+  name,
+  provider,
+  runtime,
+  agentId,
+  onOpen,
+}: {
+  name: string
+  provider: string
+  runtime: string
+  agentId: string
+  onOpen: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, running, ${runtime}`}
+      accessibilityHint="Opens the session"
+      onPress={() => {
+        void haptic('light')
+        onOpen()
+      }}
+      className="rounded-lg border border-line bg-surface active:bg-raised"
+      style={{ width: 240 }}
+    >
+      <View className="gap-2 p-3.5">
+        <View className="flex-row items-center gap-2">
+          <View
+            className="size-2 rounded-full"
+            style={{ backgroundColor: agentColor(agentId) }}
+          />
+          <Mono className="flex-1 text-[10.5px] uppercase text-ink-3" numberOfLines={1}>
+            {provider}
+          </Mono>
+          <View className="flex-row items-center gap-1">
+            <Play size={10} color={palette.ok} />
+            <Mono className="text-[11px] text-ink-2" style={{ fontVariant: ['tabular-nums'] }}>
+              {runtime}
+            </Mono>
+          </View>
+        </View>
+        <Text className="text-[14.5px] leading-[19px] font-medium text-ink" numberOfLines={2}>
+          {name}
+        </Text>
+      </View>
+      <View style={{ height: 2, backgroundColor: agentColor(agentId), opacity: 0.55 }} />
+    </Pressable>
+  )
+}
+
+/* ── Connection card ───────────────────────────────────────────────────────────
+ * Which route the app is using, and what it can fall back to. Every route has
+ * a copy button, because the first thing anyone does with a "cannot reach your
  * desktop" error is read the URL out loud. */
 
 function ConnectionCard() {

@@ -1,26 +1,13 @@
 /**
- * Search — the app's find-everything surface.
+ * Search — the kiln's find-everything glance sheet.
  *
- * The desktop has ⌘K. A phone has no ⌘, so the equivalent is a sheet that opens
- * from an icon, and it has to do *both* of the desktop's jobs in one list:
- * jump to a session, and run a station action. A user opening a search sheet is
- * usually trying to reach something they cannot name precisely, and splitting
- * "search sessions" from "navigate" into two sheets makes them open the wrong
- * one.
- *
- * WHY IT IS A SHEET AND NOT A FULL SCREEN
- * --------------------------------------
- * A full-screen search takes away the thing you were looking at, which defeats
- * the point of a quick jump. At 60% height the transcript or the deck is still
- * visible behind it, and dismissing is a flick in the direction you were
- * already moving.
- *
- * WHAT IT SEARCHES
- * ----------------
- * Sessions by name, agent and workspace; the actions you can take; and, when
- * opened from inside a session, the *transcript* — the last one is the reason
- * this is worth being a sheet rather than a field, because finding the message
- * where an agent said the thing is a real task in a long conversation.
+ * EMBER CLAY
+ * ----------
+ * The desktop's ⌘K as a 62% kiln sheet: sessions by name/agent/workspace,
+ * station actions, and — from inside a session — the transcript itself.
+ * A full screen would steal what you were looking at; a glance sheet keeps it
+ * behind you and dismisses with a downward flick. Same search and jump
+ * handlers.
  */
 
 import * as React from 'react'

@@ -1,26 +1,14 @@
 /**
- * Activity — what this station has run, and what it cost.
+ * Activity — what this kiln has fired, and what it cost.
  *
- * THE TWO PAGES MERGED, AND WHY
- * -----------------------------
- * The desktop has separate `History` and `Usage` destinations. On a phone they
- * are the same question asked twice — "what did it do, and what did that cost"
- * — and a session's tokens and its last turn are both facts about the same
- * object. Splitting them means the answer to either question is a tab away from
- * the other half of the answer, which on a phone is two screens and a
- * decision.
- *
- * So this is one screen with a two-way switch:
- *
- *   - **Sessions** is the chronological record, grouped by day, newest first.
- *     Exactly the desktop's `HistoryPage` row-for-row, so the two agree.
- *   - **Spend** is the same sessions sorted by cost, with the fleet totals on
- *     top, because "which session is costing me money" is a different sort of
- *     the same list rather than a different list.
- *
- * Nothing is thrown away: the full usage table is still a tab away and is
- * exactly the same data, just laid out for comparison rather than for
- * browsing.
+ * EMBER CLAY
+ * ----------
+ * The desktop's History and Usage are one question asked twice — "what did it
+ * do, and what did that cost". This stays one screen with a kiln switch:
+ * Sessions (chronological, grouped by day, newest first) and Spend (same
+ * sessions sorted by cost, fleet totals on a lit slab on top). The totals card
+ * carries an ember edge because cost is the hottest fact on the page. Nothing
+ * is thrown away: the full usage breakdown is one tap away on the same data.
  */
 
 import * as React from 'react'
@@ -276,8 +264,9 @@ export function ActivityScreen() {
               number a reader needs before the totals: "12 sessions, 7 of them
               reported" changes how the total below it should be read, and
               putting it below the total asks them to un-read the number first. */}
-          <Section eyebrow="Fleet" enterIndex={0}>
-            <Card>
+          <Section eyebrow="Kiln totals" enterIndex={0}>
+            <Card className="overflow-hidden">
+              <View style={{ height: 3, backgroundColor: palette.accent, opacity: 0.9 }} />
               <CardHeader
                 title="Totals"
                 subtitle={`${measured.length} of ${ranked.length} ${

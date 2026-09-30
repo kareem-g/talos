@@ -1,25 +1,10 @@
 /**
- * Prose — assistant text with the desktop's inline markdown treatment.
+ * Prose — assistant parchment with the desktop's inline markdown treatment.
  *
- * The same three layers the desktop uses, so a message reads identically:
- *   `splitFences`  → fenced blocks become code cards, the rest stays prose;
- *   `parseBlocks`  → headings, bullets and numbered lists become real rows;
- *   `inlineMarkdown` → `code`, **bold** and @/$#/ tokens get their own
- *   styling inside a paragraph.
- *
- * Mobile differences, all forced by the platform:
- *   - `numberOfLines` replaces `truncate`/`line-clamp-*`;
- *   - the streaming caret is an animated view, not a `::after` pseudo-element;
- *   - text wraps natively, so `whitespace-pre-wrap`/`break-words` are the
- *     default rather than classes.
- *
- * BODY SIZE
- * ---------
- * The desktop sets agent prose at 14px. Mobile sets it at 15px/21px. That is
- * the single largest typographic decision in the app: an agent's answer is the
- * one piece of text on this screen that is genuinely long-form, and it is
- * read at arm's length in whatever light the room has. 14px is fine at 60cm
- * and tiring at 30.
+ * EMBER CLAY: fenced blocks become kiln wells (ember-ticked headers, copyable
+ * mono), headings/bullets become real rows, `code`/bold/@tokens glow inline.
+ * Agent prose stays 15px/21px for arm's-length reading; the streaming caret
+ * burns ember. Same splitFences/parseBlocks/inlineMarkdown handlers.
  */
 
 import * as React from 'react'

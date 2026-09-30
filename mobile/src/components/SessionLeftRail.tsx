@@ -1,26 +1,13 @@
 /**
- * Session switcher — the desktop's left sidebar, as a sheet.
+ * Session switcher — the desktop's left rail, as a kiln glance sheet.
  *
- * The desktop keeps a 304pt column beside the transcript: workspace picker,
- * search, "needs your attention", the session list, rooms. On a phone that is
- * two panels and two dismissal gestures for one idea ("show me more"), so it is
- * one sheet with a chip switch, and the segments are *the reason you opened
- * it* rather than sections you scroll past:
- *
- *   - **Needs you** is a separate segment, not a group at the top of the list.
- *     A sheet that opens onto a list you then have to scroll past to find the
- *     thing that is blocking you has not solved the problem; a chip you can
- *     hit puts it in front of you. It is also pre-selected when there is
- *     something in it, which is the whole point.
- *   - **All** is the same list the deck shows, plus archived sessions, because
- *     "where did that session go" is asked from inside a session more often
- *     than from the deck.
- *   - **Rooms** is its own segment rather than a section at the bottom, for the
- *     same reason.
- *
- * The transcript stays visible behind a 60%-height sheet, so switching is a
- * glance rather than a page change — which is the entire difference between a
- * rail and a screen.
+ * EMBER CLAY
+ * ----------
+ * One sheet with a chip switch instead of two panels: Needs you (pre-selected
+ * when it burns), All (deck list plus archived, because lost sessions are
+ * asked for from inside a session), Rooms. The transcript stays visible behind
+ * a 62% detent — switching is a glance, not a page change. Same state ranking
+ * and room handlers.
  */
 
 import * as React from 'react'

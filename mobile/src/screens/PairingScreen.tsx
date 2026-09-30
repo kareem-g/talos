@@ -1,23 +1,15 @@
 /**
- * Pairing — exchange the desktop's QR (or a pasted link) for a device token.
+ * Pairing — exchange the kiln's QR (or a pasted link) for a device token.
  *
- * The same screen the desktop shows in its native shell, for the same audience,
- * but rebuilt around the one thing a phone does that a browser does not: it can
- * *scan*. So scanning is the screen's primary state, not a button that reveals
- * it, and the manual-link path is one tap below rather than a hidden toggle.
- *
- * WHY EVERY ADVERTISED ROUTE IS TRIED
- * ----------------------------------
- * The offer is tried against EVERY origin the QR carried, not just the one it
- * was encoded with. The daemon lists the tailnet MagicDNS name first because it
- * is the best route when it works, but a phone with MagicDNS off cannot resolve
- * `.ts.net` — and a phone away from home cannot use the LAN address. Trying each
- * in order is what stopped a tailnet QR from failing against a daemon that was
- * perfectly reachable on its other routes.
- *
- * A *transport* failure is worth retrying against another route. An expired or
- * already-spent offer answers the same way from every host, so the loop stops
- * immediately rather than burning the user's time on four doomed requests.
+ * EMBER CLAY
+ * ----------
+ * Scanning is the primary state (a phone scans; a browser cannot), manual
+ * entry one tap below. Every advertised route is tried in turn — tailnet name
+ * first, then IP, then LAN — because the best route when it works is unusable
+ * when MagicDNS is off or the phone is away. Transport failures retry across
+ * routes; spent offers stop immediately. The reticle burns ember on
+ * true-black viewfinder; the landing stacks the kiln mark over one promise
+ * and the scan ingot.
  */
 
 import * as React from 'react'

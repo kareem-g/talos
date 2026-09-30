@@ -1,20 +1,12 @@
 /**
- * Subagents — spawn a focused child agent, or fan a task out across several.
+ * Subagents — spawn a focused child, or fan out across the kiln.
  *
- * The desktop exposes these as a `WorkerModal` in the composer. On a phone the
- * composer is for typing, and the multi-agent controls are a decision made
- * *before* the prompt, not a control pressed after it. So this is a full sheet
- * with a clear mode switch at the top, and the two modes are genuinely
- * different flows rather than a toggle on one form:
- *
- *   - **Single subagent**: pick a role, write a task. One child, one answer.
- *   - **Fan-out**: pick several agents, decide whether to merge, write one
- *     task. The merge choice is a first-class switch rather than a checkbox
- *     because it changes the shape of the *result*: merged gives you one
- *     synthesised answer, unmerged gives you each worker's answer in sequence.
- *
- * Both write into the same transcript the primary agent reads, so the results
- * arrive where the user is already looking.
+ * EMBER CLAY
+ * ----------
+ * A kiln form sheet with a mode switch: single (role + task, one answer) or
+ * fan-out (several agents, merge as a first-class switch — merged is one
+ * synthesised answer, unmerged is each worker in sequence). Results land in
+ * the transcript the primary reads. Same spawn/orchestrate handlers.
  */
 
 import * as React from 'react'

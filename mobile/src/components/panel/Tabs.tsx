@@ -2,26 +2,21 @@
  * Panel tabs that talk to the daemon — Git, Files, Browser, Rooms, Projects,
  * Terminals, the scratchpad and the run trace.
  *
- * These are the desktop right-rail views that need real backend data, so they
- * call the same handlers the desktop calls, through the authenticated
- * `/api/mobile/*` surface. The structure follows the desktop's: Git is branch +
- * changed files + diff + commit, Files is a lazy directory tree with a
- * line-numbered reader, Browser is the CDP mirror, Projects and Rooms are
- * pickers over sessions.
+ * EMBER CLAY — the workbench tools.
+ * ----------------------------------
+ * Same handlers the desktop calls through `/api/mobile/*`, same structure
+ * (Git: branch + changed files + diff + commit; Files: lazy tree + reader
+ * with git paths intact; Browser: CDP mirror with tap-to-click; Projects and
+ * Rooms as pickers). Kiln grammar throughout: ember-ticked PanelHeaders,
+ * clay tablets, ember radio rings, inline Retry on every failure (a dead end
+ * with no way out is a bug), content-sized skeletons so nothing reflows when
+ * git/file data lands. Where the desktop hovers, these tap.
  *
- * Where the desktop reveals things on hover, these expand on tap — a phone has
- * no hover, and a control that only exists while a cursor is over it does not
- * exist.
- *
- * TWO THINGS EVERY ONE OF THESE GETS RIGHT
- * ----------------------------------------
- * 1. **An inline retry.** A failed fetch here is almost always a dropped
- *    connection, and the previous version rendered the error as a coloured
- *    strip with no way out of it. An error the user cannot act on is a dead
- *    end, so every one of these has a Retry that re-runs the load.
- * 2. **Content-sized loading.** A spinner where a list will go means the
- *    layout jumps twice; these show a skeleton in the shape of the content
- *    whenever the shape is knowable, so nothing reflows when the data lands.
+ * Git/file/path functions are untouched — only the chrome around them is
+ * fired. Branch checkout/create, commit/push, log, worktrees, dir listing,
+ * file reading, serve start/stop, browser goto/click/screenshot, terminal
+ * create/close, scratchpad storage, and trace loading all call the same APIs
+ * with the same payloads.
  */
 
 import * as React from 'react'

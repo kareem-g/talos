@@ -1,16 +1,14 @@
 /**
- * Browser engines — the fleet view.
+ * Browser engines — the kiln fleet view.
  *
- * The desktop `BrowsersPage` lists every session that has a workspace and lets
- * you start or stop its CDP engine. This is the same page against the same
- * handlers, restructured for a list you scan rather than a table you read.
- *
- * The interesting state is not "running" or "stopped" — it is *which workspace
- * is using the engine right now*, because engines are per-workspace and one
- * running engine can be several sessions' worth of browser. So the row leads
- * with the workspace and its URL, and the engine state is a control on the
- * right rather than a label. Tapping the row opens the session; tapping the
- * control toggles the engine. Two targets, two meanings, no ambiguity.
+ * EMBER CLAY
+ * ----------
+ * Same page as the desktop BrowsersPage against the same start/stop handlers,
+ * restructured as scannable kiln rows: workspace + URL lead (an engine is
+ * per-workspace, and one hot engine serves several sessions), engine state as
+ * an ember control on the right. Row opens the session; control toggles the
+ * engine. Two targets, two meanings. The fleet header counts hot engines with
+ * an ember edge when any burn.
  */
 
 import * as React from 'react'
@@ -123,7 +121,7 @@ export function BrowsersScreen() {
         </Card>
       ) : (
         <Section
-          eyebrow="Fleet"
+          eyebrow="Kiln fleet"
           title={`${runningCount} of ${withProject.length} ${withProject.length === 1 ? 'engine' : 'engines'} running`}
           enterIndex={0}
         >

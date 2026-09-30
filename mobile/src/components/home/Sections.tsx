@@ -1,29 +1,12 @@
 /**
- * Home sections — Automations and Skills.
+ * Home sections — Automations and Skills as kiln shelves.
  *
- * Two very different things that happen to sit below the fold on the Deck,
- * kept in one file because they are the two "configuration you keep on a phone"
- * surfaces and they share a shape: a list of named things you can toggle, run
- * and delete.
- *
- * Two honest differences from the desktop, both inherent to porting them:
- *
- *   - **Automations are per-device.** On the desktop the list lives in
- *     `localStorage`; here the same template catalog and the same shape live in
- *     MMKV. Neither side has a scheduler — on both, "Run" spawns a real session
- *     — and the two lists do not sync, because nothing on the daemon stores
- *     them. Saying so is the whole honesty of this section: a "scheduled
- *     automation" that does not schedule anything, presented without that
- *     caveat, is a lie told by omission.
- *   - **Skills are shared**, because they are real: the daemon owns
- *     `.agentdeck/skills/` per project, so toggling one here changes what the
- *     desktop injects into every turn.
- *
- * VISUALLY, both are nested blocks on a card: `rounded-md bg-raised` rows on
- * `bg-surface`, with uppercase eyebrows labelling the groups. An enabled
- * automation is distinguished by a hairline one step stronger, not by a wash
- * of accent — the accent belongs to the toggle dot, which is the actual
- * control.
+ * EMBER CLAY: named things you toggle, run and delete. Automations stay
+ * per-device (same template catalog, same MMKV shape, no daemon scheduler —
+ * Run spawns a real session, stated on the card). Skills stay shared (daemon
+ * `.agentdeck/skills/`, same toggle/install/uninstall/content handlers — a
+ * switch here fires on the desktop too). Lit automations lift onto ember
+ * hairlines with ember dots; the rest is clay.
  */
 
 import * as React from 'react'
@@ -293,9 +276,9 @@ function AutomationRow({
       <View
         className={cn(
           'flex-row items-center gap-2.5 rounded-md border py-2 pl-3 pr-1',
-          // An armed automation gets a hairline one step stronger, not a wash
-          // of accent — the toggle dot carries the state.
-          automation.enabled ? 'border-line-strong bg-raised' : 'border-line bg-transparent',
+          // A lit automation gets an ember hairline — the toggle dot carries
+          // the state, the edge carries the heat.
+          automation.enabled ? 'border-accent-border bg-raised' : 'border-line bg-transparent',
         )}
         style={automation.enabled ? undefined : { opacity: 0.72 }}
       >

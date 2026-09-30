@@ -1,22 +1,10 @@
 /**
- * ConfigChips and the context ring — the session's live configuration.
+ * ConfigChips and the context ring — the session's live kiln dials.
  *
- * The desktop keeps these in the composer's control row on wide screens and
- * moves them into a "Model & permissions" layer on narrow ones. Mobile has
- * only the narrow case, so they live in the composer's dock, scrolling
- * horizontally, where they are one tap from the field you are typing into.
- *
- * Changes go over the socket (`set_config`), the same command surface the
- * desktop uses — the mobile HTTP API has no config PATCH and the daemon routes
- * both WebSocket paths into one handler.
- *
- * DIMENSIONS ARE DATA
- * -------------------
- * The desktop treats a config dimension as data: a new one renders with no code
- * change, because `ConfigOption[]` is what the agent reports. This does too.
- * That is why there is no `ModelChip` and `PermissionChip` and `ThoughtChip`
- * component here, and why adding a new capability to an agent shows up on the
- * phone with no mobile release.
+ * EMBER CLAY: the desktop's composer row / narrow "Model & permissions" layer
+ * as a horizontal kiln-dial row in the dock, one tap from the field.
+ * Socket `set_config` like the desktop; dimensions are data (a new capability
+ * renders with no release). Ember radio rings in the picker; live dials glow.
  */
 
 import * as React from 'react'

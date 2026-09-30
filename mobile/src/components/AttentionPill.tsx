@@ -1,30 +1,9 @@
 /**
- * The attention pill.
+ * The attention pill — the kiln's ember reminder.
  *
- * A persistent, floating reminder that something is blocked on the user, and
- * that disappears the moment it is not.
- *
- * WHY IT IS NOT A BANNER
- * ----------------------
- * The desktop's home page has a "Needs you" pill in its sticky header, and it
- * works there because the header is always on screen and nothing scrolls over
- * it. On a phone the user spends their time *in a session*, and the surfaces
- * that are always on screen during a session are the composer and the status
- * pill — both of which are about the session you are in, not about the other
- * four. So the cross-session reminder has to float, and it has to be the only
- * floating thing.
- *
- * WHY IT IS AT THE TOP
- * -------------------
- * The bottom of the screen belongs to the composer and to the thumb. A pill at
- * the bottom sits 40pt above the send button, which is exactly where a thumb
- * is about to be, and every dismissal is a mis-tap. At the top it is out of
- * the thumb's arc, it does not cover the keyboard, and it is in the same
- * reading position as a notification banner — so it is understood without
- * being taught.
- *
- * It animates because appearing and disappearing should not shift the content
- * under the user's finger by surprise.
+ * EMBER CLAY: floats top-center out of the thumb's arc, ember-bordered warm
+ * chrome over blur, wait dot + count + session name. Derived, not stored (a
+ * session blocks without a pushed action); vanishes the moment nothing burns.
  */
 
 import * as React from 'react'
@@ -127,7 +106,7 @@ export function AttentionPill() {
               overflow: 'hidden',
               borderRadius: radius.pill,
               borderWidth: 1,
-              borderColor: palette.lineStrong,
+              borderColor: palette.accentBorder,
               backgroundColor: `${palette.chrome}E6`,
             }}
           >

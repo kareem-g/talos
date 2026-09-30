@@ -1,29 +1,13 @@
 /**
- * Settings — the hub for everything this device can reach.
+ * Settings — the kiln hub for everything this device can reach.
  *
- * The desktop's Configuration destination is a stack of settings sections, most
- * of which write daemon config the phone has no endpoint for: tunnels, custom
- * provider endpoints, context windows, built-in agent roles. Those are still
- * here, as destinations, so it is obvious where they live rather than looking
- * missing. What this phone *can* own is in full and first: which route it uses
- * to reach the desktop, with manual failover; the notification permission,
- * explained; and unpairing.
- *
- * WHY A HUB AND NOT A FLAT LIST
- * -----------------------------
- * It is one screen, in three clearly different kinds of block, each drawn with
- * the same iOS-settings grammar — a section eyebrow, a grouped `ListCard`,
- * rows on inset hairlines:
- *
- *   - **You own these.** Real controls, on this device, with real state.
- *   - **On the desktop.** Navigation, grouped, with a one-line description of
- *     what each one is for.
- *   - **This device.** Pairing, the device token, and unpair — the last of
- *     them alone at the bottom, because it is irreversible.
- *
- * The three kinds are kept visually distinct by their leading slot, not by
- * different boxes: owned controls carry a status `Dot`, destinations carry an
- * `IconTile` and a `Chevron`, and the danger zone is a lone danger button.
+ * EMBER CLAY
+ * ----------
+ * The desktop's Configuration is a stack of daemon-owned sections; the phone
+ * owns its route, its alerts, and its pairing — those come first as lit
+ * controls. Desktop-owned destinations follow as ember-tiled navigation (a
+ * tile + chevron always means "goes somewhere"), then the device block, then
+ * the lone danger zone at the bottom because it is irreversible.
  */
 
 import * as React from 'react'
@@ -372,7 +356,7 @@ function Destination({
     <ListRow
       title={title}
       subtitle={subtitle}
-      leading={<IconTile icon={icon} tone="muted" size={36} />}
+      leading={<IconTile icon={icon} tone="accent" size={36} />}
       trailing={<Chevron />}
       onPress={() => {
         void haptic('light')

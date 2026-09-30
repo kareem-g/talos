@@ -1,43 +1,28 @@
 /**
  * Session — the conversation with one agent.
  *
- * This is where the app spends most of its time, so the layout is built around
- * one rule: **the transcript gets the screen, and everything else gets out of
- * its way.**
+ * EMBER CLAY REDESIGN — "the hearth"
+ * ----------------------------------
+ * A phone-native cousin of the desktop SessionView, not a copy. The desktop
+ * is a compact remote-control header (back + title + status pill + detail +
+ * project + connection, with pane openers for sessions / controls / workspace)
+ * over a Timeline + StateZone, with the left navigator and right workspace
+ * rail surfacing as side sheets. This screen keeps that skeleton but hearths
+ * it for one thumb:
  *
- * THE HEADER, AND WHAT WAS REMOVED FROM IT
- * ---------------------------------------
- * The previous header carried a back button, a title, a status pill, a search
- * button, two panel toggles, a live config chip row, and a context ring — five
- * horizontal bands before the first message, and three of them were duplicated
- * a few centimetres down the screen.
- *
- * Now the header carries four things: where you are, what state it is in, the
- * one button that opens the session's tools, and the overflow. Everything else
- * has moved somewhere it is reachable but not always in the way:
- *
- *   - **Config chips and the context ring → the composer's dock.** They were
- *     *already* duplicated there on the desktop; on a phone they belong with
- *     the field you are typing into, not in a bar above the transcript.
- *   - **The desktop's right rail → a pushed screen** (`SessionPanelScreen`).
- *     A plan, a diff, a file tree and a terminal do not fit in a 60%-height
- *     sheet at phone width, and cramming them in made them unreadable. Full
- *     screen, with its own tab strip, is the honest translation of a
- *     resizable side panel.
- *   - **The desktop's left sidebar → a sheet.** Switching sessions is a
- *     glance, not a destination; a sheet over the transcript keeps the
- *     conversation you were reading visible behind it.
- *   - **Search → a sheet, from the overflow.** A search field permanently
- *     resident in the header is a control for a screen you are on about 2% of
- *     the time.
- *
- * THE CONTEXT STRIP
- * -----------------
- * One row between the transcript and the composer that answers "what is it
- * doing right now" without opening anything: the plan's progress, the number
- * of subagents, and the elapsed runtime. It is the desktop's `FloatingHud`
- * collapsed to a single line and pinned where a thumb cannot miss it. Tapping
- * it opens the panel on the tab that matches what you tapped.
+ *   - **Two-row header.** Row one: where you are, what state it is in, the
+ *     two panes that matter (sessions left, workspace right) and the overflow.
+ *     Row two: the desktop's detail overflow — project, branch, connection —
+ *     full-width in mono, because at phone width it never fits beside the
+ *     title. The agent hue burns underneath as a 2pt ember line: identity,
+ *     not state.
+ *   - **HUD island.** The desktop's collapsed FloatingHud as a floating pill
+ *     pinned above the composer: plan progress + subagent count, tappable to
+ *     the matching workspace tab. A shortcut, not a readout.
+ *   - **The desktop's left rail → a sheet, the right rail → a pushed screen.**
+ *     Switching sessions is a glance over the transcript; a plan, diff, file
+ *     tree and terminal deserve the whole screen. Same split as the desktop,
+ *     different widths.
  */
 
 import * as React from 'react'
@@ -63,7 +48,7 @@ import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import type { Session } from '@/types/session'
 import { useStore, useConversation } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
-import { agentColor, palette, radius } from '@app/design/tokens'
+import { agentColor, palette, radius, shadowFloating } from '@app/design/tokens'
 import { Transcript } from '@app/components/Transcript'
 import { Composer } from '@app/components/Composer'
 import { NewTaskSheet } from '@app/components/NewTaskSheet'
@@ -73,9 +58,9 @@ import { SessionSwitcherSheet } from '@app/components/SessionLeftRail'
 import { SessionSearchSheet } from '@app/components/CommandPalette'
 import { AttentionPill } from '@app/components/AttentionPill'
 import { ActionSheet, ConfirmDialog } from '@app/components/Sheet'
-import { AppBar, BackButton } from '@app/components/Screen'
+import { BackButton } from '@app/components/Screen'
 import { deriveSubagents, latestPlanInfo } from '@app/lib/sessionView'
-import { ProgressBar, StatusPill, IconButton, toast } from '@app/components/ui'
+import { AgentAvatar, Dot, ProgressBar, StatusPill, IconButton, toast } from '@app/components/ui'
 
 /** A minimal row, for the window between a deep link and the snapshot landing. */
 const PLACEHOLDER_SESSION: Session = {
@@ -192,66 +177,108 @@ export function SessionScreen() {
     }
   }
 
+  const projectLeaf = session?.project?.split('/').filter(Boolean).pop() ?? null
+  const offline = connection !== 'connected'
+
   return (
     <View className="flex-1 bg-canvas">
-      {/* ── Header ────────────────────────────────────────────────────────
-          Four things. Everything else has moved. */}
-      <AppBar
-        title={session?.name ?? 'Session'}
-        subtitle={session?.agent || 'loading…'}
-        borderless
-        left={<BackButton onPress={() => navigation.goBack()} label="Back to the deck" />}
-        right={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingRight: 6 }}>
-            <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
-            <IconButton
-              label="Open session tools"
-              accessibilityHint="Plan, agents, git, files, terminal"
-              size={36}
-              onPress={() => openPanel()}
-            >
-              <PanelRight size={19} color={palette.ink2} />
-            </IconButton>
-            <IconButton
-              label="Session actions"
-              size={36}
-              onPress={() => setMenuOpen(true)}
-            >
-              <MoreHorizontal size={19} color={palette.ink2} />
-            </IconButton>
+      {/* ── Hearth header ───────────────────────────────────────────────
+          The desktop SessionView's compact header, hearth-styled: row one is
+          navigation + identity + state + the two panes; row two is the detail
+          overflow (project · branch · connection) in mono. */}
+      <View style={{ paddingTop: insets.top, backgroundColor: palette.chrome, borderBottomWidth: 1, borderBottomColor: palette.line }}>
+        <View className="min-h-[56px] flex-row items-center gap-1.5 pl-1 pr-2">
+          <BackButton onPress={() => navigation.goBack()} label="Back to the deck" />
+          <AgentAvatar agent={session?.agent ?? ''} name={session?.agent} size={34} />
+          <View className="min-w-0 flex-1 px-1">
+            <Text className="text-[16px] leading-[21px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
+              {session?.name ?? 'Session'}
+            </Text>
+            <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
+              {session?.agent || 'loading…'}
+              {projectLeaf ? ` · ${projectLeaf}` : ''}
+            </Text>
           </View>
-        }
-      />
+          <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
+          <IconButton
+            label="Switch session"
+            accessibilityHint="See what else is running, without leaving this conversation"
+            size={36}
+            onPress={() => setSwitcherOpen(true)}
+          >
+            <Repeat2 size={18} color={palette.ink2} />
+          </IconButton>
+          <IconButton
+            label="Open workspace"
+            accessibilityHint="Plan, agents, git, files, terminal"
+            size={36}
+            onPress={() => openPanel()}
+          >
+            <PanelRight size={19} color={palette.ink2} />
+          </IconButton>
+          <IconButton
+            label="Session actions"
+            size={36}
+            onPress={() => setMenuOpen(true)}
+          >
+            <MoreHorizontal size={19} color={palette.ink2} />
+          </IconButton>
+        </View>
 
-      {/* The agent hue, as a hairline under the bar. It is the only place the
-          app colours by *identity* rather than by state, and it sits exactly
-          where the eye already is. Quieter in v3: a 1.5pt light, not a stripe. */}
-      <View style={{ height: 1.5, backgroundColor: accent, opacity: session ? 0.7 : 0.2 }} />
+        {/* Detail overflow: the desktop's second row, full-width on narrow. */}
+        {session?.branch || projectLeaf || offline || display.hint ? (
+          <View className="flex-row items-center gap-1.5 px-4 pb-2">
+            {session?.branch ? (
+              <Text className="shrink-0 text-[11px] leading-[14px] text-accent" numberOfLines={1}>
+                {session.branch}
+              </Text>
+            ) : null}
+            {projectLeaf && session?.branch ? (
+              <Text className="text-[11px] text-ink-4">·</Text>
+            ) : null}
+            {projectLeaf ? (
+              <Text className="min-w-0 flex-1 text-[11px] leading-[14px] text-ink-3" numberOfLines={1}>
+                {session?.project}
+              </Text>
+            ) : null}
+            {offline ? (
+              <View className="shrink-0 flex-row items-center gap-1">
+                <Dot tone="danger" />
+                <Text className="text-[11px] capitalize text-ink-3">{connection}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* The ember line: identity, not state. */}
+        <View style={{ height: 2, backgroundColor: accent, opacity: session ? 0.85 : 0.2 }} />
+      </View>
 
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
       >
-        <Transcript
-          sessionId={sessionId}
-          messages={conversation.messages}
-          revision={revision}
-          onViewPlan={() => openPanel('plan')}
-        />
+        <View className="flex-1">
+          <Transcript
+            sessionId={sessionId}
+            messages={conversation.messages}
+            revision={revision}
+            onViewPlan={() => openPanel('plan')}
+          />
 
-        {/* ── Context strip ──────────────────────────────────────────────
-            What is it doing *right now*. Tapping a segment opens the panel on
-            the matching tab, so this row is a shortcut rather than a readout
-            you have to interpret and then act on elsewhere. */}
-        <ContextStrip
-          uiState={uiState}
-          planDone={planDone}
-          planTotal={planTotal}
-          subagents={runningSubagents}
-          onPlan={() => openPanel('plan')}
-          onAgents={() => openPanel('agents')}
-        />
+          {/* ── HUD island ────────────────────────────────────────────
+              The desktop's collapsed FloatingHud as a floating pill: what it
+              is doing right now, tappable to the matching workspace tab. */}
+          <HudIsland
+            uiState={uiState}
+            planDone={planDone}
+            planTotal={planTotal}
+            subagents={runningSubagents}
+            onPlan={() => openPanel('plan')}
+            onAgents={() => openPanel('agents')}
+          />
+        </View>
 
         <Composer sessionId={sessionId} uiState={uiState} />
       </KeyboardAvoidingView>
@@ -439,16 +466,14 @@ export function SessionScreen() {
   )
 }
 
-/* ── Context strip ─────────────────────────────────────────────────────────────
- * The desktop's `FloatingHud`, reduced to one line and pinned where a thumb
- * cannot miss it.
- *
- * It is a row of *tappable segments*, not a readout, because every fact it can
- * show has a screen that acts on it: plan progress opens the plan, subagents
- * open the agents tab, and a state that is not "fine" says what to do about it.
- * A status line you cannot act on is a line of decoration. */
+/* ── HUD island ────────────────────────────────────────────────────────────────
+ * The desktop's collapsed FloatingHud as a floating pill pinned above the
+ * composer: plan progress on the left, subagents on the right. Each segment
+ * opens its workspace tab — a shortcut, not a readout. Nothing to say (no
+ * plan, no subagents, Ready) renders nothing: an island with nothing on it is
+ * a bar of padding. */
 
-function ContextStrip({
+function HudIsland({
   uiState,
   planDone,
   planTotal,
@@ -465,78 +490,84 @@ function ContextStrip({
 }) {
   const display = uiStateDisplay(uiState as never)
 
-  // Nothing to say: no plan, no subagents, and a state whose own label is
-  // already in the header. A strip with nothing in it is a bar of padding.
   const hasPlan = planTotal > 0
   const hasSubagents = subagents > 0
   if (!hasPlan && !hasSubagents && display.label === 'Ready') return null
 
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        borderTopWidth: 1,
-        borderTopColor: palette.line,
-        backgroundColor: palette.canvas,
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-      }}
-    >
-      {hasPlan ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Plan, ${planDone} of ${planTotal} steps done`}
-          accessibilityHint="Opens the plan"
-          onPress={onPlan}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 7,
-            flex: 1,
-            minHeight: 26,
-            borderRadius: radius.sm,
-            paddingHorizontal: 7,
-            backgroundColor: pressed ? palette.raised : 'transparent',
-          })}
-        >
-          <ListTree size={13} color={palette.ink3} />
-          <View style={{ flex: 1 }}>
-            <ProgressBar value={planTotal ? planDone / planTotal : 0} tone={planDone === planTotal ? 'ok' : 'accent'} />
-          </View>
-          <Text style={{ color: palette.ink3, fontSize: 10.5, fontVariant: ['tabular-nums'] }}>
-            {planDone}/{planTotal}
+    <View pointerEvents="box-none" style={{ paddingHorizontal: 12, paddingBottom: 8, alignItems: 'center' }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          borderRadius: radius.pill,
+          borderWidth: 1,
+          borderColor: palette.lineStrong,
+          backgroundColor: palette.raised,
+          paddingLeft: 6,
+          paddingRight: 6,
+          paddingVertical: 5,
+          gap: 4,
+          ...shadowFloating,
+        }}
+      >
+        {hasPlan ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Plan, ${planDone} of ${planTotal} steps done`}
+            accessibilityHint="Opens the plan"
+            onPress={onPlan}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              borderRadius: radius.pill,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              backgroundColor: pressed ? palette.hover : 'transparent',
+            })}
+          >
+            <ListTree size={13} color={palette.accent} />
+            <View style={{ width: 64 }}>
+              <ProgressBar value={planTotal ? planDone / planTotal : 0} tone={planDone === planTotal ? 'ok' : 'accent'} />
+            </View>
+            <Text style={{ color: palette.ink2, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+              {planDone}/{planTotal}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {hasPlan && hasSubagents ? (
+          <View style={{ width: 1, height: 16, backgroundColor: palette.lineStrong }} />
+        ) : null}
+
+        {hasSubagents ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${subagents} subagents running`}
+            accessibilityHint="Opens the agents panel"
+            onPress={onAgents}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              borderRadius: radius.pill,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              backgroundColor: pressed ? palette.hover : 'transparent',
+            })}
+          >
+            <Users size={13} color={palette.accent} />
+            <Text style={{ color: palette.accent, fontSize: 11.5, fontWeight: '700' }}>{subagents}</Text>
+          </Pressable>
+        ) : null}
+
+        {!hasPlan && !hasSubagents ? (
+          <Text style={{ color: palette.ink3, fontSize: 12, paddingHorizontal: 10, paddingVertical: 6 }} numberOfLines={1}>
+            {display.hint ?? display.label}
           </Text>
-        </Pressable>
-      ) : null}
-
-      {hasSubagents ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${subagents} subagents running`}
-          accessibilityHint="Opens the agents panel"
-          onPress={onAgents}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 5,
-            minHeight: 26,
-            borderRadius: radius.sm,
-            paddingHorizontal: 8,
-            backgroundColor: pressed ? palette.raised : 'transparent',
-          })}
-        >
-          <Users size={13} color={palette.accent} />
-          <Text style={{ color: palette.accent, fontSize: 11.5, fontWeight: '600' }}>{subagents}</Text>
-        </Pressable>
-      ) : null}
-
-      {hasPlan || hasSubagents ? null : (
-        <Text style={{ flex: 1, color: palette.ink3, fontSize: 12 }} numberOfLines={1}>
-          {display.hint ?? display.label}
-        </Text>
-      )}
+        ) : null}
+      </View>
     </View>
   )
 }

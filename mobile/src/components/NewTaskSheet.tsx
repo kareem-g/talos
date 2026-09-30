@@ -1,28 +1,14 @@
 /**
- * New task — the app's only verb, as a two-step sheet.
+ * New task — the kiln's only verb, as a two-step firing sheet.
  *
- * The desktop opens a three-step layer: provider → project → prompt. Two of
- * those steps are the *same decision* seen twice ("which agent, in which
- * folder"), and on a phone they are one scroll. So this is two steps:
- *
- *   1. **Where** — the workspace. A vertical list of the folders you actually
- *      use, most-used first, with the Inbox at the bottom, plus a way to type a
- *      path the desktop has never seen. Nothing about the agent yet, because
- *      the folder does not change which agents are available.
- *   2. **What and how** — the agent, the first prompt, and the three settings
- *      that matter at creation time (model, thought level, permissions).
- *
- * WHY THE SETTINGS ARE ON THIS SCREEN AND NOT AFTERWARDS
- * ------------------------------------------------------
- * A phone that skips configuration can only ever start a default run, and
- * "default" is the one run you do not want: `permission_mode: ask` on a
- * long task means you spend the run approving files one at a time from a
- * device in your pocket. So the permission mode is right here, defaulted and
- * pre-explained, rather than buried in the session's dock.
- *
- * `model` and `thought` are applied at creation (the daemon takes them with the
- * create call); permission mode is set over the socket once the session exists,
- * which is exactly the order the desktop uses.
+ * EMBER CLAY
+ * ----------
+ * The desktop's provider → project → prompt becomes two kiln steps: Where
+ * (workspace, most-fired first, Inbox last, plus a typed path) and What and
+ * how (agent, first prompt, model/thought/permissions that matter at creation
+ * — permission pre-explained, because `ask` on a long pocket run means
+ * approving files one at a time). Rises as a kiln sheet with detents; same
+ * create/setConfig handlers and ordering as the desktop.
  */
 
 import * as React from 'react'

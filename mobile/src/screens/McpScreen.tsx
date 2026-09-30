@@ -1,17 +1,13 @@
 /**
- * MCP servers — the tools this desktop can call.
+ * MCP servers — the tools this kiln can call.
  *
- * One screen, two jobs that are genuinely different and were previously both
- * crammed into the same card: **listing** what is installed, and **adding**
- * something new. Adding is a form sheet rather than a row of inputs injected
- * into the list, because a form that appears and disappears with the list is a
- * form you cannot scroll away from once you have made a mistake.
- *
- * Removing is two-step and immediate rather than a confirm dialog: the row's
- * quiet danger button swaps to a filled "Confirm remove" and the tap that
- * completes it is the one you have to aim at deliberately. A dialog for
- * deleting one server is heavier than the action deserves, and the two-step
- * row is the pattern iOS itself uses for exactly this case.
+ * EMBER CLAY
+ * ----------
+ * Listing is a kiln shelf of server ingots with ember-tiled icons; adding is
+ * a kiln form sheet rising from the bottom (a form you cannot scroll away from
+ * once mistaken is a trap). Removing stays two-step in the row — quiet danger
+ * first, filled confirm second — the iOS grammar for exactly this case. Same
+ * list/add/remove handlers, same endpoints.
  */
 
 import * as React from 'react'
@@ -155,7 +151,7 @@ export function McpScreen() {
         </View>
       ) : null}
 
-      <Section eyebrow="Installed" title={servers.length > 0 ? `${servers.length} ${servers.length === 1 ? 'server' : 'servers'}` : undefined} enterIndex={0}>
+      <Section eyebrow="Firebox" title={servers.length > 0 ? `${servers.length} ${servers.length === 1 ? 'server' : 'servers'}` : undefined} enterIndex={0}>
         {servers.length === 0 ? (
           <Card>
             <EmptyState
@@ -256,7 +252,7 @@ function ServerRow({
   return (
     <View style={rowEnterStyle(enter)}>
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
-        <IconTile icon={<Server size={16} color={palette.ink2} />} tone="muted" />
+        <IconTile icon={<Server size={16} color={palette.accent} />} tone="accent" />
         <View className="min-w-0 flex-1 gap-0.5">
           <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
             {server.name}

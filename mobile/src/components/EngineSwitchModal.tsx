@@ -1,22 +1,13 @@
 /**
- * Engine switch — move a live session onto a different CLI or model.
+ * Engine switch — move a live session onto a different kiln burner.
  *
- * The desktop's `EngineModelMenu` is a two-level anchored dropdown: pick the
- * provider, then the model, with the model list filtered to what that provider
- * reports. On a phone a dropdown that opens upward over a transcript is a
- * dropdown you cannot read, and a two-level one is worse — so this is a sheet,
- * and it is honest about what the operation does:
- *
- * **Switching is not free.** A digest of the previous turns is handed to the
- * new provider so the conversation survives, which means a new process, a new
- * cost, and a context that is no longer byte-identical to what the old agent
- * saw. Saying so up front is the difference between a switch and a trap, and
- * it is why the current engine is labelled and the confirm button is disabled
- * until you pick something different.
- *
- * The model list is the provider's own. Model ids are opaque — never split on
- * `/`, never lowercased — because some providers namespace ids and the case is
- * part of them.
+ * EMBER CLAY
+ * ----------
+ * The desktop's EngineModelMenu as a kiln sheet: pick provider, then its own
+ * model list (ids opaque — never split, never lowercased). Honest that
+ * switching is not free: a digest survives, a new process and cost begin, and
+ * context is no longer byte-identical. Confirm stays disabled until something
+ * different is picked. Same switch handler.
  */
 
 import * as React from 'react'

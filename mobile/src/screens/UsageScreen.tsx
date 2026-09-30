@@ -1,17 +1,13 @@
 /**
- * Usage — the full token and cost breakdown.
+ * Usage — the full token and cost ledger.
  *
- * The desktop `UsagePage` has no usage endpoint to call: it walks the stored
- * conversations' `usage` parts (ACP `usage_update`, Grok headless `usage`) and
- * totals them per session. This is the same scan and the same formatting, so
- * the numbers agree with the browser for the same sessions.
- *
- * The Activity tab already carries the totals and a cost-sorted list, which is
- * the *answer*. This screen is the *evidence*: every session, whether or not it
- * reported anything, with the difference made explicit rather than shown as a
- * confident zero. A session at `—` means the CLI did not report usage, which
- * is a different fact from a session that cost nothing, and conflating the two
- * is how a fleet looks cheaper than it is.
+ * EMBER CLAY
+ * ----------
+ * The desktop UsagePage walks stored conversations' `usage` parts and totals
+ * per session — same scan, same formatting, so numbers agree. Activity carries
+ * the answer; this screen is the evidence: every session on a lit totals slab
+ * with an ember edge, whether or not it reported, with unreported sessions at
+ * `—` (the CLI did not report, which is not the same as free).
  */
 
 import * as React from 'react'
@@ -124,8 +120,10 @@ export function UsageScreen() {
       contentClassName="px-4 pb-12 gap-5"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back" />}
     >
-      <Section eyebrow="Fleet" enterIndex={0}>
-        <Card>
+      <Section eyebrow="Kiln ledger" enterIndex={0}>
+        <Card className="overflow-hidden">
+          {/* Ember edge: cost is the hottest fact on the page. */}
+          <View style={{ height: 3, backgroundColor: palette.accent, opacity: 0.9 }} />
           {/* The header carries the reporting count rather than the footer: it
               changes how the three numbers below should be read, and a caveat
               under a number has to be read second. */}

@@ -1334,26 +1334,26 @@ export function FieldRow({ label, value }: { label: string; value: string }) {
 /* ── Brand ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * The four-square mark, v3. A soft-cornered 2×2 with one receding quadrant —
- * "a deck of surfaces". Doubles as the app icon's geometry.
+ * The kiln mark. Three fired slabs stacked with the ember on top — heat
+ * rises. Doubles as the app icon's geometry.
  */
 export function BrandMark({ size = 24, color = palette.accent }: { size?: number; color?: string }) {
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ width: size, height: size, flexDirection: 'row', flexWrap: 'wrap', gap: size * 0.14 }}
+      style={{ width: size, height: size, justifyContent: 'center', gap: size * 0.12 }}
     >
-      {[0, 1, 2, 3].map((index) => (
+      {[1, 0.62, 0.34].map((opacity, index) => (
         <View
           key={index}
           style={{
-            width: size * 0.43,
-            height: size * 0.43,
-            borderRadius: size * 0.155,
+            width: index === 0 ? size : size * (0.78 - index * 0.1),
+            height: size * 0.2,
+            borderRadius: size * 0.1,
             backgroundColor: color,
-            // The fourth square recedes: the mark reads as one object, not four.
-            opacity: index === 3 ? 0.35 : 1,
+            opacity,
+            alignSelf: index === 0 ? 'stretch' : 'center',
           }}
         />
       ))}
