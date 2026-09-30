@@ -7,11 +7,11 @@
  * into the list, because a form that appears and disappears with the list is a
  * form you cannot scroll away from once you have made a mistake.
  *
- * Removing is two-step and immediate rather than a confirm dialog: the row
- * swaps to "Confirm" and the tap that completes it is the one you have to aim
- * at deliberately. A dialog for deleting one server is heavier than the action
- * deserves, and the two-step row is the pattern iOS itself uses for exactly
- * this case.
+ * Removing is two-step and immediate rather than a confirm dialog: the row's
+ * quiet danger button swaps to a filled "Confirm remove" and the tap that
+ * completes it is the one you have to aim at deliberately. A dialog for
+ * deleting one server is heavier than the action deserves, and the two-step
+ * row is the pattern iOS itself uses for exactly this case.
  */
 
 import * as React from 'react'
@@ -22,17 +22,18 @@ import { Plus, Server } from 'lucide-react-native'
 
 import { mcpApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius } from '@app/design/tokens'
-import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { palette } from '@app/design/tokens'
+import { BackButton, Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import { FormSheet } from '@app/components/Sheet'
 import {
   Badge,
   Button,
-  Card,
-  Divider,
   EmptyState,
+  ErrorState,
   Field,
+  IconTile,
+  Mono,
   haptic,
   toast,
 } from '@app/components/ui'
@@ -128,7 +129,7 @@ export function McpScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       scroll
-      contentClassName="px-4 pb-12 gap-5"
+      contentClassName="pb-12 gap-6"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
       headerRight={
         // A `primary` Button rather than a hand-rolled pill: the accent fill,
@@ -149,20 +150,8 @@ export function McpScreen() {
       }
     >
       {error ? (
-        <View
-          accessible
-          accessibilityRole="alert"
-          style={{
-            gap: 9,
-            borderRadius: radius.md,
-            borderWidth: 1,
-            borderColor: palette.dangerBorder,
-            backgroundColor: palette.dangerSoft,
-            padding: 14,
-          }}
-        >
-          <Text className="text-[13.5px] font-semibold text-ink">{error}</Text>
-          <Button size="sm" variant="secondary" label="Retry" onPress={() => void load()} />
+        <View className="mx-4">
+          <ErrorState message={error} onRetry={() => void load()} retryLabel="Retry" />
         </View>
       ) : null}
 
@@ -185,7 +174,7 @@ export function McpScreen() {
             />
           </Card>
         ) : (
-          <Card>
+          <ListCard inset={64}>
             {servers.map((server, index) => (
               <ServerRow
                 key={server.name}
@@ -200,7 +189,7 @@ export function McpScreen() {
                 onConfirmRemove={() => void removeServer(server.name)}
               />
             ))}
-          </Card>
+          </ListCard>
         )}
       </Section>
 
@@ -243,7 +232,9 @@ export function McpScreen() {
  * One server row.
  *
  * Its own component so the entry animation's value is created by a hook on a
- * stable component rather than inside a `.map` callback.
+ * stable component rather than inside a `.map` callback. Removing is the
+ * two-step destructive grammar: a ghost button in the danger colour first, a
+ * filled danger-soft confirm second — the escalation itself is the warning.
  */
 function ServerRow({
   server,
@@ -260,38 +251,24 @@ function ServerRow({
   onRemove: () => void
   onConfirmRemove: () => void
 }) {
-  const enter = useEnter(staggerDelay(index), false)
+  const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
+  const active = server.enabled !== false
   return (
     <View style={rowEnterStyle(enter)}>
-      {index > 0 ? <Divider inset={60} /> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-        <View
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: radius.sm,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: palette.accentSoft,
-          }}
-        >
-          <Server size={16} color={palette.accent} />
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+      <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
+        <IconTile icon={<Server size={16} color={palette.ink2} />} tone="muted" />
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
             {server.name}
           </Text>
           {server.command ? (
-            <Text
-              style={{ color: palette.ink3, fontSize: 11.5, fontFamily: 'Menlo', marginTop: 1 }}
-              numberOfLines={1}
-            >
+            <Mono className="text-[11.5px] leading-[15px]" numberOfLines={1}>
               {server.command}
-            </Text>
+            </Mono>
           ) : null}
         </View>
-        <Badge tone={server.enabled !== false ? 'ok' : 'muted'} outline>
-          {server.enabled !== false ? 'active' : 'disabled'}
+        <Badge tone={active ? 'ok' : 'muted'} outline>
+          {active ? 'active' : 'disabled'}
         </Badge>
         {confirming ? (
           <Pressable
@@ -299,18 +276,12 @@ function ServerRow({
             accessibilityLabel={`Confirm removing ${server.name}`}
             disabled={busy}
             onPress={onConfirmRemove}
-            style={({ pressed }) => ({
-              minHeight: 34,
-              justifyContent: 'center',
-              borderRadius: radius.sm,
-              borderWidth: 1,
-              borderColor: palette.dangerBorder,
-              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
-              paddingHorizontal: 11,
-            })}
+            hitSlop={8}
+            className="min-h-9 flex-row items-center justify-center rounded-sm border px-3 active:opacity-70"
+            style={{ borderColor: palette.dangerBorder, backgroundColor: palette.dangerSoft, opacity: busy ? 0.5 : 1 }}
           >
-            <Text style={{ color: palette.danger, fontSize: 12, fontWeight: '700' }}>
-              {busy ? '…' : 'Remove'}
+            <Text className="text-[12px] leading-[16px] font-bold text-danger">
+              {busy ? 'Removing…' : 'Confirm remove'}
             </Text>
           </Pressable>
         ) : (
@@ -319,16 +290,9 @@ function ServerRow({
             accessibilityLabel={`Remove ${server.name}`}
             onPress={onRemove}
             hitSlop={8}
-            style={({ pressed }) => ({
-              width: 34,
-              height: 34,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radius.pill,
-              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
-            })}
+            className="min-h-9 flex-row items-center justify-center rounded-sm border border-line px-3 active:bg-raised"
           >
-            <Text style={{ color: palette.ink3, fontSize: 17 }}>×</Text>
+            <Text className="text-[12px] leading-[16px] font-semibold text-danger">Remove</Text>
           </Pressable>
         )}
       </View>

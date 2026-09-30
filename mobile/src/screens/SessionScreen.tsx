@@ -75,7 +75,7 @@ import { AttentionPill } from '@app/components/AttentionPill'
 import { ActionSheet, ConfirmDialog } from '@app/components/Sheet'
 import { AppBar, BackButton } from '@app/components/Screen'
 import { deriveSubagents, latestPlanInfo } from '@app/lib/sessionView'
-import { ProgressBar, StatusPill, haptic, toast } from '@app/components/ui'
+import { ProgressBar, StatusPill, IconButton, toast } from '@app/components/ui'
 
 /** A minimal row, for the window between a deep link and the snapshot landing. */
 const PLACEHOLDER_SESSION: Session = {
@@ -204,39 +204,29 @@ export function SessionScreen() {
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingRight: 6 }}>
             <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open session tools"
+            <IconButton
+              label="Open session tools"
               accessibilityHint="Plan, agents, git, files, terminal"
-              onPress={() => {
-                void haptic('light')
-                openPanel()
-              }}
-              hitSlop={10}
-              className="size-10 items-center justify-center rounded-pill active:bg-raised"
+              size={36}
+              onPress={() => openPanel()}
             >
               <PanelRight size={19} color={palette.ink2} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Session actions"
-              onPress={() => {
-                void haptic('light')
-                setMenuOpen(true)
-              }}
-              hitSlop={10}
-              className="size-10 items-center justify-center rounded-pill active:bg-raised"
+            </IconButton>
+            <IconButton
+              label="Session actions"
+              size={36}
+              onPress={() => setMenuOpen(true)}
             >
               <MoreHorizontal size={19} color={palette.ink2} />
-            </Pressable>
+            </IconButton>
           </View>
         }
       />
 
       {/* The agent hue, as a hairline under the bar. It is the only place the
           app colours by *identity* rather than by state, and it sits exactly
-          where the eye already is. */}
-      <View style={{ height: 2, backgroundColor: accent, opacity: session ? 0.9 : 0.2 }} />
+          where the eye already is. Quieter in v3: a 1.5pt light, not a stripe. */}
+      <View style={{ height: 1.5, backgroundColor: accent, opacity: session ? 0.7 : 0.2 }} />
 
       <KeyboardAvoidingView
         className="flex-1"
@@ -489,7 +479,7 @@ function ContextStrip({
         gap: 8,
         borderTopWidth: 1,
         borderTopColor: palette.line,
-        backgroundColor: palette.chrome,
+        backgroundColor: palette.canvas,
         paddingHorizontal: 12,
         paddingVertical: 7,
       }}

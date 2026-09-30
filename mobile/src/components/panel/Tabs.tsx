@@ -25,15 +25,7 @@
  */
 
 import * as React from 'react'
-import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
 import {
   ChevronRight,
   FileText,
@@ -43,7 +35,7 @@ import {
   Layers,
   Play,
   Plus,
-  RefreshCw,
+  RotateCw,
   Square,
   Terminal as TerminalIcon,
   Trash2,
@@ -51,7 +43,7 @@ import {
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 
-import { basename, relativeTime } from '@/lib/format'
+import { basename, cn, relativeTime } from '@/lib/format'
 import type { Session } from '@/types/session'
 import type { RootStackParamList } from '@app/navigation'
 import {
@@ -66,15 +58,20 @@ import {
 } from '@app/lib/api'
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
-import { palette, radius } from '@app/design/tokens'
+import { palette } from '@app/design/tokens'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
   Button,
+  Card,
+  Divider,
   EmptyState,
   ErrorState,
   Eyebrow,
+  Field,
+  IconButton,
   Mono,
+  RowSkeleton,
   ToggleRow,
   Well,
   toast,
@@ -86,22 +83,9 @@ import { PanelHeader } from '@app/screens/SessionPanelScreen'
 
 function RefreshButton({ onPress, busy }: { onPress: () => void; busy?: boolean }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Refresh"
-      onPress={onPress}
-      hitSlop={10}
-      style={({ pressed }) => ({
-        width: 30,
-        height: 30,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radius.pill,
-        backgroundColor: pressed ? palette.raised : 'transparent',
-      })}
-    >
-      <RefreshCw size={15} color={busy ? palette.accent : palette.ink3} />
-    </Pressable>
+    <IconButton label="Refresh" size={30} onPress={onPress}>
+      <RotateCw size={15} color={busy ? palette.accent : palette.ink3} />
+    </IconButton>
   )
 }
 
@@ -111,8 +95,8 @@ function RefreshButton({ onPress, busy }: { onPress: () => void; busy?: boolean 
  * block with its own loading and error, so a slow log does not block a fast
  * file list.
  *
- * Branch creation and checkout live in a picker rather than an inline
- * dropdown, because a dropdown that opens over a diff on a phone is a dropdown
+ * Branch creation and checkout live in an inline expansion rather than an
+ * overlay, because a dropdown that opens over a diff on a phone is a dropdown
  * you cannot read. */
 
 export function GitTab({ session }: { session: Session }) {
@@ -274,7 +258,7 @@ export function GitTab({ session }: { session: Session }) {
   }
 
   return (
-    <View style={{ gap: 16 }}>
+    <View className="gap-4">
       <PanelHeader
         eyebrow={`git · ${basename(project)}`}
         right={<RefreshButton onPress={() => void load()} busy={loading} />}
@@ -283,28 +267,18 @@ export function GitTab({ session }: { session: Session }) {
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
 
       {/* ── Branch ──────────────────────────────────────────────────── */}
-      <View style={{ gap: 8 }}>
+      <View className="gap-2">
         {loading && !git ? (
-          <ActivityIndicator color={palette.accent} />
+          <RowSkeleton />
         ) : git ? (
           <>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Branch ${git.current ?? 'detached'}. Tap to switch.`}
+              accessibilityState={{ selected: branchOpen }}
               onPress={() => setBranchOpen((value) => !value)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 9,
-                alignSelf: 'flex-start',
-                borderRadius: radius.pill,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: pressed ? palette.raised : palette.well,
-                paddingLeft: 11,
-                paddingRight: 9,
-                paddingVertical: 8,
-              })}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              className="h-9 flex-row items-center gap-2 self-start rounded-pill border border-line-strong bg-raised px-3.5 active:bg-hover"
             >
               <GitBranch size={14} color={palette.accent} />
               <Mono className="text-[12.5px] font-semibold text-ink">
@@ -317,13 +291,19 @@ export function GitTab({ session }: { session: Session }) {
               />
             </Pressable>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Mono className="text-[11.5px] text-ink-3">{git.branches.length} branches</Mono>
-              <Mono className="text-[11.5px] text-diff-add">+{git.added}</Mono>
-              <Mono className="text-[11.5px] text-diff-del">−{git.removed}</Mono>
+            <View className="flex-row items-center gap-2.5">
+              <Mono className="text-[11.5px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+                {git.branches.length} branches
+              </Mono>
+              <Mono className="text-[11.5px] text-ok" style={{ fontVariant: ['tabular-nums'] }}>
+                +{git.added}
+              </Mono>
+              <Mono className="text-[11.5px] text-danger" style={{ fontVariant: ['tabular-nums'] }}>
+                −{git.removed}
+              </Mono>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <View className="flex-row flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="secondary"
@@ -341,19 +321,10 @@ export function GitTab({ session }: { session: Session }) {
             </View>
 
             {branchOpen ? (
-              <View
-                style={{
-                  gap: 8,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: palette.line,
-                  backgroundColor: palette.well,
-                  padding: 12,
-                }}
-              >
+              <Card className="gap-3 p-4">
                 <Eyebrow>Switch branch</Eyebrow>
                 <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
-                  <View style={{ gap: 2 }}>
+                  <View className="gap-0.5">
                     {git.branches.map((branch) => {
                       const isCurrent = branch.name === git.current
                       return (
@@ -364,27 +335,21 @@ export function GitTab({ session }: { session: Session }) {
                           accessibilityState={{ selected: isCurrent }}
                           disabled={branchBusy}
                           onPress={() => void checkoutBranch(branch.name)}
+                          className="min-h-10 flex-row items-center gap-2.5 rounded-sm px-2"
                           style={({ pressed }) => ({
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 9,
-                            minHeight: 40,
-                            borderRadius: radius.sm,
-                            paddingHorizontal: 8,
-                            backgroundColor: isCurrent ? palette.accentSoft : pressed ? palette.raised : 'transparent',
+                            backgroundColor: isCurrent
+                              ? palette.accentSoft
+                              : pressed
+                                ? palette.raised
+                                : 'transparent',
                           })}
                         >
                           <View
-                            style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: 3,
-                              backgroundColor: isCurrent ? palette.accent : palette.ink4,
-                            }}
+                            className="size-1.5 rounded-full"
+                            style={{ backgroundColor: isCurrent ? palette.accent : palette.ink4 }}
                           />
                           <Mono
-                            className="flex-1 text-[12.5px]"
-                            style={{ color: isCurrent ? palette.ink : palette.ink2 }}
+                            className={cn('flex-1 text-[12.5px]', isCurrent ? 'text-ink' : 'text-ink-2')}
                             numberOfLines={1}
                           >
                             {branch.name}
@@ -395,60 +360,42 @@ export function GitTab({ session }: { session: Session }) {
                   </View>
                 </ScrollView>
 
-                <View style={{ height: 1, backgroundColor: palette.line }} />
+                <Divider />
                 <Eyebrow>New branch</Eyebrow>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TextInput
+                <View className="flex-row items-center gap-2">
+                  <Field
+                    containerClassName="flex-1"
+                    mono
                     value={newBranch}
                     onChangeText={setNewBranch}
                     placeholder="branch-name"
-                    placeholderTextColor={palette.ink4}
                     accessibilityLabel="New branch name"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    className="min-h-11 flex-1 rounded-md border border-line bg-field px-3 text-[13px] text-ink"
-                    style={{ fontFamily: 'Menlo' }}
                   />
                   <Button
-                    size="sm"
+                    size="md"
                     variant="secondary"
                     label={branchBusy ? '…' : 'Create'}
                     disabled={branchBusy || !newBranch.trim()}
                     onPress={() => void createBranch()}
                   />
                 </View>
-              </View>
+              </Card>
             ) : null}
 
             {logOpen ? (
-              <View
-                style={{
-                  gap: 8,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: palette.line,
-                  backgroundColor: palette.well,
-                  padding: 12,
-                }}
-              >
+              <Card className="gap-2.5 p-4">
                 <Eyebrow>Recent commits</Eyebrow>
                 {logLoading ? (
-                  <ActivityIndicator color={palette.accent} />
+                  <RowSkeleton />
                 ) : commits.length === 0 ? (
-                  <Text className="text-[13px] text-ink-3">No commits found.</Text>
+                  <Text className="text-[13px] leading-[18px] text-ink-3">No commits found.</Text>
                 ) : (
-                  <View style={{ gap: 2 }}>
+                  <View className="gap-1">
                     {commits.map((commitRow) => (
-                      <View
-                        key={commitRow.sha}
-                        style={{
-                          gap: 2,
-                          borderRadius: radius.sm,
-                          paddingHorizontal: 8,
-                          paddingVertical: 7,
-                        }}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View key={commitRow.sha} className="gap-0.5 rounded-sm px-2 py-1.5">
+                        <View className="flex-row items-center gap-2">
                           <Mono className="text-[11px] font-semibold text-accent">
                             {commitRow.sha.slice(0, 7)}
                           </Mono>
@@ -466,28 +413,19 @@ export function GitTab({ session }: { session: Session }) {
                     ))}
                   </View>
                 )}
-              </View>
+              </Card>
             ) : null}
 
             {worktreesOpen ? (
-              <View
-                style={{
-                  gap: 8,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: palette.line,
-                  backgroundColor: palette.well,
-                  padding: 12,
-                }}
-              >
+              <Card className="gap-2.5 p-4">
                 <Eyebrow>Worktrees</Eyebrow>
                 {worktrees.length === 0 ? (
-                  <Text className="text-[13px] text-ink-3">No additional worktrees.</Text>
+                  <Text className="text-[13px] leading-[18px] text-ink-3">No additional worktrees.</Text>
                 ) : (
                   worktrees.map((worktree) => (
-                    <View key={worktree.path} style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View key={worktree.path} className="flex-row items-center gap-2.5">
                       <Layers size={13} color={palette.ink3} />
-                      <Mono className="flex-1 text-[12px] text-ink" numberOfLines={1}>
+                      <Mono className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
                         {worktree.path}
                       </Mono>
                       {worktree.branch ? (
@@ -498,31 +436,30 @@ export function GitTab({ session }: { session: Session }) {
                     </View>
                   ))
                 )}
-              </View>
+              </Card>
             ) : null}
           </>
         ) : null}
       </View>
 
       {/* ── Changed files ───────────────────────────────────────────── */}
-      <View style={{ gap: 8 }}>
+      <View className="gap-2">
         <Eyebrow>
           {files.length} changed {files.length === 1 ? 'file' : 'files'}
         </Eyebrow>
         {files.length === 0 ? (
           <View
+            className="rounded-md p-3.5"
             style={{
-              borderRadius: radius.md,
               borderWidth: 1,
               borderStyle: 'dashed',
               borderColor: palette.line,
-              padding: 14,
             }}
           >
-            <Text className="text-[13.5px] text-ink-3">Working tree clean.</Text>
+            <Text className="text-[13.5px] leading-[19px] text-ink-3">Working tree clean.</Text>
           </View>
         ) : (
-          <View style={{ gap: 6 }}>
+          <View className="gap-1.5">
             {files.map((file, index) => (
               <FileDiffRow
                 key={file.path}
@@ -539,17 +476,15 @@ export function GitTab({ session }: { session: Session }) {
 
       {/* ── Commit ──────────────────────────────────────────────────── */}
       {files.length > 0 ? (
-        <View style={{ gap: 8 }}>
-          <View style={{ height: 1, backgroundColor: palette.line }} />
+        <Card className="gap-3 p-4">
           <Eyebrow>Commit</Eyebrow>
-          <TextInput
+          <Field
             value={message}
             onChangeText={setMessage}
             placeholder="Describe what changed…"
-            placeholderTextColor={palette.ink4}
             accessibilityLabel="Commit message"
             multiline
-            className="min-h-[72px] rounded-md border border-line bg-field px-3.5 py-3 text-[14px] leading-[20px] text-ink"
+            style={{ minHeight: 72, textAlignVertical: 'top' }}
           />
           <ToggleRow label="Push after committing" value={push} onChange={setPush} />
           <Button
@@ -558,12 +493,8 @@ export function GitTab({ session }: { session: Session }) {
             disabled={busy || message.trim().length === 0}
             onPress={() => void commit()}
           />
-          {note ? (
-            <Text className="text-[12.5px]" style={{ color: palette.ok }}>
-              {note}
-            </Text>
-          ) : null}
-        </View>
+          {note ? <Text className="text-[12.5px] leading-[17px] text-ok">{note}</Text> : null}
+        </Card>
       ) : null}
     </View>
   )
@@ -586,13 +517,8 @@ function FileDiffRow({
   return (
     <View style={rowEnterStyle(enter)}>
       <View
-        style={{
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: open ? palette.accentBorder : palette.line,
-          backgroundColor: palette.surface,
-          overflow: 'hidden',
-        }}
+        className="overflow-hidden rounded-md border bg-surface"
+        style={{ borderColor: open ? palette.accentBorder : palette.line }}
       >
         <Pressable
           accessibilityRole="button"
@@ -600,14 +526,7 @@ function FileDiffRow({
           accessibilityHint={open ? 'Hides the diff' : 'Shows the diff'}
           accessibilityState={{ expanded: open }}
           onPress={onPress}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 9,
-            minHeight: 44,
-            paddingHorizontal: 12,
-            backgroundColor: pressed ? palette.raised : 'transparent',
-          })}
+          className="min-h-12 flex-row items-center gap-2.5 px-3.5 active:bg-raised"
         >
           {file.status ? (
             <Text
@@ -634,7 +553,7 @@ function FileDiffRow({
           diff ? (
             <DiffCard path={file.path} diff={diff} status={file.status} />
           ) : (
-            <Text className="px-3 py-3 text-[12.5px] text-ink-3">No diff for this file.</Text>
+            <Text className="px-3.5 py-3 text-[12.5px] leading-[17px] text-ink-3">No diff for this file.</Text>
           )
         ) : null}
       </View>
@@ -695,44 +614,44 @@ export function FilesTab({ session }: { session: Session }) {
   if (openFile) {
     const lines = openFile.contents.split('\n')
     return (
-      <View style={{ gap: 10 }}>
+      <View className="gap-2.5">
         <PanelHeader
           eyebrow="File"
           right={
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to the file list"
+            <Button
+              size="sm"
+              variant="ghost"
+              label="Back to list"
               onPress={() => setOpenFile(null)}
-              hitSlop={10}
-            >
-              <Text className="text-[12.5px] font-semibold text-accent">Back to list</Text>
-            </Pressable>
+            />
           }
         />
         <Mono className="text-[12px] text-ink-2" numberOfLines={1}>
           {openFile.path}
         </Mono>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <ScrollView style={{ maxHeight: 460 }} nestedScrollEnabled>
-            <View style={{ flexDirection: 'row', padding: 10, borderRadius: radius.md, backgroundColor: palette.code }}>
-              <Mono
-                className="pr-3 text-right text-[10.5px] leading-[16px] text-ink-4"
-                numberOfLines={lines.length}
-              >
-                {lines.map((_, index) => String(index + 1)).join('\n')}
-              </Mono>
-              <Mono className="text-[12px] leading-[16px] text-code-ink" numberOfLines={lines.length}>
-                {openFile.contents}
-              </Mono>
-            </View>
+        <Well className="overflow-hidden rounded-lg border border-line">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 460 }} nestedScrollEnabled>
+              <View className="flex-row p-2.5">
+                <Mono
+                  className="pr-3 text-right text-[11px] leading-[18px] text-code-dim"
+                  numberOfLines={lines.length}
+                >
+                  {lines.map((_, index) => String(index + 1)).join('\n')}
+                </Mono>
+                <Mono className="text-[12.5px] leading-[18px] text-code-ink" numberOfLines={lines.length}>
+                  {openFile.contents}
+                </Mono>
+              </View>
+            </ScrollView>
           </ScrollView>
-        </ScrollView>
+        </Well>
       </View>
     )
   }
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader
         eyebrow={`Files · ${basename(listing?.path ?? project ?? 'workspace')}`}
         right={<RefreshButton onPress={() => void load()} busy={loading} />}
@@ -741,35 +660,33 @@ export function FilesTab({ session }: { session: Session }) {
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
 
       {listing ? (
-        <View style={{ gap: 1 }}>
+        <Card className="overflow-hidden">
           {listing.parent ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Go up one directory"
-              onPress={() => void load(listing.parent)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-                minHeight: 44,
-                borderRadius: radius.sm,
-                paddingHorizontal: 10,
-                backgroundColor: pressed ? palette.raised : 'transparent',
-              })}
-            >
-              <Folder size={15} color={palette.ink3} />
-              <Mono className="text-[13px] text-ink-2">..</Mono>
-            </Pressable>
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Go up one directory"
+                onPress={() => void load(listing.parent)}
+                className="min-h-12 flex-row items-center gap-2.5 px-4 active:bg-raised"
+              >
+                <Folder size={15} color={palette.ink3} />
+                <Mono className="text-[13px] text-ink-2">..</Mono>
+              </Pressable>
+              <Divider />
+            </>
           ) : null}
           {listing.entries.map((entry, index) => (
-            <DirRow key={entry.path} entry={entry} index={index} onPress={() => (entry.dir ? void load(entry.path) : void readFile(entry))} />
+            <React.Fragment key={entry.path}>
+              {index > 0 ? <Divider /> : null}
+              <DirRow entry={entry} index={index} onPress={() => (entry.dir ? void load(entry.path) : void readFile(entry))} />
+            </React.Fragment>
           ))}
           {listing.entries.length === 0 ? (
-            <Text className="px-2 py-4 text-[13.5px] text-ink-3">This directory is empty.</Text>
+            <Text className="px-4 py-4 text-[13.5px] leading-[19px] text-ink-3">This directory is empty.</Text>
           ) : null}
-        </View>
+        </Card>
       ) : loading ? (
-        <ActivityIndicator color={palette.accent} />
+        <RowSkeleton />
       ) : null}
     </View>
   )
@@ -792,15 +709,7 @@ function DirRow({
         accessibilityLabel={entry.name}
         accessibilityHint={entry.dir ? 'Opens this folder' : 'Opens this file'}
         onPress={onPress}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          minHeight: 44,
-          borderRadius: radius.sm,
-          paddingHorizontal: 10,
-          backgroundColor: pressed ? palette.raised : 'transparent',
-        })}
+        className="min-h-12 flex-row items-center gap-2.5 px-4 active:bg-raised"
       >
         {entry.dir ? <Folder size={15} color={palette.ink3} /> : <FileText size={15} color={palette.ink3} />}
         <Mono className="min-w-0 flex-1 text-[13px] text-ink-2" numberOfLines={1}>
@@ -963,7 +872,7 @@ export function BrowserTab({ session }: { session: Session }) {
   const running = Boolean(state?.ok)
 
   return (
-    <View style={{ gap: 16 }}>
+    <View className="gap-4">
       <PanelHeader
         eyebrow="Browser"
         right={<Badge tone={running ? 'ok' : 'muted'} outline>{running ? 'live' : 'stopped'}</Badge>}
@@ -972,37 +881,16 @@ export function BrowserTab({ session }: { session: Session }) {
       {error ? <ErrorState message={error} onRetry={() => void refreshState()} /> : null}
 
       {project ? (
-        <View style={{ gap: 9 }}>
+        <View className="gap-2.5">
           <Eyebrow>Workspace app server</Eyebrow>
-          {serveError ? (
-            <View
-              style={{
-                borderRadius: radius.sm,
-                borderWidth: 1,
-                borderColor: palette.dangerBorder,
-                backgroundColor: palette.dangerSoft,
-                padding: 10,
-              }}
-            >
-              <Text className="text-[12.5px] leading-[17px] text-danger">{serveError}</Text>
-            </View>
-          ) : null}
+          {serveError ? <ErrorState message={serveError} className="mt-1" /> : null}
 
           {serveStatus?.running ? (
-            <View
-              style={{
-                gap: 9,
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: palette.well,
-                padding: 12,
-              }}
-            >
+            <Card className="gap-2.5 p-4">
               <Mono className="text-[13px] font-semibold text-ink">
                 http://127.0.0.1:{serveStatus.port}
               </Mono>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View className="flex-row gap-2">
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1021,22 +909,13 @@ export function BrowserTab({ session }: { session: Session }) {
                   onPress={() => void serveStop()}
                 />
               </View>
-            </View>
+            </Card>
           ) : (
-            <View
-              style={{
-                gap: 9,
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: palette.well,
-                padding: 12,
-              }}
-            >
+            <Card className="gap-2.5 p-4">
               <Text className="text-[12.5px] leading-[17px] text-ink-3">
                 Start a local dev server to preview this workspace in the agent's browser.
               </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <View className="flex-row flex-wrap gap-1.5">
                 {SERVE_PRESETS.map((preset) => {
                   const active = serveCommand === preset.command
                   return (
@@ -1046,19 +925,16 @@ export function BrowserTab({ session }: { session: Session }) {
                       accessibilityLabel={preset.label}
                       accessibilityState={{ selected: active }}
                       onPress={() => setServeCommand(preset.command)}
-                      style={({ pressed }) => ({
-                        minHeight: 34,
-                        justifyContent: 'center',
-                        borderRadius: radius.sm,
-                        borderWidth: 1,
-                        borderColor: active ? palette.accent : palette.line,
-                        backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : 'transparent',
-                        paddingHorizontal: 11,
-                      })}
+                      className="h-9 justify-center rounded-pill border px-3.5 active:bg-raised"
+                      style={{
+                        borderColor: active ? palette.accentBorder : palette.line,
+                        backgroundColor: active ? palette.accentSoft : 'transparent',
+                      }}
                     >
                       <Text
                         style={{
                           fontSize: 12,
+                          lineHeight: 15,
                           fontWeight: active ? '700' : '500',
                           color: active ? palette.accent : palette.ink2,
                         }}
@@ -1069,16 +945,14 @@ export function BrowserTab({ session }: { session: Session }) {
                   )
                 })}
               </View>
-              <TextInput
+              <Field
+                mono
                 value={serveCommand}
                 onChangeText={setServeCommand}
                 placeholder="Command (blank serves static files)"
-                placeholderTextColor={palette.ink4}
                 accessibilityLabel="App server command"
                 autoCapitalize="none"
                 autoCorrect={false}
-                className="min-h-11 rounded-md border border-line bg-field px-3 text-[12px] text-ink"
-                style={{ fontFamily: 'Menlo' }}
               />
               <Button
                 size="sm"
@@ -1088,13 +962,13 @@ export function BrowserTab({ session }: { session: Session }) {
                 disabled={serveBusy}
                 onPress={() => void serveStart()}
               />
-            </View>
+            </Card>
           )}
         </View>
       ) : null}
 
       {!running ? (
-        <View style={{ gap: 11 }}>
+        <View className="gap-3">
           <Text className="text-[13.5px] leading-[19px] text-ink-2">
             The built-in browser is not running for this session. Start it to mirror the page here
             and drive it by hand — the agent keeps using the same engine.
@@ -1107,21 +981,20 @@ export function BrowserTab({ session }: { session: Session }) {
           />
         </View>
       ) : (
-        <View style={{ gap: 10 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput
+        <View className="gap-2.5">
+          <View className="flex-row items-center gap-2">
+            <Field
+              containerClassName="flex-1"
               value={url}
               onChangeText={setUrl}
               placeholder="https://…"
-              placeholderTextColor={palette.ink4}
               accessibilityLabel="Address to navigate to"
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
-              className="min-h-12 flex-1 rounded-md border border-line bg-field px-3 text-[14px] text-ink"
             />
             <Button
-              size="sm"
+              size="md"
               variant="secondary"
               label="Go"
               disabled={busy || url.trim().length === 0}
@@ -1133,16 +1006,7 @@ export function BrowserTab({ session }: { session: Session }) {
               accessibilityRole="button"
               accessibilityLabel="Stop the browser"
               onPress={() => void run(() => browserApi.stop(session.id))}
-              style={({ pressed }) => ({
-                width: 44,
-                height: 44,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.dangerBorder,
-                backgroundColor: pressed ? palette.dangerSoft : 'transparent',
-              })}
+              className="size-12 items-center justify-center rounded-md border border-danger-border active:bg-danger-soft"
             >
               <Square size={13} color={palette.danger} fill={palette.danger} />
             </Pressable>
@@ -1160,33 +1024,24 @@ export function BrowserTab({ session }: { session: Session }) {
                 const { width, height } = event.nativeEvent.layout
                 setSize({ width: width || 1, height: height || 1 })
               }}
-              style={{
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.line,
-                overflow: 'hidden',
-              }}
             >
-              <Well>
+              <Well className="overflow-hidden rounded-lg border border-line">
                 <Image source={{ uri: shot }} resizeMode="contain" style={{ width: '100%', height: 300 }} />
               </Well>
             </Pressable>
           ) : (
-            <Well
-              className="h-[300px] items-center justify-center border border-line"
-              style={{ borderRadius: radius.md }}
-            >
+            <Well className="h-[300px] items-center justify-center rounded-lg border border-line">
               <ActivityIndicator color={palette.ink3} />
               <Text className="mt-2 text-[12.5px] text-ink-3">Waiting for a frame…</Text>
             </Well>
           )}
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View className="flex-row items-center gap-2">
             <Mono className="min-w-0 flex-1 text-[11.5px] text-ink-2" numberOfLines={1}>
               {state?.tabs?.[0]?.title || state?.tabs?.[0]?.url || 'about:blank'}
             </Mono>
             {state?.viewport ? (
-              <Mono className="text-[11px] text-ink-3">
+              <Mono className="text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
                 {state.viewport.width}×{state.viewport.height}
               </Mono>
             ) : null}
@@ -1225,7 +1080,7 @@ export function RoomsTab() {
   }, [load])
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader
         eyebrow="Rooms"
         right={<RefreshButton onPress={() => void load()} busy={loading} />}
@@ -1237,7 +1092,7 @@ export function RoomsTab() {
           body="A room is a roster of workers you can fan one task out to. Send /orchestrator inside a session to make one."
         />
       ) : (
-        <View style={{ gap: 6 }}>
+        <View className="gap-1.5">
           {rooms.map((room, index) => (
             <RoomCard
               key={room.id}
@@ -1276,21 +1131,10 @@ function RoomCard({
         accessibilityLabel={room.name}
         accessibilityHint={room.session_id ? 'Opens the room channel' : 'This room has no channel session yet'}
         onPress={onPress}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 11,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: palette.line,
-          backgroundColor: pressed ? palette.raised : palette.well,
-          paddingHorizontal: 13,
-          paddingVertical: 12,
-          minHeight: 52,
-        })}
+        className="min-h-[56px] flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 active:bg-raised"
       >
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.accent }} />
-        <Text className="min-w-0 flex-1 text-[14.5px] text-ink" numberOfLines={1}>
+        <View className="size-2 rounded-full" style={{ backgroundColor: palette.accent }} />
+        <Text className="min-w-0 flex-1 text-[15.5px] leading-[21px] text-ink" numberOfLines={1}>
           {room.name}
         </Text>
         {workers > 0 ? (
@@ -1323,24 +1167,19 @@ export function ProjectsTab() {
   }, [sessions])
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader eyebrow={`Projects · ${groups.length}`} />
       {groups.length === 0 ? (
         <EmptyState title="No projects" body="Sessions with a workspace appear here." />
       ) : (
-        <View style={{ gap: 6 }}>
+        <View className="gap-1.5">
           {groups.map(([project, list]) => {
             const expanded = open === project
             return (
               <View
                 key={project}
-                style={{
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: expanded ? palette.accentBorder : palette.line,
-                  backgroundColor: palette.well,
-                  overflow: 'hidden',
-                }}
+                className="overflow-hidden rounded-lg border bg-surface"
+                style={{ borderColor: expanded ? palette.accentBorder : palette.line }}
               >
                 <Pressable
                   accessibilityRole="button"
@@ -1348,14 +1187,7 @@ export function ProjectsTab() {
                   accessibilityHint={`${list.length} sessions`}
                   accessibilityState={{ expanded }}
                   onPress={() => setOpen(expanded ? null : project)}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 9,
-                    minHeight: 50,
-                    paddingHorizontal: 12,
-                    backgroundColor: pressed ? palette.raised : 'transparent',
-                  })}
+                  className="min-h-14 flex-row items-center gap-2.5 px-4 active:bg-raised"
                 >
                   <ChevronRight
                     size={14}
@@ -1363,33 +1195,30 @@ export function ProjectsTab() {
                     style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
                   />
                   <Folder size={15} color={palette.ink3} />
-                  <Text className="min-w-0 flex-1 text-[14.5px] font-medium text-ink" numberOfLines={1}>
+                  <Text
+                    className="min-w-0 flex-1 text-[15px] leading-[20px] font-medium text-ink"
+                    numberOfLines={1}
+                  >
                     {project === '__inbox__' ? 'Inbox' : basename(project)}
                   </Text>
-                  <Mono className="text-[11.5px] text-ink-3">{list.length}</Mono>
+                  <Mono className="text-[11.5px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+                    {list.length}
+                  </Mono>
                 </Pressable>
                 {expanded ? (
-                  <View style={{ borderTopWidth: 1, borderTopColor: palette.line, paddingVertical: 4 }}>
+                  <View className="border-t border-line py-1">
                     {list.map((session) => (
                       <Pressable
                         key={session.id}
                         accessibilityRole="button"
                         accessibilityLabel={session.name}
                         onPress={() => navigation.navigate('Session', { sessionId: session.id })}
-                        style={({ pressed }) => ({
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 9,
-                          minHeight: 42,
-                          paddingLeft: 40,
-                          paddingRight: 12,
-                          backgroundColor: pressed ? palette.raised : 'transparent',
-                        })}
+                        className="min-h-11 flex-row items-center gap-2.5 pl-10 pr-4 active:bg-raised"
                       >
-                        <Text className="min-w-0 flex-1 text-[13.5px] text-ink-2" numberOfLines={1}>
+                        <Text className="min-w-0 flex-1 text-[13.5px] leading-[18px] text-ink-2" numberOfLines={1}>
                           {session.name}
                         </Text>
-                        <Mono className="text-[11px]">{relativeTime(session.updated_at)}</Mono>
+                        <Mono className="text-[11px] text-ink-3">{relativeTime(session.updated_at)}</Mono>
                       </Pressable>
                     ))}
                   </View>
@@ -1453,34 +1282,23 @@ export function TerminalsTab({ session }: { session: Session }) {
   }
 
   return (
-    <View style={{ gap: 16 }}>
+    <View className="gap-4">
       <PanelHeader
         eyebrow="Standalone terminals"
         right={<RefreshButton onPress={() => void load()} busy={loading} />}
       />
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
 
-      <View
-        style={{
-          gap: 9,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: palette.line,
-          backgroundColor: palette.well,
-          padding: 12,
-        }}
-      >
+      <Card className="gap-2.5 p-4">
         <Eyebrow>New terminal</Eyebrow>
-        <TextInput
+        <Field
+          mono
           value={newCwd}
           onChangeText={setNewCwd}
           placeholder="Working directory (blank = this workspace)"
-          placeholderTextColor={palette.ink4}
           accessibilityLabel="Terminal working directory"
           autoCapitalize="none"
           autoCorrect={false}
-          className="min-h-11 rounded-md border border-line bg-field px-3 text-[12.5px] text-ink"
-          style={{ fontFamily: 'Menlo' }}
         />
         <Button
           size="sm"
@@ -1490,31 +1308,20 @@ export function TerminalsTab({ session }: { session: Session }) {
           disabled={busy}
           onPress={() => void create()}
         />
-      </View>
+      </Card>
 
-      <View style={{ gap: 8 }}>
+      <View className="gap-2">
         <Eyebrow>Active ({terminals.length})</Eyebrow>
         {terminals.length === 0 ? (
-          <Text className="text-[13.5px] text-ink-3">No standalone terminals are open.</Text>
+          <Text className="text-[13.5px] leading-[19px] text-ink-3">No standalone terminals are open.</Text>
         ) : (
           terminals.map((terminal) => (
             <View
               key={terminal.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 11,
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: palette.well,
-                paddingLeft: 13,
-                paddingRight: 6,
-                paddingVertical: 9,
-              }}
+              className="flex-row items-center gap-3 rounded-lg border border-line bg-surface py-2.5 pl-4 pr-2"
             >
-              <TerminalIcon size={15} color={palette.accent} />
-              <View style={{ flex: 1, minWidth: 0 }}>
+              <TerminalIcon size={16} color={palette.accent} />
+              <View className="min-w-0 flex-1">
                 <Mono className="text-[12.5px] text-ink" numberOfLines={1}>
                   {terminal.id}
                 </Mono>
@@ -1524,22 +1331,14 @@ export function TerminalsTab({ session }: { session: Session }) {
                   </Mono>
                 ) : null}
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Close terminal ${terminal.id}`}
+              <IconButton
+                label={`Close terminal ${terminal.id}`}
+                size={34}
                 disabled={busy}
                 onPress={() => void close(terminal.id)}
-                style={({ pressed }) => ({
-                  width: 34,
-                  height: 34,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: radius.pill,
-                  backgroundColor: pressed ? palette.dangerSoft : 'transparent',
-                })}
               >
                 <Trash2 size={15} color={palette.ink3} />
-              </Pressable>
+              </IconButton>
             </View>
           ))
         )}
@@ -1563,14 +1362,18 @@ export function SideTab({ session }: { session: Session }) {
   }
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader
         eyebrow="Scratchpad"
         right={
           notes ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="Clear the scratchpad" onPress={() => save('')} hitSlop={10}>
-              <Text className="text-[12px] font-semibold text-danger">Clear</Text>
-            </Pressable>
+            <Button
+              size="sm"
+              variant="danger"
+              label="Clear"
+              accessibilityLabel="Clear the scratchpad"
+              onPress={() => save('')}
+            />
           ) : null
         }
       />
@@ -1578,17 +1381,16 @@ export function SideTab({ session }: { session: Session }) {
         Notes and a task checklist for this workspace, stored on this device only. Nothing here is
         sent to the desktop.
       </Text>
-      <TextInput
+      <Field
+        mono
         value={notes}
         onChangeText={save}
         placeholder="Notes, snippets, a todo list…"
-        placeholderTextColor={palette.ink4}
         accessibilityLabel="Scratchpad notes"
         multiline
-        className="min-h-[220px] rounded-md border border-line bg-field px-3.5 py-3 text-[13.5px] leading-[20px] text-ink"
-        style={{ fontFamily: 'Menlo', textAlignVertical: 'top' }}
+        style={{ minHeight: 220, lineHeight: 20, textAlignVertical: 'top' }}
       />
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+      <View className="flex-row flex-wrap gap-2">
         <ScratchpadInsert
           label="+ Todo list"
           onPress={() => save((notes ? `${notes}\n\n` : '') + '### Next steps\n- [ ] ')}
@@ -1610,15 +1412,8 @@ function ScratchpadInsert({ label, onPress }: { label: string; onPress: () => vo
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: 34,
-        justifyContent: 'center',
-        borderRadius: radius.sm,
-        borderWidth: 1,
-        borderColor: palette.line,
-        backgroundColor: pressed ? palette.raised : palette.well,
-        paddingHorizontal: 11,
-      })}
+      hitSlop={8}
+      className="h-9 items-center justify-center rounded-pill border border-line px-3.5 active:bg-raised"
     >
       <Mono className="text-[11.5px] text-ink-2">{label}</Mono>
     </Pressable>
@@ -1661,21 +1456,21 @@ export function TrajectoriesTab({ session }: { session: Session }) {
   }, [load])
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader
         eyebrow="Run trace"
         right={<RefreshButton onPress={() => void load()} busy={loading} />}
       />
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
       {loading ? (
-        <ActivityIndicator color={palette.accent} />
+        <RowSkeleton />
       ) : data.length === 0 ? (
         <EmptyState
           title="No recorded trace"
           body="Recorded timeline events for this run appear here. Older daemons do not record them."
         />
       ) : (
-        <View style={{ gap: 6 }}>
+        <View className="gap-1.5">
           {data.map((item, index) => (
             <TraceRow key={index} item={item} index={index} />
           ))}
@@ -1695,18 +1490,9 @@ function TraceRow({
   const enter = useEnter(staggerDelay(Math.min(index, 8)), false)
   return (
     <View style={rowEnterStyle(enter)}>
-      <View
-        style={{
-          gap: 4,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: palette.line,
-          backgroundColor: palette.well,
-          padding: 12,
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <Mono className="text-[11px] font-semibold text-accent" numberOfLines={1}>
+      <Card className="gap-1 p-4">
+        <View className="flex-row items-center justify-between gap-2">
+          <Mono className="text-[11.5px] font-semibold text-accent" numberOfLines={1}>
             {item.event}
           </Mono>
           {item.timestamp ? (
@@ -1714,11 +1500,11 @@ function TraceRow({
           ) : null}
         </View>
         {item.summary ? (
-          <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={3}>
+          <Text className="text-[13.5px] leading-[19px] text-ink-2" numberOfLines={3}>
             {item.summary}
           </Text>
         ) : null}
-      </View>
+      </Card>
     </View>
   )
 }

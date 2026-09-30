@@ -18,8 +18,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, TextInput, View } from 'react-native'
-import { Layers, Users } from 'lucide-react-native'
+import { Pressable, Text, View } from 'react-native'
+import { Check, Layers, Users } from 'lucide-react-native'
 
 import { mobileApi } from '@app/lib/api'
 import { useStore } from '@app/store'
@@ -29,6 +29,8 @@ import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   AgentAvatar,
   CheckRow,
+  Eyebrow,
+  Field,
   Segmented,
   ToggleRow,
   haptic,
@@ -106,8 +108,6 @@ export function SubagentSheet({
     }
   }
 
-  const roleDescription = BUILTIN_ROLES.find((entry) => entry.id === role)?.desc
-
   return (
     <FormSheet
       open={open}
@@ -131,19 +131,8 @@ export function SubagentSheet({
       />
 
       {mode === 'spawn' ? (
-        <View style={{ gap: 9, marginTop: 12 }}>
-          <Text
-            style={{
-              color: palette.ink3,
-              fontSize: 10,
-              fontWeight: '600',
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-              fontFamily: 'Menlo',
-            }}
-          >
-            Role
-          </Text>
+        <View style={{ gap: 8, marginTop: 14 }}>
+          <Eyebrow>Role</Eyebrow>
           <View style={{ gap: 6 }}>
             {BUILTIN_ROLES.map((entry, index) => (
               <RoleChoice
@@ -158,31 +147,17 @@ export function SubagentSheet({
               />
             ))}
           </View>
-          {roleDescription ? (
-            <Text className="text-[12.5px] leading-[17px] text-ink-3">{roleDescription}</Text>
-          ) : null}
         </View>
       ) : (
-        <View style={{ gap: 12, marginTop: 12 }}>
+        <View style={{ gap: 12, marginTop: 14 }}>
           <View style={{ gap: 7 }}>
-            <Text
-              style={{
-                color: palette.ink3,
-                fontSize: 10,
-                fontWeight: '600',
-                letterSpacing: 1.2,
-                textTransform: 'uppercase',
-                fontFamily: 'Menlo',
-              }}
-            >
-              Target agents
-            </Text>
+            <Eyebrow>Target agents</Eyebrow>
             {readyAgents.length === 0 ? (
               <Text className="text-[13px] leading-[18px] text-ink-3">
                 No agent is ready on the desktop.
               </Text>
             ) : (
-              <View style={{ gap: 6 }}>
+              <View style={{ gap: 4 }}>
                 {readyAgents.map((agent, index) => (
                   <AgentToggle
                     key={agent.id}
@@ -209,20 +184,9 @@ export function SubagentSheet({
         </View>
       )}
 
-      <View style={{ gap: 7, marginTop: 14 }}>
-        <Text
-          style={{
-            color: palette.ink3,
-            fontSize: 10,
-            fontWeight: '600',
-            letterSpacing: 1.2,
-            textTransform: 'uppercase',
-            fontFamily: 'Menlo',
-          }}
-        >
-          {mode === 'spawn' ? 'What should it do?' : 'The task to fan out'}
-        </Text>
-        <TaskInput
+      <View style={{ gap: 8, marginTop: 16 }}>
+        <Eyebrow>{mode === 'spawn' ? 'What should it do?' : 'The task to fan out'}</Eyebrow>
+        <Field
           value={prompt}
           onChangeText={setPrompt}
           placeholder={
@@ -230,33 +194,13 @@ export function SubagentSheet({
               ? 'Investigate the flaky auth test and report what you find…'
               : 'Describe the task every worker should tackle…'
           }
+          accessibilityLabel="Task for the subagent"
+          multiline
+          containerClassName="min-h-[110px]"
+          style={{ textAlignVertical: 'top', lineHeight: 21 }}
         />
       </View>
     </FormSheet>
-  )
-}
-
-/** The task field. Its own component so the hook above it stays unconditional. */
-function TaskInput({
-  value,
-  onChangeText,
-  placeholder,
-}: {
-  value: string
-  onChangeText: (value: string) => void
-  placeholder: string
-}) {
-  return (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={palette.ink4}
-      accessibilityLabel="Task for the subagent"
-      multiline
-      className="min-h-[110px] rounded-md border border-line bg-field px-3.5 py-3 text-[14.5px] leading-[21px] text-ink"
-      style={{ textAlignVertical: 'top' }}
-    />
   )
 }
 
@@ -283,27 +227,47 @@ function RoleChoice({
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 11,
+          gap: 12,
           borderRadius: radius.md,
           borderWidth: 1,
-          borderColor: active ? palette.accent : palette.line,
+          borderColor: active ? palette.accentBorder : palette.line,
           backgroundColor: active
             ? palette.accentSoft
             : pressed
               ? palette.raised
-              : palette.well,
+              : palette.surface,
           paddingHorizontal: 13,
           paddingVertical: 11,
-          minHeight: 50,
+          minHeight: 54,
         })}
       >
-        <Users size={16} color={active ? palette.accent : palette.ink3} />
-        <Text
-          className="flex-1 text-[14.5px]"
-          style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: radius.sm,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: active ? palette.accentSoftStrong : palette.raised,
+            borderWidth: 1,
+            borderColor: active ? palette.accentBorder : palette.line,
+          }}
         >
-          {role.label}
-        </Text>
+          <Users size={15} color={active ? palette.accent : palette.ink3} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+          <Text
+            className="text-[14.5px] leading-[19px]"
+            style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
+            numberOfLines={1}
+          >
+            {role.label}
+          </Text>
+          <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
+            {role.desc}
+          </Text>
+        </View>
+        {active ? <Check size={17} color={palette.accent} strokeWidth={2.6} /> : null}
       </Pressable>
     </View>
   )

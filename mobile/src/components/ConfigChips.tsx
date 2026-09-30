@@ -26,9 +26,9 @@ import Svg, { Circle } from 'react-native-svg'
 import type { ConfigOption } from '@/types/provider'
 import { socket } from '@app/lib/socket'
 import { getConversation, useStore } from '@app/store'
-import { palette, radius, shadowOverlay } from '@app/design/tokens'
+import { palette, radius } from '@app/design/tokens'
 import { PickerSheet } from '@app/components/Sheet'
-import { haptic, KeyValue, ProgressBar } from '@app/components/ui'
+import { haptic, KeyValue, Popover, ProgressBar } from '@app/components/ui'
 
 /** Dimensions that are not meaningful as a chip. */
 const HIDDEN_OPTIONS = new Set(['worktree', 'cwd', 'command'])
@@ -84,11 +84,11 @@ function OptionChip({ option, onOpen }: { option: ConfigOption; onOpen: () => vo
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        borderRadius: radius.sm,
+        borderRadius: radius.pill,
         borderWidth: 1,
         borderColor: palette.line,
-        backgroundColor: pressed ? palette.hover : palette.well,
-        paddingLeft: 8,
+        backgroundColor: pressed ? palette.hover : palette.raised,
+        paddingLeft: 10,
         paddingRight: 7,
       })}
     >
@@ -108,11 +108,21 @@ function OptionChip({ option, onOpen }: { option: ConfigOption; onOpen: () => vo
           style={{
             paddingHorizontal: 4,
             paddingVertical: 1,
-            borderRadius: 3,
-            backgroundColor: palette.raised,
+            borderRadius: radius.xs,
+            backgroundColor: palette.hover,
           }}
         >
-          <Text style={{ color: palette.ink3, fontSize: 8.5, fontWeight: '700' }}>NEXT</Text>
+          <Text
+            style={{
+              color: palette.ink3,
+              fontSize: 8.5,
+              fontWeight: '700',
+              letterSpacing: 0.5,
+              fontVariant: ['tabular-nums'],
+            }}
+          >
+            NEXT
+          </Text>
         </View>
       )}
     </Pressable>
@@ -307,18 +317,7 @@ function ContextPopover({
   onClose: () => void
 }) {
   return (
-    <View
-      accessibilityViewIsModal
-      style={{
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: palette.lineStrong,
-        backgroundColor: palette.raised,
-        padding: 13,
-        gap: 10,
-        ...shadowOverlay,
-      }}
-    >
+    <Popover>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text className="text-[13px] font-semibold text-ink">Context windows</Text>
         <Pressable
@@ -332,7 +331,7 @@ function ContextPopover({
         </Pressable>
       </View>
 
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: 6, marginTop: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <Text style={{ color: color, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
             {formatTokens(usage.input)}
@@ -347,7 +346,7 @@ function ContextPopover({
         {usage.window ? <ProgressBar value={pct / 100} tone={pct > 85 ? 'danger' : pct > 60 ? 'wait' : 'ok'} /> : null}
       </View>
 
-      <View style={{ height: 1, backgroundColor: palette.line }} />
+      <View style={{ height: 1, backgroundColor: palette.line, marginTop: 10, marginBottom: 8 }} />
 
       <View style={{ gap: 4 }}>
         <KeyValue label="Context sent" value={formatTokens(usage.input)} />
@@ -358,23 +357,19 @@ function ContextPopover({
 
       {pct >= 90 ? (
         <View
-          style={{
-            borderRadius: radius.sm,
-            backgroundColor: palette.dangerSoft,
-            paddingHorizontal: 9,
-            paddingVertical: 7,
-          }}
+          className="rounded-sm bg-danger-soft"
+          style={{ paddingHorizontal: 9, paddingVertical: 7, marginTop: 8 }}
         >
           <Text className="text-[11.5px] leading-[16px] text-danger">
             The window is nearly full. Older messages are compressed automatically to continue.
           </Text>
         </View>
       ) : pct >= 60 ? (
-        <Text className="text-[11.5px] leading-[16px] text-wait">
+        <Text className="mt-2 text-[11.5px] leading-[16px] text-wait">
           Auto-compression will activate when the window fills.
         </Text>
       ) : null}
-    </View>
+    </Popover>
   )
 }
 

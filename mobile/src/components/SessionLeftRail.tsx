@@ -4,12 +4,12 @@
  * The desktop keeps a 304pt column beside the transcript: workspace picker,
  * search, "needs your attention", the session list, rooms. On a phone that is
  * two panels and two dismissal gestures for one idea ("show me more"), so it is
- * one sheet with a segmented switch, and the segments are *the reason you
- * opened it* rather than sections you scroll past:
+ * one sheet with a chip switch, and the segments are *the reason you opened
+ * it* rather than sections you scroll past:
  *
  *   - **Needs you** is a separate segment, not a group at the top of the list.
  *     A sheet that opens onto a list you then have to scroll past to find the
- *     thing that is blocking you has not solved the problem; a tab you can
+ *     thing that is blocking you has not solved the problem; a chip you can
  *     hit puts it in front of you. It is also pre-selected when there is
  *     something in it, which is the whole point.
  *   - **All** is the same list the deck shows, plus archived sessions, because
@@ -35,16 +35,16 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '@app/navigation'
 import { roomsApi } from '@app/lib/api'
 import { getConversation, useStore } from '@app/store'
-import { palette, radius } from '@app/design/tokens'
+import { palette, radius, toneColor } from '@app/design/tokens'
 import { Sheet } from '@app/components/Sheet'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   AgentAvatar,
   Button,
-  Divider,
   Dot,
   EmptyState,
   FilterChips,
+  IconTile,
   Mono,
   SearchField,
   haptic,
@@ -149,7 +149,7 @@ export function SessionSwitcherSheet({
       eyebrow="Switch session"
       snapPoints={[0.62, 0.94]}
     >
-      <View style={{ gap: 10 }}>
+      <View className="gap-3">
         <SearchField
           value={query}
           onChangeText={setQuery}
@@ -185,7 +185,7 @@ export function SessionSwitcherSheet({
             body="A room is a roster of workers you can fan a single task out to. Send /orchestrator inside a session to make one."
           />
         ) : (
-          <View style={{ marginHorizontal: -16 }}>
+          <View className="gap-0.5">
             {rooms.map((room, index) => (
               <RoomRow
                 key={room.id}
@@ -213,7 +213,7 @@ export function SessionSwitcherSheet({
           }
         />
       ) : (
-        <View style={{ marginHorizontal: -16, marginTop: 4 }}>
+        <View className="gap-0.5">
           {visible.map(({ session, state }, index) => (
             <SwitchRow
               key={session.id}
@@ -231,7 +231,7 @@ export function SessionSwitcherSheet({
         </View>
       )}
 
-      <View style={{ marginTop: 8, gap: 8 }}>
+      <View className="gap-2.5">
         <Button
           variant="secondary"
           label="Start a task in this workspace"
@@ -242,9 +242,9 @@ export function SessionSwitcherSheet({
             onNewTask()
           }}
         />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 4 }}>
+        <View className="flex-row items-center gap-2 px-1">
           <Dot tone={connection === 'connected' ? 'ok' : 'danger'} pulse={connection !== 'connected'} />
-          <Text className="flex-1 text-[11.5px] text-ink-3">
+          <Text className="flex-1 text-[12px] leading-[16px] text-ink-3">
             {connection === 'connected' ? 'Connected to your desktop' : 'Not connected — the list may be stale'}
           </Text>
         </View>
@@ -256,6 +256,8 @@ export function SessionSwitcherSheet({
 /**
  * One row in the switcher.
  *
+ * A soft rounded row on the sheet's surface: the current session is the one
+ * with the accent-soft selection fill, the others are plain until pressed.
  * Its own component so the entry animation's value is created by a hook on a
  * stable component rather than inside a `.map` callback.
  */
@@ -286,31 +288,22 @@ function SwitchRow({
         accessibilityHint={`${display.label}. ${relativeTime(session.updated_at)}`}
         accessibilityState={{ selected: active }}
         onPress={onPress}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 11,
-          minHeight: 56,
-          paddingHorizontal: 16,
-          paddingVertical: 9,
-          backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : 'transparent',
-        })}
+        className={cn(
+          'min-h-14 flex-row items-center gap-3 rounded-md px-3 py-2.5',
+          active ? 'bg-accent-soft' : 'active:bg-raised',
+        )}
       >
-        <AgentAvatar agent={session.agent} size={30} name={providerName} />
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <AgentAvatar agent={session.agent} size={34} name={providerName} />
+        <View className="min-w-0 flex-1 gap-0.5">
           <Text
-            className="text-[14.5px]"
-            style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
+            className={cn('text-[15px] leading-[20px] text-ink', active ? 'font-semibold' : 'font-medium')}
             numberOfLines={1}
           >
             {session.name}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 }}>
+          <View className="flex-row items-center gap-1.5">
             <Dot tone={tone} pulse={display.pulse} />
-            <Text
-              className="text-[11.5px]"
-              style={{ color: tone === 'muted' ? palette.ink3 : toneColorFor(tone) }}
-            >
+            <Text className="text-[11.5px] leading-[15px]" style={{ color: toneColor[tone] }}>
               {display.label}
             </Text>
             <Text className="text-[11px] text-ink-4">·</Text>
@@ -318,26 +311,8 @@ function SwitchRow({
           </View>
         </View>
       </Pressable>
-      <Divider inset={57} />
     </View>
   )
-}
-
-function toneColorFor(tone: string): string {
-  switch (tone) {
-    case 'ok':
-      return palette.ok
-    case 'wait':
-      return palette.wait
-    case 'danger':
-      return palette.danger
-    case 'info':
-      return palette.info
-    case 'accent':
-      return palette.accent
-    default:
-      return palette.ink3
-  }
 }
 
 function RoomRow({
@@ -358,23 +333,14 @@ function RoomRow({
         accessibilityHint={room.session_id ? 'Opens the room channel' : 'This room has no channel session yet'}
         disabled={!room.session_id}
         onPress={onPress}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 11,
-          minHeight: 54,
-          paddingHorizontal: 16,
-          paddingVertical: 10,
-          opacity: room.session_id ? 1 : 0.5,
-          backgroundColor: pressed ? palette.raised : 'transparent',
-        })}
+        className="min-h-13 flex-row items-center gap-3 rounded-md px-3 py-2.5 active:bg-raised"
+        style={{ opacity: room.session_id ? 1 : 0.5 }}
       >
-        <Waypoints size={17} color={palette.ink3} />
-        <Text className="flex-1 text-[14.5px] text-ink-2" numberOfLines={1}>
+        <IconTile tone="muted" size={30} icon={<Waypoints size={15} color={palette.ink3} />} />
+        <Text className="min-w-0 flex-1 text-[15px] leading-[20px] text-ink-2" numberOfLines={1}>
           {room.name}
         </Text>
       </Pressable>
-      <Divider inset={44} />
     </View>
   )
 }

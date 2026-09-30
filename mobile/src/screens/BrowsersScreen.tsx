@@ -17,22 +17,23 @@ import * as React from 'react'
 import { Pressable, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { ChevronRight, Globe, Play, Square } from 'lucide-react-native'
+import { Globe, Play, Square } from 'lucide-react-native'
 
 import { basename } from '@/lib/format'
 import { browserApi, type BrowserInstance } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore } from '@app/store'
-import { palette, radius } from '@app/design/tokens'
-import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { palette } from '@app/design/tokens'
+import { BackButton, Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
-  Button,
-  Card,
-  Divider,
+  Chevron,
   Dot,
   EmptyState,
+  ErrorState,
+  IconTile,
+  IconButton,
   Mono,
   haptic,
   toast,
@@ -103,24 +104,12 @@ export function BrowsersScreen() {
       }}
       refreshing={refreshing}
       scroll
-      contentClassName="px-4 pb-12 gap-5"
+      contentClassName="pb-12 gap-6"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
     >
       {error ? (
-        <View
-          accessible
-          accessibilityRole="alert"
-          style={{
-            gap: 9,
-            borderRadius: radius.md,
-            borderWidth: 1,
-            borderColor: palette.dangerBorder,
-            backgroundColor: palette.dangerSoft,
-            padding: 14,
-          }}
-        >
-          <Text className="text-[13.5px] font-semibold text-ink">{error}</Text>
-          <Button label="Retry" size="sm" variant="secondary" onPress={() => void load()} />
+        <View className="mx-4">
+          <ErrorState message={error} onRetry={() => void load()} retryLabel="Retry" />
         </View>
       ) : null}
 
@@ -138,7 +127,7 @@ export function BrowsersScreen() {
           title={`${runningCount} of ${withProject.length} ${withProject.length === 1 ? 'engine' : 'engines'} running`}
           enterIndex={0}
         >
-          <Card>
+          <ListCard inset={64}>
             {withProject.map((session, index) => {
               const instance = instances.find((candidate) => candidate.session_id === session.id)
               const running = Boolean(instance?.running || instance?.url)
@@ -157,13 +146,22 @@ export function BrowsersScreen() {
                 />
               )
             })}
-          </Card>
+          </ListCard>
         </Section>
       )}
     </ScreenScaffold>
   )
 }
 
+/**
+ * One engine row, two targets.
+ *
+ * The row body opens the session; the trailing square control starts or stops
+ * the engine. The control stays a separate pressable from the row — nesting
+ * them would make the stop button also open the session — and it is disabled
+ * (not hidden) while any other engine is mid-toggle, so the column of controls
+ * never reflows.
+ */
 function EngineRow({
   name,
   providerName,
@@ -185,11 +183,10 @@ function EngineRow({
   onOpen: () => void
   onToggle: () => void
 }) {
-  const enter = useEnter(staggerDelay(index), false)
+  const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
     <View style={rowEnterStyle(enter)}>
-      {index > 0 ? <Divider inset={16} /> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <View className="flex-row items-center">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={name}
@@ -200,73 +197,56 @@ function EngineRow({
           }}
           className="min-h-16 flex-1 flex-row items-center gap-3 px-4 py-3 active:bg-raised"
         >
-          <View
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: radius.sm,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: running ? palette.okSoft : palette.raised,
-            }}
-          >
-            <Globe size={16} color={running ? palette.ok : palette.ink3} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-              <Text className="min-w-0 flex-1 text-[15px] font-semibold text-ink" numberOfLines={1}>
+          <IconTile
+            icon={<Globe size={16} color={running ? palette.ok : palette.ink2} />}
+            tone={running ? 'ok' : 'muted'}
+          />
+          <View className="min-w-0 flex-1 gap-1">
+            <View className="flex-row items-center gap-2">
+              <Text
+                className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-semibold text-ink"
+                numberOfLines={1}
+              >
                 {name}
               </Text>
               <Badge tone={running ? 'ok' : 'muted'} outline>
                 {running ? 'running' : 'stopped'}
               </Badge>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View className="flex-row items-center gap-1.5">
               <Dot tone={running ? 'ok' : 'muted'} />
-              <Mono className="min-w-0 flex-1 text-[11.5px]" numberOfLines={1}>
+              <Mono className="min-w-0 flex-1 text-[11.5px] leading-[16px]" numberOfLines={1}>
                 {url}
               </Mono>
             </View>
-            <Text className="text-[11px] text-ink-4">{providerName}</Text>
+            <Text className="text-[11px] leading-[15px] text-ink-3" numberOfLines={1}>
+              {providerName}
+            </Text>
           </View>
-          <ChevronRight size={16} color={palette.ink4} />
+          <Chevron />
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={running ? `Stop the engine for ${name}` : `Start the engine for ${name}`}
+        <IconButton
+          label={running ? `Stop the engine for ${name}` : `Start the engine for ${name}`}
+          size={44}
           disabled={disabled || busy}
+          style={{ marginRight: 8 }}
           onPress={() => {
             void haptic('medium')
             onToggle()
           }}
-          style={({ pressed }) => ({
-            width: 46,
-            height: 46,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radius.pill,
-            backgroundColor: pressed ? palette.hover : 'transparent',
-            opacity: disabled ? 0.4 : 1,
-          })}
         >
           {busy ? (
             <View
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: 7,
-                borderWidth: 2,
-                borderColor: palette.ink4,
-                borderTopColor: 'transparent',
-              }}
+              className="size-3.5 rounded-full"
+              style={{ borderWidth: 2, borderColor: palette.ink4, borderTopColor: 'transparent' }}
             />
           ) : running ? (
             <Square size={14} color={palette.danger} fill={palette.danger} />
           ) : (
             <Play size={16} color={palette.ok} fill={palette.ok} />
           )}
-        </Pressable>
+        </IconButton>
       </View>
     </View>
   )

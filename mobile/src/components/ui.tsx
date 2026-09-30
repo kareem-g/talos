@@ -5,41 +5,36 @@
  * button, badge, or card; if it needs one, it belongs here. That constraint is
  * the only reason eleven screens look like one product.
  *
- * DESIGN RULES ENCODED HERE
- * -------------------------
- * 1. **48pt minimum touch target.** Android says 48dp, iOS says 44pt, and a
- *    phone held one-handed is worse than either. Anything smaller is its
- *    visual size *plus* a `hitSlop` that grows the tappable area back to 48
- *    without growing the visual — a 32pt star button is right as a picture and
- *    wrong as a target.
+ * THE V3 LANGUAGE, ENCODED HERE
+ * -----------------------------
+ * The look is "midnight studio": luminous type on near-black, soft-cornered
+ * sheets with hairline edges, one electric accent reserved for what is
+ * actionable. The rules:
+ *
+ * 1. **48pt minimum touch target.** Anything smaller is its visual size *plus*
+ *    a `hitSlop` that grows the tappable area back to 48 without growing the
+ *    visual.
  *
  * 2. **Every interactive element is named.** `accessibilityRole` and
- *    `accessibilityLabel` are required on the pressable primitives, so it is
- *    not possible to add a button without describing it. Pass the verb
- *    ("Archive session"), not the destination, so the label stays stable when
- *    the subject is already the thing in focus.
+ *    `accessibilityLabel` are required on the pressable primitives. Pass the
+ *    verb ("Archive session"), not the destination.
  *
  * 3. **State is never colour alone.** `Dot` varies *size* as well as hue, and
- *    the states that need a human are drawn larger so they are findable while
- *    scrolling. `StatusPill` always pairs the dot with a word.
+ *    the states that need a human are drawn larger. `StatusPill` always pairs
+ *    the dot with a word.
  *
- * 4. **Press feedback is a spring, not a colour swap.** A hard cut on a
- *    transform reads as a glitch, because the eye tracks the silhouette. See
- *    `Touchable` in `motion.tsx`.
+ * 4. **Press feedback is a spring, not a colour swap.** See `Touchable` in
+ *    `motion.tsx`.
  *
- * 5. **Tokens only.** No component in this file contains a hex literal. Colours
- *    come from `design/tokens` for values that must be raw (icons, styles) and
- *    from class names otherwise. `scripts/check-colors.mjs` enforces it.
+ * 5. **Tokens only.** No component in this file contains a hex literal.
+ *    `scripts/check-colors.mjs` enforces it.
  *
  * DENSITY
  * -------
- * This is a developer control surface, not a consumer app, so the primitives
- * are not padded out for comfort: a `ListRow` is 56pt, not 72. Information
- * density is preserved deliberately — a phone showing three rows where a
- * desktop shows twelve is already a real cost, and padding the rows out to
- * look calm would spend the difference for nothing. What the extra centimetres
- * buy instead is *hierarchy*: a status line that is clearly a status line, a
- * path that is clearly a path.
+ * A developer control surface, not a consumer app: a `ListRow` stays ~56pt and
+ * the primitives stay tight. The extra centimetres a phone buys go to
+ * *hierarchy* — a status line that reads as one, a path that reads as one —
+ * not to padding.
  */
 
 import * as React from 'react'
@@ -92,24 +87,24 @@ type TypeRole = 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption' |
 
 /** The type scale, as class names. Kept in one place so it cannot drift. */
 const TYPE_CLASS: Record<TypeRole, string> = {
-  display: 'text-[30px] font-bold',
-  title: 'text-[21px] font-bold',
-  heading: 'text-[16.5px] font-semibold',
-  body: 'text-[15px] leading-[21px]',
-  label: 'text-[15px] font-medium',
+  display: 'text-[30px] leading-[36px] font-bold',
+  title: 'text-[21px] leading-[27px] font-bold',
+  heading: 'text-[16.5px] leading-[22px] font-semibold',
+  body: 'text-[15.5px] leading-[22px]',
+  label: 'text-[15.5px] leading-[22px] font-medium',
   caption: 'text-[13.5px] leading-[19px]',
   small: 'text-[12px] leading-[16px]',
-  micro: 'text-[11.5px] font-medium',
+  micro: 'text-[11.5px] leading-[15px] font-medium',
   mono: 'text-[12.5px] leading-[18px]',
-  monoSmall: 'text-[11px] font-medium',
-  eyebrow: 'text-[10px] font-semibold uppercase',
+  monoSmall: 'text-[11px] leading-[15px] font-medium',
+  eyebrow: 'text-[10px] leading-[13px] font-semibold uppercase',
 }
 
 const TYPE_TRACK: Partial<Record<TypeRole, number>> = {
-  display: -0.6,
-  title: -0.35,
+  display: -0.7,
+  title: -0.4,
   heading: -0.2,
-  label: -0.05,
+  label: -0.1,
   micro: 0.1,
   eyebrow: 1.2,
 }
@@ -146,13 +141,12 @@ function Txt({
 }
 
 /**
- * The uppercase mono eyebrow — the single most recognisable signature of the
- * desktop's system, and the thing that turns a list of cards into a document
- * with sections.
+ * The uppercase mono eyebrow — turns a list of cards into a document with
+ * sections.
  */
 export function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <Text className={cn('text-[10px] font-semibold uppercase text-ink-3', className)} style={{ letterSpacing: 1.2 }}>
+    <Text className={cn('text-[10px] leading-[13px] font-semibold uppercase text-ink-3', className)} style={{ letterSpacing: 1.2 }}>
       {children}
     </Text>
   )
@@ -185,7 +179,7 @@ const BUTTON_TEXT: Record<ButtonVariant, string> = {
   danger: 'text-danger font-semibold',
 }
 
-const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 38, md: 48, lg: 54 }
+const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 36, md: 48, lg: 54 }
 
 export function Button({
   variant = 'secondary',
@@ -230,12 +224,12 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 7,
-          borderRadius: radius.md,
+          borderRadius: size === 'lg' ? radius.md : radius.sm,
           paddingHorizontal: size === 'sm' ? 14 : 18,
-          alignSelf: full ? 'stretch' : 'flex-start',
-          opacity: disabled ? 0.4 : 1,
         },
-        full && { alignSelf: 'stretch' },
+        full ? { alignSelf: 'stretch', width: '100%' } : { alignSelf: 'flex-start' },
+        { opacity: disabled ? 0.4 : 1 },
+        style as StyleProp<ViewStyle>,
       ]}
       className={cn(BUTTON_SURFACE[variant], className)}
     >
@@ -341,7 +335,13 @@ export function Dot({ tone = 'muted', pulse }: { tone?: Tone; pulse?: boolean })
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="rounded-full"
-      style={{ width: size, height: size, backgroundColor: toneColor[tone], opacity: pulse ? 0.7 : 1 }}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: toneColor[tone],
+        opacity: pulse ? 0.7 : 1,
+      }}
     />
   )
 }
@@ -363,7 +363,7 @@ export function Badge({
   return (
     <View
       className={cn(
-        'h-6 shrink-0 flex-row items-center justify-center rounded-pill px-2',
+        'h-[22px] shrink-0 flex-row items-center justify-center rounded-pill px-2',
         outline ? toneClass.border[tone] : toneClass.soft[tone],
         className,
       )}
@@ -452,10 +452,10 @@ export function CardHeader({
   className?: string
 }) {
   return (
-    <View className={cn('flex-row items-center justify-between gap-3 border-b border-line px-4 py-3', className)}>
+    <View className={cn('flex-row items-center justify-between gap-3 border-b border-line px-4 py-3.5', className)}>
       <View className="min-w-0 flex-1 gap-0.5">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-        <Text className="text-[15px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
+        <Text className="text-[15px] leading-[20px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
           {title}
         </Text>
         {subtitle ? (
@@ -522,7 +522,7 @@ export function Field({
           accessibilityLabel={props.accessibilityLabel ?? label}
           placeholderTextColor={palette.ink4}
           {...props}
-          className={cn('flex-1 text-[15px] text-ink', mono && 'text-[13px]')}
+          className={cn('flex-1 text-[15.5px] text-ink', mono && 'text-[13px]')}
           style={[
             { paddingVertical: 0, fontFamily: mono ? MONO_FONT : undefined },
             props.style as StyleProp<TextStyle>,
@@ -557,7 +557,7 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-md border border-line bg-field px-3"
+      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-3.5"
       style={style as StyleProp<ViewStyle>}
     >
       <SearchIcon size={16} color={palette.ink3} />
@@ -618,7 +618,7 @@ export function ToggleRow({
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[15px] font-medium text-ink">{label}</Text>
+        <Text className="text-[15.5px] leading-[21px] font-medium text-ink">{label}</Text>
         {description ? (
           <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3">{description}</Text>
         ) : null}
@@ -639,13 +639,12 @@ export function ToggleRow({
   )
 }
 
-/** A checkbox row, for multi-select pickers. */
 /**
  * A checkbox row.
  *
  * The box carries a tick rather than being a coloured square so the *state* is
  * legible without colour, which matters because "which of these had I already
- * include" is exactly the question a multi-select is asked. `leading` exists
+ * included" is exactly the question a multi-select is asked. `leading` exists
  * for rows whose item also has an identity — an agent avatar, say — because a
  * multi-select of otherwise identical names is a list you have to read rather
  * than scan.
@@ -689,7 +688,7 @@ export function CheckRow({
       </View>
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[14.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
           {label}
         </Text>
         {description ? (
@@ -746,7 +745,6 @@ export function Segmented<T extends string>({
               size === 'sm' ? 'h-8' : 'h-10',
               active ? 'bg-raised' : 'active:bg-raised/60',
             )}
-            style={active ? { borderWidth: 1, borderColor: palette.lineStrong } : undefined}
           >
             <Text
               className={cn('text-[13px]', active ? 'font-semibold text-ink' : 'font-medium text-ink-3')}
@@ -895,7 +893,7 @@ export function ListRow({
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[15px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
@@ -951,7 +949,7 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2.8,
+        borderRadius: size / 2,
         backgroundColor: agentSoft(agent),
         borderWidth: 1,
         borderColor: `${agentColor(agent)}44`,
@@ -977,7 +975,7 @@ export function IconTile({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="items-center justify-center"
-      style={{ width: size, height: size, borderRadius: size / 2.6, backgroundColor: toneSoft[tone] }}
+      style={{ width: size, height: size, borderRadius: size * 0.31, backgroundColor: toneSoft[tone] }}
     >
       {icon}
     </View>
@@ -1136,14 +1134,23 @@ export function EmptyState({
       {icon ? (
         <View
           style={[
-            { width: 52, height: 52, borderRadius: radius.lg, backgroundColor: palette.raised, alignItems: 'center', justifyContent: 'center' },
+            {
+              width: 54,
+              height: 54,
+              borderRadius: radius.lg,
+              backgroundColor: palette.raised,
+              borderWidth: 1,
+              borderColor: palette.line,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
             enterStyle(enter, 6),
           ]}
         >
           {icon}
         </View>
       ) : null}
-      <Text className="text-center text-[16px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
+      <Text className="text-center text-[16px] leading-[21px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
         {title}
       </Text>
       {body ? (
@@ -1178,7 +1185,7 @@ export function ErrorState({
       accessibilityLabel={message}
       className={cn('gap-2.5 rounded-lg border border-danger-border bg-danger-soft p-4', className)}
     >
-      <Text className="text-[14px] font-semibold text-ink">{message}</Text>
+      <Text className="text-[14px] leading-[19px] font-semibold text-ink">{message}</Text>
       {detail ? (
         <Text className="text-[13px] leading-[18px] text-ink-2">{detail}</Text>
       ) : null}
@@ -1326,24 +1333,27 @@ export function FieldRow({ label, value }: { label: string; value: string }) {
 
 /* ── Brand ──────────────────────────────────────────────────────────────────────────── */
 
-/** The four-square mark. Doubles as the app icon's geometry. */
+/**
+ * The four-square mark, v3. A soft-cornered 2×2 with one receding quadrant —
+ * "a deck of surfaces". Doubles as the app icon's geometry.
+ */
 export function BrandMark({ size = 24, color = palette.accent }: { size?: number; color?: string }) {
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ width: size, height: size, flexDirection: 'row', flexWrap: 'wrap', gap: size * 0.12 }}
+      style={{ width: size, height: size, flexDirection: 'row', flexWrap: 'wrap', gap: size * 0.14 }}
     >
       {[0, 1, 2, 3].map((index) => (
         <View
           key={index}
           style={{
-            width: size * 0.44,
-            height: size * 0.44,
-            borderRadius: size * 0.13,
+            width: size * 0.43,
+            height: size * 0.43,
+            borderRadius: size * 0.155,
             backgroundColor: color,
             // The fourth square recedes: the mark reads as one object, not four.
-            opacity: index === 3 ? 0.4 : 1,
+            opacity: index === 3 ? 0.35 : 1,
           }}
         />
       ))}

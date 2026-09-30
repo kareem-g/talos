@@ -142,9 +142,9 @@ function InlineText({
           key={`c${pieceIndex}`}
           style={{
             fontFamily: 'Menlo',
-            fontSize: 13.5,
-            color: palette.codeInk,
-            backgroundColor: palette.field,
+            fontSize: 13,
+            color: palette.accent,
+            backgroundColor: palette.accentSoft,
           }}
         >
           {' '}
@@ -233,17 +233,17 @@ export function Code({ lang, body }: { lang?: string; body: string }) {
           borderBottomWidth: 1,
           borderBottomColor: palette.line,
           backgroundColor: palette.well,
-          paddingHorizontal: 12,
-          paddingVertical: 7,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
         }}
       >
-        <Mono className="text-[10px] uppercase text-ink-3" style={{ letterSpacing: 0.8 }}>
+        <Mono className="text-[10px] uppercase text-ink-3" style={{ letterSpacing: 1 }}>
           {lang ?? 'code'}
         </Mono>
         <CopyButton value={body} />
       </View>
       <Scrollable>
-        <Mono className="px-3 py-2.5 text-[12.5px] leading-[19px] text-code-ink">{body}</Mono>
+        <Mono className="px-3.5 py-3 text-[12.5px] leading-[19px] text-code-ink">{body}</Mono>
       </Scrollable>
     </Well>
   )
@@ -301,12 +301,12 @@ export function Caret() {
  * to make the *shape* of one answer readable at a glance before you read it. */
 
 const HEADING_STYLE: Record<number, TextStyle> = {
-  1: { fontSize: 19, fontWeight: '700', letterSpacing: -0.3, color: palette.ink },
-  2: { fontSize: 17, fontWeight: '700', letterSpacing: -0.25, color: palette.ink },
-  3: { fontSize: 15.5, fontWeight: '600', letterSpacing: -0.15, color: palette.ink },
+  1: { fontSize: 20, lineHeight: 27, fontWeight: '700', letterSpacing: -0.4, color: palette.ink },
+  2: { fontSize: 17.5, lineHeight: 24, fontWeight: '700', letterSpacing: -0.3, color: palette.ink },
+  3: { fontSize: 16, lineHeight: 22, fontWeight: '600', letterSpacing: -0.15, color: palette.ink },
   // h4 is the "fine print heading" level: same weight, one step quieter, which
   // is the only thing distinguishing it from body text.
-  4: { fontSize: 15, fontWeight: '600', color: palette.ink2 },
+  4: { fontSize: 15.5, lineHeight: 21, fontWeight: '600', color: palette.ink2 },
 }
 
 export function Prose({
@@ -321,7 +321,7 @@ export function Prose({
   const segments = React.useMemo(() => splitFences(text), [text])
 
   return (
-    <View style={{ gap: 10 }}>
+    <View style={{ gap: 12 }}>
       {segments.map((segment, segmentIndex) => {
         const last = segmentIndex === segments.length - 1
         if (segment.code) {
@@ -329,7 +329,7 @@ export function Prose({
         }
         const blocks = parseBlocks(segment.body)
         return (
-          <View key={segmentIndex} style={{ gap: 10 }}>
+          <View key={segmentIndex} style={{ gap: 12 }}>
             {blocks.map((block, blockIndex) => {
               const isLastBlock = streaming && last && blockIndex === blocks.length - 1
               if (block.kind === 'heading') {
@@ -344,15 +344,15 @@ export function Prose({
               }
               if (block.kind === 'bullets' || block.kind === 'ordered') {
                 return (
-                  <View key={blockIndex} style={{ gap: 6 }}>
+                  <View key={blockIndex} style={{ gap: 7 }}>
                     {block.items.map((item, itemIndex) => (
-                      <View key={itemIndex} style={{ flexDirection: 'row', gap: 9 }}>
-                        <Mono className="w-4 text-[13px] leading-[21px] text-ink-3">
+                      <View key={itemIndex} style={{ flexDirection: 'row', gap: 10 }}>
+                        <Mono className="w-4 text-[14px] leading-[23px] text-ink-3">
                           {block.kind === 'bullets' ? '•' : `${itemIndex + 1}.`}
                         </Mono>
                         <InlineText
                           text={item}
-                          style={{ flex: 1, fontSize: 15, lineHeight: 21, color: palette.ink }}
+                          style={{ flex: 1, fontSize: 15.5, lineHeight: 23, color: palette.ink }}
                           chips={chips}
                         />
                       </View>
@@ -364,7 +364,7 @@ export function Prose({
                 <View key={blockIndex} style={{ flexDirection: 'row' }}>
                   <InlineText
                     text={block.text}
-                    style={{ flex: 1, fontSize: 15, lineHeight: 22, color: palette.ink }}
+                    style={{ flex: 1, fontSize: 15.5, lineHeight: 23.5, color: palette.ink }}
                     chips={chips}
                   />
                   {isLastBlock ? <Caret /> : null}
@@ -380,7 +380,7 @@ export function Prose({
 
 /** User-message text: prose with inline token chips and `code`/bold styling. */
 export function Chips({ text }: { text: string }) {
-  return <InlineText text={text} style={{ fontSize: 15, lineHeight: 22, color: palette.ink }} chips />
+  return <InlineText text={text} style={{ fontSize: 15.5, lineHeight: 22.5, color: palette.ink }} chips />
 }
 
 export { cn }

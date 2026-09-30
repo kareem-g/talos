@@ -2,157 +2,128 @@
  * The design tokens — AgentDeck's single source of truth for colour, type,
  * spacing, radius and motion on mobile.
  *
- * WHY THIS FILE IS THE WHOLE SYSTEM
- * ---------------------------------
- * A token is defined once, here, and read by both consumers:
+ * THE PALETTE — "midnight studio"
+ * -------------------------------
+ * The v3 visual language. Where the previous palette was a warm terminal room,
+ * this one is a calm, near-black studio: a cool graphite ramp with almost no
+ * chroma, one electric-blue accent used only for what is actionable, and four
+ * status hues that are never decoration. It is modelled on the chat surfaces
+ * people already trust (ChatGPT, Linear, Zed): content reads as luminous type
+ * floating on true darkness, chrome disappears until it is needed, and every
+ * container is a soft-cornered sheet with a hairline rather than a border-heavy
+ * box. The rules that make it work:
  *
- *   - `tailwind.config.js` requires this file and generates its `colors` from
- *     it, so `className="text-ink-2"` and `color={palette.ink2}` are provably
- *     the same value rather than two values that happen to look alike.
- *   - Components import `palette` / `toneColor` directly for icon props,
- *     placeholders and `style` props that Tailwind cannot express.
+ *   1. **The surfaces are a monotonic ramp, and elevation is a lift.**
  *
- * `scripts/check-colors.mjs` fails the build if a raw hex reaches a component,
- * and `scripts/check-token-usage.mjs` fails it if a token *name* is passed as
- * a quoted string (which typechecks fine and silently renders nothing). Together
- * they mean there is exactly one place a colour can be defined, and exactly one
- * way to reference it.
+ *        well  <  canvas  <  chrome  <  surface  <  raised  <  hover
  *
- * THE PALETTE — "warm terminal room, phone-sized"
- * ----------------------------------------------
- * The desktop dashboard is a "dark terminal room": near-neutral warm greys, one
- * blue accent, three status hues. Mobile keeps that language but re-proportions
- * it for a screen held at arm's length in one hand, often outdoors, often while
- * something is on fire. Four decisions drive everything below.
- *
- *   1. **The surfaces are a monotonic ramp, and elevation is a lift.** The order
- *      is fixed and never inverted:
- *
- *          well  <  canvas  <  chrome  <  surface  <  raised  <  hover
- *
- *      `well` is a *hole* — code, terminal output, search fields, the tab
- *      strip's inset wells. `canvas` is the page. `surface` is a card resting on
- *      it. `raised` is a card on a card, or a filled control. `hover` is only
- *      ever a press or selection state, never a new colour. Each step is ~4–6%
- *      lightness, which separates on a cheap panel without banding on OLED.
+ *      `well` is a hole (code, terminal, search fields). `canvas` is the page.
+ *      `surface` is a card. `raised` is a card on a card or a filled control.
+ *      `hover` is only ever a press state. Each step is ~5% lightness — enough
+ *      to separate on a cheap panel, small enough to never band on OLED.
  *
  *   2. **Ink is a four-step ramp with a fixed job per step.** `ink` is body
- *      copy, `ink2` is secondary prose and labels, `ink3` is metadata that must
- *      stay legible (paths, counts, timestamps), `ink4` is disabled-only. All of
- *      `ink`/`ink2` clear WCAG AA (4.5:1) on every surface; `ink3` clears the
- *      large-text bar (3:1) with margin and is only ever rendered at 10–11px
- *      where that is the governing requirement. `__tests__/contrast.test.ts`
- *      *computes* these numbers rather than trusting this comment.
+ *      copy, `ink2` is secondary prose and labels, `ink3` is metadata, `ink4`
+ *      is disabled-only. `ink`/`ink2` clear WCAG AA on every surface; `ink3`
+ *      clears the large-text bar; `__tests__/contrast.test.ts` computes the
+ *      ratios rather than trusting this comment.
  *
- *   3. **Exactly ONE accent, and it is the desktop's.** `#5b8def`. It is
- *      reserved for: the primary action, the active tab, selection, focus, a
- *      live mark, and progress fills. Never decoration. A tool with a large
- *      status vocabulary (working / blocked / failed / idle) cannot also carry a
- *      decorative palette — every extra hue competes with a status colour and
- *      the user has to learn which meaning wins.
+ *   3. **Exactly ONE accent.** An electric periwinkle-blue, the desktop's hue
+ *      pushed brighter so it glows against near-black. Reserved for: the
+ *      primary action, the active tab, selection, links, a live mark, progress.
+ *      Never decoration — with four status hues in the app, every decorative
+ *      colour competes with a meaning.
  *
- *   4. **Status is the only place colour carries meaning, and it is never the
- *      only channel.** Four tones, following the desktop's traffic-light
- *      discipline: `ok` = alive, `wait` = needs a human, `danger` = failed,
- *      `muted` = finished. `Dot` varies *size* as well as hue (the states that
- *      need a human are drawn larger so they are findable while scrolling) and
- *      every status surface ships a word. `info` is a fourth, non-urgent tone
- *      for "held, not broken" (queued, paused, informational).
- *
- * AGENT IDENTITY
- * --------------
- * A separate, deliberately narrow hue set identifies *which agent* is running,
- * not *what state* it is in, so it is allowed to be colourful where the status
- * palette is not — and it never appears on a status control. The six-slot cycle
- * is the desktop's, so a session looks the same in the browser and on the
- * phone; named providers are pinned so Claude is always the same blue.
+ *   4. **Status is the only place colour carries meaning, and never the only
+ *      channel.** `ok` = alive, `wait` = needs a human, `danger` = failed,
+ *      `info` = held, not broken. Dots vary size as well as hue and every
+ *      status surface ships a word.
  */
 
-/* ── Surfaces ───────────────────────────────────────────────────────────────
- * One ramp, one order. `hexShade` documents the lightness step of each. */
+/* ── Surfaces ─────────────────────────────────────────────────────────────── */
 
 export const palette = {
   /** A hole in the page — code blocks, terminal output, search wells. */
-  well: '#0E0E10',
+  well: '#08080A',
   /** The page itself. Everything else is a lift off this. */
-  canvas: '#101012',
+  canvas: '#0C0C0E',
   /** Navigation chrome and headers: tab bar, app bar, sticky sub-bars. */
-  chrome: '#161619',
+  chrome: '#121215',
   /** A resting card, list row, or sheet. */
-  surface: '#1C1C20',
+  surface: '#17171B',
   /** A card on a card: nested grouping, filled buttons, selected rows. */
-  raised: '#24242A',
+  raised: '#1F1F25',
   /** Pressed / hovered state for a `raised` surface. */
-  hover: '#2E2E35',
+  hover: '#2A2A32',
 
-  /** A selected row: `raised` warmed toward the accent. */
-  selected: '#262633',
+  /** A selected row: `raised` cooled toward the accent. */
+  selected: '#191C2A',
   /** The tappable body of a control sitting on `surface`. */
-  field: '#141417',
+  field: '#0E0E11',
 
   /** Scrim behind a sheet, dialog or drawer. */
-  scrim: 'rgba(6,6,8,0.72)',
+  scrim: 'rgba(4,4,6,0.66)',
   /** A lighter scrim for stacked overlays (a picker over a sheet). */
-  scrimSoft: 'rgba(6,6,8,0.55)',
+  scrimSoft: 'rgba(4,4,6,0.5)',
 
   /* ── Ink ────────────────────────────────────────────────────────────────
-   * Measured against `canvas` (#101012): `ink` 17.0:1, `ink2` 8.0:1,
-   * `ink3` 4.7:1, `ink4` 3.0:1. See `__tests__/contrast.test.ts`. */
-  ink: '#F2F2F3',
-  ink2: '#B0B0B6',
-  ink3: '#7E7E86',
+   * Measured against `canvas` (#0C0C0E): `ink` 17.6:1, `ink2` 8.8:1,
+   * `ink3` 4.6:1, `ink4` 2.2:1. See `__tests__/contrast.test.ts`. */
+  ink: '#F3F3F5',
+  ink2: '#ABAEB8',
+  ink3: '#7A7A86',
   /** Disabled / placeholder only. Never for information. */
-  ink4: '#57575F',
+  ink4: '#4E4E58',
 
   /* ── Accent ──────────────────────────────────────────────────────────────
-   * The desktop's blue, unchanged, so a session looks the same in both. */
-  accent: '#5B8DEF',
-  accentHover: '#6F9BF2',
-  accentPressed: '#4A76D1',
-  /** Text drawn ON `accent`. Near-black, not pure black, to avoid a hard edge. */
-  accentInk: '#0B1220',
+   * The desktop's blue, pushed brighter for near-black surfaces. */
+  accent: '#7A9BFF',
+  accentHover: '#8FABFF',
+  accentPressed: '#6689F2',
+  /** Text drawn ON `accent`. Near-black with the accent's cast. */
+  accentInk: '#0A1024',
   /** A wash of accent — selected rows, quiet emphasis. */
-  accentSoft: 'rgba(91,141,239,0.13)',
-  accentSoftStrong: 'rgba(91,141,239,0.22)',
-  accentBorder: 'rgba(91,141,239,0.36)',
+  accentSoft: 'rgba(122,155,255,0.13)',
+  accentSoftStrong: 'rgba(122,155,255,0.22)',
+  accentBorder: 'rgba(122,155,255,0.38)',
 
   /* ── Status ──────────────────────────────────────────────────────────────
    * The only colours that carry meaning. Each pairs with a distinct dot size
    * and a word, so colour is never the sole channel. */
-  ok: '#5FB863',
-  okSoft: 'rgba(95,184,99,0.13)',
-  okBorder: 'rgba(95,184,99,0.34)',
+  ok: '#52C58B',
+  okSoft: 'rgba(82,197,139,0.13)',
+  okBorder: 'rgba(82,197,139,0.36)',
 
   /** "Needs you" — a human is blocking the run. The app's most important state. */
-  wait: '#E08A3C',
-  waitSoft: 'rgba(224,138,60,0.13)',
-  waitBorder: 'rgba(224,138,60,0.36)',
+  wait: '#E8A03E',
+  waitSoft: 'rgba(232,160,62,0.13)',
+  waitBorder: 'rgba(232,160,62,0.38)',
 
-  danger: '#F85149',
-  dangerSoft: 'rgba(248,81,73,0.13)',
-  dangerBorder: 'rgba(248,81,73,0.36)',
+  danger: '#F45B66',
+  dangerSoft: 'rgba(244,91,102,0.13)',
+  dangerBorder: 'rgba(244,91,102,0.38)',
 
   /** Informational — queued, paused, or otherwise held but not broken. */
-  info: '#7FA8D8',
-  infoSoft: 'rgba(127,168,216,0.13)',
-  infoBorder: 'rgba(127,168,216,0.36)',
+  info: '#74B6E8',
+  infoSoft: 'rgba(116,182,232,0.13)',
+  infoBorder: 'rgba(116,182,232,0.36)',
 
   /* ── Hairlines ────────────────────────────────────────────────────────────
    * Alpha white, never a grey: a grey hairline picks up the colour of whatever
    * is behind it and looks dirty on a tinted surface, whereas an alpha-white
    * one always reads as "a thin bit of light on the edge". */
-  line: 'rgba(255,255,255,0.075)',
-  lineStrong: 'rgba(255,255,255,0.14)',
+  line: 'rgba(255,255,255,0.065)',
+  lineStrong: 'rgba(255,255,255,0.13)',
 
   /* ── Code wells ───────────────────────────────────────────────────────────
    * The densest text in the app, on its own darker well. */
-  code: '#0A0A0C',
-  codeInk: '#D9DDE7',
+  code: '#0A0A0D',
+  codeInk: '#DCE0EA',
   /** The gutter / line-number column inside a diff. */
-  codeDim: '#4E5158',
+  codeDim: '#54555E',
 
   /** The shimmer band that runs across a skeleton while it loads. */
-  shimmer: 'rgba(255,255,255,0.055)',
+  shimmer: 'rgba(255,255,255,0.05)',
 
   /**
    * The camera viewfinder behind the pairing scanner.
@@ -165,14 +136,10 @@ export const palette = {
   viewfinder: '#000000',
 
   /**
-   * Ink for a badge drawn on a *saturated* fill.
-   *
-   * `accentInk` is a blue-black tuned to sit on the accent, so it muddies when
-   * placed on the danger red behind the tab bar's count. This is the near-white
-   * the status fills actually want, named so the reason is recorded rather
-   * than re-derived at every call site.
+   * Ink for a badge drawn on a *saturated* fill (danger count, accent pill).
+   * Near-white, tuned for dark text-on-fill legibility at small sizes.
    */
-  badgeInk: '#F5F7FA',
+  badgeInk: '#F5F7FC',
 } as const
 
 /* ── Diff ──────────────────────────────────────────────────────────────────────
@@ -189,8 +156,8 @@ export const palette = {
  * has no status equivalent: they are the row backgrounds behind a +/- line, and
  * they exist purely so the gutter reads as belonging to its line. */
 
-export const diffAddSoft = 'rgba(95,184,99,0.10)'
-export const diffDelSoft = 'rgba(248,81,73,0.10)'
+export const diffAddSoft = 'rgba(82,197,139,0.10)'
+export const diffDelSoft = 'rgba(244,91,102,0.10)'
 
 /* ── Elevation ────────────────────────────────────────────────────────────────
  * The app has exactly one shadow, and overlays get it. A shadow on a content
@@ -206,19 +173,19 @@ export const diffDelSoft = 'rgba(248,81,73,0.10)'
 
 export const shadowOverlay = {
   shadowColor: '#000000',
-  shadowOpacity: 0.5,
-  shadowRadius: 28,
-  shadowOffset: { width: 0, height: 14 },
-  elevation: 24,
+  shadowOpacity: 0.55,
+  shadowRadius: 32,
+  shadowOffset: { width: 0, height: 16 },
+  elevation: 26,
 } as const
 
 /** A lighter version for things that float over an already-raised surface. */
 export const shadowFloating = {
   shadowColor: '#000000',
-  shadowOpacity: 0.4,
-  shadowRadius: 14,
-  shadowOffset: { width: 0, height: 6 },
-  elevation: 10,
+  shadowOpacity: 0.45,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 7 },
+  elevation: 12,
 } as const
 
 export type PaletteKey = keyof typeof palette
@@ -295,20 +262,21 @@ export const toneClass = {
 } as const
 
 /* ── Radii ───────────────────────────────────────────────────────────────────
- * Six steps, each with a job. The old vocabulary had seven overlapping names
- * (`sm`/`md`/`lg`/`xl`/`2xl`/`card`/`control`/`chip`); these are the only ones. */
+ * Six steps, each with a job. The v3 language is soft: containers read as
+ * sheets of glass on the page, so cards and controls are one step rounder
+ * than the previous vocabulary. */
 
 export const radius = {
   /** Inline code, tiny tags, 1px-ish affordances. */
-  xs: 6,
+  xs: 7,
   /** Badges, chips, small controls. */
-  sm: 10,
+  sm: 11,
   /** Buttons, inputs, list rows. The workhorse. */
-  md: 14,
+  md: 15,
   /** Cards and panels. */
   lg: 20,
   /** Sheets, dialogs, the tab bar's floating elements. */
-  xl: 26,
+  xl: 28,
   /** Full pill — segmented controls, FABs, chips. */
   pill: 999,
 } as const
@@ -316,7 +284,7 @@ export const radius = {
 /* ── Spacing ─────────────────────────────────────────────────────────────────
  * A 4pt scale. Tailwind's default scale is what components use via class
  * names; these exist for `style` props and for documenting the rhythm. The
- * page gutter is 16, the card gutter 14, the tight gap 8. */
+ * page gutter is 18, the card gutter 16, the tight gap 8. */
 
 export const space = {
   xs: 4,
@@ -324,29 +292,28 @@ export const space = {
   md: 12,
   lg: 16,
   xl: 20,
-  xxl: 28,
+  xxl: 30,
 } as const
 
 /* ── Type ────────────────────────────────────────────────────────────────────
- * A mobile scale. Every step is larger than its desktop counterpart: a phone
- * is read at arm's length, often one-handed, often in motion, and the desktop
- * sets body copy at 13px on a monitor 60cm away. Tracking is negative on large
- * text (optical) and positive on small caps (legibility).
+ * A mobile scale tuned for the v3 language: generous body sizes, tall
+ * line-heights on prose, tight tracking on large display text. A phone is read
+ * at arm's length, often one-handed, often in motion.
  *
  * `size`/`height` are RN fontSize/lineHeight; `weight` is the RN fontWeight;
  * `track` is letterSpacing in px. */
 
 export const type = {
-  /** Screen hero title (large-title headers). 30/36, -0.6. */
-  display: { size: 30, height: 36, weight: '700' as const, track: -0.6 },
-  /** Section title. 21/27, -0.35. */
-  title: { size: 21, height: 27, weight: '700' as const, track: -0.35 },
+  /** Screen hero title (large-title headers). 30/36, -0.7. */
+  display: { size: 30, height: 36, weight: '700' as const, track: -0.7 },
+  /** Section title. 21/27, -0.4. */
+  title: { size: 21, height: 27, weight: '700' as const, track: -0.4 },
   /** App-bar title, card title. 16.5/22, -0.2. */
   heading: { size: 16.5, height: 22, weight: '600' as const, track: -0.2 },
-  /** Body / list row primary. 15/21, 0. */
-  body: { size: 15, height: 21, weight: '400' as const, track: 0 },
-  /** List row primary, emphasised. 15/21, 500. */
-  label: { size: 15, height: 21, weight: '500' as const, track: -0.05 },
+  /** Body / list row primary. 15.5/22, 0. */
+  body: { size: 15.5, height: 22, weight: '400' as const, track: 0 },
+  /** List row primary, emphasised. 15.5/22, 500. */
+  label: { size: 15.5, height: 22, weight: '500' as const, track: -0.1 },
   /** Secondary body, descriptions. 13.5/19, 0. */
   caption: { size: 13.5, height: 19, weight: '400' as const, track: 0 },
   /** Metadata. 12/16, 0. */

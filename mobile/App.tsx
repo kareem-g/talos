@@ -127,8 +127,32 @@ function BootScreen({
         opacity: enter,
       }}
     >
-      <BrandMark size={34} />
-      <Text style={{ color: palette.ink, fontSize: 20, fontWeight: '700', letterSpacing: -0.35 }}>
+      {/* The mark sits on a tile, so the boot screen has the same first frame
+          as the pairing screen it usually precedes. */}
+      <View
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 24,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: palette.surface,
+          borderWidth: 1,
+          borderColor: palette.line,
+          marginBottom: 4,
+        }}
+      >
+        <BrandMark size={34} />
+      </View>
+      <Text
+        style={{
+          color: palette.ink,
+          fontSize: 21,
+          lineHeight: 27,
+          fontWeight: '700',
+          letterSpacing: -0.5,
+        }}
+      >
         {title}
       </Text>
       <Text

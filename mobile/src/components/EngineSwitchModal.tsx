@@ -21,13 +21,13 @@
 
 import * as React from 'react'
 import { Pressable, Text, View } from 'react-native'
-import { Check, Cpu } from 'lucide-react-native'
+import { Check } from 'lucide-react-native'
 
 import { useStore } from '@app/store'
 import { palette, radius } from '@app/design/tokens'
 import { FormSheet } from '@app/components/Sheet'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
-import { AgentAvatar, Mono, haptic, toast } from '@app/components/ui'
+import { AgentAvatar, Badge, Eyebrow, Mono, Notice, haptic, toast } from '@app/components/ui'
 
 export function EngineSwitchSheet({
   open,
@@ -103,27 +103,13 @@ export function EngineSwitchSheet({
       error={error}
       disabled={!canSubmit}
     >
-      <View
-        style={{
-          flexDirection: 'row',
-          gap: 11,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: palette.line,
-          backgroundColor: palette.well,
-          padding: 13,
-        }}
-      >
-        <Cpu size={17} color={palette.ink3} />
-        <Text className="flex-1 text-[13px] leading-[18px] text-ink-2">
-          A digest of the previous turns is handed to the new agent so the conversation survives.
-          That means a new process, a new cost, and a context that is a summary rather than the
-          original.
-        </Text>
-      </View>
+      <Notice
+        tone="info"
+        message="A digest of the previous turns is handed to the new agent so the conversation survives. That means a new process, a new cost, and a context that is a summary rather than the original."
+      />
 
-      <View style={{ gap: 7, marginTop: 14 }}>
-        <SectionLabel>Agent</SectionLabel>
+      <View style={{ gap: 7 }}>
+        <Eyebrow>Agent</Eyebrow>
         {readyAgents.length === 0 ? (
           <Text className="text-[13.5px] leading-[19px] text-ink-3">
             No agent is ready on the desktop. Install a supported CLI there, then re-scan from the
@@ -149,8 +135,8 @@ export function EngineSwitchSheet({
       </View>
 
       {models.length > 0 ? (
-        <View style={{ gap: 7, marginTop: 16 }}>
-          <SectionLabel>Model — optional</SectionLabel>
+        <View style={{ gap: 7, marginTop: 8 }}>
+          <Eyebrow>Model — optional</Eyebrow>
           <View style={{ gap: 6 }}>
             <ModelRow
               label="Keep the current model"
@@ -170,23 +156,6 @@ export function EngineSwitchSheet({
         </View>
       ) : null}
     </FormSheet>
-  )
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Text
-      style={{
-        color: palette.ink3,
-        fontSize: 10,
-        fontWeight: '600',
-        letterSpacing: 1.2,
-        textTransform: 'uppercase',
-        fontFamily: 'Menlo',
-      }}
-    >
-      {children}
-    </Text>
   )
 }
 
@@ -220,39 +189,30 @@ function AgentRow({
           gap: 12,
           borderRadius: radius.md,
           borderWidth: 1,
-          borderColor: active ? palette.accent : palette.line,
+          borderColor: active ? palette.accentBorder : palette.line,
           backgroundColor: active
             ? palette.accentSoft
             : pressed
               ? palette.raised
-              : palette.well,
+              : palette.surface,
           paddingHorizontal: 13,
           paddingVertical: 11,
-          minHeight: 54,
+          minHeight: 56,
         })}
       >
         <AgentAvatar agent={id} size={32} name={name} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+        <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+          <Text className="text-[15px] leading-[20px] font-semibold text-ink" numberOfLines={1}>
             {name}
           </Text>
-          <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+          <Mono className="text-[11px] leading-[15px]" numberOfLines={1}>
             {id}
           </Mono>
         </View>
         {current ? (
-          <View
-            style={{
-              paddingHorizontal: 7,
-              paddingVertical: 3,
-              borderRadius: radius.xs,
-              backgroundColor: palette.raised,
-            }}
-          >
-            <Text style={{ color: palette.ink3, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 }}>
-              CURRENT
-            </Text>
-          </View>
+          <Badge tone={active ? 'accent' : 'muted'} mono>
+            Current
+          </Badge>
         ) : null}
         {active && !current ? <Check size={17} color={palette.accent} strokeWidth={2.6} /> : null}
       </Pressable>
@@ -284,14 +244,14 @@ function ModelRow({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-        borderRadius: radius.sm,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: active ? palette.accent : palette.line,
+        borderColor: active ? palette.accentBorder : palette.line,
         backgroundColor: active
           ? palette.accentSoft
           : pressed
             ? palette.raised
-            : palette.well,
+            : palette.surface,
         paddingHorizontal: 12,
         paddingVertical: 10,
         minHeight: 46,
@@ -302,13 +262,23 @@ function ModelRow({
           `claude-opus-4-6` read as one identifier rather than three
           hyphenated words, which is the difference between picking the model
           you meant and picking a plausible-looking one. */}
-      <Text
-        className="flex-1 text-[13.5px]"
-        style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '400' }}
-        numberOfLines={1}
-      >
-        {mono ? <Mono className="text-[13.5px]">{label}</Mono> : label}
-      </Text>
+      {mono ? (
+        <Mono
+          className="flex-1 text-[13px] leading-[18px]"
+          style={{ color: active ? palette.ink : palette.ink2 }}
+          numberOfLines={1}
+        >
+          {label}
+        </Mono>
+      ) : (
+        <Text
+          className="flex-1 text-[14px] leading-[19px]"
+          style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '400' }}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      )}
       {active ? <Check size={16} color={palette.accent} strokeWidth={2.6} /> : null}
     </Pressable>
   )

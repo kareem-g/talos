@@ -289,10 +289,10 @@ export function Sheet({
               <View {...pan.panHandlers} style={{ height: 26, alignItems: 'center', justifyContent: 'center' }}>
                 <View
                   style={{
-                    width: 40,
-                    height: 4,
-                    borderRadius: 2,
-                    backgroundColor: palette.lineStrong,
+                    width: 42,
+                    height: 4.5,
+                    borderRadius: 3,
+                    backgroundColor: palette.ink4,
                   }}
                 />
               </View>
@@ -306,8 +306,8 @@ export function Sheet({
                 <View className="min-w-0 flex-1">
                   {eyebrow ? <Eyebrow className="mb-1">{eyebrow}</Eyebrow> : null}
                   <Text
-                    className="text-[19px] font-bold text-ink"
-                    style={{ letterSpacing: -0.3 }}
+                    className="text-[19.5px] leading-[25px] font-bold text-ink"
+                    style={{ letterSpacing: -0.4 }}
                     numberOfLines={1}
                   >
                     {title}

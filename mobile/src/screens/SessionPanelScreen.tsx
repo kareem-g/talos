@@ -17,10 +17,11 @@
  * --------
  * The rail's tab set is a registry on the desktop, with the four that matter
  * open by default and a picker for the rest. That maps to a phone exactly: a
- * scrolling strip of the four default tabs, and a `+` that opens a picker of
- * the rest. Opening a fifth tab is one tap and the strip scrolls to it; there
- * is no drawer, no overflow menu nested three deep, and no way to lose a tab
- * you opened.
+ * scrolling strip of rounded-pill chips, and a `+` that opens a picker of the
+ * rest. Opening a fifth tab is one tap and the strip scrolls to it; there is no
+ * drawer, no overflow menu nested three deep, and no way to lose a tab you
+ * opened. Long-press still closes — the strip is a tool rail, and tools you
+ * cannot put away are clutter.
  *
  * WHICH FOUR
  * ----------
@@ -31,27 +32,32 @@
  */
 
 import * as React from 'react'
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Pressable, ScrollView, Text, View } from 'react-native'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { ChevronRight, Plus, X } from 'lucide-react-native'
 
+import { cn } from '@/lib/format'
 import type { Conversation } from '@/types/conversation'
 import type { Session } from '@/types/session'
 import { deriveSubagents, hasRecentError, latestPlanInfo, latestUserPrompt } from '@app/lib/sessionView'
 import { useConversation, useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius, toneColor, type Tone } from '@app/design/tokens'
+import { palette, type Tone } from '@app/design/tokens'
 import { useCollapse } from '@app/components/motion'
 import { PickerSheet } from '@app/components/Sheet'
 import { AppBar, BackButton } from '@app/components/Screen'
 import {
+  AgentAvatar,
   Badge,
   Button,
+  Card,
   Dot,
   EmptyState,
   Eyebrow,
+  Field,
   Mono,
+  Notice,
   ProgressBar,
   StatusPill,
   Well,
@@ -141,96 +147,81 @@ export function SessionPanelScreen() {
         left={<BackButton onPress={() => navigation.goBack()} label="Back to the session" />}
         right={
           <View style={{ paddingRight: 6 }}>
-            <Text className="text-[11px] text-ink-3" style={{ letterSpacing: 0.4 }}>
-              TOOLS
-            </Text>
+            <Eyebrow>Tools</Eyebrow>
           </View>
         }
       />
 
       {/* ── Tab strip ─────────────────────────────────────────────────────
-          A horizontally scrolling strip with the active tab underlined, and a
-          `+` at the end that opens the picker. Scrolling rather than wrapping:
-          a wrapped strip becomes two rows of buttons and pushes the content
-          down, which is the opposite of what a tool panel is for. */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          borderBottomWidth: 1,
-          borderBottomColor: palette.line,
-          backgroundColor: palette.chrome,
-        }}
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8 }}
-        >
-          {open.map((id) => {
-            const spec = TABS.find((entry) => entry.id === id)!
-            const isActive = id === active
-            return (
-              <Pressable
-                key={id}
-                accessibilityRole="tab"
-                accessibilityLabel={spec.label}
-                accessibilityHint={spec.hint}
-                accessibilityState={{ selected: isActive }}
-                onPress={() => {
-                  void haptic('select')
-                  setActive(id)
-                }}
-                onLongPress={() => closeTab(id)}
-                style={{
-                  minHeight: 42,
-                  justifyContent: 'center',
-                  paddingHorizontal: 11,
-                }}
-              >
-                <View style={{ alignItems: 'center', gap: 5 }}>
+          A horizontally scrolling rail of rounded-pill chips on the chrome,
+          with the live tab lifted (raised fill, hairline, an accent dot) and
+          the `+` at the end that opens the picker. Scrolling rather than
+          wrapping: a wrapped strip becomes two rows of buttons and pushes the
+          content down, which is the opposite of what a tool panel is for. */}
+      <View className="border-b border-line bg-chrome">
+        <View className="flex-row items-center">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 }}
+          >
+            {open.map((id) => {
+              const spec = TABS.find((entry) => entry.id === id)!
+              const isActive = id === active
+              return (
+                <Pressable
+                  key={id}
+                  accessibilityRole="tab"
+                  accessibilityLabel={spec.label}
+                  accessibilityHint={spec.hint}
+                  accessibilityState={{ selected: isActive }}
+                  onPress={() => {
+                    void haptic('select')
+                    setActive(id)
+                  }}
+                  onLongPress={() => closeTab(id)}
+                  className={cn(
+                    'mr-1.5 h-9 flex-row items-center gap-2 rounded-pill border px-3.5',
+                    isActive
+                      ? 'border-line-strong bg-raised'
+                      : 'border-transparent active:bg-raised/60',
+                  )}
+                >
+                  {isActive ? (
+                    <View
+                      className="size-1.5 rounded-full"
+                      style={{ backgroundColor: palette.accent }}
+                    />
+                  ) : null}
                   <Text
                     style={{
                       fontSize: 13,
-                      fontWeight: isActive ? '700' : '500',
+                      lineHeight: 16,
+                      fontWeight: isActive ? '600' : '500',
                       color: isActive ? palette.ink : palette.ink3,
                     }}
                   >
                     {spec.label}
                   </Text>
-                  <View
-                    style={{
-                      width: isActive ? 22 : 0,
-                      height: 2,
-                      borderRadius: 1,
-                      backgroundColor: palette.accent,
-                    }}
-                  />
-                </View>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open another tool"
-          accessibilityHint="Shows the tabs that are not open"
-          onPress={() => {
-            void haptic('light')
-            setPickerOpen(true)
-          }}
-          hitSlop={8}
-          style={({ pressed }) => ({
-            width: 42,
-            height: 42,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: pressed ? palette.raised : 'transparent',
-          })}
-        >
-          <Plus size={17} color={palette.ink2} />
-        </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open another tool"
+            accessibilityHint="Shows the tabs that are not open"
+            onPress={() => {
+              void haptic('light')
+              setPickerOpen(true)
+            }}
+            hitSlop={8}
+            className="ml-0.5 mr-2.5 size-9 items-center justify-center rounded-pill border border-line active:bg-raised"
+          >
+            <Plus size={17} color={palette.ink2} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -352,8 +343,8 @@ export function PanelHeader({
 }
 
 /* ── Plan ──────────────────────────────────────────────────────────────────────
- * The plan is a *checklist*, so it is a checklist: one row per step, a mark
- * that is a glyph and not a colour, and the whole thing collapsible. On the
+ * The plan is a *checklist*, so it is a checklist: one row per step, a glyph
+ * sitting in its own small round tile, and the whole thing collapsible. On the
  * desktop the chevron rotates and the body clips; the same, measured, so a
  * nine-step plan and a one-step plan both animate at a believable speed. */
 
@@ -395,7 +386,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
             hitSlop={10}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
           >
-            <Text style={{ color: palette.ink3, fontSize: 11.5 }}>{open ? 'Collapse' : 'Expand'}</Text>
+            <Text className="text-[11.5px] leading-[15px] text-ink-3">{open ? 'Collapse' : 'Expand'}</Text>
             <ChevronRight
               size={13}
               color={palette.ink3}
@@ -407,39 +398,29 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
 
       {info.title ? (
         <Text
-          className="mb-3 text-[17px] font-semibold text-ink"
-          style={{ letterSpacing: -0.25, lineHeight: 23 }}
+          className="mb-3 text-[17px] leading-[23px] font-semibold text-ink"
+          style={{ letterSpacing: -0.25 }}
         >
           {info.title}
         </Text>
       ) : null}
 
-      <View style={{ gap: 2, marginBottom: 12 }}>
+      <View className="mb-3 gap-1.5">
         <ProgressBar value={steps.length ? done / steps.length : 0} tone={done === steps.length && steps.length > 0 ? 'ok' : 'accent'} />
-        <Text className="text-[11.5px] text-ink-3">
+        <Text className="text-[11.5px] leading-[15px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
           {done} of {steps.length} complete
         </Text>
       </View>
 
       <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
-        <View style={{ gap: 2 }}>
+        <View className="gap-0.5">
           {steps.map((step, index) => (
             <StepRow key={index} index={index} content={step.content} status={step.status ?? 'pending'} />
           ))}
         </View>
 
         {info.text ? (
-          <View
-            style={{
-              marginTop: 14,
-              borderRadius: radius.md,
-              borderWidth: 1,
-              borderColor: palette.line,
-              backgroundColor: palette.well,
-              padding: 13,
-              gap: 6,
-            }}
-          >
+          <Well className="mt-3.5 gap-1.5 rounded-md border border-line p-3.5">
             {info.text
               .split('\n')
               .filter((line) => line.trim().length > 0)
@@ -452,7 +433,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
                     key={index}
                     style={{
                       fontSize: heading ? 14 : 13.5,
-                      lineHeight: 20,
+                      lineHeight: heading ? 20 : 19,
                       fontWeight: heading ? '600' : '400',
                       color: heading ? palette.ink : palette.ink2,
                       marginLeft: bullet ? 10 : 0,
@@ -463,11 +444,11 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
                   </Text>
                 )
               })}
-          </View>
+          </Well>
         ) : null}
 
         {info.relatedFiles.length > 0 ? (
-          <View style={{ marginTop: 14, gap: 6 }}>
+          <View className="mt-3.5 gap-1.5">
             <Eyebrow>Related files</Eyebrow>
             {info.relatedFiles.map((path) => (
               <Mono key={path} className="text-[12px] leading-[18px] text-ink-2">
@@ -502,19 +483,23 @@ function StepRow({ index, content, status }: { index: number; content: string; s
   const active = status === 'in_progress'
   return (
     <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 10,
-        borderRadius: radius.sm,
-        paddingHorizontal: 9,
-        paddingVertical: 8,
-        backgroundColor: active ? palette.raised : 'transparent',
-      }}
+      className={cn(
+        'flex-row items-start gap-3 rounded-md px-2.5 py-2',
+        active && 'bg-white/5',
+      )}
     >
-      <Text style={{ width: 16, marginTop: 1, fontSize: 12, lineHeight: 18, fontWeight: '700', color: STEP_COLOR[status] ?? palette.ink4 }}>
-        {STEP_MARK[status] ?? '○'}
-      </Text>
+      <View className="mt-0.5 size-[22px] items-center justify-center rounded-full bg-raised">
+        <Text
+          style={{
+            fontSize: 11.5,
+            lineHeight: 14,
+            fontWeight: '700',
+            color: STEP_COLOR[status] ?? palette.ink4,
+          }}
+        >
+          {STEP_MARK[status] ?? '○'}
+        </Text>
+      </View>
       <Text
         style={{
           flex: 1,
@@ -527,7 +512,9 @@ function StepRow({ index, content, status }: { index: number; content: string; s
       >
         {content}
       </Text>
-      <Text style={{ color: palette.ink4, fontSize: 10.5, fontVariant: ['tabular-nums'] }}>{index + 1}</Text>
+      <Text className="mt-1 text-[10.5px] leading-[14px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }}>
+        {index + 1}
+      </Text>
     </View>
   )
 }
@@ -556,7 +543,10 @@ function AgentsTab({
         eyebrow="Agents"
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: palette.ink3, fontSize: 11 }}>
+            <Text
+              className="text-[11px] leading-[14px] text-ink-3"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
               {subagents.length === 0 ? 'none' : `${running}/${subagents.length} running`}
             </Text>
             <Button size="sm" variant="secondary" label="Spawn" onPress={onSpawn} />
@@ -564,30 +554,21 @@ function AgentsTab({
         }
       />
 
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 11,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: palette.line,
-          backgroundColor: palette.well,
-          paddingHorizontal: 13,
-          paddingVertical: 12,
-        }}
-      >
-        <Dot tone="ok" />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+      <Card className="flex-row items-center gap-3 p-4">
+        <AgentAvatar agent={session.agent || 'agent'} size={38} />
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-[15.5px] leading-[21px] font-semibold text-ink" numberOfLines={1}>
             {session.agent || 'agent'}
           </Text>
-          <Text className="mt-0.5 text-[12px] text-ink-3">Primary</Text>
+          <View className="flex-row items-center gap-1.5">
+            <Dot tone="ok" />
+            <Text className="text-[12px] leading-[16px] text-ink-3">Primary</Text>
+          </View>
         </View>
-      </View>
+      </Card>
 
       {subagents.length === 0 ? (
-        <View style={{ marginTop: 14 }}>
+        <View className="mt-3.5">
           <EmptyState
             title="No subagents"
             body="A subagent is a focused child task — a review, a plan, a parallel implementation — that runs under this session."
@@ -595,36 +576,26 @@ function AgentsTab({
           />
         </View>
       ) : (
-        <View style={{ marginTop: 12, gap: 6 }}>
+        <View className="mt-3 gap-1.5">
           {subagents.map((agent) => (
-            <View
-              key={agent.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 11,
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: palette.well,
-                paddingHorizontal: 13,
-                paddingVertical: 11,
-              }}
-            >
+            <Card key={agent.id} className="flex-row items-center gap-3 px-4 py-3">
               <Dot
                 tone={agent.status === 'working' ? 'accent' : agent.status === 'failed' ? 'danger' : 'ok'}
                 pulse={agent.status === 'working'}
               />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text className="text-[14px] text-ink-2" numberOfLines={1}>
+              <View className="min-w-0 flex-1 gap-0.5">
+                <Text className="text-[14.5px] leading-[19px] text-ink" numberOfLines={1}>
                   {agent.name}
                 </Text>
-                <Text className="mt-0.5 text-[11px]" style={{ color: subagentTone(agent.status) }}>
+                <Text
+                  className="text-[11.5px] leading-[15px]"
+                  style={{ color: subagentTone(agent.status) }}
+                >
                   {subagentLabel(agent.status)}
                 </Text>
               </View>
               <Mono className="shrink-0 text-[10px] uppercase text-ink-3">{agent.kind}</Mono>
-            </View>
+            </Card>
           ))}
         </View>
       )}
@@ -663,27 +634,17 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
       <PanelHeader eyebrow="Goal" right={<StatusPill tone={tone} label={label} size="sm" />} />
 
       <Text
-        className="text-[19px] font-semibold text-ink"
-        style={{ letterSpacing: -0.35, lineHeight: 26 }}
+        className="text-[21px] leading-[27px] font-bold text-ink"
+        style={{ letterSpacing: -0.4 }}
       >
         {info?.title ?? session.name ?? 'Session'}
       </Text>
 
       {objective ? (
-        <View
-          style={{
-            marginTop: 12,
-            borderRadius: radius.md,
-            borderWidth: 1,
-            borderColor: palette.line,
-            backgroundColor: palette.well,
-            padding: 13,
-            gap: 6,
-          }}
-        >
+        <Card className="mt-3 gap-1.5 p-4">
           <Eyebrow>Objective</Eyebrow>
-          <Text className="text-[14px] leading-[20px] text-ink-2">{objective}</Text>
-        </View>
+          <Text className="text-[15.5px] leading-[22px] text-ink-2">{objective}</Text>
+        </Card>
       ) : (
         <Text className="mt-3 text-[13.5px] leading-[19px] text-ink-3">
           No objective yet — this is the first thing you asked the agent.
@@ -691,15 +652,18 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
       )}
 
       {steps.length > 0 ? (
-        <View style={{ marginTop: 18, gap: 10 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-            <Text className="text-[13px] text-ink-2">Progress</Text>
-            <Text style={{ color: palette.ink2, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+        <View className="mt-4 gap-2.5">
+          <View className="flex-row items-baseline justify-between">
+            <Text className="text-[13px] leading-[18px] text-ink-2">Progress</Text>
+            <Text
+              className="text-[13px] leading-[18px] font-bold text-ink-2"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
               {done}/{steps.length} · {pct}%
             </Text>
           </View>
           <ProgressBar value={pct / 100} tone={tone} />
-          <View style={{ gap: 2, marginTop: 4 }}>
+          <View className="mt-1 gap-0.5">
             {steps.slice(0, 20).map((step, index) => (
               <StepRow key={index} index={index} content={step.content} status={step.status ?? 'pending'} />
             ))}
@@ -733,26 +697,33 @@ function TerminalTab({
   }, [conversation.terminal])
 
   return (
-    <View style={{ gap: 12 }}>
+    <View className="gap-3">
       <PanelHeader
         eyebrow="Terminal"
         right={<Badge tone={interactive ? 'ok' : 'muted'} outline>{interactive ? 'interactive' : 'read-only'}</Badge>}
       />
 
       {interactive ? (
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TextInputShell
+        <View className="flex-row items-center gap-2">
+          <Field
+            containerClassName="flex-1"
+            mono
             value={input}
             onChangeText={setInput}
             placeholder="Type a command…"
-            onSubmit={() => {
+            accessibilityLabel="Type a command…"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onSubmitEditing={() => {
               if (!input.trim()) return
               socket.sendTerminalInput(session.id, `${input}\n`)
               setInput('')
             }}
+            returnKeyType="send"
+            blurOnSubmit={false}
           />
           <Button
-            size="sm"
+            size="md"
             variant="secondary"
             label="Send"
             disabled={input.trim().length === 0}
@@ -764,20 +735,10 @@ function TerminalTab({
           />
         </View>
       ) : (
-        <View
-          style={{
-            borderRadius: radius.sm,
-            borderWidth: 1,
-            borderColor: palette.line,
-            backgroundColor: palette.waitSoft,
-            padding: 11,
-          }}
-        >
-          <Text className="text-[12.5px] leading-[17px]" style={{ color: toneColor.wait }}>
-            This agent runs without a terminal, so its output is recorded but keystrokes are not
-            accepted.
-          </Text>
-        </View>
+        <Notice
+          tone="wait"
+          message="This agent runs without a terminal, so its output is recorded but keystrokes are not accepted."
+        />
       )}
 
       {/* A `Well`, not a `Card`: terminal output is a *hole* in the surface. It
@@ -785,54 +746,14 @@ function TerminalTab({
           never the thing you tap — those three properties are what make a block
           read as output rather than as a control, and `Well` is the one
           component that guarantees all three. */}
-      <Well className="max-h-[460px] border border-line" style={{ borderRadius: radius.md }}>
+      <Well className="max-h-[460px] rounded-lg border border-line">
         <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 12 }} nestedScrollEnabled>
-          <Mono className="text-[12px] leading-[17px] text-code-ink">
+          <Mono className="text-[12.5px] leading-[18px] text-code-ink">
             {conversation.terminal.trim() ? conversation.terminal : 'No terminal output yet.'}
           </Mono>
         </ScrollView>
       </Well>
     </View>
-  )
-}
-
-function TextInputShell({
-  value,
-  onChangeText,
-  placeholder,
-  onSubmit,
-}: {
-  value: string
-  onChangeText: (value: string) => void
-  placeholder: string
-  onSubmit: () => void
-}) {
-  return (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={palette.ink4}
-      accessibilityLabel={placeholder}
-      autoCapitalize="none"
-      autoCorrect={false}
-      onSubmitEditing={onSubmit}
-      returnKeyType="send"
-      blurOnSubmit={false}
-      style={{
-        flex: 1,
-        minHeight: 40,
-        borderRadius: radius.sm,
-        borderWidth: 1,
-        borderColor: palette.line,
-        backgroundColor: palette.field,
-        paddingHorizontal: 11,
-        paddingVertical: 0,
-        color: palette.ink,
-        fontSize: 13,
-        fontFamily: 'Menlo',
-      }}
-    />
   )
 }
 

@@ -28,17 +28,19 @@
  */
 
 import * as React from 'react'
-import { Animated, Pressable, Text, View } from 'react-native'
+import { Animated, Text, View } from 'react-native'
+import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { AlertCircle, ChevronRight } from 'lucide-react-native'
+import { ChevronRight } from 'lucide-react-native'
 
 
 import { useStore } from '@app/store'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius, shadowFloating, spring } from '@app/design/tokens'
-import { haptic } from '@app/components/ui'
+import { palette, radius, shadowOverlay, spring } from '@app/design/tokens'
+import { Touchable } from '@app/components/motion'
+import { Dot, haptic } from '@app/components/ui'
 
 export function AttentionPill() {
   const insets = useSafeAreaInsets()
@@ -96,7 +98,7 @@ export function AttentionPill() {
       pointerEvents="box-none"
       style={{
         position: 'absolute',
-        top: insets.top + 6,
+        top: insets.top + 8,
         left: 0,
         right: 0,
         alignItems: 'center',
@@ -107,50 +109,67 @@ export function AttentionPill() {
         ],
       }}
     >
-      <Pressable
+      <Touchable
         accessibilityRole="button"
         accessibilityLabel={`${count} ${count === 1 ? 'session needs' : 'sessions need'} you. Opens ${target?.name ?? 'the next one'}.`}
         onPress={() => {
           void haptic('medium')
           if (targetId) navigation.push('Session', { sessionId: targetId, approvalId: targetApprovalId })
         }}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          maxWidth: '92%',
-          borderRadius: radius.pill,
-          borderWidth: 1,
-          borderColor: palette.dangerBorder,
-          backgroundColor: pressed ? palette.dangerSoft : palette.raised,
-          paddingLeft: 13,
-          paddingRight: 11,
-          paddingVertical: 9,
-          ...shadowFloating,
-        })}
+        scaleTo={0.96}
+        style={{ maxWidth: '92%' }}
       >
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: palette.danger,
-          }}
-        />
-        <AlertCircle size={15} color={palette.danger} />
-        <Text className="shrink-0 text-[13px] font-semibold text-ink" numberOfLines={1}>
-          {count} {count === 1 ? 'needs' : 'need'} you
-        </Text>
-        {target ? (
-          <>
-            <Text className="shrink-0 text-[13px] text-ink-4">·</Text>
-            <Text className="shrink-0 text-[13px] text-ink-2" numberOfLines={1}>
-              {target.name}
-            </Text>
-          </>
-        ) : null}
-        <ChevronRight size={15} color={palette.danger} />
-      </Pressable>
+        {/* The one surface in the app allowed to cast a full overlay shadow:
+            this pill genuinely floats over whatever session is behind it. */}
+        <View style={[{ borderRadius: radius.pill }, shadowOverlay]}>
+          <View
+            style={{
+              overflow: 'hidden',
+              borderRadius: radius.pill,
+              borderWidth: 1,
+              borderColor: palette.lineStrong,
+              backgroundColor: `${palette.chrome}E6`,
+            }}
+          >
+            <BlurView intensity={60} tint="dark" style={StyleSheetAbsoluteFill} />
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingLeft: 14,
+                paddingRight: 10,
+                paddingVertical: 9,
+              }}
+            >
+              {/* `wait` is the token that means "a human is blocking the run" —
+                  and the word beside it keeps the state from being colour
+                  alone. */}
+              <Dot tone="wait" />
+              <Text className="shrink-0 text-[13px] leading-[18px] font-semibold text-ink" numberOfLines={1}>
+                {count} {count === 1 ? 'needs' : 'need'} you
+              </Text>
+              {target ? (
+                <>
+                  <Text className="shrink-0 text-[13px] leading-[18px] text-ink-4">·</Text>
+                  <Text className="min-w-0 shrink text-[13px] leading-[18px] text-ink-2" numberOfLines={1}>
+                    {target.name}
+                  </Text>
+                </>
+              ) : null}
+              <ChevronRight size={15} color={palette.ink3} />
+            </View>
+          </View>
+        </View>
+      </Touchable>
     </Animated.View>
   )
+}
+
+const StyleSheetAbsoluteFill = {
+  position: 'absolute' as const,
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
 }

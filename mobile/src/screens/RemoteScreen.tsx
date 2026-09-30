@@ -10,7 +10,7 @@
  * promoted to a card and the unreachable ones are listed beneath it as
  * fallbacks. The paired-devices list matters for a different reason — it is
  * how you cut off a phone you lost — so it gets its own section and its own
- * confirm.
+ * two-step revoke.
  */
 
 import * as React from 'react'
@@ -21,17 +21,17 @@ import { Cloud, Power, Smartphone } from 'lucide-react-native'
 
 import { remoteApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius } from '@app/design/tokens'
-import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { palette } from '@app/design/tokens'
+import { BackButton, Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
   Button,
-  Card,
   CopyButton,
-  Divider,
   Dot,
   EmptyState,
+  ErrorState,
+  IconTile,
   Mono,
   haptic,
   toast,
@@ -153,24 +153,12 @@ export function RemoteScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       scroll
-      contentClassName="px-4 pb-12 gap-5"
+      contentClassName="pb-12 gap-6"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
     >
       {error ? (
-        <View
-          accessible
-          accessibilityRole="alert"
-          style={{
-            gap: 9,
-            borderRadius: radius.md,
-            borderWidth: 1,
-            borderColor: palette.dangerBorder,
-            backgroundColor: palette.dangerSoft,
-            padding: 14,
-          }}
-        >
-          <Text className="text-[13.5px] font-semibold text-ink">{error}</Text>
-          <Button size="sm" variant="secondary" label="Retry" onPress={() => void load()} />
+        <View className="mx-4">
+          <ErrorState message={error} onRetry={() => void load()} retryLabel="Retry" />
         </View>
       ) : null}
 
@@ -188,45 +176,42 @@ export function RemoteScreen() {
             />
           </Card>
         ) : (
-          <Card>
+          <ListCard inset={36}>
             {reachable.map((endpoint, index) => (
               <EndpointRow key={endpoint.base_url} endpoint={endpoint} index={index} primary />
             ))}
-          </Card>
+          </ListCard>
         )}
       </Section>
 
       {/* ── Tunnels ─────────────────────────────────────────────────── */}
       <Section eyebrow="Managed on the desktop" title="Tunnels" enterIndex={1}>
-        <Card>
-          <View style={{ gap: 12, padding: 14 }}>
-            <TunnelRow
-              name="Tailscale"
-              hint="Best when you already run a tailnet — the phone joins it and the daemon needs no open ports."
-              running={tunnelState('tailscale')}
-              busy={busy}
-              onToggle={() => void toggleTunnel('tailscale')}
-            />
-            <View style={{ height: 1, backgroundColor: palette.line }} />
-            <TunnelRow
-              name="Cloudflare"
-              hint="A public HTTPS URL, no account on your network required. Use when Tailscale is not available."
-              running={tunnelState('cloudflare')}
-              busy={busy}
-              onToggle={() => void toggleTunnel('cloudflare')}
-            />
-          </View>
-        </Card>
+        <ListCard inset={16}>
+          <TunnelRow
+            name="Tailscale"
+            hint="Best when you already run a tailnet — the phone joins it and the daemon needs no open ports."
+            running={tunnelState('tailscale')}
+            busy={busy}
+            onToggle={() => void toggleTunnel('tailscale')}
+          />
+          <TunnelRow
+            name="Cloudflare"
+            hint="A public HTTPS URL, no account on your network required. Use when Tailscale is not available."
+            running={tunnelState('cloudflare')}
+            busy={busy}
+            onToggle={() => void toggleTunnel('cloudflare')}
+          />
+        </ListCard>
       </Section>
 
       {/* ── Other routes ────────────────────────────────────────────── */}
       {unreachable.length > 0 ? (
         <Section eyebrow="Not answering" title="Other routes" enterIndex={2}>
-          <Card>
+          <ListCard inset={36}>
             {unreachable.map((endpoint, index) => (
               <EndpointRow key={endpoint.base_url} endpoint={endpoint} index={index} />
             ))}
-          </Card>
+          </ListCard>
         </Section>
       ) : null}
 
@@ -240,7 +225,7 @@ export function RemoteScreen() {
             />
           </Card>
         ) : (
-          <Card>
+          <ListCard inset={64}>
             {devices.map((device, index) => (
               <DeviceRow
                 key={device.id}
@@ -255,7 +240,7 @@ export function RemoteScreen() {
                 onConfirmRevoke={() => void revokeDevice(device.id)}
               />
             ))}
-          </Card>
+          </ListCard>
         )}
       </Section>
     </ScreenScaffold>
@@ -271,17 +256,16 @@ function EndpointRow({
   index: number
   primary?: boolean
 }) {
-  const enter = useEnter(staggerDelay(index), false)
+  const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
     <View style={rowEnterStyle(enter)}>
-      {index > 0 ? <Divider inset={16} /> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14 }}>
+      <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
         <Dot tone={endpoint.reachable ? 'ok' : 'muted'} />
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Mono className="text-[12.5px] text-ink" numberOfLines={1}>
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Mono className="text-[12.5px] leading-[18px] text-ink" numberOfLines={1}>
             {endpoint.base_url}
           </Mono>
-          <Text className="text-[11.5px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[11.5px] leading-[16px] text-ink-3" numberOfLines={1}>
             {endpoint.source}
             {endpoint.via ? ` via ${endpoint.via}` : ''} · {endpoint.secure ? 'secure' : 'insecure'}
           </Text>
@@ -315,22 +299,14 @@ function TunnelRow({
   onToggle: () => void
 }) {
   return (
-    <View style={{ gap: 10 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-        <View
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: radius.sm,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: running ? palette.okSoft : palette.raised,
-          }}
-        >
-          <Cloud size={16} color={running ? palette.ok : palette.ink3} />
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[15px] font-semibold text-ink">{name}</Text>
+    <View className="gap-3 px-4 py-3.5">
+      <View className="flex-row items-center gap-3">
+        <IconTile
+          icon={<Cloud size={16} color={running ? palette.ok : palette.ink2} />}
+          tone={running ? 'ok' : 'muted'}
+        />
+        <View className="min-w-0 flex-1">
+          <Text className="text-[15.5px] leading-[21px] font-semibold text-ink">{name}</Text>
           <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
             {hint}
           </Text>
@@ -343,7 +319,7 @@ function TunnelRow({
         size="sm"
         variant={running ? 'secondary' : 'primary'}
         label={busy ? 'Working…' : running ? `Stop ${name}` : `Start ${name}`}
-        icon={<Power size={14} color={palette.ink2} />}
+        icon={<Power size={14} color={running ? palette.ink2 : palette.accentInk} />}
         disabled={busy !== null}
         onPress={onToggle}
       />
@@ -351,6 +327,11 @@ function TunnelRow({
   )
 }
 
+/**
+ * One paired device. Revoking cuts a phone off for good, so it escalates in
+ * two steps — a quiet danger button, then a filled confirm — with the warn
+ * haptic landing on the first tap.
+ */
 function DeviceRow({
   device,
   index,
@@ -366,32 +347,20 @@ function DeviceRow({
   onRevoke: () => void
   onConfirmRevoke: () => void
 }) {
-  const enter = useEnter(staggerDelay(index), false)
+  const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
     <View style={rowEnterStyle(enter)}>
-      {index > 0 ? <Divider inset={60} /> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-        <View
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: radius.sm,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: palette.accentSoft,
-          }}
-        >
-          <Smartphone size={16} color={palette.accent} />
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+      <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
+        <IconTile icon={<Smartphone size={16} color={palette.ink2} />} tone="muted" />
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
             {device.name}
           </Text>
-          <Mono className="mt-0.5 text-[11px] text-ink-3" numberOfLines={1}>
+          <Mono className="text-[11px] leading-[15px]" numberOfLines={1}>
             {device.fingerprint?.slice(0, 16) ?? device.id.slice(0, 16)}
           </Mono>
           {device.last_seen ? (
-            <Text className="mt-0.5 text-[11px] text-ink-4">
+            <Text className="text-[11px] leading-[15px] text-ink-3">
               Last seen {new Date(device.last_seen).toLocaleDateString()}
             </Text>
           ) : null}
@@ -402,18 +371,12 @@ function DeviceRow({
             accessibilityLabel={`Confirm revoking ${device.name}`}
             disabled={busy}
             onPress={onConfirmRevoke}
-            style={({ pressed }) => ({
-              minHeight: 34,
-              justifyContent: 'center',
-              borderRadius: radius.sm,
-              borderWidth: 1,
-              borderColor: palette.dangerBorder,
-              backgroundColor: pressed ? palette.dangerSoft : 'transparent',
-              paddingHorizontal: 11,
-            })}
+            hitSlop={8}
+            className="min-h-9 flex-row items-center justify-center rounded-sm border px-3 active:opacity-70"
+            style={{ borderColor: palette.dangerBorder, backgroundColor: palette.dangerSoft, opacity: busy ? 0.5 : 1 }}
           >
-            <Text style={{ color: palette.danger, fontSize: 12, fontWeight: '700' }}>
-              {busy ? '…' : 'Revoke'}
+            <Text className="text-[12px] leading-[16px] font-bold text-danger">
+              {busy ? 'Revoking…' : 'Confirm revoke'}
             </Text>
           </Pressable>
         ) : (
@@ -422,17 +385,9 @@ function DeviceRow({
             accessibilityLabel={`Revoke ${device.name}`}
             onPress={onRevoke}
             hitSlop={8}
-            style={({ pressed }) => ({
-              minHeight: 34,
-              justifyContent: 'center',
-              borderRadius: radius.sm,
-              borderWidth: 1,
-              borderColor: palette.line,
-              backgroundColor: pressed ? palette.raised : 'transparent',
-              paddingHorizontal: 11,
-            })}
+            className="min-h-9 flex-row items-center justify-center rounded-sm border border-line px-3 active:bg-raised"
           >
-            <Text style={{ color: palette.ink2, fontSize: 12, fontWeight: '600' }}>Revoke</Text>
+            <Text className="text-[12px] leading-[16px] font-semibold text-danger">Revoke</Text>
           </Pressable>
         )}
       </View>

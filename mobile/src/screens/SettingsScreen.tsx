@@ -11,21 +11,19 @@
  *
  * WHY A HUB AND NOT A FLAT LIST
  * -----------------------------
- * The previous version was one long scroll of cards: connection, alerts, three
- * links to other screens, a stub row that said "local" and did nothing, and a
- * danger button. It mixed four different kinds of thing — things you *own*
- * here, things you *navigate* to, things that are *not editable* from the
- * phone, and things that *destroy* — in one undifferentiated list, which is why
- * unpairing sat two rows from a "Local to this device" heading that led
- * nowhere.
- *
- * This is one screen, in three clearly different kinds of block:
+ * It is one screen, in three clearly different kinds of block, each drawn with
+ * the same iOS-settings grammar — a section eyebrow, a grouped `ListCard`,
+ * rows on inset hairlines:
  *
  *   - **You own these.** Real controls, on this device, with real state.
  *   - **On the desktop.** Navigation, grouped, with a one-line description of
  *     what each one is for.
  *   - **This device.** Pairing, the device token, and unpair — the last of
  *     them alone at the bottom, because it is irreversible.
+ *
+ * The three kinds are kept visually distinct by their leading slot, not by
+ * different boxes: owned controls carry a status `Dot`, destinations carry an
+ * `IconTile` and a `Chevron`, and the danger zone is a lone danger button.
  */
 
 import * as React from 'react'
@@ -56,13 +54,12 @@ import { deviceToken } from '@app/lib/api'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius } from '@app/design/tokens'
-import { ScreenScaffold, Section } from '@app/components/Screen'
+import { palette } from '@app/design/tokens'
+import { ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { ConfirmDialog } from '@app/components/Sheet'
 import {
   Badge,
   Button,
-  Card,
   Chevron,
   CopyButton,
   Divider,
@@ -71,6 +68,7 @@ import {
   IconTile,
   ListRow,
   Mono,
+  Notice,
   haptic,
   toast,
 } from '@app/components/ui'
@@ -151,85 +149,82 @@ export function SettingsScreen() {
       eyebrow={desktopName}
       subtitle="This device talks only to your own daemon. Nothing is sent anywhere else."
       scroll
-      contentClassName="px-4 pb-12 gap-5"
+      contentClassName="pb-12 gap-6"
     >
       {/* ── Connection ──────────────────────────────────────────────── */}
       <Section enterIndex={0} eyebrow="You own this" title="Connection">
-        <Card>
-          <View style={{ gap: 12, padding: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-              <Dot
-                tone={connection === 'connected' ? 'ok' : connection === 'offline' ? 'danger' : 'wait'}
-                pulse={connection !== 'connected'}
-              />
-              <Text className="flex-1 text-[14.5px] font-medium text-ink">
-                {connection === 'connected' ? 'Connected to your desktop' : connection}
-              </Text>
-              <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline>
-                {connection === 'connected' ? 'live' : connection}
-              </Badge>
+        <ListCard inset={16}>
+          <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
+            <Dot
+              tone={connection === 'connected' ? 'ok' : connection === 'offline' ? 'danger' : 'wait'}
+              pulse={connection !== 'connected'}
+            />
+            <Text
+              className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink"
+              numberOfLines={1}
+            >
+              {connection === 'connected' ? 'Connected to your desktop' : connection}
+            </Text>
+            <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline>
+              {connection === 'connected' ? 'live' : connection}
+            </Badge>
+          </View>
+
+          {routes.length === 0 ? (
+            <View className="px-4 py-3.5">
+              <Text className="text-[13.5px] leading-[19px] text-ink-3">This device is not paired.</Text>
             </View>
+          ) : (
+            <View>
+              <Text className="px-4 pb-2 pt-3 text-[12.5px] leading-[17px] text-ink-3">
+                Tap a route to pin it. Left alone, the app moves on by itself when the active route
+                stops answering.
+              </Text>
+              {routes.map((route) => {
+                const isActive = route === active
+                return (
+                  <View key={route}>
+                    <Divider inset={16} />
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityLabel={route}
+                      accessibilityState={{ selected: isActive }}
+                      onPress={() => useRoute(route)}
+                      className="min-h-12 flex-row items-center gap-3 px-4 active:bg-raised"
+                      style={isActive ? { backgroundColor: palette.accentSoft } : undefined}
+                    >
+                      <Dot tone={isActive ? 'ok' : 'muted'} />
+                      <Mono className="min-w-0 flex-1 text-[12.5px] leading-[18px] text-ink" numberOfLines={1}>
+                        {route}
+                      </Mono>
+                      {isActive ? <Badge tone="accent">Active</Badge> : null}
+                    </Pressable>
+                  </View>
+                )
+              })}
+            </View>
+          )}
 
-            {routes.length === 0 ? (
-              <Text className="text-[13px] leading-[18px] text-ink-3">This device is not paired.</Text>
-            ) : (
-              <>
-                <Text className="text-[13px] leading-[18px] text-ink-2">
-                  Tap a route to pin it. Left alone, the app moves on by itself when the active route
-                  stops answering.
-                </Text>
-                <View style={{ gap: 4 }}>
-                  {routes.map((route) => {
-                    const isActive = route === active
-                    return (
-                      <Pressable
-                        key={route}
-                        accessibilityRole="radio"
-                        accessibilityLabel={route}
-                        accessibilityState={{ selected: isActive }}
-                        onPress={() => useRoute(route)}
-                        style={({ pressed }) => ({
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 9,
-                          minHeight: 44,
-                          borderRadius: radius.sm,
-                          paddingHorizontal: 10,
-                          backgroundColor: isActive ? palette.accentSoft : pressed ? palette.raised : 'transparent',
-                        })}
-                      >
-                        <Dot tone={isActive ? 'ok' : 'muted'} />
-                        <Mono className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
-                          {route}
-                        </Mono>
-                        {isActive ? <Badge tone="accent">Active</Badge> : null}
-                      </Pressable>
-                    )
-                  })}
-                </View>
-              </>
-            )}
-
-            <View style={{ height: 1, backgroundColor: palette.line }} />
+          <View className="px-4 py-3">
             <FieldRow label="Desktop" value={desktopName} />
           </View>
-        </Card>
+        </ListCard>
       </Section>
 
       {/* ── Alerts ──────────────────────────────────────────────────── */}
       <Section enterIndex={1} eyebrow="You own this" title="Attention alerts">
-        <Card>
-          <View style={{ gap: 12, padding: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-              <Bell size={15} color={palette.ink3} />
-              <Text className="flex-1 text-[14.5px] font-medium text-ink">
-                {PERMISSION_LABEL[perm]}
-              </Text>
-              <Badge tone={perm === 'granted' ? 'ok' : 'muted'} outline>
-                {perm === 'granted' ? 'on' : 'off'}
-              </Badge>
-            </View>
-            <Text className="text-[13px] leading-[18px] text-ink-2">
+        <ListCard inset={16}>
+          <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
+            <IconTile icon={<Bell size={17} color={palette.ink2} />} tone="muted" />
+            <Text className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink">
+              {PERMISSION_LABEL[perm]}
+            </Text>
+            <Badge tone={perm === 'granted' ? 'ok' : 'muted'} outline>
+              {perm === 'granted' ? 'on' : 'off'}
+            </Badge>
+          </View>
+          <View className="gap-3 px-4 py-3.5">
+            <Text className="text-[13.5px] leading-[19px] text-ink-2">
               AgentDeck raises a local notification when an agent needs approval, finishes a turn, or
               errors. It rides the connection to your own daemon — no account, no third-party push
               service.
@@ -252,94 +247,96 @@ export function SettingsScreen() {
               next time you open AgentDeck.
             </Text>
             {note ? (
-              <Text className="text-[12.5px] leading-[17px]" style={{ color: palette.ok }}>
-                {note}
-              </Text>
+              <Notice
+                tone={note.startsWith('Test notification sent') ? 'ok' : 'danger'}
+                message={note}
+              />
             ) : null}
           </View>
-        </Card>
+        </ListCard>
       </Section>
 
       {/* ── On the desktop ────────────────────────────────────────────
           These are *navigation*, not settings: each one opens a screen that
           manages something the daemon owns. They are grouped under one heading
-          and given an icon tile each, because a row of unadorned text labels is
+          and given a chevron each, because a row of unadorned text labels is
           indistinguishable from a list of values you could edit here. */}
       <Section enterIndex={2} eyebrow="Managed on the desktop" title="Configuration">
-        <Card>
+        <ListCard inset={64}>
           <Destination
             title="Usage"
             subtitle="Token spend and cost, per session"
-            icon={<Cpu size={17} color={palette.accent} />}
+            icon={<Cpu size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Usage')}
           />
           <Destination
             title="Browser engines"
             subtitle="One shared engine per workspace"
-            icon={<Globe size={17} color={palette.accent} />}
+            icon={<Globe size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Browsers')}
           />
           <Destination
             title="MCP servers"
             subtitle="External tools this desktop can call"
-            icon={<Server size={17} color={palette.accent} />}
+            icon={<Server size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Mcp')}
           />
           <Destination
             title="Remote access"
             subtitle="Tunnels, endpoints and paired devices"
-            icon={<Wifi size={17} color={palette.accent} />}
+            icon={<Wifi size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Remote')}
           />
           <Destination
             title="Daemon settings"
             subtitle="Read and edit the daemon's own configuration"
-            icon={<SettingsIcon size={17} color={palette.accent} />}
-            last
+            icon={<SettingsIcon size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Daemon')}
           />
-        </Card>
+        </ListCard>
       </Section>
 
       {/* ── This device ─────────────────────────────────────────────── */}
       <Section enterIndex={3} eyebrow="You own this" title="This device">
-        <Card>
+        <ListCard inset={64}>
           <Destination
             title="Pair another device"
             subtitle="Scan a code from the desktop, or enter a link"
             icon={<Smartphone size={17} color={palette.ink2} />}
             onPress={() => navigation.navigate('Pairing')}
           />
-          <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-              <Monitor size={15} color={palette.ink3} />
-              <Text className="flex-1 text-[14px] text-ink-2">Device token</Text>
+          <View className="gap-1.5 px-4 py-3">
+            <View className="flex-row items-center gap-3">
+              <IconTile icon={<Monitor size={17} color={palette.ink2} />} tone="muted" />
+              <Text className="min-w-0 flex-1 text-[13.5px] leading-[19px] text-ink-2">Device token</Text>
               <CopyButton
                 value={deviceToken() ?? ''}
                 label="Copy"
                 accessibilityLabel="Copy this device's API token"
               />
             </View>
-            <Text className="ml-6 mt-0.5 text-[11.5px] leading-[16px] text-ink-3">
+            <Text className="text-[11.5px] leading-[16px] text-ink-3" style={{ marginLeft: 48 }}>
               Bearer credential for this phone. Revoke it from Remote access if the device is lost.
             </Text>
           </View>
-        </Card>
+        </ListCard>
       </Section>
 
       {/* ── Danger ──────────────────────────────────────────────────── */}
       <Section enterIndex={4} eyebrow="Irreversible" title="Danger zone">
-        <Button
-          variant="danger"
-          label="Unpair this device"
-          accessibilityLabel="Unpair this device"
-          full
-          onPress={() => setConfirmUnpair(true)}
-        />
-        <Text className="text-[12px] leading-[17px] text-ink-3">
-          Removes the token from this phone. The desktop keeps running; you pair again with a new
-          code.
-        </Text>
+        <View className="gap-2.5">
+          <Button
+            variant="danger"
+            label="Unpair this device"
+            accessibilityLabel="Unpair this device"
+            full
+            onPress={() => setConfirmUnpair(true)}
+          />
+          <Text className="px-1 text-[12.5px] leading-[18px] text-ink-3">
+            Removes the token from this phone. The desktop keeps running; you pair again with a new
+            code.
+          </Text>
+        </View>
       </Section>
 
       <ConfirmDialog
@@ -356,40 +353,33 @@ export function SettingsScreen() {
 }
 
 /* ── A row that goes somewhere ───────────────────────────────────────────────────
- * The icon tile, the inset hairline and the chevron together are the whole
- * visual vocabulary of "this is navigation, not a value" — and having one
- * component for it is what stops a settings list from drifting into a set of
- * similar-looking rows that are three different kinds of thing.
- */
+ * The muted icon tile and the chevron together are the whole visual vocabulary
+ * of "this is navigation, not a value". The card supplies the hairline, so the
+ * row itself stays a plain `ListRow`. */
 
 function Destination({
   title,
   subtitle,
   icon,
   onPress,
-  last,
 }: {
   title: string
   subtitle: string
   icon: React.ReactNode
   onPress: () => void
-  last?: boolean
 }) {
   return (
-    <View>
-      <ListRow
-        title={title}
-        subtitle={subtitle}
-        leading={<IconTile icon={icon} size={36} />}
-        trailing={<Chevron />}
-        onPress={() => {
-          void haptic('light')
-          onPress()
-        }}
-        accessibilityLabel={title}
-        accessibilityHint={subtitle}
-      />
-      {last ? null : <Divider inset={60} />}
-    </View>
+    <ListRow
+      title={title}
+      subtitle={subtitle}
+      leading={<IconTile icon={icon} tone="muted" size={36} />}
+      trailing={<Chevron />}
+      onPress={() => {
+        void haptic('light')
+        onPress()
+      }}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
+    />
   )
 }

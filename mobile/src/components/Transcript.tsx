@@ -30,6 +30,11 @@
  * 4. **The system divider is a real divider.** Two hairlines with the text
  *    between them, exactly as the desktop does it. It reads as a boundary
  *    rather than as another message, which is the point of a system message.
+ *
+ * V3: the conversation reads like ChatGPT on a premium dark theme. Assistant
+ * turns are full-width clean prose — no bubble, no card — separated by clear
+ * vertical rhythm; user messages sit in a compact right-aligned raised bubble
+ * with one small corner; reasoning is a quiet collapsible row.
  */
 
 import * as React from 'react'
@@ -51,7 +56,7 @@ import { gitApi } from '@app/lib/api'
 import { useStore } from '@app/store'
 import { palette, radius, shadowFloating } from '@app/design/tokens'
 import { EASE_OUT } from '@app/components/motion'
-import { haptic } from '@app/components/ui'
+import { Well, haptic } from '@app/components/ui'
 import { Approval, ErrorCard, Plan, TurnSummary, UsageMeter } from './chat/cards'
 import {
   BrowserStepRow,
@@ -88,7 +93,7 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
         accessibilityState={{ expanded: hasText ? open : undefined }}
         onPress={hasText ? () => setOverride(!open) : undefined}
         style={{
-          minHeight: 30,
+          minHeight: 32,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 7,
@@ -97,7 +102,7 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
         }}
       >
         {part.streaming ? (
-          <ActivityIndicator size="small" color={palette.ink3} />
+          <ActivityIndicator size="small" color={palette.accent} />
         ) : (
           <ChevronDown
             size={12}
@@ -105,13 +110,8 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
             style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }}
           />
         )}
-        <Text
-          style={{
-            fontSize: 13,
-            color: part.streaming ? palette.ink3 : palette.ink2,
-            fontStyle: part.streaming ? 'italic' : 'normal',
-          }}
-        >
+        <Text style={{ fontSize: 13, lineHeight: 18, color: palette.ink3 }}>
+          {part.streaming ? '✦ ' : ''}
           {label}
         </Text>
         {part.durationMs && !part.streaming ? (
@@ -119,11 +119,9 @@ function Reasoning({ part }: { part: MessagePart & { kind: 'reasoning' } }) {
         ) : null}
       </Pressable>
       {open && hasText ? (
-        <View style={{ marginLeft: 15, paddingLeft: 11, borderLeftWidth: 1, borderLeftColor: palette.line, paddingVertical: 4 }}>
-          <Text style={{ fontFamily: 'Menlo', fontSize: 12.5, lineHeight: 19, color: palette.ink3 }}>
-            {part.text}
-          </Text>
-        </View>
+        <Well className="mb-1 mt-1.5 px-3 py-2.5">
+          <Text className="text-[13px] leading-[19px] text-ink-2">{part.text}</Text>
+        </Well>
       ) : null}
     </View>
   )
@@ -145,16 +143,14 @@ function UserTurn({ message }: { message: Message }) {
   const text = message.parts.map((part) => (part.kind === 'text' ? part.text : '')).join('\n')
   if (!text.trim()) return null
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingLeft: 44 }}>
+    <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
       <View
         style={{
-          maxWidth: '100%',
+          maxWidth: '86%',
           borderRadius: radius.lg,
-          borderBottomRightRadius: radius.xs,
-          borderWidth: 1,
-          borderColor: palette.accentBorder,
-          backgroundColor: palette.accentSoft,
-          paddingHorizontal: 13,
+          borderBottomRightRadius: 6,
+          backgroundColor: palette.raised,
+          paddingHorizontal: 14,
           paddingVertical: 10,
           // 60% while optimistic: the message is on its way to the desktop but
           // is not yet a fact, and the user should be able to see that.
@@ -183,7 +179,7 @@ function AssistantTurn({
   const files = message.parts.filter((part) => part.kind === 'file')
 
   return (
-    <View style={{ gap: 9 }}>
+    <View style={{ gap: 10 }}>
       {message.parts.map((part, index) => {
         // Fold a run of consecutive calls into one group; a lone call is bare.
         if (part.kind === 'tool' || part.kind === 'command') {
@@ -275,12 +271,12 @@ function TranscriptEmpty() {
       style={{
         alignItems: 'center',
         gap: 10,
-        marginHorizontal: 16,
+        marginHorizontal: 8,
         marginTop: 12,
-        borderRadius: radius.xl,
+        borderRadius: radius.lg,
         borderWidth: 1,
         borderStyle: 'dashed',
-        borderColor: palette.line,
+        borderColor: palette.lineStrong,
         backgroundColor: palette.surface,
         paddingHorizontal: 22,
         paddingVertical: 34,
@@ -396,7 +392,7 @@ export function Transcript({
         data={messages}
         keyExtractor={(message) => message.id}
         extraData={revision}
-        contentContainerStyle={{ gap: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20 }}
+        contentContainerStyle={{ gap: 22, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 }}
         renderItem={({ item }) =>
           item.role === 'system' ? (
             <SystemTurn message={item} />

@@ -23,6 +23,10 @@
  *      glyph rather than the row collapsing, so the transcript does not jump
  *      every time a tool starts or finishes — which on a live stream is
  *      several times a second.
+ *
+ * V3: the step is a *slim quiet row* — a 22pt circular tile holding the glyph
+ * (or the spinner), a 13px ink-2 label, and tiny mono meta on the right. The
+ * row is chrome; the numbers are the content.
  */
 
 import * as React from 'react'
@@ -59,7 +63,16 @@ import type {
   ToolPart,
   VerificationPart,
 } from '@/types/conversation'
-import { diffAddSoft, diffDelSoft, palette, radius } from '@app/design/tokens'
+import {
+  diffAddSoft,
+  diffDelSoft,
+  palette,
+  radius,
+  toneBorder,
+  toneColor,
+  toneSoft,
+  type Tone,
+} from '@app/design/tokens'
 import { useCollapse } from '@app/components/motion'
 import {
   CopyButton,
@@ -74,20 +87,20 @@ const FAILED = palette.danger
 
 /* ── Step: a tool call or shell command ──────────────────────────────────────── */
 
-function StepGlyph({ glyph, failed, size = 13 }: { glyph: string; failed: boolean; size?: number }) {
+function StepGlyph({ glyph, failed, size = 12 }: { glyph: string; failed: boolean; size?: number }) {
   if (failed) return <AlertTriangle size={size} color={FAILED} />
   switch (glyph) {
     case 'edit':
-      return <Pencil size={size} color={palette.ink3} />
+      return <Pencil size={size} color={palette.ink2} />
     case 'read':
     case 'file':
-      return <FileText size={size} color={palette.ink3} />
+      return <FileText size={size} color={palette.ink2} />
     case 'run':
-      return <SquareTerminal size={size} color={palette.ink3} />
+      return <SquareTerminal size={size} color={palette.ink2} />
     case 'search':
-      return <SearchIcon size={size} color={palette.ink3} />
+      return <SearchIcon size={size} color={palette.ink2} />
     default:
-      return <Sparkle size={size} color={palette.ink3} />
+      return <Sparkle size={size} color={palette.ink2} />
   }
 }
 
@@ -146,16 +159,25 @@ export function Step({
             : undefined
         }
         style={{
-          minHeight: 30,
+          minHeight: 32,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 7,
+          gap: 8,
           borderRadius: radius.xs,
-          paddingHorizontal: 6,
+          paddingHorizontal: 4,
         }}
       >
-        {/* Fixed 18pt slot: a spinner must not change the row's rhythm. */}
-        <View style={{ width: 18, alignItems: 'center', justifyContent: 'center' }}>
+        {/* Fixed 22pt tile: a spinner must not change the row's rhythm. */}
+        <View
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: palette.raised,
+          }}
+        >
           {running ? (
             <ActivityIndicator size="small" color={palette.accent} />
           ) : (
@@ -168,8 +190,8 @@ export function Step({
         </Text>
 
         {arg ? (
-          <Mono className="min-w-0 flex-1 text-[12px] leading-[17px] text-ink" numberOfLines={1}>
-            {argDir ? <Mono className="text-ink-3">{argDir}</Mono> : null}
+          <Mono className="min-w-0 flex-1 text-[12px] leading-[17px] text-ink-2" numberOfLines={1}>
+            {argDir ? <Mono className="text-ink-4">{argDir}</Mono> : null}
             {argName}
           </Mono>
         ) : (
@@ -177,16 +199,22 @@ export function Step({
         )}
 
         {!running && diffLines > 0 && !isCommand ? (
-          <Mono className="shrink-0 text-[11px] text-diff-add">+{diffLines}</Mono>
+          <Mono className="shrink-0 text-[11px] text-ok" style={{ fontVariant: ['tabular-nums'] }}>
+            +{diffLines}
+          </Mono>
         ) : null}
         {isCommand && part.exitCode !== undefined && part.exitCode !== 0 ? (
-          <Mono className="shrink-0 text-[11px] text-diff-del">exit {part.exitCode}</Mono>
+          <Mono className="shrink-0 text-[11px] text-danger" style={{ fontVariant: ['tabular-nums'] }}>
+            exit {part.exitCode}
+          </Mono>
         ) : null}
         {failed ? (
           <Text className="shrink-0 text-[11px] font-semibold text-danger">Failed</Text>
         ) : null}
         {part.durationMs && !simple ? (
-          <Mono className="shrink-0 text-[11px]">{formatMs(part.durationMs)}</Mono>
+          <Mono className="shrink-0 text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+            {formatMs(part.durationMs)}
+          </Mono>
         ) : null}
         {expandable ? (
           <ChevronDown
@@ -253,7 +281,7 @@ export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
       }}
     >
       <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
-        <View style={{ gap: 1, padding: 4 }}>
+        <View style={{ gap: 1, padding: 5 }}>
           {parts.map((part, index) => (
             <Step key={index} part={part} />
           ))}
@@ -268,14 +296,13 @@ export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
           setOpen((value) => !value)
         }}
         style={{
-          minHeight: 30,
+          minHeight: 32,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 7,
           borderTopWidth: 1,
           borderTopColor: palette.line,
-          backgroundColor: palette.well,
-          paddingHorizontal: 10,
+          paddingHorizontal: 11,
         }}
       >
         <View
@@ -287,7 +314,7 @@ export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
           }}
         />
         {running ? <ActivityIndicator size="small" color={palette.accent} /> : null}
-        <Mono className="text-[10.5px]">
+        <Mono className="text-[10.5px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }}>
           {parts.length} steps{totalMs > 0 ? ` · ${formatMs(totalMs)}` : ''}
           {failed ? ' · failed' : ''}
           {running ? ' · running' : ''}
@@ -335,10 +362,11 @@ export function DiffView({ diff, maxHeight = 280 }: { diff: string; maxHeight?: 
                   style={{
                     flexDirection: 'row',
                     backgroundColor: add ? diffAddSoft : del ? diffDelSoft : 'transparent',
-                    paddingRight: 16,
+                    paddingLeft: 10,
+                    paddingRight: 14,
                   }}
                 >
-                  <Mono className="w-9 pr-2 text-right text-[10.5px] leading-[16px] text-ink-4">
+                  <Mono className="w-9 shrink-0 pr-2 text-right text-[10.5px] leading-[16px] text-ink-4">
                     {line.length === 0 ? ' ' : line}
                   </Mono>
                   <Mono className="text-[11.5px] leading-[16px]" style={{ color }}>
@@ -400,15 +428,30 @@ export function DiffCard({
         }}
       >
         {status ? (
-          <Text style={{ color: palette.ink3, fontSize: 10.5, fontWeight: '700', fontFamily: 'Menlo' }}>
-            {status}
-          </Text>
+          <View
+            style={{
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: radius.xs,
+              backgroundColor: palette.raised,
+            }}
+          >
+            <Mono className="text-[10px] font-semibold text-ink-3">{status}</Mono>
+          </View>
         ) : null}
         <Mono className="min-w-0 flex-1 text-[12px] text-ink-2" numberOfLines={1}>
           {path}
         </Mono>
-        {stat.plus > 0 ? <Mono className="text-[11px] text-diff-add">+{stat.plus}</Mono> : null}
-        {stat.minus > 0 ? <Mono className="text-[11px] text-diff-del">−{stat.minus}</Mono> : null}
+        {stat.plus > 0 ? (
+          <Mono className="text-[11px] text-ok" style={{ fontVariant: ['tabular-nums'] }}>
+            +{stat.plus}
+          </Mono>
+        ) : null}
+        {stat.minus > 0 ? (
+          <Mono className="text-[11px] text-danger" style={{ fontVariant: ['tabular-nums'] }}>
+            −{stat.minus}
+          </Mono>
+        ) : null}
         <CopyButton value={diff} label="Copy diff" accessibilityLabel={`Copy the diff for ${path}`} />
       </View>
       <DiffView diff={diff} />
@@ -447,10 +490,9 @@ export function FileChips({
           alignItems: 'center',
           gap: 7,
           paddingHorizontal: 12,
-          paddingVertical: 8,
+          paddingVertical: 9,
           borderBottomWidth: 1,
           borderBottomColor: palette.line,
-          backgroundColor: palette.well,
         }}
       >
         <FileText size={12} color={palette.ink3} />
@@ -471,12 +513,11 @@ export function FileChips({
           accessibilityLabel={expanded ? 'Show fewer files' : `Show all ${parts.length} files`}
           onPress={() => setExpanded((value) => !value)}
           style={{
-            minHeight: 34,
+            minHeight: 36,
             alignItems: 'center',
             justifyContent: 'center',
             borderTopWidth: 1,
             borderTopColor: palette.line,
-            backgroundColor: palette.well,
           }}
         >
           <Text className="text-[12px] font-semibold text-ink-3">
@@ -533,7 +574,7 @@ function FileChip({
         accessibilityState={{ expanded: open }}
         onPress={() => void toggle()}
         style={{
-          minHeight: 30,
+          minHeight: 32,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
@@ -545,10 +586,10 @@ function FileChip({
         ) : (
           <AlertTriangle size={12} color={FAILED} />
         )}
-        <Mono className="min-w-0 flex-1 text-[12px] text-ink" numberOfLines={1}>
+        <Mono className="min-w-0 flex-1 text-[12px] text-ink-2" numberOfLines={1}>
           {part.path}
         </Mono>
-        <Mono className="shrink-0 text-[10.5px]">{open ? 'hide' : 'diff'}</Mono>
+        <Mono className="shrink-0 text-[10.5px] text-ink-4">{open ? 'hide' : 'diff'}</Mono>
         <ChevronDown
           size={12}
           color={palette.ink4}
@@ -561,7 +602,7 @@ function FileChip({
             <ActivityIndicator size="small" color={palette.ink3} />
           </View>
         ) : error ? (
-          <Text className="px-3 py-2.5 text-[12px] text-ink-3">{error}</Text>
+          <Text className="px-3 py-2.5 text-[12px] leading-[17px] text-ink-3">{error}</Text>
         ) : diff ? (
           <DiffView diff={diff} maxHeight={240} />
         ) : null}
@@ -598,24 +639,16 @@ export function OrchestrationRow({ part }: { part: OrchestrationPart }) {
         : `Fan-out ${part.status}`
   const okCount = part.children?.filter((child) => child.status === 'ok').length
   return (
-    <View
-      style={{
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: palette.line,
-        backgroundColor: palette.well,
-        overflow: 'hidden',
-      }}
-    >
+    <View style={{ gap: 6 }}>
       <EventCard
         icon={<Sparkle size={13} color={palette.accent} />}
         label={`${label} · ${names.slice(0, 4).join(' + ')}`}
         meta={part.children ? `${okCount ?? 0}/${part.children.length} ok` : `${part.agents.length} agents`}
       />
       {part.reply ? (
-        <View style={{ borderTopWidth: 1, borderTopColor: palette.line, padding: 12 }}>
+        <Well className="px-3.5 py-3">
           <Prose text={part.reply} />
-        </View>
+        </Well>
       ) : null}
     </View>
   )
@@ -629,8 +662,8 @@ export function ProgressRow({ part }: { part: ProgressPart }) {
         borderRadius: radius.md,
         borderWidth: 1,
         borderColor: palette.line,
-        backgroundColor: palette.well,
-        paddingHorizontal: 11,
+        backgroundColor: palette.surface,
+        paddingHorizontal: 12,
         paddingVertical: 10,
         gap: 7,
       }}
@@ -643,7 +676,9 @@ export function ProgressRow({ part }: { part: ProgressPart }) {
         ) : (
           <View style={{ flex: 1 }} />
         )}
-        <Mono className="text-[10.5px]">{part.percent !== undefined ? `${Math.round(pct)}%` : '…'}</Mono>
+        <Mono className="text-[10.5px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+          {part.percent !== undefined ? `${Math.round(pct)}%` : '…'}
+        </Mono>
       </View>
       <View style={{ height: 3, borderRadius: 2, backgroundColor: palette.raised, overflow: 'hidden' }}>
         <View
@@ -706,6 +741,12 @@ export function BrowserStepRow({ part }: { part: BrowserStepPart }) {
   )
 }
 
+const VERIFICATION_TONE: Record<string, Tone> = {
+  failed: 'danger',
+  passed: 'ok',
+  running: 'wait',
+}
+
 export function VerificationCard({
   part,
   simple,
@@ -713,31 +754,31 @@ export function VerificationCard({
   part: VerificationPart
   simple?: boolean
 }) {
-  const tone =
-    part.status === 'failed'
-      ? palette.danger
-      : part.status === 'passed'
-        ? palette.ok
-        : part.status === 'running'
-          ? palette.wait
-          : palette.ink4
+  const tone = VERIFICATION_TONE[part.status] ?? 'muted'
   return (
     <View
       style={{
         borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: `${tone}44`,
-        backgroundColor: `${tone}0F`,
+        borderColor: toneBorder[tone],
+        backgroundColor: toneSoft[tone],
         overflow: 'hidden',
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, padding: 11 }}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} />
+        <View
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: toneColor[tone],
+          }}
+        />
         <Text className="flex-1 text-[12.5px] font-medium text-ink" numberOfLines={1}>
           Tests {part.status}
         </Text>
         {!simple && part.command ? (
-          <Mono className="max-w-[45%] text-[11px]" numberOfLines={1}>
+          <Mono className="max-w-[45%] text-[11px] text-ink-3" numberOfLines={1}>
             {part.command}
           </Mono>
         ) : null}

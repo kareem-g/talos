@@ -1,15 +1,6 @@
 /**
  * The tab bar.
  *
- * WHY NOT THE DRAWER THE APP HAD
- * -----------------------------
- * The previous navigation was a 300pt swipe-in drawer holding nine
- * destinations in three labelled groups. On a phone that is wrong three times
- * over: every destination is two taps away even from the session you are
- * watching, the groups ("Monitor / Extend / Configure") were invented for the
- * drawer and mean nothing anywhere else, and a hamburger on every screen costs
- * a full header row that the content could be using.
- *
  * The four things you do with this app are *check what needs you*, *see what
  * the agents are*, *look back at what happened*, and *change how it is
  * configured*. Those are the four tabs, and they are the tabs forever — not
@@ -68,7 +59,7 @@ const ICONS: Record<TabRoute, keyof typeof GLYPHS> = {
  * they are not: they are drawn on different grids with different terminals and
  * different visual weights, and the mismatch is obvious the moment you see two
  * of them next to each other. Four small drawings on one 24-unit grid do not
- * have that problem, and they can animate (the active tab's glyph fills) which
+ * have that problem, and they can animate (the active tab's glyph lifts) which
  * a static set cannot.
  */
 type Shape =
@@ -83,7 +74,7 @@ const GLYPHS: Record<string, Shape[]> = {
     { kind: 'bar', x: 4, y: 16, w: 16, h: 1.8 },
   ],
   bot: [
-    { kind: 'box', x: 4.5, y: 7.5, w: 15, h: 11, r: 4 },
+    { kind: 'box', x: 4.5, y: 7.5, w: 15, h: 11, r: 5 },
     { kind: 'bar', x: 11.1, y: 3.2, w: 1.8, h: 4.3, r: 1 },
     { kind: 'dot', cx: 9, cy: 12.5, r: 1.5 },
     { kind: 'dot', cx: 15, cy: 12.5, r: 1.5 },
@@ -196,11 +187,24 @@ export function TabBar({ state, navigation, onNewTask }: TabBarProps) {
     <View
       style={{
         paddingBottom: Math.max(insets.bottom, 8),
-        backgroundColor: palette.chrome,
-        borderTopWidth: 1,
-        borderTopColor: palette.line,
+        backgroundColor: 'transparent',
       }}
     >
+      {/* Translucent chrome: a real blur under a wash of `chrome`, so content
+          reads through the bar without tinting the glyphs above it. */}
+      <BlurView intensity={52} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(12,12,14,0.86)',
+          borderBottomWidth: 1,
+          borderBottomColor: palette.line,
+        }}
+      />
       <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 58, paddingHorizontal: 6 }}>
         {LEFT.map((route) => (
           <TabButton
@@ -278,7 +282,7 @@ function ComposeButton() {
         transform: [
           {
             translateY: Animated.add(
-              Animated.multiply(enter, -6),
+              Animated.multiply(enter, -7),
               Animated.multiply(progress, 3),
             ),
           },
@@ -301,16 +305,19 @@ function ComposeButton() {
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: palette.accent,
-          borderWidth: 3,
-          borderColor: palette.chrome,
+          // A hairline ring of the bar's own colour separates the button from
+          // the blur behind it, replacing the old 3pt border: the v3 language
+          // separates planes with light, not with heavy outlines.
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.22)',
           shadowColor: palette.accent,
-          shadowOpacity: 0.45,
-          shadowRadius: 14,
-          shadowOffset: { width: 0, height: 4 },
-          elevation: 8,
+          shadowOpacity: 0.5,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 5 },
+          elevation: 9,
         }}
       >
-        <Plus size={22} color={palette.accentInk} strokeWidth={2.8} />
+        <Plus size={23} color={palette.accentInk} strokeWidth={2.8} />
       </Pressable>
     </Animated.View>
   )
@@ -379,7 +386,7 @@ function TabButton({
                 justifyContent: 'center',
                 backgroundColor: palette.danger,
                 borderWidth: 1.5,
-                borderColor: palette.chrome,
+                borderColor: palette.canvas,
               }}
             >
               {/* Near-white rather than the accent's ink: the badge sits on a

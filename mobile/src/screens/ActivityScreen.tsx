@@ -34,7 +34,7 @@ import { basename } from '@/lib/format'
 import type { Session } from '@/types/session'
 import { getConversation, useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius } from '@app/design/tokens'
+import { palette } from '@app/design/tokens'
 import { ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
@@ -43,15 +43,16 @@ import {
   CardHeader,
   Divider,
   EmptyState,
+  IconButton,
   ProgressBar,
   Segmented,
-  Skeleton,
   Stat,
+  Mono,
   formatCost,
   formatCount,
   haptic,
 } from '@app/components/ui'
-import { SessionRow } from '@app/components/session/SessionRow'
+import { SessionListSkeleton, SessionRow } from '@app/components/session/SessionRow'
 
 type Mode = 'sessions' | 'spend'
 
@@ -200,8 +201,8 @@ export function ActivityScreen() {
       refreshing={refreshing}
       contentClassName="pb-10"
       below={
-        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
+        <View className="flex-row items-center gap-2.5">
+          <View className="flex-1">
             <Segmented
               label="Activity view"
               value={mode}
@@ -215,44 +216,21 @@ export function ActivityScreen() {
               ]}
             />
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open the full usage breakdown"
+          <IconButton
+            label="Open the full usage breakdown"
+            size={46}
+            className="border border-line"
             onPress={() => navigation.navigate('Usage')}
-            hitSlop={8}
-            style={({ pressed }) => ({
-              width: 46,
-              height: 46,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radius.pill,
-              borderWidth: 1,
-              borderColor: palette.line,
-              backgroundColor: pressed ? palette.raised : 'transparent',
-            })}
           >
-            <BarChart3 size={18} color={palette.ink2} />
-          </Pressable>
+            <BarChart3 size={19} color={palette.ink2} />
+          </IconButton>
         </View>
       }
     >
       {mode === 'sessions' ? (
-        <View style={{ gap: 18 }}>
+        <View className="gap-5">
           {sessionsLoading && visible.length === 0 ? (
-            <Card>
-              <View style={{ padding: 8 }}>
-                {Array.from({ length: 5 }).map((_, index) => (
-                  <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}>
-                    <Skeleton width={34} height={34} radius={12} />
-                    <View style={{ flex: 1, gap: 8 }}>
-                      <Skeleton width="58%" height={13} />
-                      <Skeleton width="36%" height={10} />
-                    </View>
-                    <Skeleton width={62} height={20} radius={10} />
-                  </View>
-                ))}
-              </View>
-            </Card>
+            <SessionListSkeleton count={5} />
           ) : groups.length === 0 ? (
             <Card>
               <EmptyState
@@ -265,9 +243,16 @@ export function ActivityScreen() {
             groups.map(([title, rows], groupIndex) => (
               <Section
                 key={title}
-                eyebrow={`${rows.length} ${rows.length === 1 ? 'session' : 'sessions'}`}
-                title={title}
+                eyebrow={title}
                 enterIndex={groupIndex}
+                action={
+                  <Text
+                    className="pb-0.5 text-[11px] font-medium text-ink-4"
+                    style={{ fontVariant: ['tabular-nums'] }}
+                  >
+                    {rows.length}
+                  </Text>
+                }
               >
                 <Card>
                   {rows.map((session, index) => (
@@ -286,12 +271,12 @@ export function ActivityScreen() {
           )}
         </View>
       ) : (
-        <View style={{ gap: 18 }}>
+        <View className="gap-5">
           {/* The header carries the *reporting* count, because that is the
               number a reader needs before the totals: "12 sessions, 7 of them
               reported" changes how the total below it should be read, and
               putting it below the total asks them to un-read the number first. */}
-          <Section eyebrow="Fleet" title="Totals" enterIndex={0}>
+          <Section eyebrow="Fleet" enterIndex={0}>
             <Card>
               <CardHeader
                 title="Totals"
@@ -299,21 +284,15 @@ export function ActivityScreen() {
                   ranked.length === 1 ? 'session reports' : 'sessions report'
                 } token usage`}
               />
-              <View style={{ flexDirection: 'row', gap: 12, padding: 16 }}>
+              <View className="flex-row items-stretch px-4 py-4">
                 <Stat label="Input" value={formatCount(totals.inputTokens)} />
+                <View className="mx-1 my-1 w-px bg-line" />
                 <Stat label="Output" value={formatCount(totals.outputTokens)} />
+                <View className="mx-1 my-1 w-px bg-line" />
                 <Stat label="Cost" value={formatCost(totals.costUsd)} tone="accent" align="right" />
               </View>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  gap: 10,
-                  borderTopWidth: 1,
-                  borderTopColor: palette.line,
-                  padding: 14,
-                }}
-              >
-                <Text className="flex-1 text-[12.5px] leading-[17px] text-ink-3">
+              <View className="border-t border-line px-4 py-3">
+                <Text className="text-[12.5px] leading-[17px] text-ink-3">
                   {measured.length === 0
                     ? 'Nothing has reported usage yet. A session stays at zero when its CLI does not report tokens.'
                     : `${measured.length} of ${ranked.length} sessions reported usage. The rest cost nothing because their CLI does not report it — not because they were free.`}
@@ -329,18 +308,18 @@ export function ActivityScreen() {
           ) : (
             <Section eyebrow="By cost" title={`${ranked.length} sessions`} enterIndex={1}>
               <Card>
-                <View style={{ paddingVertical: 4 }}>
-                  {ranked.map((row, index) => (
+                {ranked.map((row, index) => (
+                  <View key={row.sessionId}>
+                    {index > 0 ? <Divider inset={16} /> : null}
                     <SpendRow
-                      key={row.sessionId}
                       row={row}
                       index={index}
                       maxCost={maxCost}
                       providerName={providerName(row.agent)}
                       onPress={() => navigation.navigate('Session', { sessionId: row.sessionId })}
                     />
-                  ))}
-                </View>
+                  </View>
+                ))}
               </Card>
             </Section>
           )}
@@ -379,29 +358,36 @@ function SpendRow({
         }}
         className="min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-raised"
       >
-        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+        <View className="min-w-0 flex-1 gap-1.5">
+          <Text className="text-[15px] leading-[20px] font-medium text-ink" numberOfLines={1}>
             {row.name}
           </Text>
-          <Text className="text-[11.5px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
             {providerName}
             {row.project ? ` · ${basename(row.project)}` : ''}
           </Text>
           {/* The bar is a *proportion of the most expensive session*, not of
               the total, so the top row is always full and the shape of the
-              distribution is readable at a glance. */}
-          <ProgressBar value={unmeasured ? 0 : row.costUsd / maxCost} tone="accent" />
+              distribution is readable at a glance. Slim, because it is the
+              row's baseline, not its headline. */}
+          <ProgressBar value={unmeasured ? 0 : row.costUsd / maxCost} tone="accent" className="h-[2.5px]" />
         </View>
-        <View style={{ alignItems: 'flex-end', gap: 3, minWidth: 74 }}>
-          <Text style={{ color: palette.ink, fontSize: 13.5, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+        <View className="shrink-0 items-end gap-0.5" style={{ minWidth: 74 }}>
+          <Mono
+            className={
+              unmeasured
+                ? 'text-[13.5px] leading-[18px] text-ink-4'
+                : 'text-[13.5px] leading-[18px] font-semibold text-ink'
+            }
+            style={{ fontVariant: ['tabular-nums'] }}
+          >
             {unmeasured ? '—' : formatCost(row.costUsd)}
-          </Text>
-          <Text style={{ color: palette.ink3, fontSize: 10.5, fontVariant: ['tabular-nums'] }}>
+          </Mono>
+          <Mono className="text-[10.5px] leading-[14px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }} numberOfLines={1}>
             {unmeasured ? 'not reported' : `↑${formatCount(row.inputTokens)} ↓${formatCount(row.outputTokens)}`}
-          </Text>
+          </Mono>
         </View>
       </Pressable>
-      {index > -1 ? <Divider inset={16} /> : null}
     </View>
   )
 }

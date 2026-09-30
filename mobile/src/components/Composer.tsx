@@ -19,12 +19,12 @@
  *
  * THE DOCK
  * --------
- * The control chips live in a row *inside* the composer card, above the text
- * field, and that row scrolls horizontally. This is the desktop's
- * `ComposerControls` exactly: on a wide screen they sit beside the send button,
- * on a phone they sit above it. The chips are the fastest way to change a model
- * mid-conversation, and burying them in a sheet would be the mobile equivalent
- * of the desktop's own mistake of putting them in a header that eats 60pt.
+ * The dock is a rounded surface card floating on the canvas: the multiline
+ * field is integrated directly into it (no nested field chrome), the queue and
+ * attachment chips stack above the text, and the 'Run' row — the session's
+ * live configuration, scrolling horizontally — folds away beneath it. The
+ * context ring stays visible even when the rest is collapsed: it is the one
+ * dimension you want to know without asking.
  */
 
 import * as React from 'react'
@@ -33,6 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   ArrowUp,
   Brain,
+  ChevronDown,
   CornerUpLeft,
   Paperclip,
   Pencil,
@@ -46,7 +47,7 @@ import type { UIState } from '@/lib/sessionState'
 import { attachmentsApi } from '@app/lib/api'
 import { useStore } from '@app/store'
 import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
-import { palette, radius, shadowFloating } from '@app/design/tokens'
+import { palette, radius, shadowOverlay } from '@app/design/tokens'
 import { useCollapse } from '@app/components/motion'
 import { haptic, Mono, Popover } from '@app/components/ui'
 import { ConfigChips, ContextRing } from '@app/components/ConfigChips'
@@ -86,7 +87,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   const [attachments, setAttachments] = React.useState<AttachmentRef[]>([])
   const [uploading, setUploading] = React.useState(false)
   const [attachError, setAttachError] = React.useState<string | null>(null)
-  const [dockOpen, setDockOpen] = React.useState(true)
+  const [dockOpen, setDockOpen] = React.useState(false)
   const inputRef = React.useRef<TextInput>(null)
 
   const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
@@ -189,8 +190,6 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   return (
     <View
       style={{
-        borderTopWidth: 1,
-        borderTopColor: palette.line,
         backgroundColor: palette.canvas,
         paddingHorizontal: 12,
         paddingTop: 8,
@@ -213,7 +212,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               borderColor: palette.lineStrong,
               backgroundColor: palette.raised,
               overflow: 'hidden',
-              ...shadowFloating,
+              ...shadowOverlay,
             }}
           >
             <View
@@ -223,7 +222,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 gap: 7,
                 borderBottomWidth: 1,
                 borderBottomColor: palette.line,
-                paddingHorizontal: 13,
+                paddingHorizontal: 14,
                 paddingVertical: 9,
               }}
             >
@@ -244,7 +243,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 11,
-                    paddingHorizontal: 13,
+                    paddingHorizontal: 14,
                     backgroundColor: pressed ? palette.hover : 'transparent',
                   })}
                 >
@@ -269,9 +268,9 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
 
         <View
           style={{
-            borderRadius: radius.lg,
+            borderRadius: 24,
             borderWidth: 1,
-            borderColor: palette.line,
+            borderColor: palette.lineStrong,
             backgroundColor: palette.surface,
             overflow: 'hidden',
           }}
@@ -285,12 +284,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               style={{
                 borderBottomWidth: 1,
                 borderBottomColor: palette.line,
-                backgroundColor: palette.well,
                 padding: 8,
                 gap: 6,
               }}
             >
-              <Mono className="px-1 text-[9.5px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
+              <Mono className="px-1 text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1 }}>
                 Queued · {queue.length}
               </Mono>
               {queue.map((message, index) => (
@@ -300,11 +298,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 6,
-                    borderRadius: radius.sm,
+                    borderRadius: radius.pill,
                     borderWidth: 1,
                     borderColor: palette.line,
-                    backgroundColor: palette.surface,
-                    paddingLeft: 10,
+                    backgroundColor: palette.raised,
+                    paddingLeft: 12,
                     paddingRight: 4,
                     paddingVertical: 3,
                   }}
@@ -321,15 +319,15 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                       steerQueued(sessionId, message.id)
                     }}
                     style={({ pressed }) => ({
-                      minHeight: 30,
+                      minHeight: 28,
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 4,
                       borderRadius: radius.pill,
                       borderWidth: 1,
                       borderColor: palette.line,
-                      backgroundColor: pressed ? palette.hover : palette.raised,
-                      paddingHorizontal: 9,
+                      backgroundColor: pressed ? palette.hover : palette.surface,
+                      paddingHorizontal: 10,
                     })}
                   >
                     <CornerUpLeft size={12} color={palette.ink2} />
@@ -340,18 +338,18 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     accessibilityLabel={`Edit queued message ${index + 1} of ${queue.length}`}
                     onPress={() => void editQueued(message)}
                     hitSlop={8}
-                    className="size-8 items-center justify-center rounded-pill active:bg-raised"
+                    className="size-8 items-center justify-center rounded-pill active:bg-hover"
                   >
-                    <Pencil size={14} color={palette.ink2} />
+                    <Pencil size={13} color={palette.ink2} />
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Remove queued message ${index + 1} of ${queue.length}`}
                     onPress={() => removeQueued(sessionId, message.id)}
                     hitSlop={8}
-                    className="size-8 items-center justify-center rounded-pill active:bg-raised"
+                    className="size-8 items-center justify-center rounded-pill active:bg-hover"
                   >
-                    <Trash2 size={14} color={palette.ink3} />
+                    <Trash2 size={13} color={palette.ink3} />
                   </Pressable>
                 </View>
               ))}
@@ -359,7 +357,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
           ) : null}
 
           {attachments.length > 0 ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingTop: 10 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, paddingTop: 10 }}>
               {attachments.map((attachment) => (
                 <View
                   key={attachment.ref}
@@ -408,9 +406,8 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               gap: 8,
               borderBottomWidth: 1,
               borderBottomColor: palette.line,
-              backgroundColor: palette.well,
-              paddingLeft: 12,
-              paddingRight: 8,
+              paddingLeft: 14,
+              paddingRight: 9,
               paddingVertical: 6,
             }}
           >
@@ -424,7 +421,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 5,
-                minHeight: 26,
+                minHeight: 28,
                 paddingRight: 4,
               }}
             >
@@ -435,6 +432,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               >
                 Run
               </Text>
+              <ChevronDown
+                size={12}
+                color={palette.ink4}
+                style={{ transform: [{ rotate: dockOpen ? '180deg' : '0deg' }] }}
+              />
             </Pressable>
 
             {!dockOpen ? <View style={{ flex: 1 }} /> : null}
@@ -462,13 +464,13 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
             multiline
             editable={!disabled}
             accessibilityLabel="Message the agent"
-            className="max-h-[150px] min-h-[48px] bg-transparent px-3.5 py-3 text-[15px] leading-[21px] text-ink"
+            className="max-h-[150px] min-h-[48px] bg-transparent px-4 py-3 text-[15.5px] leading-[22px] text-ink"
           />
 
           {/* ── Control row ────────────────────────────────────────────
               Attach on the left, send on the right, Stop beside send while
               working. The send control never changes position. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, paddingBottom: 8, paddingTop: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 2 }}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Attach images"
@@ -476,8 +478,8 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               onPress={() => void attach()}
               hitSlop={8}
               style={({ pressed }) => ({
-                width: 40,
-                height: 40,
+                width: 36,
+                height: 36,
                 borderRadius: radius.pill,
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -488,7 +490,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               {uploading ? (
                 <ActivityIndicator size="small" color={palette.ink3} />
               ) : (
-                <Paperclip size={18} color={palette.ink2} />
+                <Paperclip size={17} color={palette.ink2} />
               )}
             </Pressable>
 
@@ -501,15 +503,15 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                   void stopSession(sessionId)
                 }}
                 style={({ pressed }) => ({
-                  width: 40,
-                  height: 40,
+                  width: 36,
+                  height: 36,
                   borderRadius: radius.pill,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: pressed ? palette.dangerSoft : palette.well,
+                  backgroundColor: pressed ? palette.dangerBorder : palette.dangerSoft,
                 })}
               >
-                <Square size={14} color={palette.danger} fill={palette.danger} />
+                <Square size={13} color={palette.danger} fill={palette.danger} />
               </Pressable>
             ) : null}
 
@@ -527,14 +529,14 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               onPress={submit}
               disabled={!canSend}
               style={({ pressed }) => ({
-                minWidth: 46,
-                height: 42,
+                minWidth: busy ? 46 : 36,
+                height: 36,
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 5,
                 borderRadius: radius.pill,
-                paddingHorizontal: 14,
+                paddingHorizontal: busy ? 14 : 0,
                 backgroundColor: !canSend
                   ? palette.raised
                   : pressed

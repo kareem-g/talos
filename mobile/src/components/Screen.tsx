@@ -84,7 +84,7 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
   })
 
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 }}>
+    <View style={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12 }}>
       <Animated.View
         style={{
           opacity: largeOpacity,
@@ -94,12 +94,12 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
           gap: 12,
         }}
       >
-        <View style={{ flex: 1, gap: 2 }}>
+        <View style={{ flex: 1, gap: 3 }}>
           {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
           <Text
             accessibilityRole="header"
-            className="text-[30px] font-bold text-ink"
-            style={{ letterSpacing: -0.6 }}
+            className="text-[31px] leading-[37px] font-bold text-ink"
+            style={{ letterSpacing: -0.8 }}
             numberOfLines={2}
           >
             {title}
@@ -157,7 +157,7 @@ export function AppBar({
       <BlurView intensity={70} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
       <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: `${palette.chrome}D9` }} />
       <View
-        className="min-h-14 flex-row items-center gap-2 px-2"
+        className="min-h-[52px] flex-row items-center gap-2 px-2"
         style={borderless ? undefined : { borderBottomWidth: 1, borderBottomColor: palette.line }}
       >
         {left}
@@ -165,7 +165,7 @@ export function AppBar({
           accessibilityRole="header"
           style={{ flex: 1, opacity: titleOpacity, paddingHorizontal: 6 }}
         >
-          <Text className="text-[16.5px] font-semibold text-ink" style={{ letterSpacing: -0.2 }} numberOfLines={1}>
+          <Text className="text-[16.5px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
@@ -458,10 +458,10 @@ export function Section({
     >
       {eyebrow || title || action ? (
         <View className="flex-row items-end justify-between gap-3">
-          <View className="min-w-0 flex-1 gap-0.5">
+          <View className="min-w-0 flex-1 gap-1">
             {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
             {title ? (
-              <Text className="text-[17px] font-semibold text-ink" style={{ letterSpacing: -0.2 }} numberOfLines={2}>
+              <Text className="text-[17.5px] leading-[23px] font-bold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={2}>
                 {title}
               </Text>
             ) : null}

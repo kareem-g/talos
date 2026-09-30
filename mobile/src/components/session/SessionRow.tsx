@@ -1,5 +1,5 @@
 /**
- * Session presentation — the cards and rows a session list is made of.
+ * Session presentation — the rows and cards a session list is made of.
  *
  * These are shared by the Deck, the Activity log, the session switcher and the
  * panel's project picker, so a session looks the same wherever it appears.
@@ -13,11 +13,13 @@
  * ▎           agent · workspace · 4m ago
  * ```
  *
- * The stripe on the left is the load-bearing part. A phone list is scanned in
- * peripheral vision while scrolling, and a coloured dot next to a name is too
- * small a target for that; a full-height 3pt stripe at the very edge of the
- * row is read at a glance from arm's length, and it is the same idea as the
- * desktop's triage card's vertical rule.
+ * A soft rounded row — the press state rounds with it — floating on its
+ * surface, one meta line of 12px metadata under a 15.5px title, the status
+ * pill on the right. The stripe on the left is the load-bearing part. A phone
+ * list is scanned in peripheral vision while scrolling, and a coloured dot
+ * next to a name is too small a target for that; a full-height 3pt stripe at
+ * the very edge of the row is read at a glance from arm's length, and it is
+ * the same idea as the desktop's triage card's vertical rule.
  *
  * The stripe is never the only signal — the status pill repeats the state in
  * words on the same row — so the list is still readable with any form of
@@ -38,10 +40,12 @@ import { Animated, PanResponder, Pressable, Text, View, type StyleProp, type Vie
 import {
   Archive,
   ArchiveRestore,
+  Check,
   ChevronRight,
   GitFork,
   MoreHorizontal,
   Play,
+  Plus,
   Star,
   Trash2,
 } from 'lucide-react-native'
@@ -51,11 +55,11 @@ import { relativeTime } from '@/lib/format'
 import { isInternalSession, sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import type { Session } from '@/types/session'
 import { useConversation, useStore } from '@app/store'
-import { agentColor, palette, radius, toneColor, type Tone } from '@app/design/tokens'
+import { agentColor, palette, toneColor, type Tone } from '@app/design/tokens'
 import { spring } from '@app/design/tokens'
 import { LiveHalo, rowEnterStyle, staggerDelay, useDisclosure, useEnter } from '../motion'
 import { ActionSheet } from '../Sheet'
-import { AgentAvatar, Badge, Button, Dot, Mono, Skeleton, StatusPill, haptic } from '../ui'
+import { AgentAvatar, Badge, Button, Card, Eyebrow, IconTile, Mono, Skeleton, StatusPill, haptic } from '../ui'
 
 /** The tone a UI state paints with, mapped to the app's vocabulary. */
 export function stateTone(state: string): Tone {
@@ -303,9 +307,10 @@ export function SessionRow({
             onOpen()
           }}
           onLongPress={onMore}
-          className="min-h-16 flex-row items-center active:bg-raised"
+          className="min-h-16 flex-row items-center overflow-hidden rounded-md active:bg-raised"
         >
-          {/* The stripe: state, readable at a glance while scrolling. */}
+          {/* The stripe: state, readable at a glance while scrolling. Clipped
+              to the row's radius so it reads as part of the rounded sheet. */}
           <View
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
@@ -316,16 +321,19 @@ export function SessionRow({
             }}
           />
 
-          <View className="flex-1 flex-row items-center gap-3 py-2.5 pl-3.5 pr-3">
-            <AgentAvatar agent={session.agent} size={34} name={providerName} />
-            <View className="min-w-0 flex-1">
+          <View className="flex-1 flex-row items-center gap-3 py-2.5 pl-3 pr-3">
+            <AgentAvatar agent={session.agent} size={36} name={providerName} />
+            <View className="min-w-0 flex-1 gap-0.5">
               <View className="flex-row items-center gap-1.5">
                 {starred ? <Star size={12} color={palette.wait} fill={palette.wait} strokeWidth={0} /> : null}
-                <Text className="min-w-0 flex-1 text-[15px] font-medium text-ink" numberOfLines={1}>
+                <Text
+                  className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink"
+                  numberOfLines={1}
+                >
                   {session.name}
                 </Text>
               </View>
-              <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
+              <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
                 {[
                   providerName ?? session.agent,
                   !hideWorkspace && session.project ? session.project.split('/').filter(Boolean).pop() : null,
@@ -343,7 +351,6 @@ export function SessionRow({
           </View>
         </Pressable>
       </SwipeRow>
-      <View className="h-px bg-line" style={{ marginLeft: 16 }} />
     </Animated.View>
   )
 }
@@ -353,9 +360,12 @@ export function SessionRow({
  * the user reading carefully: a human is blocked, what is being asked, how long
  * it has waited, and what to do about it.
  *
- * The approve action is inline. One tap, from the list, without opening a
- * session — because the situations where a session is waiting on you are
- * exactly the situations where you are doing something else. */
+ * It is quieter than a shout and clearer than a whisper: a soft tone fill and
+ * hairline (no cap, no boxing-in), the state as a StatusPill beside the name,
+ * the ask as one prompt line, and exactly two actions — Approve in place, Open
+ * as a ghost beside it. The approve action is inline, one tap from the list,
+ * because the situations where a session is waiting on you are exactly the
+ * situations where you are doing something else. */
 
 export function AttentionCard({
   session,
@@ -381,7 +391,6 @@ export function AttentionCard({
   const tone = stateTone(uiState)
   const display = uiStateDisplay(uiState as never)
   const enter = useEnter(staggerDelay(enterIndex ?? 0), false)
-  const accent = toneColor[tone]
 
   return (
     <Animated.View style={rowEnterStyle(enter)}>
@@ -393,26 +402,24 @@ export function AttentionCard({
           void haptic('light')
           onOpen()
         }}
-        className="overflow-hidden rounded-lg border active:opacity-90"
-        style={{ borderColor: `${accent}55`, backgroundColor: `${accent}12` }}
+        className="rounded-md active:opacity-85"
       >
-        {/* A 3pt cap at the top rather than a border all the way round: it
-            marks the card as urgent without boxing it in. */}
-        <View style={{ height: 3, backgroundColor: accent }} />
-        <View className="gap-3 p-4">
-          <View className="flex-row items-start gap-2.5">
-            <View className="items-center pt-1.5">
-              <Dot tone={tone} pulse={false} />
-            </View>
-            <View className="min-w-0 flex-1">
-              <Text className="text-[16px] font-semibold text-ink" style={{ letterSpacing: -0.2 }} numberOfLines={2}>
+        <Card tone={tone} className="gap-3 p-4">
+          <View className="flex-row items-start gap-3">
+            <View className="min-w-0 flex-1 gap-0.5">
+              <Text
+                className="text-[16px] leading-[21px] font-semibold text-ink"
+                style={{ letterSpacing: -0.2 }}
+                numberOfLines={2}
+              >
                 {session.name}
               </Text>
-              <Text className="mt-0.5 text-[12px] text-ink-3" numberOfLines={1}>
+              <Text className="text-[12px] leading-[16px] text-ink-2" numberOfLines={1}>
                 {providerName ?? session.agent}
                 {idleFor ? ` · waiting ${idleFor}` : ''}
               </Text>
             </View>
+            <StatusPill tone={tone} label={display.label} size="sm" />
           </View>
 
           {headline ? (
@@ -435,7 +442,7 @@ export function AttentionCard({
               />
             ) : null}
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
               label={uiState === 'failed' ? 'Retry' : 'Open'}
               accessibilityLabel={`Open ${session.name}`}
@@ -444,10 +451,8 @@ export function AttentionCard({
                 onOpen()
               }}
             />
-            <View style={{ flex: 1 }} />
-            <ChevronRight size={17} color={palette.ink4} />
           </View>
-        </View>
+        </Card>
       </Pressable>
     </Animated.View>
   )
@@ -484,7 +489,7 @@ export function LiveRow({
           void haptic('light')
           onOpen()
         }}
-        className="min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-raised"
+        className="min-h-14 flex-row items-center gap-3 rounded-md px-4 py-3 active:bg-raised"
       >
         <View style={{ width: 20, alignItems: 'center', justifyContent: 'center' }}>
           <LiveHalo color={agentColor(session.agent)} size={20} />
@@ -497,15 +502,19 @@ export function LiveRow({
             }}
           />
         </View>
-        <View className="min-w-0 flex-1">
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
             {task ?? session.name}
           </Text>
-          <Text className="mt-0.5 text-[12px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
             {providerName ?? session.agent}
           </Text>
         </View>
-        <Mono className="shrink-0 text-[11.5px]" numberOfLines={1}>
+        <Mono
+          className="shrink-0 text-[11.5px]"
+          style={{ fontVariant: ['tabular-nums'] }}
+          numberOfLines={1}
+        >
           {runtime}
         </Mono>
       </Pressable>
@@ -514,8 +523,10 @@ export function LiveRow({
 }
 
 /* ── Workspace group ─────────────────────────────────────────────────────────────────
- * A collapsible group of sessions, the desktop's workspace card. The header is
- * the tap target; the chevron rotates with the collapse. */
+ * A collapsible group of sessions, the desktop's workspace card. The workspace
+ * name is an eyebrow — the group is a *label* for the rows under it, not a
+ * competing headline — with the project path in mono beneath, counts as outline
+ * badges, and the chevron rotating with the collapse. */
 
 export function WorkspaceGroup({
   name,
@@ -555,33 +566,41 @@ export function WorkspaceGroup({
             void haptic('light')
             setOpen((value) => !value)
           }}
-          className="min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-raised"
+          className="min-h-14 flex-row items-center gap-2.5 px-4 py-3 active:bg-raised"
         >
           <Animated.View style={disclosure.indicatorStyle}>
-            <ChevronRight size={17} color={palette.ink3} />
+            <ChevronRight size={16} color={palette.ink3} />
           </Animated.View>
-          <View className="min-w-0 flex-1">
-            <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
-              {name}
-            </Text>
+          <View className="min-w-0 flex-1 gap-1">
+            <Eyebrow className="text-ink-2">{name}</Eyebrow>
             {project ? (
-              <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+              <Mono className="text-[11px]" numberOfLines={1}>
                 {project}
               </Mono>
             ) : null}
           </View>
-          {attention > 0 ? <Badge tone="wait">{attention} need you</Badge> : null}
-          {running > 0 ? <Badge tone="accent" outline>{running} live</Badge> : null}
+          {attention > 0 ? (
+            <Badge tone="wait" outline>
+              {attention} need you
+            </Badge>
+          ) : null}
+          {running > 0 ? (
+            <Badge tone="accent" outline>
+              {running} live
+            </Badge>
+          ) : null}
+          <Badge tone="muted" outline mono>
+            {total}
+          </Badge>
           {onNewTask ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Start a task in ${name}`}
               onPress={onNewTask}
               hitSlop={12}
-              className="size-8 items-center justify-center rounded-pill active:bg-hover"
-              style={{ backgroundColor: palette.raised }}
+              className="size-8 items-center justify-center rounded-pill bg-raised active:bg-hover"
             >
-              <Text style={{ color: palette.ink2, fontSize: 17, fontWeight: '600', lineHeight: 20 }}>+</Text>
+              <Plus size={17} color={palette.ink2} />
             </Pressable>
           ) : null}
         </Pressable>
@@ -591,7 +610,7 @@ export function WorkspaceGroup({
             {...(disclosure.style.height === undefined ? {} : { onLayout: disclosure.onLayout })}
             style={disclosure.style}
           >
-            {children}
+            <View className="gap-0.5 px-1.5 pb-1.5">{children}</View>
           </Animated.View>
         ) : null}
       </View>
@@ -704,20 +723,9 @@ export function SessionActionsSheet({
 export function AllClear({ count, onOpenActivity }: { count: number; onOpenActivity?: () => void }) {
   return (
     <View className="flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3.5">
-      <View
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: radius.md,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: palette.okSoft,
-        }}
-      >
-        <Text style={{ color: palette.ok, fontSize: 16, fontWeight: '800' }}>✓</Text>
-      </View>
+      <IconTile tone="ok" size={34} icon={<Check size={17} color={palette.ok} strokeWidth={2.6} />} />
       <View className="min-w-0 flex-1">
-        <Text className="text-[15px] font-semibold text-ink">All clear</Text>
+        <Text className="text-[15.5px] leading-[21px] font-medium text-ink">All clear</Text>
         <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3" numberOfLines={2}>
           {count > 0
             ? `${count} ${count === 1 ? 'session is' : 'sessions are'} running. Nothing is waiting on you.`
@@ -762,8 +770,8 @@ function SkeletonRow() {
       className="min-h-16 flex-row items-center gap-3 px-4 py-3"
       style={rowEnterStyle(enter)}
     >
-      <Skeleton width={34} height={34} radius={12} />
-      <View style={{ flex: 1, gap: 8 }}>
+      <Skeleton width={36} height={36} radius={18} />
+      <View style={{ flex: 1, gap: 7 }}>
         <Skeleton width="58%" height={13} />
         <Skeleton width="36%" height={10} />
       </View>

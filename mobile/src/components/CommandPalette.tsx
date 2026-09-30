@@ -45,7 +45,16 @@ import type { Message } from '@/types/conversation'
 import { palette, radius } from '@app/design/tokens'
 import { Sheet } from '@app/components/Sheet'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
-import { AgentAvatar, EmptyState, Eyebrow, Mono, SearchField, haptic, toast } from '@app/components/ui'
+import {
+  AgentAvatar,
+  Badge,
+  EmptyState,
+  Eyebrow,
+  Mono,
+  SearchField,
+  haptic,
+  toast,
+} from '@app/components/ui'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '@app/navigation'
@@ -220,6 +229,8 @@ export function SessionSearchSheet({
       eyebrow={sessionId ? 'This device' : undefined}
       snapPoints={[0.62, 0.94]}
     >
+      {/* The field leads the content: it is the reason the sheet exists, and
+          the sheet's own header keeps the close affordance pinned above it. */}
       <SearchField
         value={query}
         onChangeText={setQuery}
@@ -228,7 +239,7 @@ export function SessionSearchSheet({
       />
 
       {matchingActions.length > 0 ? (
-        <View style={{ gap: 6 }}>
+        <View style={{ gap: 4 }}>
           <Eyebrow>Actions</Eyebrow>
           <View style={{ marginHorizontal: -16 }}>
             {matchingActions.map((action, index) => (
@@ -249,9 +260,9 @@ export function SessionSearchSheet({
       ) : null}
 
       {transcriptHits.length > 0 ? (
-        <View style={{ gap: 6 }}>
+        <View style={{ gap: 4 }}>
           <Eyebrow>In this conversation</Eyebrow>
-          <View style={{ marginHorizontal: -16 }}>
+          <View style={{ gap: 6 }}>
             {transcriptHits.map((hit, index) => (
               <TranscriptHit key={`${hit.id}-${index}`} hit={hit} index={index} />
             ))}
@@ -259,7 +270,7 @@ export function SessionSearchSheet({
         </View>
       ) : null}
 
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: 4 }}>
         <Eyebrow>{q ? `Sessions · ${matchingSessions.length}` : 'Recent sessions'}</Eyebrow>
         {matchingSessions.length === 0 ? (
           <EmptyState
@@ -314,15 +325,16 @@ function ActionRow({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
-          minHeight: 52,
+          minHeight: 48,
           paddingHorizontal: 16,
-          paddingVertical: 9,
+          paddingVertical: 7,
+          borderRadius: radius.md,
           backgroundColor: pressed ? palette.raised : 'transparent',
         })}
       >
         {icon}
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
             {label}
           </Text>
           <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
@@ -352,30 +364,31 @@ function SessionHit({
     <View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={session.name}
+        accessibilityLabel={current ? `${session.name} (open)` : session.name}
         accessibilityHint={`${providerName}${session.project ? `, ${basename(session.project)}` : ''}, ${relativeTime(session.updated_at)}`}
         onPress={onPress}
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 11,
-          minHeight: 54,
+          minHeight: 48,
           paddingHorizontal: 16,
-          paddingVertical: 8,
+          paddingVertical: 6,
+          borderRadius: radius.md,
           backgroundColor: pressed ? palette.raised : 'transparent',
         })}
       >
         <AgentAvatar agent={session.agent} size={30} name={providerName} />
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[14.5px] text-ink-2" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[19px] text-ink" numberOfLines={1}>
             {session.name}
-            {current ? <Text style={{ color: palette.ink4 }}> · open</Text> : null}
           </Text>
-          <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+          <Mono className="mt-0.5 text-[11px] leading-[15px]" numberOfLines={1}>
             {providerName}
             {session.project ? ` · ${basename(session.project)}` : ''} · {relativeTime(session.updated_at)}
           </Mono>
         </View>
+        {current ? <Badge tone="accent" mono>open</Badge> : null}
       </Pressable>
     </View>
   )
@@ -387,10 +400,10 @@ function TranscriptHit({ hit, index }: { hit: TranscriptHitValue; index: number 
     <View style={rowEnterStyle(enter)}>
       <View
         style={{
-          paddingHorizontal: 16,
-          paddingVertical: 9,
-          gap: 3,
-          borderRadius: radius.sm,
+          paddingHorizontal: 13,
+          paddingVertical: 10,
+          gap: 5,
+          borderRadius: radius.md,
           backgroundColor: palette.well,
           borderWidth: 1,
           borderColor: palette.line,
@@ -398,9 +411,9 @@ function TranscriptHit({ hit, index }: { hit: TranscriptHitValue; index: number 
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <GitBranch size={11} color={palette.ink4} />
-          <Text style={{ color: palette.ink3, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 }}>
-            {hit.role.toUpperCase()}
-          </Text>
+          <Badge tone="muted" mono>
+            {hit.role}
+          </Badge>
         </View>
         <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={2}>
           {hit.preview}

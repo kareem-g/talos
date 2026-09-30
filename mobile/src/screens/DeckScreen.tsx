@@ -1,5 +1,5 @@
 /**
- * Deck — the control deck.
+ * Deck — the home.
  *
  * THE INFORMATION HIERARCHY *IS* THE DESIGN
  * ------------------------------------------
@@ -17,23 +17,9 @@
  * halves or becomes a top/bottom stack — which is this. The desktop's left
  * column *is* the first thing you read; so is this.
  *
- * What this page deliberately does not have:
- *
- *   - **No search field above the fold.** It is one tap away in the app bar
- *     (⌘-equivalent), and a permanent 48pt field pushes the triage list — the
- *     reason the page exists — below the fold on a small phone.
- *   - **No filter chips inline.** The same reason. They live in the filter
- *     sheet, which the funnel button in the app bar opens. A control you have
- *     to scroll to is a control you cannot use.
- *   - **No "Quick launch" row of provider pills.** The desktop has one because
- *     its New-session dialog is three steps deep. The FAB opens a sheet that is
- *     *one* step, and adding a second way to start a task to the home page
- *     would be two entry points for one verb.
- *
- * The connection state is not part of this page. It is a strip above every
- * page, because "the desktop is unreachable" is a fact about the app rather
- * than about this screen, and a phone in a pocket is the thing you are least
- * likely to be looking at and most likely to be confused by.
+ * The header is the shared `ScreenScaffold` large title — the desktop's name is
+ * the page's headline, the two counts answer the page's question beside it, and
+ * search/filter live in the app bar where they stay reachable while scrolled.
  *
  * Ranking, headlines, and grouping all come from the shared `deriveHomeView`,
  * so a session floats to the top here for exactly the reasons it does on the
@@ -41,7 +27,7 @@
  */
 
 import * as React from 'react'
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
+import { ScrollView, Text, View } from 'react-native'
 import { Search, SlidersHorizontal, Sparkles } from 'lucide-react-native'
 
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
@@ -58,17 +44,18 @@ import {
   Badge,
   Button,
   Card,
+  CardHeader,
   CopyButton,
   Dot,
   EmptyState,
-  Eyebrow,
   FilterChips,
+  IconButton,
   Mono,
   StatusPill,
   haptic,
   toast,
 } from '@app/components/ui'
-import { Section } from '@app/components/Screen'
+import { ScreenScaffold, Section } from '@app/components/Screen'
 import {
   AllClear,
   AttentionCard,
@@ -193,247 +180,274 @@ export function DeckScreen() {
   }
 
   return (
-    <View className="flex-1 bg-canvas">
-      <DeckHeader
-        desktopName={desktopName}
-        needsYou={needsYou}
-        running={view.counts.running}
-        live={live}
-        filtering={filtering}
-        onSearch={() => {
-          setQuery('')
-          setFilterOpen(true)
-        }}
-        onFilter={() => setFilterOpen(true)}
-      />
-
-      <ScrollView
-        contentContainerClassName="gap-6 pb-8"
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={palette.ink3}
-            colors={[palette.accent]}
-            progressBackgroundColor={palette.surface}
+    <ScreenScaffold
+      title={desktopName}
+      eyebrow="Control deck"
+      onRefresh={() => void onRefresh()}
+      refreshing={refreshing}
+      contentClassName="gap-6 pb-12"
+      headerRight={
+        <View className="flex-row items-center gap-0.5">
+          <IconButton
+            label="Search sessions"
+            size={38}
+            onPress={() => {
+              void haptic('light')
+              setQuery('')
+              setFilterOpen(true)
+            }}
+          >
+            <Search size={19} color={palette.ink2} />
+          </IconButton>
+          <IconButton
+            label={filtering ? 'Change the active filter' : 'Filter sessions'}
+            size={38}
+            active={filtering}
+            onPress={() => {
+              void haptic('light')
+              setFilterOpen(true)
+            }}
+          >
+            <SlidersHorizontal size={19} color={filtering ? palette.accent : palette.ink2} />
+          </IconButton>
+        </View>
+      }
+      below={
+        /* The counts sit under the title, not in a bar: "3 need you" is a
+            statement about the whole station, and it belongs next to the name
+            of the station. They scroll away with the title — the list itself
+            takes over the answer once you are reading it. */
+        <View className="flex-row items-center gap-2">
+          <StatusPill
+            tone={needsYou > 0 ? 'wait' : 'ok'}
+            label={needsYou > 0 ? `${needsYou} need you` : 'All clear'}
+            size="sm"
           />
-        }
-      >
-        {/* ── 1. Needs you ───────────────────────────────────────────────
-            Highest priority, always first. Absent entirely when nothing needs
-            attention *and* nothing is running — no empty section, no reserved
-            space. When something is running but nothing is blocked, "All
-            clear" is still shown: the difference between "nothing needs you"
-            and "the app is disconnected" matters, and silence does not
-            distinguish them. */}
-        {!filtering && needsYou > 0 ? (
-          <Section eyebrow="Triage" title="Needs you" enterIndex={0}>
-            <View className="gap-2.5">
-              {view.attention.map((entry, index) => (
-                <AttentionCard
-                  key={entry.session.id}
+          {view.counts.running > 0 ? (
+            <Badge tone="accent" outline>
+              {view.counts.running} live
+            </Badge>
+          ) : null}
+          <View style={{ flex: 1 }} />
+          <View className="flex-row items-center gap-1.5">
+            <Dot tone={live ? 'ok' : 'danger'} pulse={!live} />
+            <Text className="text-[11.5px] leading-[15px] text-ink-3">{live ? 'Live' : 'Offline'}</Text>
+          </View>
+        </View>
+      }
+    >
+      {/* ── 1. Needs you ───────────────────────────────────────────────
+          Highest priority, always first. Absent entirely when nothing needs
+          attention *and* nothing is running — no empty section, no reserved
+          space. When something is running but nothing is blocked, "All
+          clear" is still shown: the difference between "nothing needs you"
+          and "the app is disconnected" matters, and silence does not
+          distinguish them. */}
+      {!filtering && needsYou > 0 ? (
+        <Section eyebrow="Triage" title="Needs you" enterIndex={0}>
+          <View className="gap-3">
+            {view.attention.map((entry, index) => (
+              <AttentionCard
+                key={entry.session.id}
+                session={entry.session}
+                headline={entry.headline}
+                uiState={entry.uiState}
+                idleFor={entry.idleFor}
+                providerName={entry.providerName}
+                enterIndex={index}
+                onApprove={entry.uiState === 'approval' ? () => approve(entry.session.id) : undefined}
+                onOpen={() => openSession(entry.session.id)}
+              />
+            ))}
+          </View>
+        </Section>
+      ) : null}
+
+      {/* ── 2. Live ────────────────────────────────────────────────────
+          Ambient. No actions: a running agent needs attention only when it
+          *changes* state, and when it does it moves itself to "Needs you".
+          A live halo is the whole affordance — enough to know something is
+          in flight from across the room, not enough to nag. */}
+      {!filtering && view.active.length > 0 ? (
+        <Section eyebrow={`${view.active.length} running`} title="Live" enterIndex={needsYou > 0 ? 1 : 0}>
+          <Card>
+            {view.active.map((entry, index) => (
+              <View key={entry.session.id}>
+                {index > 0 ? <View className="h-px bg-line" style={{ marginLeft: 16 }} /> : null}
+                <LiveRow
                   session={entry.session}
-                  headline={entry.headline}
-                  uiState={entry.uiState}
-                  idleFor={entry.idleFor}
-                  providerName={entry.providerName}
-                  enterIndex={index}
-                  onApprove={entry.uiState === 'approval' ? () => approve(entry.session.id) : undefined}
+                  task={entry.task}
+                  runtime={entry.runtime}
+                  providerName={providerNameFor(entry.session.agent)}
                   onOpen={() => openSession(entry.session.id)}
                 />
-              ))}
-            </View>
-          </Section>
-        ) : null}
+              </View>
+            ))}
+          </Card>
+        </Section>
+      ) : null}
 
-        {/* ── 2. Live ────────────────────────────────────────────────────
-            Ambient. No actions: a running agent needs attention only when it
-            *changes* state, and when it does it moves itself to "Needs you".
-            A live halo is the whole affordance — enough to know something is
-            in flight from across the room, not enough to nag. */}
-        {!filtering && view.active.length > 0 ? (
-          <Section eyebrow={`${view.active.length} running`} title="Live" enterIndex={needsYou > 0 ? 1 : 0}>
-            <Card>
-              {view.active.map((entry, index) => (
-                <View key={entry.session.id}>
-                  {index > 0 ? <View className="h-px bg-line" style={{ marginLeft: 16 }} /> : null}
-                  <LiveRow
-                    session={entry.session}
-                    task={entry.task}
-                    runtime={entry.runtime}
-                    providerName={providerNameFor(entry.session.agent)}
-                    onOpen={() => openSession(entry.session.id)}
+      {/* ── The all-clear state ─────────────────────────────────────────
+          Shown when nothing is blocked *and* nothing is live, so the page is
+          never just an empty list with no explanation. */}
+      {!filtering && needsYou === 0 && view.active.length === 0 ? (
+        <View className="px-4">
+          <AllClear count={0} />
+        </View>
+      ) : null}
+
+      {/* ── The filter row ──────────────────────────────────────────────
+          Deliberately *here* and not above the fold. On a small phone a
+          filter row pinned under the header pushes the triage list — the
+          reason this page exists — below the fold. Down here it is one tap
+          from the content it filters and out of the way of the question the
+          page is answering, and it is reachable from the app bar's funnel
+          too for anyone who wants it first. */}
+      {view.filtered.length > 0 || filtering ? (
+        <View className="px-4">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="pr-4">
+            <FilterChips
+              label="Filter sessions"
+              value={filter}
+              onChange={(value) => {
+                void haptic('light')
+                setFilter(value as HomeFilter)
+              }}
+              options={[
+                { value: 'all' as HomeFilter, label: 'Everything', count: view.counts.total },
+                { value: 'attention' as HomeFilter, label: 'Needs you', count: view.counts.attention },
+                { value: 'active' as HomeFilter, label: 'Live', count: view.counts.running },
+                { value: 'starred' as HomeFilter, label: 'Starred', count: starred.length },
+                { value: 'archived' as HomeFilter, label: 'Archived', count: view.counts.archived },
+              ]}
+            />
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {/* ── 4. Workspaces ──────────────────────────────────────────────
+          Grouped by folder, because "which project is this?" is the
+          question that makes a long session list navigable. Collapsed by
+          default when a workspace is quiet, open when it has something
+          waiting, so the list opens at the right altitude. */}
+      <Section
+        eyebrow={filtering ? 'Filtered' : 'Workspaces'}
+        title={filtering ? `${view.filtered.length} matching` : `${view.workspaces.length} ${view.workspaces.length === 1 ? 'workspace' : 'workspaces'}`}
+        enterIndex={2}
+        action={
+          filtering ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              label="Clear"
+              accessibilityLabel="Clear filters and search"
+              onPress={() => {
+                setFilter('all')
+                setQuery('')
+              }}
+            />
+          ) : null
+        }
+      >
+        {sessionsLoading && sessions.length === 0 ? (
+          <SessionListSkeleton />
+        ) : view.workspaces.length === 0 ? (
+          <Card>
+            <EmptyState
+              title={filtering ? 'Nothing matches' : 'No sessions yet'}
+              body={
+                filtering
+                  ? 'Try a different search, or clear the filter to see everything.'
+                  : 'Start an agent from here, or open one on your desktop and it will appear.'
+              }
+              icon={filtering ? <Search size={22} color={palette.ink3} /> : <Sparkles size={22} color={palette.ink3} />}
+              action={
+                filtering ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    label="Clear filters"
+                    onPress={() => {
+                      setFilter('all')
+                      setQuery('')
+                    }}
                   />
-                </View>
-              ))}
-            </Card>
-          </Section>
-        ) : null}
-
-        {/* ── The all-clear state ─────────────────────────────────────────
-            Shown when nothing is blocked *and* nothing is live, so the page is
-            never just an empty list with no explanation. */}
-        {!filtering && needsYou === 0 && view.active.length === 0 ? (
-          <View className="px-4">
-            <AllClear count={0} />
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    label="New task"
+                    accessibilityLabel="Start a new task"
+                    onPress={() => openNewTask()}
+                  />
+                )
+              }
+            />
+          </Card>
+        ) : (
+          <View className="gap-3">
+            {view.workspaces.map((workspace) => (
+              <WorkspaceGroup
+                key={workspace.id}
+                name={workspace.name}
+                project={workspace.project}
+                total={workspace.sessions.length}
+                attention={workspace.counts.attention}
+                running={workspace.counts.running}
+                defaultOpen={workspace.counts.attention > 0 || view.workspaces.length <= 2}
+                onNewTask={() => openNewTask(undefined, workspace.project ?? undefined)}
+              >
+                {workspace.sessions.map(({ session, uiState }, index) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    state={uiState}
+                    providerName={providerNameFor(session.agent)}
+                    hideWorkspace
+                    starred={starred.includes(session.id)}
+                    enterIndex={index}
+                    onOpen={() => openSession(session.id)}
+                    onToggleStar={() => {
+                      void toggleStar(session.id)
+                      toast({
+                        message: starred.includes(session.id) ? 'Star removed' : 'Starred',
+                        tone: 'muted',
+                        haptic: 'light',
+                      })
+                    }}
+                    onArchive={() => void toggleArchive(session.id, session.status === 'archived')}
+                    onMore={() => setMenuSession(session.id)}
+                  />
+                ))}
+              </WorkspaceGroup>
+            ))}
           </View>
-        ) : null}
+        )}
+      </Section>
 
-        {/* ── The filter row ──────────────────────────────────────────────
-            Deliberately *here* and not above the fold. On a small phone a
-            filter row pinned under the header pushes the triage list — the
-            reason this page exists — below the fold. Down here it is one tap
-            from the content it filters and out of the way of the question the
-            page is answering, and it is reachable from the app bar's funnel
-            too for anyone who wants it first. */}
-        {view.filtered.length > 0 || filtering ? (
-          <View className="px-4">
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="pr-4">
-              <FilterChips
-                label="Filter sessions"
-                value={filter}
-                onChange={(value) => {
-                  void haptic('light')
-                  setFilter(value as HomeFilter)
-                }}
-                options={[
-                  { value: 'all' as HomeFilter, label: 'Everything', count: view.counts.total },
-                  { value: 'attention' as HomeFilter, label: 'Needs you', count: view.counts.attention },
-                  { value: 'active' as HomeFilter, label: 'Live', count: view.counts.running },
-                  { value: 'starred' as HomeFilter, label: 'Starred', count: starred.length },
-                  { value: 'archived' as HomeFilter, label: 'Archived', count: view.counts.archived },
-                ]}
-              />
-            </ScrollView>
-          </View>
-        ) : null}
+      {/* ── Automations ────────────────────────────────────────────────
+          Configuration, not triage, so it sits below the fold rather than
+          competing with sessions for the eye. */}
+      <Section eyebrow="Automations" title="Run on demand" enterIndex={3}>
+        <AutomationsSection />
+      </Section>
 
-        {/* ── 4. Workspaces ──────────────────────────────────────────────
-            Grouped by folder, because "which project is this?" is the
-            question that makes a long session list navigable. Collapsed by
-            default when a workspace is quiet, open when it has something
-            waiting, so the list opens at the right altitude. */}
-        <Section
-          eyebrow={filtering ? 'Filtered' : 'Workspaces'}
-          title={filtering ? `${view.filtered.length} matching` : `${view.workspaces.length} ${view.workspaces.length === 1 ? 'workspace' : 'workspaces'}`}
-          enterIndex={2}
-          action={
-            filtering ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                label="Clear"
-                accessibilityLabel="Clear filters and search"
-                onPress={() => {
-                  setFilter('all')
-                  setQuery('')
-                }}
-              />
-            ) : null
-          }
-        >
-          {sessionsLoading && sessions.length === 0 ? (
-            <SessionListSkeleton />
-          ) : view.workspaces.length === 0 ? (
-            <Card>
-              <EmptyState
-                title={filtering ? 'Nothing matches' : 'No sessions yet'}
-                body={
-                  filtering
-                    ? 'Try a different search, or clear the filter to see everything.'
-                    : 'Start an agent from here, or open one on your desktop and it will appear.'
-                }
-                icon={filtering ? <Search size={22} color={palette.ink3} /> : <Sparkles size={22} color={palette.ink3} />}
-                action={
-                  filtering ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      label="Clear filters"
-                      onPress={() => {
-                        setFilter('all')
-                        setQuery('')
-                      }}
-                    />
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      label="New task"
-                      accessibilityLabel="Start a new task"
-                      onPress={() => openNewTask()}
-                    />
-                  )
-                }
-              />
-            </Card>
-          ) : (
-            <View className="gap-2.5">
-              {view.workspaces.map((workspace) => (
-                <WorkspaceGroup
-                  key={workspace.id}
-                  name={workspace.name}
-                  project={workspace.project}
-                  total={workspace.sessions.length}
-                  attention={workspace.counts.attention}
-                  running={workspace.counts.running}
-                  defaultOpen={workspace.counts.attention > 0 || view.workspaces.length <= 2}
-                  onNewTask={() => openNewTask(undefined, workspace.project ?? undefined)}
-                >
-                  {workspace.sessions.map(({ session, uiState }, index) => (
-                    <SessionRow
-                      key={session.id}
-                      session={session}
-                      state={uiState}
-                      providerName={providerNameFor(session.agent)}
-                      hideWorkspace
-                      starred={starred.includes(session.id)}
-                      enterIndex={index}
-                      onOpen={() => openSession(session.id)}
-                      onToggleStar={() => {
-                        void toggleStar(session.id)
-                        toast({
-                          message: starred.includes(session.id) ? 'Star removed' : 'Starred',
-                          tone: 'muted',
-                          haptic: 'light',
-                        })
-                      }}
-                      onArchive={() => void toggleArchive(session.id, session.status === 'archived')}
-                      onMore={() => setMenuSession(session.id)}
-                    />
-                  ))}
-                </WorkspaceGroup>
-              ))}
-            </View>
-          )}
-        </Section>
+      {/* ── Skills ─────────────────────────────────────────────────────
+          Shared with the desktop: the daemon owns `.agentdeck/skills/`, so
+          toggling one here changes what the desktop injects into every
+          turn. That makes this the one home-page section that is genuinely
+          remote control rather than a local convenience. */}
+      <Section eyebrow="Prompt library" title="Skills" enterIndex={4}>
+        <SkillsSection />
+      </Section>
 
-        {/* ── Automations ────────────────────────────────────────────────
-            Configuration, not triage, so it sits below the fold rather than
-            competing with sessions for the eye. */}
-        <Section eyebrow="Automations" title="Run on demand" enterIndex={3}>
-          <AutomationsSection />
-        </Section>
-
-        {/* ── Skills ─────────────────────────────────────────────────────
-            Shared with the desktop: the daemon owns `.agentdeck/skills/`, so
-            toggling one here changes what the desktop injects into every
-            turn. That makes this the one home-page section that is genuinely
-            remote control rather than a local convenience. */}
-        <Section eyebrow="Prompt library" title="Skills" enterIndex={4}>
-          <SkillsSection />
-        </Section>
-
-        {/* ── This device ─────────────────────────────────────────────────
-            Last, because it is rarely the thing you are looking for — but it
-            is the answer to "why did my task fail with a network error", so
-            it has to be on the page rather than three menus deep. */}
-        <Section eyebrow="This device" title="Routes" enterIndex={5}>
-          <ConnectionCard />
-        </Section>
-      </ScrollView>
+      {/* ── This device ─────────────────────────────────────────────────
+          Last, because it is rarely the thing you are looking for — but it
+          is the answer to "why did my task fail with a network error", so
+          it has to be on the page rather than three menus deep. */}
+      <Section eyebrow="This device" title="Routes" enterIndex={5}>
+        <ConnectionCard />
+      </Section>
 
       <PickerSheet
         open={filterOpen}
@@ -513,88 +527,7 @@ export function DeckScreen() {
         onClose={() => setConfirmDelete(null)}
         onConfirm={() => confirmDelete && void doDelete(confirmDelete)}
       />
-    </View>
-  )
-}
-
-/* ── Header ────────────────────────────────────────────────────────────────────
- * A custom bar rather than the shared `AppBar`, because this page needs three
- * things the generic one has no room for: the two counts that answer the page's
- * question, a search entry point, and a filter entry point that shows whether a
- * filter is active. */
-
-function DeckHeader({
-  desktopName,
-  needsYou,
-  running,
-  live,
-  filtering,
-  onSearch,
-  onFilter,
-}: {
-  desktopName: string
-  needsYou: number
-  running: number
-  live: boolean
-  filtering: boolean
-  onSearch: () => void
-  onFilter: () => void
-}) {
-  return (
-    <View className="border-b border-line bg-chrome px-4 pb-3 pt-2">
-      <View className="flex-row items-center gap-3">
-        <View className="min-w-0 flex-1">
-          <Eyebrow>Control deck</Eyebrow>
-          <Text
-            className="text-[22px] font-bold text-ink"
-            style={{ letterSpacing: -0.35 }}
-            numberOfLines={1}
-          >
-            {desktopName}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Search sessions"
-          onPress={onSearch}
-          hitSlop={8}
-          className="size-10 items-center justify-center rounded-pill active:bg-raised"
-        >
-          <Search size={19} color={palette.ink2} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={filtering ? 'Change the active filter' : 'Filter sessions'}
-          onPress={onFilter}
-          hitSlop={8}
-          className="size-10 items-center justify-center rounded-pill active:bg-raised"
-          style={filtering ? { backgroundColor: palette.accentSoft } : undefined}
-        >
-          <SlidersHorizontal size={19} color={filtering ? palette.accent : palette.ink2} />
-        </Pressable>
-      </View>
-
-      {/* The counts sit under the title, not in a bar: "3 need you" is a
-          statement about the whole station, and it belongs next to the name
-          of the station. */}
-      <View className="mt-2.5 flex-row items-center gap-2">
-        <StatusPill
-          tone={needsYou > 0 ? 'wait' : 'ok'}
-          label={needsYou > 0 ? `${needsYou} need you` : 'All clear'}
-          size="sm"
-        />
-        {running > 0 ? (
-          <Badge tone="accent" outline>
-            {running} live
-          </Badge>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <View className="flex-row items-center gap-1.5">
-          <Dot tone={live ? 'ok' : 'danger'} pulse={!live} />
-          <Text className="text-[11.5px] text-ink-3">{live ? 'Live' : 'Offline'}</Text>
-        </View>
-      </View>
-    </View>
+    </ScreenScaffold>
   )
 }
 
@@ -632,19 +565,21 @@ function ConnectionCard() {
 
   return (
     <Card>
-      <View className="flex-row items-center gap-2 border-b border-line px-4 py-3">
-        <Text className="min-w-0 flex-1 text-[14.5px] font-semibold text-ink">Reachable routes</Text>
-        <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline>
-          {connection === 'connected' ? 'connected' : connection}
-        </Badge>
-      </View>
-      <View>
+      <CardHeader
+        title="Reachable routes"
+        right={
+          <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline>
+            {connection === 'connected' ? 'connected' : connection}
+          </Badge>
+        }
+      />
+      <View className="gap-0.5 p-1.5">
         {routes.map((route) => {
           const isActive = route === active
           return (
             <View
               key={route}
-              className="min-h-13 flex-row items-center gap-2.5 px-4 py-2.5"
+              className="min-h-13 flex-row items-center gap-2.5 rounded-md px-2.5 py-2.5"
               style={isActive ? { backgroundColor: palette.accentSoft } : undefined}
             >
               <Dot tone={isActive ? 'ok' : 'muted'} />

@@ -24,6 +24,11 @@
  *     first thing rendered, in monospace, at full width.
  *   - **A resolved card collapses to one line** so the decision stays
  *     visible in the transcript history instead of scrolling away.
+ *
+ * V3: the approval is the one LOUD element in the transcript — a soft tone
+ * fill with a tone border, a "Needs you" pill in the header band, generous
+ * option rows whose radio ring fills with the accent, and a full-width
+ * primary Confirm. Everything else on the screen defers to it.
  */
 
 import * as React from 'react'
@@ -38,11 +43,9 @@ import type {
   TurnSummaryPart,
   UsagePart,
 } from '@/types/conversation'
-import { palette, radius } from '@app/design/tokens'
+import { palette, radius, toneColor, toneSoft, type Tone } from '@app/design/tokens'
 import { useCollapse } from '@app/components/motion'
-import { Button, CopyButton, Mono, haptic } from '@app/components/ui'
-
-const DIM = palette.ink3
+import { Button, Card, CopyButton, Mono, StatusPill, Well, haptic } from '@app/components/ui'
 
 /* ── Usage meter ───────────────────────────────────────────────────────────── */
 
@@ -59,7 +62,11 @@ export function UsageMeter({ part }: { part: UsagePart }) {
   if (part.outputTokens != null) bits.push(`↓${formatTokens(part.outputTokens)}`)
   if (part.cacheReadTokens != null) bits.push(`↻${formatTokens(part.cacheReadTokens)}`)
   if (bits.length === 0) return null
-  return <Mono className="text-[11px]">{bits.join('  ')}</Mono>
+  return (
+    <Mono className="text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+      {bits.join('  ')}
+    </Mono>
+  )
 }
 
 /* ── Turn summary ──────────────────────────────────────────────────────────── */
@@ -95,7 +102,11 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
       )}
       {reason ? <Text className="text-[11.5px] text-ink-3">{reason}</Text> : null}
       {reason && stats.length ? <Text className="text-[11px] text-ink-4">·</Text> : null}
-      {stats.length ? <Mono className="text-[11px]">{stats.join(' · ')}</Mono> : null}
+      {stats.length ? (
+        <Mono className="text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+          {stats.join(' · ')}
+        </Mono>
+      ) : null}
     </View>
   )
 }
@@ -104,17 +115,7 @@ export function TurnSummary({ part }: { part: TurnSummaryPart }) {
 
 export function ErrorCard({ part }: { part: ErrorPart }) {
   return (
-    <View
-      accessible
-      accessibilityRole="alert"
-      style={{
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: palette.dangerBorder,
-        backgroundColor: palette.dangerSoft,
-        overflow: 'hidden',
-      }}
-    >
+    <Card tone="danger" accessible accessibilityRole="alert" className="overflow-hidden">
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 14 }}>
         <View
           style={{
@@ -123,7 +124,7 @@ export function ErrorCard({ part }: { part: ErrorPart }) {
             borderRadius: radius.sm,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: `${palette.danger}22`,
+            backgroundColor: palette.raised,
           }}
         >
           <AlertTriangle size={14} color={palette.danger} />
@@ -133,7 +134,7 @@ export function ErrorCard({ part }: { part: ErrorPart }) {
           <Mono className="mt-1 text-[12px] leading-[18px] text-ink-2">{part.message}</Mono>
         </View>
       </View>
-    </View>
+    </Card>
   )
 }
 
@@ -200,7 +201,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
           paddingVertical: 11,
         }}
       >
-        <FileText size={14} color={DIM} />
+        <FileText size={14} color={palette.ink3} />
         <Mono className="text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
           Plan
         </Mono>
@@ -222,12 +223,12 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
             }}
           />
         </View>
-        <Mono className="text-[10.5px]">
+        <Mono className="text-[10.5px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
           {done}/{steps.length}
         </Mono>
         <ChevronDown
           size={14}
-          color={DIM}
+          color={palette.ink4}
           style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
         />
       </Pressable>
@@ -310,7 +311,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
                   </Text>
                 )
               })}
-              {previewLines.length > 6 ? <Mono className="text-[11px]">…</Mono> : null}
+              {previewLines.length > 6 ? <Mono className="text-[11px] text-ink-4">…</Mono> : null}
             </View>
             {onViewPlan ? (
               <Pressable
@@ -325,7 +326,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
                   borderRadius: radius.sm,
                   borderWidth: 1,
                   borderColor: palette.line,
-                  backgroundColor: pressed ? palette.raised : palette.well,
+                  backgroundColor: pressed ? palette.hover : palette.raised,
                   paddingHorizontal: 12,
                   paddingVertical: 8,
                 })}
@@ -377,7 +378,9 @@ export function Approval({
   const isMulti = Boolean(view.multiSelect)
   const [selected, setSelected] = React.useState<string[]>([])
   const [custom, setCustom] = React.useState('')
-  const accent = risky ? palette.danger : palette.wait
+  // The one loud card: amber for "a human is blocking the run", red when the
+  // request itself is dangerous. Every tint inside derives from the tone.
+  const tone: Tone = risky ? 'danger' : 'wait'
 
   // Resolved cards collapse to one row, so the decision stays visible in the
   // transcript history rather than becoming a tall block of stale options.
@@ -394,7 +397,7 @@ export function Approval({
           borderRadius: radius.md,
           borderWidth: 1,
           borderColor: palette.line,
-          backgroundColor: palette.well,
+          backgroundColor: palette.raised,
           paddingHorizontal: 12,
           paddingVertical: 10,
         }}
@@ -408,7 +411,7 @@ export function Approval({
           {decisionLabel(part.decision)}
         </Text>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Mono className="text-[11.5px] leading-[16px]" numberOfLines={1}>
+          <Mono className="text-[11.5px] leading-[16px] text-ink-3" numberOfLines={1}>
             {part.customText ?? view.header ?? view.context ?? view.question}
           </Mono>
         </View>
@@ -456,17 +459,12 @@ export function Approval({
   }
 
   return (
-    <View
+    <Card
+      tone={tone}
       accessible={false}
       accessibilityRole="alert"
       accessibilityLabel="The agent is waiting for you"
-      style={{
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: `${accent}55`,
-        backgroundColor: palette.surface,
-        overflow: 'hidden',
-      }}
+      className="overflow-hidden"
     >
       {/* Header: the agent is asleep. That framing is the desktop's, and it is
           the one that makes the card legible — the user is not being asked to
@@ -478,47 +476,24 @@ export function Approval({
           gap: 8,
           paddingHorizontal: 14,
           paddingVertical: 10,
-          backgroundColor: `${accent}14`,
         }}
       >
-        <Moon size={13} color={accent} />
+        <Moon size={13} color={toneColor[tone]} />
         <Mono className="text-[10px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
           Agent sleeping
         </Mono>
         <View style={{ width: 1, height: 12, backgroundColor: palette.lineStrong }} />
-        <View
-          style={{
-            paddingHorizontal: 7,
-            paddingVertical: 2,
-            borderRadius: radius.xs,
-            backgroundColor: `${accent}22`,
-          }}
-        >
-          <Text style={{ color: accent, fontSize: 10, fontWeight: '700' }}>
-            {risky ? 'high risk' : 'needs you'}
-          </Text>
-        </View>
+        <StatusPill tone={tone} label={risky ? 'High risk' : 'Needs you'} size="sm" />
         <View style={{ flex: 1 }} />
-        <Text className="text-[10.5px] text-ink-3">waiting for you</Text>
       </View>
 
       {/* Context: the command, path or URL the request is about. First, because
           it is what you check before deciding. */}
       {view.context ? (
-        <View
-          style={{
-            flexDirection: 'row',
-            gap: 8,
-            paddingHorizontal: 14,
-            paddingVertical: 11,
-            backgroundColor: palette.well,
-            borderTopWidth: 1,
-            borderTopColor: palette.line,
-          }}
-        >
+        <Well style={{ borderRadius: 0, flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingVertical: 11 }}>
           <Mono className="text-[12px] leading-[18px] text-ink-4">›</Mono>
           <Mono className="flex-1 text-[12px] leading-[18px] text-ink-2">{view.context}</Mono>
-        </View>
+        </Well>
       ) : null}
 
       {/* The question, in the agent's words. */}
@@ -530,10 +505,10 @@ export function Approval({
             borderRadius: radius.sm,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: `${accent}1A`,
+            backgroundColor: palette.raised,
           }}
         >
-          <Moon size={15} color={accent} />
+          <Moon size={15} color={toneColor[tone]} />
         </View>
         <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
           {view.header ? (
@@ -550,7 +525,7 @@ export function Approval({
                 alignSelf: 'flex-start',
                 paddingHorizontal: 8,
                 paddingVertical: 3,
-                borderRadius: radius.xs,
+                borderRadius: radius.pill,
                 backgroundColor: palette.raised,
               }}
             >
@@ -566,8 +541,8 @@ export function Approval({
       <View style={{ gap: 8, paddingHorizontal: 14, paddingBottom: 14 }}>
         {options.map((option, index) => {
           const active = selected.includes(option.value)
-          const kindColor =
-            option.kind === 'allow' ? palette.ok : option.kind === 'deny' ? palette.danger : palette.ink3
+          const kindTone: Tone | null =
+            option.kind === 'allow' ? 'ok' : option.kind === 'deny' ? 'danger' : null
           return (
             <Pressable
               key={option.value}
@@ -583,17 +558,18 @@ export function Approval({
                 borderRadius: radius.md,
                 borderWidth: 1,
                 borderColor: active ? palette.accent : palette.line,
-                backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : palette.well,
+                backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : palette.surface,
                 paddingHorizontal: 13,
                 paddingVertical: 12,
-                minHeight: 52,
+                minHeight: 48,
               })}
             >
+              {/* A 16pt ring: the index while undecided, the accent once chosen. */}
               <View
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: isMulti ? radius.xs : 11,
+                  width: 16,
+                  height: 16,
+                  borderRadius: isMulti ? 5 : 8,
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderWidth: 1.5,
@@ -603,41 +579,50 @@ export function Approval({
               >
                 {active ? (
                   isMulti ? (
-                    <Check size={13} color={palette.accentInk} strokeWidth={3} />
+                    <Check size={10} color={palette.accentInk} strokeWidth={3.2} />
                   ) : (
                     <View
                       style={{
-                        width: 7,
-                        height: 7,
-                        borderRadius: 4,
+                        width: 6,
+                        height: 6,
+                        borderRadius: 3,
                         backgroundColor: palette.accentInk,
                       }}
                     />
                   )
                 ) : (
-                  <Text style={{ color: palette.ink4, fontSize: 10.5, fontWeight: '700' }}>{index + 1}</Text>
+                  <Text style={{ color: palette.ink4, fontSize: 9.5, lineHeight: 11, fontWeight: '700' }}>
+                    {index + 1}
+                  </Text>
                 )}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text className="text-[14px] font-medium text-ink" numberOfLines={2}>
+                <Text className="text-[14px] font-medium leading-[19px] text-ink" numberOfLines={2}>
                   {option.label}
                 </Text>
                 {option.description ? (
-                  <Mono className="mt-1 text-[11.5px] leading-[16px]" numberOfLines={3}>
+                  <Mono className="mt-1 text-[11.5px] leading-[16px] text-ink-3" numberOfLines={3}>
                     {option.description}
                   </Mono>
                 ) : null}
               </View>
-              {option.kind !== 'other' ? (
+              {kindTone ? (
                 <View
                   style={{
                     paddingHorizontal: 6,
                     paddingVertical: 2,
                     borderRadius: radius.xs,
-                    backgroundColor: `${kindColor}1F`,
+                    backgroundColor: toneSoft[kindTone],
                   }}
                 >
-                  <Text style={{ color: kindColor, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.5 }}>
+                  <Text
+                    style={{
+                      color: toneColor[kindTone],
+                      fontSize: 9.5,
+                      fontWeight: '700',
+                      letterSpacing: 0.5,
+                    }}
+                  >
                     {option.kind.toUpperCase()}
                   </Text>
                 </View>
@@ -656,7 +641,7 @@ export function Approval({
               borderRadius: radius.md,
               borderWidth: 1,
               borderColor: palette.line,
-              backgroundColor: palette.well,
+              backgroundColor: palette.surface,
               paddingHorizontal: 12,
             }}
           >
@@ -697,19 +682,18 @@ export function Approval({
         {/* Multi-select and plan approvals need a confirm: the answer is
             composed, not chosen, and one wrong tap here is a wrong turn. */}
         {instant ? null : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 }}>
+          <View style={{ gap: 8, marginTop: 2 }}>
             {isMulti ? (
-              <Text className="flex-1 text-[12.5px] text-ink-3">
+              <Text className="text-[12.5px] text-ink-3">
                 {selected.length === 0
                   ? 'Pick at least one'
                   : `${selected.length} selected — ${options.length} options`}
               </Text>
-            ) : (
-              <View style={{ flex: 1 }} />
-            )}
+            ) : null}
             <Button
               variant="primary"
               size="sm"
+              full
               label={isMulti ? `Confirm${selected.length ? ` (${selected.length})` : ''}` : 'Respond'}
               disabled={selected.length === 0}
               onPress={() => {
@@ -720,7 +704,7 @@ export function Approval({
           </View>
         )}
       </View>
-    </View>
+    </Card>
   )
 }
 
@@ -753,9 +737,9 @@ export function EventCard({
         borderRadius: radius.md,
         borderWidth: 1,
         borderColor: palette.line,
-        backgroundColor: palette.well,
-        paddingHorizontal: 11,
-        paddingVertical: 9,
+        backgroundColor: palette.surface,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
       }}
     >
       {icon}
@@ -764,7 +748,7 @@ export function EventCard({
           {label}
         </Text>
         {detail ? (
-          <Mono className="mt-0.5 text-[11px] leading-[15px]" numberOfLines={1}>
+          <Mono className="mt-0.5 text-[11px] leading-[15px] text-ink-3" numberOfLines={1}>
             {detail}
           </Mono>
         ) : null}

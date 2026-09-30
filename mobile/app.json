@@ -7,11 +7,11 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#131315",
+    "backgroundColor": "#0C0C0E",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#131315"
+      "backgroundColor": "#0C0C0E"
     },
     "ios": {
       "supportsTablet": false,
@@ -29,7 +29,7 @@
     "android": {
       "package": "com.agentdeck.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#131315",
+        "backgroundColor": "#0C0C0E",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -50,7 +50,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#131315"
+          "backgroundColor": "#0C0C0E"
         }
       ],
       [
@@ -63,7 +63,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#5b8def"
+          "color": "#7a9bff"
         }
       ],
       [

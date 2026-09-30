@@ -26,8 +26,8 @@
  */
 
 import * as React from 'react'
-import { Animated, Pressable, Text, TextInput, View } from 'react-native'
-import { Check, ChevronLeft, Folder, Inbox, Sparkles } from 'lucide-react-native'
+import { Animated, Pressable, Text, View } from 'react-native'
+import { Check, ChevronDown, ChevronLeft, Folder, Inbox, Sparkles } from 'lucide-react-native'
 
 import { basename } from '@/lib/format'
 import { useStore } from '@app/store'
@@ -35,7 +35,16 @@ import type { Session } from '@/types/session'
 import { palette, radius, toneColor } from '@app/design/tokens'
 import { Sheet, PickerSheet } from '@app/components/Sheet'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
-import { AgentAvatar, Button, Eyebrow, Mono, haptic, toast } from '@app/components/ui'
+import {
+  AgentAvatar,
+  Badge,
+  Button,
+  Eyebrow,
+  Field,
+  Mono,
+  haptic,
+  toast,
+} from '@app/components/ui'
 
 /** The desktop's four permission modes, same ids and labels. */
 const PERMISSION_MODES = [
@@ -177,8 +186,8 @@ export function NewTaskSheet({
       <Sheet
         open={open}
         onClose={onClose}
-        title={step === 1 ? 'New task' : 'Start a task'}
-        eyebrow={`Step ${step} of 2 · ${step === 1 ? 'workspace' : 'agent & configuration'}`}
+        title={step === 1 ? 'Where' : 'What and how'}
+        eyebrow={`New task · Step ${step} of 2`}
         snapPoints={[0.62, 0.94]}
         footer={
           step === 1 ? (
@@ -186,6 +195,7 @@ export function NewTaskSheet({
               variant="primary"
               label="Next — pick an agent"
               full
+              trailingIcon={<Sparkles size={16} color={palette.accentInk} />}
               onPress={() => {
                 void haptic('light')
                 setStep(2)
@@ -194,7 +204,7 @@ export function NewTaskSheet({
           ) : (
             <View style={{ gap: 8 }}>
               {error ? (
-                <Text style={{ color: palette.danger, fontSize: 12.5, lineHeight: 17 }} numberOfLines={2}>
+                <Text className="text-[12.5px] leading-[17px] text-danger" numberOfLines={2}>
                   {error}
                 </Text>
               ) : null}
@@ -212,60 +222,54 @@ export function NewTaskSheet({
         {step === 1 ? (
           <View style={{ gap: 10 }}>
             {recent.length === 0 ? (
-              <Text className="py-2 text-[13.5px] leading-[19px] text-ink-3">
+              <Text className="py-1 text-[13.5px] leading-[19px] text-ink-3">
                 No workspaces yet. Start in the Inbox, or type a path that exists on the desktop.
               </Text>
             ) : (
-              <View style={{ marginHorizontal: -16 }}>
-                {recent.map((entry, index) => (
-                  <WorkspaceChoice
-                    key={entry.path}
-                    name={basename(entry.path)}
-                    path={entry.path}
-                    count={entry.count}
-                    index={index}
-                    active={entry.path === project && !customPath.trim()}
-                    onPress={() => {
-                      void haptic('select')
-                      setProject(entry.path)
-                      setCustomPath('')
-                      setShowCustom(false)
-                    }}
-                  />
-                ))}
-              </View>
+              recent.map((entry, index) => (
+                <WorkspaceChoice
+                  key={entry.path}
+                  name={basename(entry.path)}
+                  path={entry.path}
+                  count={entry.count}
+                  index={index}
+                  active={entry.path === project && !customPath.trim()}
+                  onPress={() => {
+                    void haptic('select')
+                    setProject(entry.path)
+                    setCustomPath('')
+                    setShowCustom(false)
+                  }}
+                />
+              ))
             )}
 
-            <View style={{ marginHorizontal: -16 }}>
-              <WorkspaceRow
-                name="Inbox"
-                path="No folder — runs in the daemon's working directory"
-                icon={<Inbox size={17} color={palette.ink3} />}
-                active={!effectiveProject}
-                onPress={() => {
-                  void haptic('select')
-                  setProject('')
-                  setCustomPath('')
-                  setShowCustom(false)
-                }}
-              />
-            </View>
+            <WorkspaceRow
+              name="Inbox"
+              path="No folder — runs in the daemon's working directory"
+              icon={<Inbox size={16} color={palette.ink3} />}
+              active={!effectiveProject}
+              onPress={() => {
+                void haptic('select')
+                setProject('')
+                setCustomPath('')
+                setShowCustom(false)
+              }}
+            />
 
             {showCustom ? (
               <View style={{ gap: 8, paddingTop: 4 }}>
-                <View style={{ height: 1, backgroundColor: palette.line }} />
-                <TextInput
+                <Field
                   value={customPath}
                   onChangeText={(value) => {
                     setCustomPath(value)
                     setProject('')
                   }}
                   placeholder="/home/you/project"
-                  placeholderTextColor={palette.ink4}
                   accessibilityLabel="Project path on the desktop"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  className="min-h-12 rounded-md border border-line bg-field px-3.5 text-[14px] text-ink"
+                  mono
                 />
                 <Text className="text-[12px] leading-[16px] text-ink-3">
                   The path is resolved on the desktop, not on this phone.
@@ -280,22 +284,22 @@ export function NewTaskSheet({
                   setShowCustom(true)
                 }}
                 style={({ pressed }) => ({
-                  minHeight: 46,
+                  minHeight: 48,
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderRadius: radius.md,
                   borderWidth: 1,
                   borderStyle: 'dashed',
-                  borderColor: palette.line,
+                  borderColor: pressed ? palette.lineStrong : palette.line,
                   backgroundColor: pressed ? palette.raised : 'transparent',
                 })}
               >
-                <Text className="text-[13px] font-semibold text-ink-3">Use another path…</Text>
+                <Text className="text-[13px] leading-[18px] font-semibold text-ink-3">Use another path…</Text>
               </Pressable>
             )}
           </View>
         ) : (
-          <View style={{ gap: 16 }}>
+          <View style={{ gap: 20 }}>
             {/* ── Agent ────────────────────────────────────────────────────
                 Cards, not chips: an agent is a decision with a name, a hue and
                 a readiness, and a 40pt pill cannot carry that. */}
@@ -309,7 +313,6 @@ export function NewTaskSheet({
                     borderColor: palette.line,
                     backgroundColor: palette.well,
                     padding: 14,
-                    gap: 10,
                   }}
                 >
                   <Text className="text-[13.5px] leading-[19px] text-ink-2">
@@ -338,14 +341,14 @@ export function NewTaskSheet({
             {/* ── First prompt ───────────────────────────────────────────── */}
             <View style={{ gap: 8 }}>
               <Eyebrow>First prompt</Eyebrow>
-              <TextInput
+              <Field
                 value={prompt}
                 onChangeText={setPrompt}
                 placeholder="What should it do?"
-                placeholderTextColor={palette.ink4}
                 accessibilityLabel="First prompt for the agent"
                 multiline
-                className="min-h-[96px] rounded-md border border-line bg-field px-3.5 py-3 text-[14.5px] leading-[21px] text-ink"
+                containerClassName="min-h-[96px]"
+                style={{ lineHeight: 22 }}
               />
               <Text className="text-[12px] leading-[16px] text-ink-3">
                 Optional — you can send it from the session instead. If you leave this blank the
@@ -472,27 +475,31 @@ function AgentChoice({
           gap: 12,
           borderRadius: radius.md,
           borderWidth: 1,
-          borderColor: active ? palette.accent : palette.line,
+          borderColor: active ? palette.accentBorder : palette.line,
           backgroundColor: active
             ? palette.accentSoft
             : pressed
               ? palette.raised
-              : palette.well,
+              : palette.surface,
           paddingHorizontal: 13,
           paddingVertical: 12,
-          minHeight: 58,
+          minHeight: 60,
         })}
       >
         <AgentAvatar agent={agent.id} size={34} name={agent.name} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+        <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+          <Text className="text-[15px] leading-[20px] font-semibold text-ink" numberOfLines={1}>
             {agent.name}
           </Text>
-          <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+          <Mono className="text-[11px] leading-[15px]" numberOfLines={1}>
             {agent.id}
-            {agent.protocol ? ` · ${agent.protocol}` : ''}
           </Mono>
         </View>
+        {agent.protocol ? (
+          <Badge tone={active ? 'accent' : 'muted'} mono>
+            {agent.protocol}
+          </Badge>
+        ) : null}
         {active ? (
           <View
             style={{
@@ -538,35 +545,38 @@ function WorkspaceRow({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: active ? palette.accentBorder : palette.line,
+        backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : palette.surface,
+        paddingHorizontal: 13,
+        paddingVertical: 11,
         minHeight: 58,
-        backgroundColor: active ? palette.accentSoft : pressed ? palette.raised : 'transparent',
       })}
     >
-      {icon ?? (
-        <View
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: radius.sm,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: active ? palette.accentSoft : palette.raised,
-          }}
-        >
-          <Folder size={16} color={active ? palette.accent : palette.ink3} />
-        </View>
-      )}
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <View
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: radius.sm,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: active ? palette.accentSoftStrong : palette.raised,
+          borderWidth: 1,
+          borderColor: active ? palette.accentBorder : palette.line,
+        }}
+      >
+        {icon ?? <Folder size={16} color={active ? palette.accent : palette.ink3} />}
+      </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
         <Text
-          className="text-[15px]"
+          className="text-[15px] leading-[20px]"
           style={{ color: active ? palette.ink : palette.ink2, fontWeight: active ? '600' : '500' }}
           numberOfLines={1}
         >
           {name}
         </Text>
-        <Mono className="mt-0.5 text-[11px]" numberOfLines={1}>
+        <Mono className="text-[11px] leading-[15px]" numberOfLines={1}>
           {detail ?? path}
         </Mono>
       </View>
@@ -601,7 +611,7 @@ function ConfigRow({
         borderRadius: radius.md,
         borderWidth: 1,
         borderColor: palette.line,
-        backgroundColor: pressed ? palette.raised : palette.well,
+        backgroundColor: pressed ? palette.raised : palette.surface,
         paddingHorizontal: 13,
         paddingVertical: 11,
         minHeight: 52,
@@ -609,17 +619,19 @@ function ConfigRow({
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text className="text-[13.5px] text-ink-2">{label}</Text>
+        <Text className="text-[13.5px] leading-[18px] text-ink-2">{label}</Text>
         <View style={{ flex: 1 }} />
         {tone === 'wait' && value !== 'Ask before changes' ? (
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: toneColor.wait }} />
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: toneColor.wait }}
+          />
         ) : null}
-        <Text
-          className="max-w-[55%] text-[14px] font-semibold text-ink"
-          numberOfLines={1}
-        >
+        <Text className="max-w-[55%] text-[14px] leading-[19px] font-semibold text-ink" numberOfLines={1}>
           {value}
         </Text>
+        <ChevronDown size={15} color={palette.ink4} />
       </View>
       {hint ? (
         <Text className="mt-1 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>

@@ -18,13 +18,19 @@
  *   - **Skills are shared**, because they are real: the daemon owns
  *     `.agentdeck/skills/` per project, so toggling one here changes what the
  *     desktop injects into every turn.
+ *
+ * VISUALLY, both are nested blocks on a card: `rounded-md bg-raised` rows on
+ * `bg-surface`, with uppercase eyebrows labelling the groups. An enabled
+ * automation is distinguished by a hairline one step stronger, not by a wash
+ * of accent — the accent belongs to the toggle dot, which is the actual
+ * control.
  */
 
 import * as React from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
-import { Eye, Play, Plus, Trash2, Zap } from 'lucide-react-native'
+import { ChevronDown, Eye, Play, Plus, Trash2, Zap } from 'lucide-react-native'
 
-import { basename } from '@/lib/format'
+import { basename, cn } from '@/lib/format'
 import { skillsApi } from '@app/lib/api'
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
@@ -34,7 +40,9 @@ import { PickerSheet, Sheet } from '@app/components/Sheet'
 import {
   Button,
   Card,
+  Eyebrow,
   Mono,
+  Notice,
   ToggleRow,
   Well,
   haptic,
@@ -171,30 +179,22 @@ export function AutomationsSection() {
   }
 
   return (
-    <View style={{ gap: 10 }}>
+    <View className="gap-3">
       <Card>
-        <View style={{ gap: 12, padding: 14 }}>
-          <Text className="text-[13px] leading-[18px] text-ink-2">
+        <View className="gap-3.5 p-4">
+          <Text className="text-[13.5px] leading-[19px] text-ink-2">
             Templates you start on demand. Nothing is scheduled by the daemon: “Run” spawns a real
             session with the prompt, on the desktop as well as here.
           </Text>
 
           {automations.length === 0 ? (
-            <View
-              style={{
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderStyle: 'dashed',
-                borderColor: palette.line,
-                padding: 14,
-              }}
-            >
-              <Text className="text-[13.5px] text-ink-3">
+            <View className="rounded-md border border-dashed border-line p-3.5">
+              <Text className="text-[13.5px] leading-[19px] text-ink-3">
                 No automations yet. Add one to keep a prompt you run often.
               </Text>
             </View>
           ) : (
-            <View style={{ gap: 6 }}>
+            <View className="gap-1.5">
               {automations.map((automation, index) => (
                 <AutomationRow
                   key={automation.id}
@@ -216,7 +216,7 @@ export function AutomationsSection() {
             </View>
           )}
 
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <View className="flex-row flex-wrap gap-2">
             <Button
               size="sm"
               variant="secondary"
@@ -232,7 +232,7 @@ export function AutomationsSection() {
             />
           </View>
 
-          <View style={{ height: 1, backgroundColor: palette.line }} />
+          <View className="h-px bg-line" />
 
           <ToggleRow
             label="Keep the machine awake"
@@ -291,25 +291,20 @@ function AutomationRow({
   return (
     <View style={rowEnterStyle(enter)}>
       <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: automation.enabled ? palette.accentBorder : palette.line,
-          backgroundColor: automation.enabled ? palette.accentSoft : palette.well,
-          paddingLeft: 12,
-          paddingRight: 6,
-          paddingVertical: 8,
-        }}
+        className={cn(
+          'flex-row items-center gap-2.5 rounded-md border py-2 pl-3 pr-1',
+          // An armed automation gets a hairline one step stronger, not a wash
+          // of accent — the toggle dot carries the state.
+          automation.enabled ? 'border-line-strong bg-raised' : 'border-line bg-transparent',
+        )}
+        style={automation.enabled ? undefined : { opacity: 0.72 }}
       >
-        <Zap size={14} color={automation.enabled ? palette.wait : palette.ink4} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text className="text-[13.5px] font-medium text-ink" numberOfLines={1}>
+        <Zap size={14} color={automation.enabled ? palette.ink2 : palette.ink4} />
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-[13.5px] leading-[18px] font-medium text-ink" numberOfLines={1}>
             {automation.name}
           </Text>
-          <Text className="mt-0.5 text-[11px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[11px] leading-[15px] text-ink-3" numberOfLines={1}>
             {automation.kind === 'idle' ? 'idle · ' : ''}
             {automation.cadence}
             {automation.lastRun ? ' · ran' : ''}
@@ -524,7 +519,7 @@ export function SkillsSection() {
   if (projects.length === 0) {
     return (
       <Card>
-        <View style={{ padding: 14 }}>
+        <View className="p-4">
           <Text className="text-[13.5px] leading-[19px] text-ink-3">
             No workspace yet. Skills install per project, so start a session first.
           </Text>
@@ -534,72 +529,48 @@ export function SkillsSection() {
   }
 
   return (
-    <View style={{ gap: 10 }}>
+    <View className="gap-3">
       <Card>
-        <View style={{ gap: 12, padding: 14 }}>
-          <Text className="text-[13px] leading-[18px] text-ink-2">
+        <View className="gap-3.5 p-4">
+          <Text className="text-[13.5px] leading-[19px] text-ink-2">
             Skills install to <Mono className="text-[12px]">.agentdeck/skills/</Mono> in the project
             and are injected into every turn by the context assembler — on the desktop as well as
             here. A switch here is not local.
           </Text>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
-              Project
-            </Text>
+          <View className="gap-1.5">
+            <Eyebrow>Project</Eyebrow>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Skills for ${project ? basename(project) : 'no project'}. Tap to change.`}
               onPress={() => setProjectPicker(true)}
-              style={({ pressed }) => ({
-                flex: 1,
-                minHeight: 36,
-                justifyContent: 'center',
-                borderRadius: radius.sm,
-                borderWidth: 1,
-                borderColor: palette.line,
-                backgroundColor: pressed ? palette.raised : palette.well,
-                paddingHorizontal: 11,
-              })}
+              className="min-h-11 flex-row items-center gap-2 rounded-md border border-line bg-field px-3.5 active:bg-raised"
             >
-              <Mono className="text-[12.5px] text-ink" numberOfLines={1}>
+              <Mono className="min-w-0 flex-1 text-[12.5px] text-ink" numberOfLines={1}>
                 {project ? basename(project) : 'Choose a project'}
               </Mono>
+              <ChevronDown size={15} color={palette.ink3} />
             </Pressable>
           </View>
 
-          {error ? (
-            <View
-              style={{
-                borderRadius: radius.sm,
-                borderWidth: 1,
-                borderColor: palette.dangerBorder,
-                backgroundColor: palette.dangerSoft,
-                padding: 10,
-              }}
-            >
-              <Text className="text-[12.5px] leading-[17px] text-danger">{error}</Text>
-            </View>
-          ) : null}
+          {error ? <Notice tone="danger" message={error} /> : null}
 
-          <View style={{ gap: 4 }}>
-            <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
-              Installed · {installed.length}
-            </Text>
+          <View className="gap-1">
+            <Eyebrow>Installed · {installed.length}</Eyebrow>
             {installed.length === 0 ? (
-              <Text className="py-2 text-[13px] text-ink-3">Nothing installed for this project.</Text>
+              <Text className="py-2 text-[13px] leading-[18px] text-ink-3">
+                Nothing installed for this project.
+              </Text>
             ) : (
               installed.map((skill) => (
                 <View
                   key={skill.id}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    minHeight: 40,
-                  }}
+                  className="min-h-11 flex-row items-center gap-0.5"
                 >
-                  <Text className="min-w-0 flex-1 text-[13.5px] text-ink" numberOfLines={1}>
+                  <Text
+                    className="min-w-0 flex-1 pl-1.5 text-[14px] leading-[19px] text-ink"
+                    numberOfLines={1}
+                  >
                     {skill.name}
                   </Text>
                   <Pressable
@@ -689,18 +660,16 @@ export function SkillsSection() {
           </View>
 
           {catalog.length > 0 ? (
-            <View style={{ gap: 4 }}>
-              <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
-                From the catalog
-              </Text>
+            <View className="gap-1">
+              <Eyebrow>From the catalog</Eyebrow>
               {catalog.slice(0, 8).map((skill) => (
-                <View key={skill.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 }}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text className="text-[13.5px] text-ink" numberOfLines={1}>
+                <View key={skill.id} className="min-h-11 flex-row items-center gap-3 py-1">
+                  <View className="min-w-0 flex-1 gap-0.5">
+                    <Text className="text-[14px] leading-[19px] text-ink" numberOfLines={1}>
                       {skill.name}
                     </Text>
                     {skill.description ? (
-                      <Text className="mt-0.5 text-[11.5px] leading-[15px] text-ink-3" numberOfLines={2}>
+                      <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
                         {skill.description}
                       </Text>
                     ) : null}
@@ -763,7 +732,7 @@ function SkillViewer({
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <ScrollView style={{ maxHeight: 420 }} nestedScrollEnabled>
-          <Well className="p-[13px]" style={{ borderRadius: radius.md }}>
+          <Well className="p-3.5" style={{ borderRadius: radius.md }}>
             <Mono className="text-[12px] leading-[18px] text-code-ink">
               {skill?.content ?? ''}
             </Mono>

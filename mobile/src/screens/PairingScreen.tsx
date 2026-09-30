@@ -21,7 +21,14 @@
  */
 
 import * as React from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -35,10 +42,12 @@ import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
 import { palette, radius } from '@app/design/tokens'
+import { Touchable, enterStyle, useEnter } from '@app/components/motion'
 import {
   BrandMark,
   Button,
   Card,
+  ErrorState,
   Field,
   Mono,
   haptic,
@@ -53,6 +62,11 @@ function isRouteUnreachable(cause: unknown): boolean {
   return cause instanceof ApiError && (cause.status === 0 || cause.code === 'network_error')
 }
 
+/** Reticle geometry. Corner brackets, not a full frame: brackets say how big
+    the code needs to be; a frame only says where it is. */
+const RETICLE_SIZE = 244
+const RETICLE_CORNER = 44
+
 export function PairingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const insets = useSafeAreaInsets()
@@ -64,6 +78,9 @@ export function PairingScreen() {
   const [busy, setBusy] = React.useState(false)
   const [scanned, setScanned] = React.useState(false)
   const [route, setRoute] = React.useState<string | null>(null)
+
+  const heroEnter = useEnter(0, false)
+  const actionsEnter = useEnter(70, false)
 
   async function handlePairingText(text: string) {
     if (busy) return
@@ -128,14 +145,15 @@ export function PairingScreen() {
   }
 
   /* ── Scanner ────────────────────────────────────────────────────────────
-     The camera is full-bleed with a cut-out reticle drawn over it, because a
-     full-bleed viewfinder is the only thing that makes finding a QR on a
-     second monitor practical. The sheet of controls at the bottom is a solid
-     surface so the buttons are readable against whatever the camera is
-     pointing at. */
+     The camera is full-bleed on a true-black viewfinder — the viewfinder is
+     not part of the app's surface ramp, and tinting it would tint the live
+     image the user is trying to read. Chrome floats over it: a rounded corner
+     reticle in the accent, and a pill rail at the bottom for status and
+     Cancel, each on a scrim so it stays readable against whatever the camera
+     is pointing at. */
   if (scanning && permission?.granted) {
     return (
-      <View style={{ flex: 1, backgroundColor: palette.viewfinder }}>
+      <View className="flex-1 bg-viewfinder">
         <CameraView
           style={{ flex: 1 }}
           facing="back"
@@ -150,10 +168,11 @@ export function PairingScreen() {
           }
         />
 
-        {/* Reticle. Four corner marks, not a full frame: a full frame tells you
-            where the code is, corner marks tell you how big it needs to be. */}
+        {/* Reticle. Four rounded corner brackets in the accent — the one place
+            decoration and function are the same thing: the brackets ARE the
+            aiming aid. */}
         <View pointerEvents="none" style={{ ...StyleSheetAbsolute, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ width: 220, height: 220 }}>
+          <View style={{ width: RETICLE_SIZE, height: RETICLE_SIZE }}>
             {[
               { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
               { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
@@ -164,9 +183,9 @@ export function PairingScreen() {
                 key={index}
                 style={{
                   position: 'absolute',
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
+                  width: RETICLE_CORNER,
+                  height: RETICLE_CORNER,
+                  borderRadius: 18,
                   borderColor: palette.accent,
                   ...corner,
                 }}
@@ -175,36 +194,38 @@ export function PairingScreen() {
           </View>
         </View>
 
+        {/* Bottom rail — status, then the Cancel pill. Every element sits on
+            its own scrim so it survives a bright camera frame. */}
         <View
+          pointerEvents="box-none"
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: palette.canvas,
+            alignItems: 'center',
+            gap: 10,
             paddingHorizontal: 20,
-            paddingTop: 20,
-            paddingBottom: Math.max(insets.bottom, 20) + 8,
-            gap: 12,
-            borderTopLeftRadius: radius.xl,
-            borderTopRightRadius: radius.xl,
-            borderTopWidth: 1,
-            borderTopColor: palette.line,
+            paddingBottom: Math.max(insets.bottom, 16) + 12,
           }}
         >
           {busy && route ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-              <View
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  borderWidth: 2,
-                  borderColor: palette.accent,
-                  borderTopColor: 'transparent',
-                }}
-              />
-              <Mono className="flex-1 text-[12px] text-ink-2" numberOfLines={1}>
+            <View
+              accessibilityLiveRegion="polite"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 9,
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.lineStrong,
+                backgroundColor: palette.scrim,
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+              }}
+            >
+              <ActivityIndicator size="small" color={palette.accent} />
+              <Mono className="flex-1 text-[12.5px] text-ink-2" numberOfLines={1}>
                 Reaching {route}…
               </Mono>
             </View>
@@ -212,7 +233,9 @@ export function PairingScreen() {
 
           {error ? (
             <View
+              accessibilityRole="alert"
               style={{
+                width: '100%',
                 borderRadius: radius.md,
                 borderWidth: 1,
                 borderColor: palette.dangerBorder,
@@ -223,24 +246,56 @@ export function PairingScreen() {
               <Text className="text-[13px] leading-[18px] text-ink">{error}</Text>
             </View>
           ) : (
-            <Text className="text-[13px] leading-[18px] text-ink-3">
+            <Text
+              className="text-center text-[13px] leading-[18px] text-ink-2"
+              style={{
+                maxWidth: 320,
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.lineStrong,
+                backgroundColor: palette.scrim,
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                overflow: 'hidden',
+              }}
+            >
               Point the camera at the pairing code in AgentDeck on your desktop.
             </Text>
           )}
 
-          <Button
-            variant="secondary"
-            label={busy ? 'Pairing…' : 'Cancel'}
+          <Touchable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel scanning"
             disabled={busy}
-            full
             onPress={() => setScanning(false)}
-          />
+            scaleTo={0.96}
+          >
+            <View
+              style={{
+                minHeight: 48,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.lineStrong,
+                backgroundColor: palette.scrim,
+                paddingHorizontal: 28,
+                opacity: busy ? 0.45 : 1,
+              }}
+            >
+              <Text className="text-[15.5px] leading-[22px] font-semibold text-ink">
+                {busy ? 'Pairing…' : 'Cancel'}
+              </Text>
+            </View>
+          </Touchable>
         </View>
       </View>
     )
   }
 
-  /* ── Landing ────────────────────────────────────────────────────────────── */
+  /* ── Landing ──────────────────────────────────────────────────────────────
+     The app's first impression: the mark, one display line, one promise, and
+     the scan button. Everything else is below the fold of attention. */
   return (
     <KeyboardAvoidingView
       className="flex-1 bg-canvas"
@@ -252,17 +307,17 @@ export function PairingScreen() {
           flexGrow: 1,
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 28,
           paddingHorizontal: 24,
-          paddingVertical: 32,
+          paddingVertical: 40,
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={{ alignItems: 'center', gap: 14 }}>
+        <View style={[{ alignItems: 'center', gap: 18 }, enterStyle(heroEnter, 12)]}>
           <View
             style={{
-              width: 60,
-              height: 60,
+              width: 76,
+              height: 76,
               borderRadius: radius.lg,
               alignItems: 'center',
               justifyContent: 'center',
@@ -271,21 +326,24 @@ export function PairingScreen() {
               borderColor: palette.line,
             }}
           >
-            <BrandMark size={30} />
+            <BrandMark size={44} />
           </View>
-          <Text
-            className="text-center text-[22px] font-bold text-ink"
-            style={{ letterSpacing: -0.35 }}
-          >
-            Pair with your desktop
-          </Text>
-          <Text className="max-w-[36ch] text-center text-[14px] leading-[20px] text-ink-3">
-            Open AgentDeck on your computer, go to the pairing page, and scan the code with this
-            device. It takes about ten seconds.
-          </Text>
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            <Text
+              accessibilityRole="header"
+              className="text-center text-[30px] leading-[36px] font-bold text-ink"
+              style={{ letterSpacing: -0.7 }}
+            >
+              Pair with your desktop
+            </Text>
+            <Text className="max-w-[34ch] text-center text-[13.5px] leading-[19px] text-ink-2">
+              Open AgentDeck on your computer, go to the pairing page, and scan the code with this
+              device. It takes about ten seconds.
+            </Text>
+          </View>
         </View>
 
-        <View style={{ width: '100%', maxWidth: 400, gap: 14 }}>
+        <View style={[{ width: '100%', maxWidth: 400, gap: 12, marginTop: 40 }, enterStyle(actionsEnter, 10)]}>
           <Button
             variant="primary"
             label="Scan the pairing code"
@@ -295,81 +353,57 @@ export function PairingScreen() {
             onPress={startScanning}
           />
 
-          <Pressable
+          <Touchable
             accessibilityRole="button"
             accessibilityLabel={showPaste ? 'Hide manual entry' : 'Enter the link manually'}
             onPress={() => setShowPaste((open) => !open)}
-            style={({ pressed }) => ({
-              minHeight: 44,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radius.md,
-              backgroundColor: pressed ? palette.raised : 'transparent',
-            })}
+            scaleTo={0.98}
+            style={{ alignSelf: 'center' }}
           >
-            <Text className="text-[13.5px] font-semibold text-ink-3">
-              {showPaste ? 'Hide manual entry' : 'Enter the link manually'}
-            </Text>
-          </Pressable>
+            <View style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 }}>
+              <Text className="text-[13.5px] leading-[19px] font-semibold text-accent">
+                {showPaste ? 'Hide manual entry' : 'Enter the link manually'}
+              </Text>
+            </View>
+          </Touchable>
 
           {showPaste ? (
-            <Card>
-              <View style={{ gap: 12, padding: 14 }}>
-                <Field
-                  value={manual}
-                  onChangeText={setManual}
-                  placeholder="http://192.168.1.8:9120/mobile/pair?offer=…&secret=…"
-                  placeholderTextColor={palette.ink4}
-                  accessibilityLabel="Pairing link"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  multiline
-                  mono
-                />
-                <Button
-                  variant="secondary"
-                  label={busy ? 'Pairing…' : 'Pair this device'}
-                  disabled={busy || manual.trim().length === 0}
-                  full
-                  onPress={() => void handlePairingText(manual.trim())}
-                />
-              </View>
+            <Card className="p-4" style={{ gap: 12 }}>
+              <Field
+                value={manual}
+                onChangeText={setManual}
+                placeholder="http://192.168.1.8:9120/mobile/pair?offer=…&secret=…"
+                accessibilityLabel="Pairing link"
+                autoCapitalize="none"
+                autoCorrect={false}
+                multiline
+                mono
+              />
+              <Button
+                variant="secondary"
+                label={busy ? 'Pairing…' : 'Pair this device'}
+                disabled={busy || manual.trim().length === 0}
+                full
+                onPress={() => void handlePairingText(manual.trim())}
+              />
             </Card>
           ) : null}
 
           {busy && route ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 4 }}>
-              <View
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  borderWidth: 2,
-                  borderColor: palette.accent,
-                  borderTopColor: 'transparent',
-                }}
-              />
-              <Mono className="flex-1 text-[12px] text-ink-2" numberOfLines={1}>
+            <View
+              accessibilityLiveRegion="polite"
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 4 }}
+            >
+              <ActivityIndicator size="small" color={palette.accent} />
+              <Mono className="flex-1 text-[12.5px] text-ink-2" numberOfLines={1}>
                 Reaching {route}…
               </Mono>
             </View>
           ) : null}
 
-          {error ? (
-            <View
-              style={{
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: palette.dangerBorder,
-                backgroundColor: palette.dangerSoft,
-                padding: 13,
-              }}
-            >
-              <Text className="text-[13.5px] leading-[19px] text-ink">{error}</Text>
-            </View>
-          ) : null}
+          {error ? <ErrorState message={error} /> : null}
 
-          <Text className="px-2 text-center text-[12px] leading-[17px] text-ink-3">
+          <Text className="px-2 pt-1 text-center text-[12px] leading-[17px] text-ink-3">
             Codes expire after two minutes and work once. If the tailnet name does not resolve on
             this phone, the same code also carries the tailnet IP and your home LAN address, and the
             app tries each in turn.

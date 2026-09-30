@@ -31,6 +31,8 @@ import {
   CardHeader,
   Divider,
   EmptyState,
+  Eyebrow,
+  Mono,
   ProgressBar,
   SearchField,
   Stat,
@@ -122,7 +124,7 @@ export function UsageScreen() {
       contentClassName="px-4 pb-12 gap-5"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back" />}
     >
-      <Section eyebrow="Fleet" title="Totals" enterIndex={0}>
+      <Section eyebrow="Fleet" enterIndex={0}>
         <Card>
           {/* The header carries the reporting count rather than the footer: it
               changes how the three numbers below should be read, and a caveat
@@ -133,23 +135,19 @@ export function UsageScreen() {
               rows.length === 1 ? 'session reports' : 'sessions report'
             } token usage`}
           />
-          <View style={{ flexDirection: 'row', gap: 12, padding: 16 }}>
+          <View className="flex-row items-stretch px-4 py-4">
             <Stat label="Input" value={formatCount(totals.inputTokens)} />
+            <View className="mx-1 my-1 w-px bg-line" />
             <Stat label="Output" value={formatCount(totals.outputTokens)} />
+            <View className="mx-1 my-1 w-px bg-line" />
             <Stat label="Cost" value={formatCost(totals.costUsd)} tone="accent" align="right" />
           </View>
           {totals.cacheReadTokens > 0 ? (
-            <View style={{ borderTopWidth: 1, borderTopColor: palette.line, padding: 16, gap: 6 }}>
-              <Text className="text-[11px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.1 }}>
-                Cache reads
-              </Text>
+            <View className="gap-1.5 border-t border-line px-4 py-4">
+              <Eyebrow>Cache reads</Eyebrow>
               <Text
-                style={{
-                  color: palette.ink,
-                  fontSize: 20,
-                  fontWeight: '600',
-                  fontVariant: ['tabular-nums'],
-                }}
+                className="text-[20px] leading-[25px] font-semibold text-ink"
+                style={{ letterSpacing: -0.3, fontVariant: ['tabular-nums'] }}
               >
                 {formatCount(totals.cacheReadTokens)}
               </Text>
@@ -163,7 +161,7 @@ export function UsageScreen() {
       </Section>
 
       <Section eyebrow="By session" title={`${measured.length} of ${rows.length} reported`} enterIndex={1}>
-        <View style={{ gap: 10 }}>
+        <View className="gap-2.5">
           <SearchField
             value={query}
             onChangeText={setQuery}
@@ -181,18 +179,18 @@ export function UsageScreen() {
             </Card>
           ) : (
             <Card>
-              <View style={{ paddingVertical: 4 }}>
-                {visible.map((row, index) => (
+              {visible.map((row, index) => (
+                <View key={row.sessionId}>
+                  {index > 0 ? <Divider inset={16} /> : null}
                   <UsageRow
-                    key={row.sessionId}
                     row={row}
                     index={index}
                     maxCost={maxCost}
                     providerName={agents.find((agent) => agent.id === row.agent)?.name ?? row.agent}
                     onPress={() => navigation.navigate('Session', { sessionId: row.sessionId })}
                   />
-                ))}
-              </View>
+                </View>
+              ))}
             </Card>
           )}
         </View>
@@ -233,41 +231,39 @@ function UsageRow({
         }}
         className="min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-raised"
       >
-        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-          <Text className="text-[14.5px] font-medium text-ink" numberOfLines={1}>
+        <View className="min-w-0 flex-1 gap-1.5">
+          <Text className="text-[15px] leading-[20px] font-medium text-ink" numberOfLines={1}>
             {row.name}
           </Text>
-          <Text className="text-[11.5px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
             {providerName}
           </Text>
-          <ProgressBar value={unmeasured ? 0 : row.costUsd / maxCost} tone="accent" />
+          {/* Same slim baseline bar as the Spend rows — the two lists are the
+              same data at different densities, and they should look related. */}
+          <ProgressBar value={unmeasured ? 0 : row.costUsd / maxCost} tone="accent" className="h-[2.5px]" />
         </View>
-        <View style={{ alignItems: 'flex-end', gap: 2, minWidth: 82 }}>
-          <Text
-            style={{
-              color: unmeasured ? palette.ink4 : palette.ink,
-              fontSize: 13.5,
-              fontWeight: '600',
-              fontVariant: ['tabular-nums'],
-            }}
+        <View className="shrink-0 items-end gap-0.5" style={{ minWidth: 82 }}>
+          <Mono
+            className={
+              unmeasured
+                ? 'text-[13.5px] leading-[18px] text-ink-4'
+                : 'text-[13.5px] leading-[18px] font-semibold text-ink'
+            }
+            style={{ fontVariant: ['tabular-nums'] }}
           >
             {unmeasured ? '—' : formatCost(row.costUsd)}
-          </Text>
-          <Text
-            style={{
-              color: palette.ink3,
-              fontSize: 10.5,
-              fontVariant: ['tabular-nums'],
-            }}
+          </Mono>
+          <Mono
+            className="text-[10.5px] leading-[14px] text-ink-3"
+            style={{ fontVariant: ['tabular-nums'] }}
             numberOfLines={1}
           >
             {unmeasured
               ? 'no usage reported'
               : `↑${formatCount(row.inputTokens)} ↓${formatCount(row.outputTokens)}`}
-          </Text>
+          </Mono>
         </View>
       </Pressable>
-      <Divider inset={16} />
     </View>
   )
 }

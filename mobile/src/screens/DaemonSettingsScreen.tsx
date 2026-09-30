@@ -21,28 +21,37 @@
  *      Between the load and the save the daemon's config may have changed (the
  *      desktop is running), and sending a stale copy back would clobber it.
  *
- * Modified keys are marked and can be reverted individually, so a bad edit is
- * one tap to undo rather than a reload.
+ * Each key is its own soft-cornered card: the key name in mono up top, the
+ * value in a well chip below (a switch row for booleans, a numeric field for
+ * numbers, a multi-line mono field for JSON). A key that has been edited is
+ * lifted onto the accent — a tinted card, a `modified — was …` line, and an
+ * undo button that reverts just that one key, so a bad edit is one tap rather
+ * than a reload.
  */
 
 import * as React from 'react'
-import { Pressable, Text, TextInput, View } from 'react-native'
+import { Text, TextInput, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { RefreshCw, Undo2 } from 'lucide-react-native'
+import { RefreshCw, SearchX, Settings2, Undo2 } from 'lucide-react-native'
 
 import { settingsApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
-import { palette, radius } from '@app/design/tokens'
-import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { palette } from '@app/design/tokens'
+import { BackButton, Card, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
   Button,
-  Card,
+  EmptyState,
+  Eyebrow,
+  IconButton,
   Mono,
   Notice,
+  RowSkeleton,
   SearchField,
+  ToggleRow,
+  Well,
   haptic,
   toast,
 } from '@app/components/ui'
@@ -165,44 +174,22 @@ export function DaemonSettingsScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       scroll
-      contentClassName="px-4 pb-12 gap-5"
+      contentClassName="pb-12 gap-5"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
       headerRight={
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Reload daemon settings"
-          onPress={() => void refresh()}
-          hitSlop={8}
-          style={({ pressed }) => ({
-            width: 38,
-            height: 38,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radius.pill,
-            backgroundColor: pressed ? palette.raised : 'transparent',
-          })}
-        >
+        <IconButton label="Reload daemon settings" size={38} onPress={() => void refresh()}>
           <RefreshCw size={18} color={refreshing ? palette.accent : palette.ink2} />
-        </Pressable>
+        </IconButton>
       }
     >
       {configPath ? (
-        <View style={{ gap: 5 }}>
-          <Text
-            style={{
-              color: palette.ink3,
-              fontSize: 10,
-              fontWeight: '600',
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-              fontFamily: 'Menlo',
-            }}
-          >
-            Config file
-          </Text>
-          <Mono className="text-[12px] text-ink-2" numberOfLines={1}>
-            {configPath}
-          </Mono>
+        <View className="mx-4 gap-1.5">
+          <Eyebrow>Config file</Eyebrow>
+          <Well className="self-start rounded-sm px-3 py-2">
+            <Mono className="text-[12px] leading-[17px] text-ink-2" numberOfLines={1}>
+              {configPath}
+            </Mono>
+          </Well>
         </View>
       ) : null}
 
@@ -223,34 +210,42 @@ export function DaemonSettingsScreen() {
       ) : null}
 
       {loading && keys.length === 0 ? (
-        <Card>
-          <View style={{ padding: 16, gap: 12 }}>
+        <Card className="p-4">
+          <View className="gap-6">
             {Array.from({ length: 5 }).map((_, index) => (
-              <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ flex: 1, gap: 7 }}>
-                  <View style={{ height: 12, width: '42%', borderRadius: 6, backgroundColor: palette.raised }} />
-                  <View style={{ height: 10, width: '62%', borderRadius: 5, backgroundColor: palette.well }} />
-                </View>
-                <View style={{ height: 34, width: 56, borderRadius: radius.sm, backgroundColor: palette.raised }} />
-              </View>
+              <RowSkeleton key={index} />
             ))}
           </View>
         </Card>
       ) : keys.length === 0 ? (
         <Card>
-          <View style={{ padding: 16 }}>
-            <Text className="text-[13.5px] leading-[19px] text-ink-3">
-              {loading
+          <EmptyState
+            title={
+              loading
                 ? 'Loading settings…'
                 : query
                   ? 'No keys match that search.'
-                  : 'No settings returned by the daemon. It may be running an older build.'}
-            </Text>
-          </View>
+                  : 'No settings returned by the daemon.'
+            }
+            body={
+              loading
+                ? 'Reading the daemon configuration.'
+                : query
+                  ? 'Try a shorter or different filter.'
+                  : 'It may be running an older build.'
+            }
+            icon={
+              query ? (
+                <SearchX size={22} color={palette.ink3} />
+              ) : (
+                <Settings2 size={22} color={palette.ink3} />
+              )
+            }
+          />
         </Card>
       ) : (
         <Section eyebrow="Configuration" title={`${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`} enterIndex={0}>
-          <View style={{ gap: 10 }}>
+          <View className="gap-3">
             {Object.keys(settings).length > 10 ? (
               <SearchField
                 value={query}
@@ -282,12 +277,15 @@ export function DaemonSettingsScreen() {
       )}
 
       {changed.length > 0 ? (
-        <Button
-          variant="primary"
-          label={saving ? 'Saving…' : `Save ${changed.length} ${changed.length === 1 ? 'change' : 'changes'}`}
-          disabled={saving}
-          onPress={() => void save()}
-        />
+        <View className="mx-4">
+          <Button
+            variant="primary"
+            full
+            label={saving ? 'Saving…' : `Save ${changed.length} ${changed.length === 1 ? 'change' : 'changes'}`}
+            disabled={saving}
+            onPress={() => void save()}
+          />
+        </View>
       ) : null}
     </ScreenScaffold>
   )
@@ -308,7 +306,7 @@ function SettingRow({
   onChange: (value: string) => void
   onRevert: () => void
 }) {
-  const enter = useEnter(staggerDelay(Math.min(index, 8)), false)
+  const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   const kind = kindOf(original)
   const isEdited = edited !== undefined
   const value = isEdited ? edited : display(original)
@@ -316,97 +314,56 @@ function SettingRow({
   return (
     <View style={rowEnterStyle(enter)}>
       <View
+        className="gap-2.5 rounded-md border p-3.5"
         style={{
-          gap: 9,
-          borderRadius: radius.md,
-          borderWidth: 1,
           borderColor: isEdited ? palette.accentBorder : palette.line,
           backgroundColor: isEdited ? palette.accentSoft : palette.surface,
-          padding: 14,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Mono className="min-w-0 flex-1 text-[12.5px] font-semibold text-ink" numberOfLines={1}>
-            {name}
-          </Mono>
-          <Badge outline>{kind}</Badge>
-          {isEdited ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Revert ${name}`}
+        {kind === 'boolean' ? (
+          <ToggleRow
+            label={name}
+            value={value === 'true'}
+            onChange={() => onChange(value === 'true' ? 'false' : 'true')}
+            leading={<Badge outline>{kind}</Badge>}
+          />
+        ) : (
+          <>
+            <View className="flex-row items-center gap-2">
+              <Mono className="min-w-0 flex-1 text-[12.5px] leading-[18px] font-semibold text-ink" numberOfLines={1}>
+                {name}
+              </Mono>
+              <Badge outline>{kind}</Badge>
+            </View>
+            <RawInput
+              value={value}
+              multiline={kind === 'json'}
+              numeric={kind === 'number'}
+              label={name}
+              onChange={onChange}
+            />
+          </>
+        )}
+
+        {isEdited ? (
+          <View className="flex-row items-center gap-2">
+            <Text
+              className="min-w-0 flex-1 text-[11.5px] leading-[16px] font-semibold text-accent"
+              numberOfLines={2}
+            >
+              modified — was {display(original) || '(empty)'}
+            </Text>
+            <IconButton
+              label={`Revert ${name}`}
+              size={30}
               onPress={() => {
                 void haptic('light')
                 onRevert()
               }}
-              hitSlop={10}
-              style={({ pressed }) => ({
-                width: 30,
-                height: 30,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radius.pill,
-                backgroundColor: pressed ? palette.raised : 'transparent',
-              })}
             >
               <Undo2 size={15} color={palette.ink3} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        {kind === 'boolean' ? (
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityLabel={name}
-            accessibilityState={{ checked: value === 'true' }}
-            onPress={() => onChange(value === 'true' ? 'false' : 'true')}
-            style={({ pressed }) => ({
-              minHeight: 44,
-              justifyContent: 'center',
-              borderRadius: radius.sm,
-              backgroundColor: pressed ? palette.raised : palette.well,
-              paddingHorizontal: 12,
-            })}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View
-                style={{
-                  width: 46,
-                  height: 27,
-                  justifyContent: 'center',
-                  borderRadius: 14,
-                  paddingHorizontal: 2,
-                  backgroundColor: value === 'true' ? palette.accent : palette.raised,
-                  borderWidth: 1,
-                  borderColor: value === 'true' ? palette.accent : palette.lineStrong,
-                }}
-              >
-                <View
-                  style={{
-                    width: 21,
-                    height: 21,
-                    borderRadius: 11,
-                    backgroundColor: value === 'true' ? palette.accentInk : palette.ink3,
-                    transform: [{ translateX: value === 'true' ? 19 : 0 }],
-                  }}
-                />
-              </View>
-              <Mono className="text-[13px] text-ink">{value === 'true' ? 'true' : 'false'}</Mono>
-            </View>
-          </Pressable>
-        ) : (
-          <RawInput
-            value={value}
-            multiline={kind === 'json'}
-            numeric={kind === 'number'}
-            label={name}
-            onChange={onChange}
-          />
-        )}
-
-        {isEdited ? (
-          <Text style={{ color: palette.accent, fontSize: 11.5, fontWeight: '600' }}>
-            modified — was {display(original) || '(empty)'}
-          </Text>
+            </IconButton>
+          </View>
         ) : null}
       </View>
     </View>
@@ -418,7 +375,9 @@ function SettingRow({
  *
  * A plain `TextInput` rather than the app's `Field`, because the wrapper's
  * 48pt well and label are wrong for a dense list of values, and a numeric
- * keyboard is not optional when the key holds a number.
+ * keyboard is not optional when the key holds a number. It is dressed as a
+ * `Well` chip — a hole in the card holding the value — so the read-only
+ * grammar of "this is data" survives into the editable one.
  */
 function RawInput({
   value,
@@ -443,7 +402,7 @@ function RawInput({
       autoCorrect={false}
       keyboardType={numeric ? 'numeric' : multiline ? 'default' : 'url'}
       multiline={multiline}
-      className="rounded-sm border border-line bg-field px-3 text-[13px] text-ink"
+      className="rounded-md border border-line bg-well px-3 text-[13px] leading-[19px] text-ink"
       style={{
         minHeight: multiline ? 96 : 44,
         paddingTop: multiline ? 10 : 0,
