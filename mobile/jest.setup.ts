@@ -1,9 +1,29 @@
 /**
- * Global test mocks for the native modules the notification stack touches. These
- * run before each test file (setupFiles), so importing `notify.ts` (which calls
+ * Global test mocks for the native modules the app touches. These run before
+ * each test file (setupFiles), so importing `notify.ts` (which calls
  * `setNotificationHandler` and reads the MMKV dedup ledger at module load) works
  * without a device.
  */
+
+/**
+ * React Native's jest setup wires `requestAnimationFrame` to
+ * `setTimeout(() => callback(jest.now()), 0)`. The `jest.now()` stamp reaches
+ * into the Jest environment, so any animation frame still queued when a test
+ * file finishes throws:
+ *
+ *   ReferenceError: You are trying to access a property or method of the Jest
+ *   environment after it has been torn down.
+ *
+ * The tests still pass, but the unhandled error fails the whole run — a red
+ * CI step whose every test is green. Restamping frames with a plain clock does
+ * the same job without touching Jest, and `cancelAnimationFrame` (which RN's
+ * setup also defines, as `clearTimeout`) keeps working because the handle is
+ * still a `setTimeout` id.
+ */
+// RN's setup defines `requestAnimationFrame` on `global` as configurable, so a
+// plain reassignment here (running later in the same setupFiles phase) wins.
+global.requestAnimationFrame = (callback: (time: number) => void): number =>
+  setTimeout(() => callback(Date.now()), 0) as unknown as number
 
 // In-memory MMKV. The backing Map is per test file (jest isolates the module
 // registry), and `notify.resetDedup()` clears the ledger between tests.
