@@ -32,7 +32,7 @@ export function NativePairingGate({ onPaired }: { onPaired: () => void }) {
     if (!parsed) {
       haptic('error')
       setError(
-        'That code is not an AgentDeck pairing link. It should look like http://<your-computer>:9120/mobile/pair?offer=…&secret=…',
+        'That code is not an QAI pairing link. It should look like http://<your-computer>:9120/mobile/pair?offer=…&secret=…',
       )
       return
     }
@@ -63,7 +63,7 @@ export function NativePairingGate({ onPaired }: { onPaired: () => void }) {
         </span>
         <h1 className="text-[17px] font-semibold text-ink">Pair with your desktop</h1>
         <p className="max-w-[34ch] text-[12.5px] leading-[1.6] text-ink-3">
-          Open AgentDeck on your computer, go to the pairing page, and scan the code with
+          Open QAI on your computer, go to the pairing page, and scan the code with
           this device.
         </p>
       </div>

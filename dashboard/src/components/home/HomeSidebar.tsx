@@ -124,7 +124,7 @@ export function HomeSidebar({
     <>
       <aside className="hidden w-[324px] shrink-0 border-r border-white/[0.08] bg-inset text-zinc-100 lg:flex">
         <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-white/[0.07] py-3">
-          <button type="button" aria-label="Plumb" title="Plumb" className="mb-4 flex size-10 items-center justify-center rounded-xl bg-accent text-[15px] font-bold tracking-[-0.05em] text-accent-ink shadow-lg shadow-black/20">A</button>
+          <button type="button" aria-label="QAI" title="QAI" className="mb-4 flex size-10 items-center justify-center rounded-xl bg-accent text-[15px] font-bold tracking-[-0.05em] text-accent-ink shadow-lg shadow-black/20">Q</button>
           <div className="flex flex-1 flex-col items-center justify-start gap-2" />
           <span className={cn('mt-3 size-2 rounded-full', connection === 'connected' ? 'bg-green' : connection === 'connecting' || connection === 'reconnecting' ? 'bg-orange breathe' : 'bg-red-400')} title={connection} />
         </div>
@@ -132,7 +132,7 @@ export function HomeSidebar({
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="border-b border-white/[0.07] px-3 pb-3 pt-3">
             <div className="mb-2 flex items-center gap-2 px-1">
-              <div className="min-w-0 flex-1"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Plumb</p><p className="truncate text-[12px] font-medium text-zinc-300">Control center</p></div>
+              <div className="min-w-0 flex-1"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">QAI</p><p className="truncate text-[12px] font-medium text-zinc-300">Control center</p></div>
               <button type="button" onClick={onNewTask} className="flex size-8 items-center justify-center rounded-lg bg-accent text-accent-ink transition hover:bg-accent-hover" aria-label="New task"><Plus size={16} /></button>
             </div>
             <button type="button" onClick={onNewTask} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.06]"><span className="flex items-center gap-2"><Plus size={14} className="text-zinc-500" /> New task</span><kbd className="font-mono text-[9px] text-zinc-600">Ctrl+N</kbd></button>

@@ -152,6 +152,9 @@ interface StoreState {
   switchEngine: (sessionId: string, agent: string, model?: string) => Promise<boolean>
   pendingActions: import('../lib/api').PendingAction[]
   loadPending: () => Promise<void>
+  /** Timeline verbosity, the desktop's simple/detailed toggle. Persisted. */
+  timelineDetail: 'simple' | 'detailed'
+  setTimelineDetail: (detail: 'simple' | 'detailed') => void
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -166,6 +169,8 @@ export const useStore = create<StoreState>((set, get) => ({
   queues: {},
   starred: storage.getJSON<string[]>(STARRED_KEY) ?? [],
   pendingActions: [],
+  timelineDetail:
+    storage.getString('qai-timeline-detail') === 'detailed' ? 'detailed' : 'simple',
 
   /** Connect the socket and wire frames into the store. Idempotent. */
   start() {
@@ -282,6 +287,34 @@ export const useStore = create<StoreState>((set, get) => ({
       set((state) => ({ sessions: upsertSession(state.sessions, session) }))
       if (!isActiveStatus(session.status)) sealConversation(conversation)
       bump(set, sessionId)
+
+      // Fetch the session config, like the desktop's openSession does: the
+      // model / permission / thought controls render from `configs`, and
+      // waiting for a `session_config_changed` frame would leave them empty
+      // on a session nothing has changed yet. Best-effort: a dead session
+      // answers 404 and the controls simply stay quiet.
+      try {
+        const cfg = await mobileApi.config(sessionId)
+        const config = cfg.config as SessionConfig | undefined
+        if (config && Array.isArray(config.options)) {
+          set((state) => ({
+            configs: {
+              ...state.configs,
+              [sessionId]: {
+                ...config,
+                options: config.options.map((option) => ({
+                  ...option,
+                  choices: option.choices ?? [],
+                  allowsCustomValue: option.allowsCustomValue ?? false,
+                  mutability: option.mutability ?? 'live',
+                })),
+              },
+            },
+          }))
+        }
+      } catch {
+        // config unavailable — live frames will fill it in if they arrive
+      }
     } catch {
       // Leave the conversation as-is; the screen shows its own error state.
     }
@@ -485,6 +518,11 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch {
       return false
     }
+  },
+
+  setTimelineDetail(detail) {
+    storage.set('qai-timeline-detail', detail)
+    set({ timelineDetail: detail })
   },
 
   async loadPending() {

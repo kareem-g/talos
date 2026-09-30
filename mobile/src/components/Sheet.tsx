@@ -261,11 +261,9 @@ export function Sheet({
               style,
             ]}
           >
-            {/* Signal edge: a hairline of accent says "this surface is live
-                above the deck" without shouting. */}
-            <View style={{ height: 2, backgroundColor: palette.accent, opacity: 0.55 }} />
             {/* The grabber is the primary dismissal affordance — quiet by
-                design; the flick and the scrim teach the rest. */}
+                design; the flick and the scrim teach the rest. The desktop
+                Layer carries no accent edge, and neither does this. */}
             {hideGrabber ? null : (
               <View {...pan.panHandlers} style={{ height: 24, alignItems: 'center', justifyContent: 'center' }}>
                 <View
@@ -284,12 +282,11 @@ export function Sheet({
                 {...pan.panHandlers}
                 className="flex-row items-center gap-3 border-b border-line px-4 pb-3 pt-1"
               >
-                <View style={{ width: 2, height: 17, borderRadius: 1, backgroundColor: palette.accent }} />
                 <View className="min-w-0 flex-1">
                   {eyebrow ? <Eyebrow className="mb-1">{eyebrow}</Eyebrow> : null}
                   <Text
-                    className="text-[18px] leading-[24px] font-bold text-ink"
-                    style={{ letterSpacing: -0.35 }}
+                    className="text-[15px] leading-[20px] font-semibold text-ink"
+                    style={{ letterSpacing: -0.2 }}
                     numberOfLines={1}
                   >
                     {title}
@@ -440,7 +437,7 @@ export function Dialog({
               borderRadius: radius.xl,
               borderWidth: 1,
               borderColor: destructive ? palette.dangerBorder : palette.lineStrong,
-              backgroundColor: palette.raised,
+              backgroundColor: palette.surface,
               padding: 20,
               paddingBottom: 20 + insets.bottom * 0.2,
               gap: 16,
@@ -922,3 +919,159 @@ export function FormSheet({
 /* ── Re-exports used by screens that build menus from the same vocabulary ───────── */
 
 export { SearchIcon, toneColor }
+
+/* ── Side sheet ─────────────────────────────────────────────────────────────────
+ * The desktop Layer's side mode, ported: a panel anchored to the left or right
+ * edge over a dim, 88% of the width so the underlying view still peeks through
+ * — that sliver is what reads as "drawer" rather than "page". Slides in on a
+ * spring, flicks back to dismiss, header anatomy identical to the desktop's
+ * (13px title, circular close). Used by the session screen's Sessions pane
+ * (left) and Workspace rail (right), exactly as the desktop SessionView does. */
+
+export function SideSheet({
+  open,
+  onClose,
+  title,
+  side,
+  children,
+  footer,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  side: 'left' | 'right'
+  children: React.ReactNode
+  footer?: React.ReactNode
+}) {
+  const insets = useSafeAreaInsets()
+  const { width: screenWidth } = useWindowDimensions()
+  const [mounted, setMounted] = React.useState(open)
+  const progress = React.useRef(new Animated.Value(open ? 1 : 0)).current
+  const drag = React.useRef(new Animated.Value(0)).current
+
+  const panelWidth = Math.min(420, Math.round(screenWidth * 0.88))
+
+  React.useEffect(() => {
+    if (open) {
+      setMounted(true)
+      drag.setValue(0)
+      progress.setValue(0)
+      Animated.spring(progress, { toValue: 1, useNativeDriver: true, ...spring.overlay }).start()
+    } else {
+      Animated.parallel([
+        Animated.timing(progress, { toValue: 0, duration: duration.fast, easing: EASE_OUT, useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false)
+      })
+    }
+  }, [open, progress, drag])
+
+  // Flick toward the anchored edge dismisses; anything less springs back.
+  const pan = React.useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, gesture) =>
+          (side === 'left' ? gesture.dx < -8 : gesture.dx > 8) &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderMove: (_e, gesture) => {
+          const toward = side === 'left' ? Math.min(0, gesture.dx) : Math.max(0, gesture.dx)
+          drag.setValue(toward)
+        },
+        onPanResponderRelease: (_e, gesture) => {
+          const dismissing = side === 'left' ? gesture.dx < -60 || gesture.vx < -0.4 : gesture.dx > 60 || gesture.vx > 0.4
+          if (dismissing) {
+            onClose()
+            return
+          }
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true, ...spring.overlay }).start()
+        },
+        onPanResponderTerminate: () =>
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true, ...spring.overlay }).start(),
+      }),
+    [drag, onClose, side],
+  )
+
+  if (!mounted) return null
+
+  const closedX = side === 'left' ? -panelWidth : panelWidth
+  const translateX = Animated.add(
+    progress.interpolate({ inputRange: [0, 1], outputRange: [closedX, 0] }),
+    drag,
+  )
+
+  return (
+    <Modal
+      transparent
+      visible={mounted}
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      supportedOrientations={['portrait', 'landscape']}
+    >
+      <View style={{ flex: 1 }}>
+        <Animated.View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: palette.scrim,
+            opacity: progress,
+          }}
+        >
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={{ flex: 1 }} />
+        </Animated.View>
+
+        <Animated.View
+          {...pan.panHandlers}
+          accessibilityViewIsModal
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            width: panelWidth,
+            paddingTop: insets.top,
+            backgroundColor: palette.surface,
+            borderColor: palette.line,
+            ...(side === 'left'
+              ? { left: 0, borderRightWidth: 1 }
+              : { right: 0, borderLeftWidth: 1 }),
+            transform: [{ translateX }],
+            ...shadowOverlay,
+          }}
+        >
+          {/* Header — the desktop Layer's anatomy. */}
+          <View className="min-h-[48px] shrink-0 flex-row items-center justify-between gap-2 border-b border-line px-3.5 py-2">
+            <Text className="min-w-0 flex-1 text-[13.5px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
+              {title}
+            </Text>
+            <IconButton label="Close" size={32} onPress={onClose}>
+              <X size={16} color={palette.ink3} />
+            </IconButton>
+          </View>
+
+          <ScrollView
+            className="flex-1"
+            contentContainerStyle={{ padding: 10, paddingBottom: 24, gap: 10 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {children}
+          </ScrollView>
+
+          {footer ? (
+            <View
+              className="shrink-0 border-t border-line p-2.5"
+              style={{ paddingBottom: Math.max(insets.bottom, 10) }}
+            >
+              {footer}
+            </View>
+          ) : (
+            <View style={{ height: Math.max(insets.bottom, 8) }} className="shrink-0" />
+          )}
+        </Animated.View>
+      </View>
+    </Modal>
+  )
+}

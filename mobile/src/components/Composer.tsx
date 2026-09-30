@@ -414,7 +414,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               style={({ pressed }) => ({
                 width: 36,
                 height: 36,
-                borderRadius: radius.sm,
+                borderRadius: 18,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: pressed ? palette.hover : 'transparent',
@@ -442,7 +442,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                   width: 36,
                   height: 36,
                   marginLeft: 4,
-                  borderRadius: radius.sm,
+                  borderRadius: 18,
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: pressed ? palette.dangerBorder : palette.dangerSoft,
@@ -471,7 +471,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 5,
-                borderRadius: radius.sm,
+                borderRadius: 18,
                 paddingHorizontal: busy ? 14 : 0,
                 backgroundColor: !canSend
                   ? palette.raised

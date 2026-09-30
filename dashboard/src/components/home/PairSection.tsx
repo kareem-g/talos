@@ -299,7 +299,7 @@ function NotificationsCard() {
     ) : backgroundCapable ? (
       'Get a system alert when an agent needs approval, finishes, or errors — even with this tab closed or your phone locked. The daemon sends it; your browser decrypts it locally.'
     ) : (
-      'Get a system alert when an agent needs approval or finishes while Plumb is in the background.'
+      'Get a system alert when an agent needs approval or finishes while QAI is in the background.'
     )
 
   return (

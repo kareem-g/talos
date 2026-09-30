@@ -1,8 +1,8 @@
 /**
- * AddToHomeButton — the "put Plumb on your phone's home screen" affordance
+ * AddToHomeButton — the "put QAI on your phone's home screen" affordance
  * for the mobile home header.
  *
- * Plumb is a PWA: installed it opens full-screen like an app. Browsers that
+ * QAI is a PWA: installed it opens full-screen like an app. Browsers that
  * can install it fire `beforeinstallprompt`, so the button runs that real
  * prompt directly. iOS Safari (and browsers that never qualify — plain-LAN
  * HTTP has no secure context for a service worker) get a short bottom sheet
@@ -98,7 +98,7 @@ export function AddToHomeButton() {
       <button
         type="button"
         aria-label="Add to Home Screen"
-        title={prompt ? 'Install Plumb as an app' : 'How to add Plumb to your home screen'}
+        title={prompt ? 'Install QAI as an app' : 'How to add QAI to your home screen'}
         onClick={() => {
           if (prompt) void runPrompt()
           else setSheetOpen(true)
@@ -111,10 +111,10 @@ export function AddToHomeButton() {
         <Download size={15} />
       </button>
 
-      <Layer open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add Plumb to your home screen" size="md" side="bottom">
+      <Layer open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add QAI to your home screen" size="md" side="bottom">
         <div className="flex flex-col gap-3 px-1 pb-2 pt-1">
           <p className="text-[12px] leading-[1.6] text-ink-3">
-            Plumb is a web app — installing it puts an icon on your home screen that opens
+            QAI is a web app — installing it puts an icon on your home screen that opens
             this station full-screen, like an app.
           </p>
 
@@ -148,7 +148,7 @@ export function AddToHomeButton() {
                   </>
                 }
               />
-              <StepRow n={2} text="Choose “Install app”, “Install Plumb”, or “Add to Home screen”." />
+              <StepRow n={2} text="Choose “Install app”, “Install QAI”, or “Add to Home screen”." />
               <StepRow n={3} text="Confirm — the icon lands on your home screen." />
               <p className="mt-1 text-[10.5px] leading-[1.5] text-ink-3/80">
                 Over plain-LAN HTTP some browsers only save a shortcut that opens in the

@@ -1,1 +1,77 @@
-{"expo": {"name": "QAI", "slug": "qai", "scheme": "qai", "version": "1.0.0", "orientation": "portrait", "icon": "./assets/icon.png", "userInterfaceStyle": "dark", "backgroundColor": "#0A0D12", "splash": {"image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#0A0D12"}, "ios": {"supportsTablet": true, "bundleIdentifier": "com.qai.mobile", "infoPlist": {"NSAppTransportSecurity": {"NSAllowsArbitraryLoads": true, "NSAllowsLocalNetworking": true}, "NSCameraUsageDescription": "QAI uses the camera to scan the pairing code from your desktop.", "NSLocalNetworkUsageDescription": "QAI connects to the daemon running on your local network.", "UIRequiresFullScreen": false}}, "android": {"package": "com.qai.mobile", "adaptiveIcon": {"backgroundColor": "#0A0D12", "foregroundImage": "./assets/android-icon-foreground.png", "monochromeImage": "./assets/android-icon-monochrome.png"}, "permissions": ["android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS", "android.permission.VIBRATE"], "edgeToEdgeEnabled": true, "predictiveBackGestureEnabled": false}, "plugins": ["expo-secure-store", "expo-font", ["expo-splash-screen", {"image": "./assets/splash-icon.png", "imageWidth": 200, "resizeMode": "contain", "backgroundColor": "#0A0D12"}], ["expo-camera", {"cameraPermission": "QAI uses the camera to scan the pairing code from your desktop."}], ["expo-notifications", {"icon": "./assets/notification-icon.png", "color": "#22D3EE"}], ["expo-image-picker", {"photosPermission": "QAI attaches images from your library to a prompt."}]]}}
+{
+  "expo": {
+    "name": "QAI",
+    "slug": "qai",
+    "scheme": "qai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#131315",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#131315"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.qai.mobile",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSCameraUsageDescription": "QAI uses the camera to scan the pairing code from your desktop.",
+        "NSLocalNetworkUsageDescription": "QAI connects to the daemon running on your local network.",
+        "UIRequiresFullScreen": false
+      }
+    },
+    "android": {
+      "package": "com.qai.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#131315",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE"
+      ],
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#131315"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "QAI uses the camera to scan the pairing code from your desktop."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5B8DEF"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "QAI attaches images from your library to a prompt."
+        }
+      ]
+    ]
+  }
+}

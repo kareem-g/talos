@@ -49,7 +49,7 @@ function Wordmark({ compact }: { compact?: boolean }) {
     <span className="flex items-center gap-2">
       <BrandMark className="size-7 shrink-0" />
       {compact ? null : (
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">QAI</span>
       )}
     </span>
   )

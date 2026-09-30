@@ -22,7 +22,8 @@ import { browserApi, type BrowserInstance } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore } from '@app/store'
 import { palette } from '@app/design/tokens'
-import { BackButton, Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
+import { Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
+import { DrawerButton } from '@app/components/Drawer'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
@@ -94,7 +95,7 @@ export function BrowsersScreen() {
   return (
     <ScreenScaffold
       title="Browser engines"
-      eyebrow="System · browsers"
+      eyebrow="Products"
       subtitle="One shared engine per workspace. The agent drives it over MCP; you can drive it by hand from a session's tools."
       onRefresh={() => {
         setRefreshing(true)
@@ -103,7 +104,7 @@ export function BrowsersScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-6"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
+      headerLeft={<DrawerButton />}
     >
       {error ? (
         <View className="mx-4">

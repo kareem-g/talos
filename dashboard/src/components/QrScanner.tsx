@@ -107,7 +107,7 @@ export function QrScanner({
         setStatus(name === 'NotAllowedError' ? 'denied' : 'unsupported')
         setError(
           name === 'NotAllowedError'
-            ? 'Camera access is off for AgentDeck. Enable it in iOS Settings → AgentDeck → Camera.'
+            ? 'Camera access is off for QAI. Enable it in iOS Settings → QAI → Camera.'
             : 'Could not start the camera on this device.',
         )
       }

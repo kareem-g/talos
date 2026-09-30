@@ -103,11 +103,11 @@ export function AttentionPill() {
             this pill genuinely floats over whatever session is behind it. The
             border is `wait`, not the accent: this is a state that needs a
             human, and the accent must stay reserved for "actionable/live". */}
-        <View style={[{ borderRadius: radius.sm }, shadowOverlay]}>
+        <View style={[{ borderRadius: radius.pill }, shadowOverlay]}>
           <View
             style={{
               overflow: 'hidden',
-              borderRadius: radius.sm,
+              borderRadius: radius.pill,
               borderWidth: 1,
               borderColor: palette.waitBorder,
               backgroundColor: `${palette.chrome}F0`,

@@ -20,7 +20,8 @@ import { isInternalSession } from '@/lib/sessionState'
 import { getConversation, useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
 import { palette, radius } from '@app/design/tokens'
-import { BackButton, ScreenScaffold, Section } from '@app/components/Screen'
+import { ScreenScaffold, Section } from '@app/components/Screen'
+import { DrawerButton } from '@app/components/Drawer'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Card,
@@ -114,11 +115,11 @@ export function UsageScreen() {
   return (
     <ScreenScaffold
       title="Usage"
-      eyebrow="System · ledger"
+      eyebrow="Manage · ledger"
       subtitle="Totalled from the turns your agents reported."
       scroll
       contentClassName="px-4 pb-12 gap-5"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back" />}
+      headerLeft={<DrawerButton />}
     >
       <Section eyebrow="Fleet ledger" enterIndex={0}>
         <Card className="overflow-hidden">

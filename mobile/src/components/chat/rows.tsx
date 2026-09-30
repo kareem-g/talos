@@ -240,15 +240,19 @@ export function Step({
 
 /* ── Tool group ─────────────────────────────────────────────────────────────── */
 
-export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
-  const [open, setOpen] = React.useState(true)
+export function ToolGroup({ parts, simple }: { parts: Array<ToolPart | CommandPart>; simple?: boolean }) {
+  // Simple mode (the desktop's timeline-detail toggle) starts folded: the
+  // group is one friendly line until the user asks for the steps.
+  const [open, setOpen] = React.useState(!simple)
   const collapse = useCollapse(open)
   const failed = parts.some((part) => part.status === 'failed')
   const running = parts.some((part) => part.status === 'running')
   const totalMs = parts.reduce((sum, part) => sum + (part.durationMs ?? 0), 0)
 
-  // A lone tool gets no card — see the file header.
-  if (parts.length === 1) return <Step part={parts[0]} />
+  // A lone tool gets no card in detailed mode — see the file header. In
+  // simple mode even a lone call folds into the one-line group, matching the
+  // desktop Timeline.
+  if (parts.length === 1 && !simple) return <Step part={parts[0]} />
 
   return (
     <View
@@ -263,7 +267,7 @@ export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
       <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
         <View style={{ gap: 1, padding: 5 }}>
           {parts.map((part, index) => (
-            <Step key={index} part={part} />
+            <Step key={index} part={part} simple={simple} />
           ))}
         </View>
       </View>
@@ -294,8 +298,11 @@ export function ToolGroup({ parts }: { parts: Array<ToolPart | CommandPart> }) {
           }}
         />
         {running ? <ActivityIndicator size="small" color={palette.accent} /> : null}
-        <Mono className="text-[10.5px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }}>
-          {parts.length} steps{totalMs > 0 ? ` · ${formatMs(totalMs)}` : ''}
+        <Mono className="text-[10.5px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }} numberOfLines={1}>
+          {simple && parts.length === 1
+            ? describeTool(parts[0]).label
+            : `${parts.length} ${parts.length === 1 ? 'step' : 'steps'}`}
+          {totalMs > 0 ? ` · ${formatMs(totalMs)}` : ''}
           {failed ? ' · failed' : ''}
           {running ? ' · running' : ''}
         </Mono>

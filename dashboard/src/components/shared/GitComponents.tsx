@@ -4,7 +4,7 @@
  *
  * Extracted here so both surfaces render git state the same way: the same
  * stat summary, the same changed-file rows, the same diff overlay, the same
- * worktree list. One source of truth for "what git looks like" in Plumb.
+ * worktree list. One source of truth for "what git looks like" in QAI.
  */
 
 import { AlertCircle, ChevronDown, ExternalLink, FolderGit2, GitBranch, RefreshCw } from 'lucide-react'

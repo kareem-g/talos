@@ -1,33 +1,30 @@
 /**
- * Session — the conversation with one agent.
+ * Session — the desktop SessionView, ported screen-for-screen.
  *
- * QAI SIGNAL DECK — the cockpit
- * -----------------------------
- * A phone-native cousin of the desktop SessionView, not a copy. The desktop
- * is a compact remote-control header (back + title + status pill + detail +
- * project + connection, with pane openers for sessions / controls / workspace)
- * over a Timeline + StateZone, with the left navigator and right workspace
- * rail surfacing as side sheets. This screen keeps that skeleton but tunes it
- * for one thumb:
+ * QAI · WARM STUDIO
+ * -----------------
+ * The desktop's mobile shell gives a session exactly one screen and exactly
+ * four header moves, and this screen keeps that contract:
  *
- *   - **Two-row header.** Row one: where you are, what state it is in, the
- *     two panes that matter (switch session, open workbench) and the overflow.
- *     Row two is the RUN BAR: the session's live configuration — model,
- *     permission mode, thought level and every other dimension the agent
- *     advertises — as a scrolling row of chips, always one tap away instead of
- *     folded under the composer, plus branch, context ring and cost. Settings
- *     you steer by live above the transcript; the composer stays pure input.
- *   - **HUD island.** The desktop's collapsed FloatingHud as a floating pill
- *     pinned above the composer: plan progress + subagent count, tappable to
- *     the matching workspace tab. A shortcut, not a readout.
- *   - **The desktop's left rail → a sheet, the right rail → a pushed screen.**
- *     Switching sessions is a glance over the transcript; a plan, diff, file
- *     tree and terminal deserve the whole screen. Same split as the desktop,
- *     different widths.
+ *   ‹ back · title + status pill · project · connection
+ *   ⚙︎ Model & permissions (right sheet — SessionControls)
+ *   ◧ Sessions pane (LEFT sheet — Rooms / Sessions / Explorer)
+ *   ◨ Workspace (RIGHT sheet — the RightRail's tab strip)
+ *   ⋯ Session actions (the phone's overflow: retry, fork, archive, search…)
+ *
+ * Under the header: the notice strip (session errors), the Timeline, the HUD
+ * island (plan progress + subagents), and the one-line composer — model and
+ * permission controls live in the ⚙︎ sheet, not the composer, which is the
+ * desktop's own mobile rule ("the composer stays one line and the keyboard
+ * keeps its room").
+ *
+ * The timeline carries the desktop's simple/detailed toggle: simple folds
+ * every tool run to one friendly line; detailed expands steps, durations and
+ * raw output. The choice persists, per device, like the desktop's.
  */
 
 import * as React from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -35,66 +32,48 @@ import {
   Archive,
   ArchiveRestore,
   BookmarkPlus,
-  GitBranch,
   GitFork,
+  List,
   ListTree,
   MoreHorizontal,
+  PanelLeft,
   PanelRight,
   RotateCcw,
-  Repeat2,
   Search,
+  Settings2,
+  SlidersHorizontal,
   Users,
   Zap,
 } from 'lucide-react-native'
 import Clipboard from '@react-native-clipboard/clipboard'
 
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
-import type { Session } from '@/types/session'
 import { useStore, useConversation } from '@app/store'
 import { mobileApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
-import { agentColor, palette, radius, shadowFloating } from '@app/design/tokens'
+import { openNewTask } from '@app/lib/newTask'
+import { palette, radius, shadowFloating } from '@app/design/tokens'
 import { Transcript } from '@app/components/Transcript'
 import { Composer } from '@app/components/Composer'
-import { NewTaskSheet } from '@app/components/NewTaskSheet'
 import { SubagentSheet } from '@app/components/SubagentModal'
-import { EngineSwitchSheet } from '@app/components/EngineSwitchModal'
-import { SessionSwitcherSheet } from '@app/components/SessionLeftRail'
 import { SessionSearchSheet } from '@app/components/CommandPalette'
 import { AttentionPill } from '@app/components/AttentionPill'
-import { ConfigChips, ContextRing } from '@app/components/ConfigChips'
-import { ActionSheet, ConfirmDialog } from '@app/components/Sheet'
+import { LeftPaneSheet } from '@app/components/session/LeftPaneSheet'
+import { SessionControlsSheet } from '@app/components/session/SessionControlsSheet'
+import { WorkspaceRail, type PanelTabId } from '@app/components/panel/WorkspaceRail'
+import { ActionSheet, ConfirmDialog, SideSheet } from '@app/components/Sheet'
 import { BackButton } from '@app/components/Screen'
 import { deriveSubagents, latestPlanInfo } from '@app/lib/sessionView'
 import {
-  AgentAvatar,
   Dot,
   Mono,
+  Notice,
   ProgressBar,
   StatusPill,
   IconButton,
-  formatCost,
-  formatCount,
   haptic,
   toast,
 } from '@app/components/ui'
-
-/** A minimal row, for the window between a deep link and the snapshot landing. */
-const PLACEHOLDER_SESSION: Session = {
-  id: '',
-  name: 'Session',
-  agent: '',
-  project: null,
-  branch: null,
-  status: 'idle',
-  worktree_path: null,
-  created_at: '',
-  updated_at: '',
-  cost: null,
-  tokens_used: null,
-  resume_command: null,
-  parent_id: null,
-}
 
 export function SessionScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
@@ -107,30 +86,30 @@ export function SessionScreen() {
   const connection = useStore((state) => state.connection)
   const revision = useStore((state) => state.revisions[sessionId] ?? 0)
   const conversation = useConversation(sessionId)
+  const notice = useStore((state) => state.notices[sessionId])
+  const dismissNotice = useStore((state) => state.dismissNotice)
   const removeSession = useStore((state) => state.removeSession)
   const resumeSession = useStore((state) => state.resumeSession)
   const forkSession = useStore((state) => state.forkSession)
   const archiveSession = useStore((state) => state.archiveSession)
   const resendLastUserPrompt = useStore((state) => state.resendLastUserPrompt)
   const loadSnapshot = useStore((state) => state.loadSnapshot)
+  const timelineDetail = useStore((state) => state.timelineDetail)
+  const setTimelineDetail = useStore((state) => state.setTimelineDetail)
 
-  const [switcherOpen, setSwitcherOpen] = React.useState(false)
+  /** Which side pane is open, if any — the desktop SessionView's own state. */
+  const [pane, setPane] = React.useState<'sessions' | 'controls' | 'workspace' | null>(null)
+  const [workspaceTab, setWorkspaceTab] = React.useState<PanelTabId | undefined>()
   const [searchOpen, setSearchOpen] = React.useState(false)
-  const [newTaskOpen, setNewTaskOpen] = React.useState(false)
   const [subagentOpen, setSubagentOpen] = React.useState(false)
-  const [engineOpen, setEngineOpen] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   /**
    * What to present once the action sheet has finished animating out.
-   *
-   * Two modals cannot be stacked on iOS, so an action that opens another
-   * surface has to wait for the first one to be gone. Queueing the intent
-   * rather than firing it from the press handler is what makes that work.
+   * Two modals cannot be stacked from a dismissing one, so an action that
+   * opens another surface waits for the first to be gone.
    */
-  const [pendingSurface, setPendingSurface] = React.useState<
-    'switcher' | 'panel' | 'search' | 'delete' | null
-  >(null)
+  const [pendingSurface, setPendingSurface] = React.useState<'search' | 'delete' | null>(null)
 
   React.useEffect(() => {
     void openSession(sessionId)
@@ -139,12 +118,6 @@ export function SessionScreen() {
   React.useEffect(() => {
     if (!pendingSurface) return
     switch (pendingSurface) {
-      case 'switcher':
-        setSwitcherOpen(true)
-        break
-      case 'panel':
-        navigation.navigate('SessionPanel', { sessionId })
-        break
       case 'search':
         setSearchOpen(true)
         break
@@ -153,14 +126,14 @@ export function SessionScreen() {
         break
     }
     setPendingSurface(null)
-  }, [pendingSurface, navigation, sessionId])
+  }, [pendingSurface])
 
   const uiState = session ? sessionUIState(session, conversation, connection) : 'ready'
   const display = uiStateDisplay(uiState)
   // `uiStateDisplay` is the shared desktop contract and names its tones
-  // `green | orange | red | dim`; the mobile palette names the same four states
-  // `ok | wait | danger | muted`. Mapping here, once, is what lets the two apps
-  // agree on *what state this is* without agreeing on the colour name.
+  // `green | orange | red | dim`; the mobile palette names the same four
+  // states `ok | wait | danger | muted`. Mapping here, once, is what lets the
+  // two apps agree on *what state this is* without agreeing on the name.
   const tone = React.useMemo(
     () =>
       ({
@@ -171,7 +144,6 @@ export function SessionScreen() {
       } as const)[display.tone],
     [display.tone],
   )
-  const accent = agentColor(session?.agent ?? '')
 
   const plan = React.useMemo(() => latestPlanInfo(conversation.messages), [conversation.messages, revision])
   const subagents = React.useMemo(() => deriveSubagents(conversation.messages), [conversation.messages, revision])
@@ -180,9 +152,20 @@ export function SessionScreen() {
   const runningSubagents = subagents.filter((agent) => agent.status === 'working').length
 
   const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
+  const activityDetail = conversation.activity?.detail
 
-  const openPanel = (tab?: 'plan' | 'agents' | 'git' | 'files') =>
-    navigation.navigate('SessionPanel', { sessionId, tab: tab as never })
+  function openWorkspace(tab?: PanelTabId) {
+    setWorkspaceTab(tab)
+    setPane('workspace')
+  }
+
+  /** Switch sessions from a pane: replace, so the back stack does not grow
+   *  one screen per hop — the desktop navigates, it does not stack. */
+  function switchSession(id: string) {
+    setPane(null)
+    if (id === sessionId) return
+    navigation.replace('Session', { sessionId: id })
+  }
 
   async function doDelete() {
     const name = session?.name ?? 'Session'
@@ -218,148 +201,176 @@ export function SessionScreen() {
 
   return (
     <View className="flex-1 bg-canvas">
-      {/* ── Cockpit header ──────────────────────────────────────────────
-          Row one: navigation + identity + state + the two panes. Row two:
-          the run bar — the session's live configuration, always visible. */}
+      {/* ── Compact remote-control header (the desktop's, row for row) ── */}
       <View
         style={{
           paddingTop: insets.top,
-          backgroundColor: palette.chrome,
+          backgroundColor: palette.canvas,
           borderBottomWidth: 1,
           borderBottomColor: palette.line,
         }}
       >
-        <View className="min-h-[52px] flex-row items-center gap-1.5 pl-1 pr-2">
-          <BackButton onPress={() => navigation.goBack()} label="Back to the deck" />
-          <AgentAvatar agent={session?.agent ?? ''} name={session?.agent} size={32} />
+        <View className="min-h-[52px] flex-row items-center gap-1 pl-1 pr-1.5">
+          <BackButton onPress={() => navigation.goBack()} label="Back" />
+
           <View className="min-w-0 flex-1 px-1">
-            <Text className="text-[15px] leading-[20px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
+            <Text className="text-[13.5px] leading-[18px] font-medium text-ink" style={{ letterSpacing: -0.15 }} numberOfLines={1}>
               {session?.name ?? 'Session'}
             </Text>
-            <Text className="text-[11px] leading-[14px] text-ink-3" numberOfLines={1}>
-              {session?.agent || 'loading…'}
-              {projectLeaf ? ` · ${projectLeaf}` : ''}
-              {offline ? ` · ${connection}` : ''}
-            </Text>
+            {/* Single status line: pill · project · connection — the desktop's
+                one source of truth for this screen. */}
+            <View className="mt-0.5 flex-row items-center gap-1.5">
+              <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
+              {projectLeaf ? (
+                <>
+                  <Text className="text-[10.5px] text-ink-4">·</Text>
+                  <Mono className="min-w-0 flex-1 text-[10.5px] text-ink-3" numberOfLines={1}>
+                    {projectLeaf}
+                  </Mono>
+                </>
+              ) : null}
+              {offline ? (
+                <View className="flex-row items-center gap-1">
+                  <Dot tone="danger" />
+                  <Text className="text-[10.5px] capitalize text-ink-3">{connection}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
-          <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
+
+          {/* The desktop's four pane openers, same icons, same order — plus
+              the phone's overflow, because session actions have to live
+              somewhere a thumb can reach. */}
           <IconButton
-            label="Switch session"
-            accessibilityHint="See what else is running, without leaving this conversation"
-            size={36}
-            onPress={() => setSwitcherOpen(true)}
+            label="Model and permissions"
+            size={34}
+            active={pane === 'controls'}
+            tone="accent"
+            onPress={() => {
+              void haptic('light')
+              setPane((current) => (current === 'controls' ? null : 'controls'))
+            }}
           >
-            <Repeat2 size={17} color={palette.ink2} />
+            <Settings2 size={16} color={pane === 'controls' ? palette.accent : palette.ink2} />
           </IconButton>
           <IconButton
-            label="Open workspace"
-            accessibilityHint="Plan, agents, git, files, terminal"
-            size={36}
-            onPress={() => openPanel()}
+            label="Sessions pane"
+            size={34}
+            active={pane === 'sessions'}
+            tone="accent"
+            onPress={() => {
+              void haptic('light')
+              setPane((current) => (current === 'sessions' ? null : 'sessions'))
+            }}
           >
-            <PanelRight size={18} color={palette.ink2} />
+            <PanelLeft size={16} color={pane === 'sessions' ? palette.accent : palette.ink2} />
+          </IconButton>
+          <IconButton
+            label="Workspace"
+            size={34}
+            active={pane === 'workspace'}
+            tone="accent"
+            onPress={() => {
+              void haptic('light')
+              setPane((current) => (current === 'workspace' ? null : 'workspace'))
+            }}
+          >
+            <PanelRight size={16} color={pane === 'workspace' ? palette.accent : palette.ink2} />
           </IconButton>
           <IconButton
             label="Session actions"
-            size={36}
+            size={34}
             onPress={() => setMenuOpen(true)}
           >
-            <MoreHorizontal size={18} color={palette.ink2} />
+            <MoreHorizontal size={16} color={palette.ink2} />
           </IconButton>
         </View>
 
-        {/* ── Run bar ───────────────────────────────────────────────────
-            What this run is: branch, live config dimensions, context load,
-            and the running cost. Scrollable because eight agents' worth of
-            dimensions is a wall; every chip is a control, not a label. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingBottom: 8 }}
-        >
-          {session?.branch ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Branch ${session.branch}`}
-              accessibilityHint="Opens the git workspace"
-              onPress={() => {
-                void haptic('light')
-                openPanel('git')
-              }}
-              className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2 active:bg-raised"
-            >
-              <GitBranch size={11} color={palette.accent} />
-              <Mono className="max-w-[130px] text-[11px] text-ink-2" numberOfLines={1}>
-                {session.branch}
-              </Mono>
-            </Pressable>
-          ) : null}
-
-          <ConfigChips sessionId={sessionId} />
-
-          <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2">
-            <ContextRing sessionId={sessionId} working={busy} size={16} />
+        {/* Detail overflow (the desktop's row 2): what the agent is touching
+            right now, full width in mono. */}
+        {activityDetail ? (
+          <View className="px-4 pb-1.5">
+            <Mono className="text-[10.5px] text-ink-3" numberOfLines={1}>
+              {activityDetail}
+            </Mono>
           </View>
-
-          {session && (session.cost ?? 0) > 0 ? (
-            <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2">
-              <Mono className="text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
-                {formatCost(session.cost ?? 0)}
-                {session.tokens_used ? ` · ${formatCount(session.tokens_used)} tok` : ''}
-              </Mono>
-            </View>
-          ) : null}
-
-          {offline ? (
-            <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-danger-border bg-danger-soft px-2">
-              <Dot tone="danger" />
-              <Text className="text-[10.5px] font-semibold capitalize text-danger">{connection}</Text>
-            </View>
-          ) : null}
-        </ScrollView>
-
-        {/* The signal line: agent identity, not state. */}
-        <View style={{ height: 2, backgroundColor: accent, opacity: session ? 0.8 : 0.2 }} />
+        ) : null}
       </View>
+
+      {notice ? (
+        <View className="px-4 pt-2">
+          <Notice
+            tone="danger"
+            message={notice}
+            action={{ label: 'Dismiss', onPress: () => dismissNotice(sessionId) }}
+          />
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+        // Zero offset: this view starts below a custom header and ends at the
+        // screen's bottom edge, so the overlap the KAV computes IS the
+        // keyboard height. Adding the top inset here (the old code) padded the
+        // view by ~59px extra — the gap users saw above the keyboard.
+        keyboardVerticalOffset={0}
       >
         <View className="flex-1">
           <Transcript
             sessionId={sessionId}
             messages={conversation.messages}
             revision={revision}
-            onViewPlan={() => openPanel('plan')}
+            simple={timelineDetail === 'simple'}
+            onViewPlan={() => openWorkspace('plan')}
           />
 
-          {/* ── HUD island ────────────────────────────────────────────
-              The desktop's collapsed FloatingHud as a floating pill: what it
-              is doing right now, tappable to the matching workspace tab. */}
+          {/* ── HUD island — the desktop's collapsed FloatingHud ─────── */}
           <HudIsland
             uiState={uiState}
             planDone={planDone}
             planTotal={planTotal}
             subagents={runningSubagents}
-            onPlan={() => openPanel('plan')}
-            onAgents={() => openPanel('agents')}
+            onPlan={() => openWorkspace('plan')}
+            onAgents={() => openWorkspace('agents')}
           />
         </View>
 
         <Composer sessionId={sessionId} uiState={uiState} />
       </KeyboardAvoidingView>
 
-      <SessionSwitcherSheet
-        open={switcherOpen}
-        onClose={() => setSwitcherOpen(false)}
+      {/* ── The desktop's three panes, as side sheets ─────────────────── */}
+      {session ? (
+        <LeftPaneSheet
+          open={pane === 'sessions'}
+          onClose={() => setPane(null)}
+          session={session}
+          onSelectSession={switchSession}
+          onOpenWorkspace={() => openWorkspace()}
+        />
+      ) : null}
+
+      <SessionControlsSheet
+        open={pane === 'controls'}
+        onClose={() => setPane(null)}
         sessionId={sessionId}
-        onNewTask={() => {
-          setSwitcherOpen(false)
-          setNewTaskOpen(true)
-        }}
+        agentId={session?.agent ?? ''}
       />
+
+      <SideSheet
+        open={pane === 'workspace'}
+        onClose={() => setPane(null)}
+        title="Workspace"
+        side="right"
+      >
+        <View style={{ marginHorizontal: -10, marginVertical: -10, flex: 1 }}>
+          <WorkspaceRail
+            sessionId={sessionId}
+            initialTab={workspaceTab}
+            onOpenSession={switchSession}
+          />
+        </View>
+      </SideSheet>
 
       <SessionSearchSheet
         open={searchOpen}
@@ -367,15 +378,8 @@ export function SessionScreen() {
         onClose={() => setSearchOpen(false)}
         onNewTask={() => {
           setSearchOpen(false)
-          setNewTaskOpen(true)
+          openNewTask(undefined, session?.project ?? undefined)
         }}
-      />
-
-      <NewTaskSheet
-        open={newTaskOpen}
-        initialProject={session?.project}
-        onClose={() => setNewTaskOpen(false)}
-        onCreated={(created) => navigation.push('Session', { sessionId: created.id })}
       />
 
       <SubagentSheet
@@ -388,13 +392,6 @@ export function SessionScreen() {
         }}
       />
 
-      <EngineSwitchSheet
-        open={engineOpen}
-        sessionId={sessionId}
-        currentAgent={session?.agent ?? ''}
-        onClose={() => setEngineOpen(false)}
-      />
-
       <AttentionPill />
 
       <ActionSheet
@@ -405,16 +402,18 @@ export function SessionScreen() {
         eyebrow={session?.agent}
         actions={[
           {
-            label: 'Switch session',
-            hint: 'See what else is running, without leaving this conversation',
-            icon: <Repeat2 size={18} color={palette.ink2} />,
-            onPress: () => setPendingSurface('switcher'),
-          },
-          {
-            label: 'Session tools',
-            hint: 'Plan, agents, git diff, files, browser and terminal',
-            icon: <ListTree size={18} color={palette.ink2} />,
-            onPress: () => setPendingSurface('panel'),
+            label: timelineDetail === 'simple' ? 'Show technical detail' : 'Simplify the timeline',
+            hint: 'Simple folds tool runs to one line; detailed expands steps and output',
+            icon:
+              timelineDetail === 'simple' ? (
+                <SlidersHorizontal size={18} color={palette.ink2} />
+              ) : (
+                <List size={18} color={palette.ink2} />
+              ),
+            onPress: () => {
+              void haptic('select')
+              setTimelineDetail(timelineDetail === 'simple' ? 'detailed' : 'simple')
+            },
           },
           {
             label: 'Retry last prompt',
@@ -430,13 +429,7 @@ export function SessionScreen() {
             label: 'Start another task',
             hint: 'Open a new session without losing this conversation',
             icon: <Zap size={18} color={palette.accent} />,
-            onPress: () => setNewTaskOpen(true),
-          },
-          {
-            label: 'Switch agent',
-            hint: 'Move this session to a different CLI or model, keeping the transcript',
-            icon: <GitFork size={18} color={palette.ink2} />,
-            onPress: () => setEngineOpen(true),
+            onPress: () => openNewTask(undefined, session?.project ?? undefined),
           },
           {
             label: 'Spawn a subagent',
@@ -451,6 +444,12 @@ export function SessionScreen() {
             onPress: () => setPendingSurface('search'),
           },
           {
+            label: 'Open workspace full screen',
+            hint: 'Plan, agents, git, files, browser and terminal',
+            icon: <ListTree size={18} color={palette.ink2} />,
+            onPress: () => navigation.navigate('SessionPanel', { sessionId }),
+          },
+          {
             label: 'Save to project memory',
             hint: 'Store this conversation as a memory on the desktop',
             icon: <BookmarkPlus size={18} color={palette.ink2} />,
@@ -463,11 +462,7 @@ export function SessionScreen() {
             onPress: () => {
               try {
                 Clipboard.setString(
-                  JSON.stringify(
-                    { session: session ?? PLACEHOLDER_SESSION, messages: conversation.messages },
-                    null,
-                    2,
-                  ),
+                  JSON.stringify({ session: session ?? null, messages: conversation.messages }, null, 2),
                 )
                 toast({ message: 'Transcript copied', tone: 'ok' })
               } catch {
@@ -554,8 +549,7 @@ export function SessionScreen() {
  * The desktop's collapsed FloatingHud as a floating pill pinned above the
  * composer: plan progress on the left, subagents on the right. Each segment
  * opens its workspace tab — a shortcut, not a readout. Nothing to say (no
- * plan, no subagents, Ready) renders nothing: an island with nothing on it is
- * a bar of padding. */
+ * plan, no subagents, Ready) renders nothing. */
 
 function HudIsland({
   uiState,
@@ -584,10 +578,10 @@ function HudIsland({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          borderRadius: radius.sm,
+          borderRadius: radius.pill,
           borderWidth: 1,
           borderColor: palette.lineStrong,
-          backgroundColor: palette.raised,
+          backgroundColor: palette.surface,
           paddingLeft: 4,
           paddingRight: 4,
           paddingVertical: 4,
@@ -605,7 +599,7 @@ function HudIsland({
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
-              borderRadius: radius.xs,
+              borderRadius: radius.pill,
               paddingHorizontal: 10,
               paddingVertical: 6,
               backgroundColor: pressed ? palette.hover : 'transparent',
@@ -635,7 +629,7 @@ function HudIsland({
               flexDirection: 'row',
               alignItems: 'center',
               gap: 6,
-              borderRadius: radius.xs,
+              borderRadius: radius.pill,
               paddingHorizontal: 10,
               paddingVertical: 6,
               backgroundColor: pressed ? palette.hover : 'transparent',

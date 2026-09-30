@@ -1,4 +1,4 @@
-# QAI Mobile — UI Language "Signal Deck"
+# QAI Mobile — UI Language "Warm Studio" (the desktop's own theme)
 
 You are restyling React Native screens in `mobile/src`. The data layer
 (`src/lib/**`, `src/store/**`, `src/components/motion.tsx`) is DONE — never edit
@@ -35,22 +35,29 @@ call in `src/lib/api.ts` against the routes the backend actually registers.
 
 ## The language
 
-- **Dark, cut, dense.** `bg-canvas` (#0A0D12) is the page; cards are
-  `rounded-lg border border-line bg-surface`; nested blocks `rounded-md
-  bg-raised border border-line-strong`; machine output (code, diffs, terminal,
-  tool output) lives on `Well` (`bg-code`) — the darkest surface — with the
-  `code-*` ink twins (`text-code-ink`, `text-code-dim`, `text-code-ok`…).
-  Elevation is a lighter surface plus a hairline, never a shadow; only overlays
-  cast (`shadowOverlay`/`shadowFloating`).
-- **The accent (#22D3EE signal cyan) is scarce**: primary buttons, selection,
-  links, live marks, progress, the brand. Never decoration. Status colours
-  (`ok` green, `wait` amber, `danger` red, `info` blue) carry meaning only —
-  always via `Dot`/`Badge`/`StatusPill`/`toneSoft` fills.
-- **Type**: dense scale — body 14.5/21, caption 13/18, metadata 11.5/15. Big
-  titles bold with tight tracking (`letterSpacing: -0.3..-0.6`). Anything
-  copyable/id-like is `Mono`. Uppercase mono eyebrows for section labels
-  (`Eyebrow`), each preceded by a 2pt accent signal tick (`Section` does this).
-  Line-heights must always be set alongside font sizes for multi-line text.
+- **Warm charcoal, pill controls, dense type.** The palette is the desktop's
+  own (`dashboard/src/index.css`): `bg-canvas` (#131315) is the page; cards are
+  `rounded-lg border border-line bg-surface` (#26262B); inputs recess to
+  `bg-field`; machine output (code, diffs, terminal, tool output) lives on
+  `Well` (`bg-code`, #161618) with the `code-*` ink twins. Elevation is a
+  lighter surface plus a hairline, never a shadow; only overlays cast
+  (`shadowOverlay`/`shadowFloating`).
+- **The accent (#5B8DEF soft blue) is scarce**: primary buttons, selection,
+  links, live marks, progress, the brand. Never decoration. Status colours are
+  the desktop's warm set (`ok` #57AB5A green, `wait` #DB6D28 copper, `danger`
+  #F85149 terracotta, `info` #6396CC sky) and carry meaning only — always via
+  `Dot`/`Badge`/`StatusPill`/`toneSoft` fills.
+- **Roundness is the desktop's**: buttons, rows and chips are FULL PILLS
+  (`rounded-control: 999px`), icon buttons circular, cards 16px (`rounded-card`),
+  sheets 20px. Text that repeats everywhere (button labels, status pills,
+  badges) takes its colour as an INLINE token, never a class — a class that
+  fails to resolve renders React Native's default black on a dark theme.
+- **Type**: the desktop's dense scale — body 13.5/20, controls 12.5-13,
+  secondary 11.5-12, metadata 10.5-11. Titles bold with tight tracking
+  (`letterSpacing: -0.15..-0.5`). Anything copyable/id-like is `Mono`.
+  Uppercase mono eyebrows for section labels (`Eyebrow`), each preceded by a
+  2pt accent tick (`Section` does this). Line-heights must always be set
+  alongside font sizes for multi-line text.
 - **Rhythm**: page gutter 16, card padding `p-4`, list rows `min-h-[52px]`,
   gaps 8/12/16. Dense where it counts (rows, chips, readouts); breathing room
   between sections (`gap-5`/`gap-6`).
@@ -90,8 +97,8 @@ call in `src/lib/api.ts` against the routes the backend actually registers.
 - Replace ad-hoc grey boxes with `Card`/`ListCard`; replace ad-hoc pills with
   `Badge`; replace ad-hoc status dot+text with `StatusPill`.
 - Titles: `Section` gives tick+eyebrow+title+action layout — prefer it.
-- Rounded corners: controls `rounded-sm/md`, cards `rounded-lg`, sheets
-  `rounded-xl`; pills only for chips, FABs and segmented tracks.
+- Rounded corners: controls and rows are PILLS (`radius.pill`), cards
+  `rounded-lg` (16), sheets `rounded-xl` (20); small tags `rounded-xs` (6).
 - Inputs: `Field` / `SearchField` — never a bare TextInput (except inside
   Composer-like docks and the daemon-settings raw editor).
 - Prefer `KeyValue`/`FieldRow` for read-only pairs; `CopyButton` on anything

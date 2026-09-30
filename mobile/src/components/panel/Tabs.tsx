@@ -72,7 +72,7 @@ import {
   toast,
 } from '@app/components/ui'
 import { DiffCard } from '@app/components/chat/rows'
-import { PanelHeader } from '@app/screens/SessionPanelScreen'
+import { PanelHeader } from './PanelHeader'
 
 /* ── Shared bits ────────────────────────────────────────────────────────────── */
 

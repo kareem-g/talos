@@ -22,7 +22,8 @@ import { providersApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore, type MobileAgent } from '@app/store'
 import { agentColor, palette } from '@app/design/tokens'
-import { BackButton, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
+import { ListCard, ScreenScaffold, Section } from '@app/components/Screen'
+import { DrawerButton } from '@app/components/Drawer'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   AgentAvatar,
@@ -103,7 +104,7 @@ export function AgentsScreen() {
   return (
     <ScreenScaffold
       title="Agents"
-      eyebrow={desktopName}
+      eyebrow={`Products · ${desktopName}`}
       subtitle={
         ready > 0
           ? `${ready} of ${agents.length} ready to start a task from here.`
@@ -112,7 +113,7 @@ export function AgentsScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       contentClassName="pb-10"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
+      headerLeft={<DrawerButton />}
       headerRight={
         <IconButton
           label="Re-scan for agents"

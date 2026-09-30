@@ -1,21 +1,22 @@
 /**
- * Settings — this device, its alerts, and its pairing.
+ * Configuration — the desktop's Configuration page, mobile shape.
  *
- * QAI SIGNAL DECK
- * ---------------
- * The desktop's Configuration is a stack of daemon-owned sections, and those
- * live in the System tab now. What is left here is exactly what the *phone*
- * owns: its route to the daemon, its attention alerts, its identity, and the
- * one irreversible action (unpair). Order follows ownership: connection first
- * (it explains every other screen's silence), alerts second (the reason this
- * app exists in a pocket), identity third, danger last.
+ * QAI · WARM STUDIO
+ * -----------------
+ * The desktop groups everything daemon-owned under one Configuration
+ * destination; the phone does the same. What this device owns comes first
+ * (its route to the daemon, its alerts, its identity), then the daemon-owned
+ * destinations as navigation rows (MCP servers, remote access, daemon
+ * settings), then the station's standalone terminals inline — a short list
+ * with one verb each does not deserve its own page. Danger last, because it
+ * is irreversible.
  */
 
 import * as React from 'react'
 import { Pressable, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { Bell, Monitor, QrCode, Smartphone } from 'lucide-react-native'
+import { Bell, ChevronRight, Monitor, Plus, QrCode, Server, Settings2, Smartphone, Trash2, Wifi } from 'lucide-react-native'
 import * as Application from 'expo-application'
 
 import {
@@ -27,7 +28,7 @@ import {
 } from '@app/lib/notify'
 import { clearPairing, getPairingBaseUrl } from '@app/lib/pairing'
 import { deviceRoutes, setDeviceBaseUrl } from '@app/lib/native'
-import { deviceToken, pairingApi } from '@app/lib/api'
+import { deviceToken, pairingApi, terminalsApi } from '@app/lib/api'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
@@ -41,13 +42,19 @@ import {
   CopyButton,
   Divider,
   Dot,
+  ErrorState,
+  Field,
   FieldRow,
+  IconButton,
   IconTile,
+  ListRow,
   Mono,
   Notice,
+  RowSkeleton,
   haptic,
   toast,
 } from '@app/components/ui'
+import { DrawerButton } from '@app/components/Drawer'
 
 const PERMISSION_LABEL: Record<PermissionState, string> = {
   granted: 'Allowed',
@@ -55,7 +62,7 @@ const PERMISSION_LABEL: Record<PermissionState, string> = {
   undetermined: 'Not requested yet',
 }
 
-export function SettingsScreen() {
+export function ConfigScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const desktopName = useStore((s) => s.desktopName)
   const connection = useStore((s) => s.connection)
@@ -127,11 +134,12 @@ export function SettingsScreen() {
 
   return (
     <ScreenScaffold
-      title="Settings"
-      eyebrow="This device"
-      subtitle="QAI talks only to your own daemon. Nothing is sent anywhere else."
+      title="Configuration"
+      eyebrow={`QAI · ${desktopName}`}
+      subtitle="This device talks only to your own daemon. Nothing is sent anywhere else."
       scroll
       contentClassName="pb-12 gap-6"
+      headerLeft={<DrawerButton />}
     >
       {/* ── Connection ──────────────────────────────────────────────── */}
       <Section enterIndex={0} eyebrow="You own this" title="Connection">
@@ -142,7 +150,7 @@ export function SettingsScreen() {
               pulse={connection !== 'connected'}
             />
             <Text
-              className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-medium text-ink"
+              className="min-w-0 flex-1 text-[13.5px] leading-[19px] font-medium text-ink"
               numberOfLines={1}
             >
               {connection === 'connected' ? `Connected to ${desktopName}` : connection}
@@ -154,11 +162,11 @@ export function SettingsScreen() {
 
           {routes.length === 0 ? (
             <View className="px-4 py-3.5">
-              <Text className="text-[13px] leading-[18px] text-ink-3">This device is not paired.</Text>
+              <Text className="text-[12.5px] leading-[17px] text-ink-3">This device is not paired.</Text>
             </View>
           ) : (
             <View>
-              <Text className="px-4 pb-2 pt-3 text-[12px] leading-[16px] text-ink-3">
+              <Text className="px-4 pb-2 pt-3 text-[11.5px] leading-[16px] text-ink-3">
                 Tap a route to pin it. Left alone, the app moves on by itself when the active route
                 stops answering.
               </Text>
@@ -198,7 +206,7 @@ export function SettingsScreen() {
         <ListCard inset={16}>
           <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
             <IconTile icon={<Bell size={16} color={palette.ink2} />} tone="muted" size={34} />
-            <Text className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-medium text-ink">
+            <Text className="min-w-0 flex-1 text-[13.5px] leading-[19px] font-medium text-ink">
               {PERMISSION_LABEL[perm]}
             </Text>
             <Badge tone={perm === 'granted' ? 'ok' : 'muted'} outline mono>
@@ -206,7 +214,7 @@ export function SettingsScreen() {
             </Badge>
           </View>
           <View className="gap-3 px-4 py-3.5">
-            <Text className="text-[13px] leading-[18px] text-ink-2">
+            <Text className="text-[12.5px] leading-[17px] text-ink-2">
               QAI raises a local notification when an agent needs approval, finishes a turn, or
               errors. It rides the connection to your own daemon — no account, no third-party push
               service.
@@ -223,7 +231,7 @@ export function SettingsScreen() {
             ) : (
               <Button size="sm" variant="primary" label="Enable notifications" onPress={() => void enable()} />
             )}
-            <Text className="text-[11.5px] leading-[16px] text-ink-3">
+            <Text className="text-[11px] leading-[15px] text-ink-3">
               Alerts are delivered while the app runs in the background. A fully closed app cannot
               be woken without platform push, so anything that arrived while it was closed surfaces
               the next time you open QAI.
@@ -238,16 +246,48 @@ export function SettingsScreen() {
         </ListCard>
       </Section>
 
+      {/* ── Daemon-owned destinations ───────────────────────────────── */}
+      <Section enterIndex={2} eyebrow="Managed on the desktop" title="Daemon">
+        <ListCard inset={64}>
+          <Destination
+            title="MCP servers"
+            subtitle="External tools this desktop can call"
+            icon={<Server size={16} color={palette.ink2} />}
+            onPress={() => navigation.navigate('Mcp')}
+          />
+          <Destination
+            title="Remote access"
+            subtitle="Tunnels, endpoints and paired devices"
+            icon={<Wifi size={16} color={palette.ink2} />}
+            onPress={() => navigation.navigate('Remote')}
+          />
+          <Destination
+            title="Daemon settings"
+            subtitle="Read and edit the daemon's own configuration"
+            icon={<Settings2 size={16} color={palette.ink2} />}
+            onPress={() => navigation.navigate('Daemon')}
+          />
+        </ListCard>
+      </Section>
+
+      {/* ── Standalone terminals (inline) ───────────────────────────────
+          Station-level PTYs the daemon owns (`term-*`), created with a working
+          directory and closed here. I/O for these lives on the desktop; what
+          the phone can honestly do is create, list and close. */}
+      <Section enterIndex={3} eyebrow="Managed on the desktop" title="Terminals">
+        <TerminalsSection />
+      </Section>
+
       {/* ── This device ─────────────────────────────────────────────── */}
-      <Section enterIndex={2} eyebrow="You own this" title="This device">
+      <Section enterIndex={4} eyebrow="You own this" title="This device">
         <ListCard inset={16}>
           <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
             <IconTile icon={<Smartphone size={16} color={palette.ink2} />} tone="accent" size={34} />
             <View className="min-w-0 flex-1">
-              <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
+              <Text className="text-[13.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
                 {about?.device ?? 'This phone'}
               </Text>
-              <Mono className="text-[11px]" numberOfLines={1}>
+              <Mono className="text-[10.5px]" numberOfLines={1}>
                 paired with {desktopName}
               </Mono>
             </View>
@@ -259,7 +299,7 @@ export function SettingsScreen() {
                 void haptic('light')
                 navigation.navigate('Pairing')
               }}
-              className="min-h-9 flex-row items-center gap-1.5 rounded-sm border border-line px-3 active:bg-raised"
+              className="min-h-9 flex-row items-center gap-1.5 rounded-pill border border-line px-3 active:bg-raised"
             >
               <QrCode size={14} color={palette.ink2} />
               <Text className="text-[12px] font-semibold text-ink-2">Pair</Text>
@@ -271,34 +311,33 @@ export function SettingsScreen() {
           <View className="gap-1.5 px-4 py-3">
             <View className="flex-row items-center gap-3">
               <IconTile icon={<Monitor size={16} color={palette.ink2} />} tone="muted" size={34} />
-              <Text className="min-w-0 flex-1 text-[13px] leading-[18px] text-ink-2">Device token</Text>
+              <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px] text-ink-2">Device token</Text>
               <CopyButton
                 value={deviceToken() ?? ''}
                 label="Copy"
                 accessibilityLabel="Copy this device's API token"
               />
             </View>
-            <Text className="text-[11.5px] leading-[16px] text-ink-3" style={{ marginLeft: 46 }}>
-              Bearer credential for this phone. Revoke it from System → Remote access if the device
-              is lost.
+            <Text className="text-[11px] leading-[15px] text-ink-3" style={{ marginLeft: 46 }}>
+              Bearer credential for this phone. Revoke it from Remote access if the device is lost.
             </Text>
           </View>
         </ListCard>
       </Section>
 
       {/* ── About ───────────────────────────────────────────────────── */}
-      <Section enterIndex={3} eyebrow="Colophon" title="About">
+      <Section enterIndex={5} eyebrow="Colophon" title="About">
         <ListCard inset={16}>
           <View className="flex-row items-center gap-3 px-4 py-4">
             <BrandLockup size={22} />
             <View style={{ flex: 1 }} />
-            <Mono className="text-[11px] text-ink-3">
+            <Mono className="text-[10.5px] text-ink-3">
               v{Application.nativeApplicationVersion ?? '1.0'}
             </Mono>
           </View>
           <Divider inset={16} />
           <View className="px-4 py-3">
-            <Text className="text-[12.5px] leading-[18px] text-ink-3">
+            <Text className="text-[12px] leading-[17px] text-ink-3">
               QAI is the mobile command centre for the coding agents running on your desktop —
               start, steer, approve and inspect from anywhere on your network or tailnet.
               {about?.desktopVersion ? ` Daemon v${about.desktopVersion}.` : ''}
@@ -308,7 +347,7 @@ export function SettingsScreen() {
       </Section>
 
       {/* ── Danger ──────────────────────────────────────────────────── */}
-      <Section enterIndex={4} eyebrow="Irreversible" title="Danger zone">
+      <Section enterIndex={6} eyebrow="Irreversible" title="Danger zone">
         <View className="gap-2.5">
           <Button
             variant="danger"
@@ -317,7 +356,7 @@ export function SettingsScreen() {
             full
             onPress={() => setConfirmUnpair(true)}
           />
-          <Text className="px-1 text-[12px] leading-[17px] text-ink-3">
+          <Text className="px-1 text-[11.5px] leading-[16px] text-ink-3">
             Removes the token from this phone. The desktop keeps running; you pair again with a new
             code.
           </Text>
@@ -334,5 +373,143 @@ export function SettingsScreen() {
         onConfirm={() => void unpair()}
       />
     </ScreenScaffold>
+  )
+}
+
+/* ── A row that goes somewhere ───────────────────────────────────────────────
+ * The muted icon tile and the chevron together are the whole visual vocabulary
+ * of "this is navigation, not a value". */
+
+function Destination({
+  title,
+  subtitle,
+  icon,
+  onPress,
+}: {
+  title: string
+  subtitle: string
+  icon: React.ReactNode
+  onPress: () => void
+}) {
+  return (
+    <ListRow
+      title={title}
+      subtitle={subtitle}
+      leading={<IconTile icon={icon} tone="accent" size={34} />}
+      trailing={<ChevronRight size={16} color={palette.ink4} />}
+      onPress={() => {
+        void haptic('light')
+        onPress()
+      }}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
+    />
+  )
+}
+
+/* ── Terminals ──────────────────────────────────────────────────────────────── */
+
+function TerminalsSection() {
+  const [terminals, setTerminals] = React.useState<Array<{ id: string; cwd?: string }> | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [cwd, setCwd] = React.useState('')
+
+  const load = React.useCallback(async () => {
+    setError(null)
+    try {
+      setTerminals((await terminalsApi.list()).terminals ?? [])
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not list terminals')
+      setTerminals(null)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void load()
+  }, [load])
+
+  async function create() {
+    setBusy(true)
+    try {
+      await terminalsApi.create(cwd.trim() || undefined)
+      setCwd('')
+      await load()
+      toast({ message: 'Terminal created on the desktop', tone: 'ok' })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create a terminal')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function close(id: string) {
+    setBusy(true)
+    try {
+      await terminalsApi.close(id)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not close that terminal')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ListCard inset={16}>
+      <View className="gap-2 px-4 py-3">
+        {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+        {terminals === null && !error ? <RowSkeleton /> : null}
+        {terminals !== null && terminals.length === 0 ? (
+          <Text className="text-[12px] leading-[16px] text-ink-3">No standalone terminals are open.</Text>
+        ) : null}
+        {(terminals ?? []).map((terminal) => (
+          <View
+            key={terminal.id}
+            className="flex-row items-center gap-3 rounded-lg border border-line bg-field py-2 pl-3.5 pr-1.5"
+          >
+            <Dot tone="ok" />
+            <View className="min-w-0 flex-1">
+              <Mono className="text-[11.5px] text-ink" numberOfLines={1}>
+                {terminal.id}
+              </Mono>
+              {terminal.cwd ? (
+                <Mono className="mt-0.5 text-[10px] text-ink-3" numberOfLines={1}>
+                  {terminal.cwd}
+                </Mono>
+              ) : null}
+            </View>
+            <IconButton
+              label={`Close terminal ${terminal.id}`}
+              size={32}
+              disabled={busy}
+              onPress={() => void close(terminal.id)}
+            >
+              <Trash2 size={14} color={palette.ink3} />
+            </IconButton>
+          </View>
+        ))}
+        <View className="flex-row items-center gap-2">
+          <Field
+            containerClassName="flex-1"
+            mono
+            value={cwd}
+            onChangeText={setCwd}
+            placeholder="Working directory (optional)"
+            accessibilityLabel="New terminal working directory"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Button
+            size="md"
+            variant="secondary"
+            label="Create"
+            icon={<Plus size={14} color={palette.ink2} />}
+            disabled={busy}
+            onPress={() => void create()}
+          />
+        </View>
+      </View>
+    </ListCard>
   )
 }

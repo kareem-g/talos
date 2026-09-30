@@ -90,26 +90,26 @@ type TypeRole = 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption' |
 
 /** The type scale, as class names. Kept in one place so it cannot drift. */
 const TYPE_CLASS: Record<TypeRole, string> = {
-  display: 'text-[28px] leading-[34px] font-bold',
-  title: 'text-[20px] leading-[26px] font-bold',
-  heading: 'text-[16px] leading-[21px] font-semibold',
-  body: 'text-[14.5px] leading-[21px]',
-  label: 'text-[14.5px] leading-[21px] font-medium',
-  caption: 'text-[13px] leading-[18px]',
-  small: 'text-[11.5px] leading-[15px]',
-  micro: 'text-[11px] leading-[14px] font-medium',
-  mono: 'text-[12.5px] leading-[18px]',
-  monoSmall: 'text-[11px] leading-[15px] font-medium',
+  display: 'text-[24px] leading-[30px] font-bold',
+  title: 'text-[17px] leading-[22px] font-bold',
+  heading: 'text-[14px] leading-[19px] font-semibold',
+  body: 'text-[13.5px] leading-[20px]',
+  label: 'text-[13px] leading-[18px] font-medium',
+  caption: 'text-[12px] leading-[17px]',
+  small: 'text-[11px] leading-[15px]',
+  micro: 'text-[10.5px] leading-[14px] font-medium',
+  mono: 'text-[12px] leading-[17px]',
+  monoSmall: 'text-[10.5px] leading-[14px] font-medium',
   eyebrow: 'text-[10px] leading-[13px] font-semibold uppercase',
 }
 
 const TYPE_TRACK: Partial<Record<TypeRole, number>> = {
-  display: -0.6,
-  title: -0.4,
-  heading: -0.2,
+  display: -0.5,
+  title: -0.3,
+  heading: -0.15,
   label: -0.1,
   micro: 0.1,
-  eyebrow: 1.2,
+  eyebrow: 1.1,
 }
 
 const MONO_ROLES: TypeRole[] = ['mono', 'monoSmall', 'eyebrow']
@@ -172,20 +172,32 @@ export function Mono({ className, style, ...props }: TextProps) {
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const BUTTON_SURFACE: Record<ButtonVariant, string> = {
-  primary: 'bg-accent border border-accent',
-  secondary: 'bg-raised border border-line-strong',
+  primary: 'bg-accent border border-line-strong',
+  secondary: 'bg-surface border border-line',
   ghost: 'bg-transparent border border-line',
   danger: 'bg-danger-soft border border-danger-border',
 }
 
 const BUTTON_TEXT: Record<ButtonVariant, string> = {
-  primary: 'text-accent-ink font-bold',
-  secondary: 'text-ink font-semibold',
-  ghost: 'text-ink-2 font-semibold',
-  danger: 'text-danger font-semibold',
+  primary: 'font-bold',
+  secondary: 'font-semibold',
+  ghost: 'font-semibold',
+  danger: 'font-semibold',
 }
 
-const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 36, md: 48, lg: 54 }
+/**
+ * Label colour as an inline token, not a class: the button label is the most
+ * repeated text in the app, and a class that fails to resolve renders RN's
+ * default BLACK — invisible on this theme. An inline colour cannot fail.
+ */
+const BUTTON_COLOR: Record<ButtonVariant, string> = {
+  primary: palette.accentInk,
+  secondary: palette.ink,
+  ghost: palette.ink2,
+  danger: palette.danger,
+}
+
+const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 36, md: 44, lg: 50 }
 
 export function Button({
   variant = 'secondary',
@@ -230,8 +242,8 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 7,
-          borderRadius: size === 'lg' ? radius.md : radius.sm,
-          paddingHorizontal: size === 'sm' ? 14 : 18,
+          borderRadius: radius.pill,
+          paddingHorizontal: size === 'sm' ? 16 : 20,
         },
         full ? { alignSelf: 'stretch', width: '100%' } : { alignSelf: 'flex-start' },
         { opacity: disabled ? 0.4 : 1 },
@@ -243,6 +255,7 @@ export function Button({
       <Txt
         as={size === 'sm' ? 'small' : 'label'}
         className={cn(BUTTON_TEXT[variant])}
+        style={{ color: BUTTON_COLOR[variant] }}
         numberOfLines={1}
         // The visible label is the accessible name; no need to repeat it.
         accessibilityElementsHidden
@@ -299,7 +312,7 @@ export function IconButton({
           height: size,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: radius.sm,
+          borderRadius: size / 2,
           backgroundColor: active ? toneSoft[tone] : 'transparent',
           opacity: disabled ? 0.35 : 1,
         },
@@ -316,11 +329,11 @@ export function IconButton({
  * every status surface ships a word. */
 
 const DOT_SIZE: Record<Tone, number> = {
-  ok: 8,
-  wait: 11,
-  danger: 11,
-  info: 8,
-  accent: 8,
+  ok: 7,
+  wait: 8,
+  danger: 8,
+  info: 7,
+  accent: 7,
   muted: 6,
 }
 
@@ -369,16 +382,16 @@ export function Badge({
   return (
     <View
       className={cn(
-        'h-[20px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
+        'h-[22px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
         outline ? toneClass.border[tone] : toneClass.soft[tone],
         className,
       )}
       style={{ borderWidth: outline ? 1 : 0 }}
     >
       <Text
-        className={cn('text-[10.5px] font-semibold', mono ? 'text-[9.5px] uppercase' : '', toneClass.text[tone])}
+        className={cn('text-[11.5px]', mono ? 'text-[10px] uppercase' : '')}
         numberOfLines={1}
-        style={{ letterSpacing: mono ? 0.6 : 0.1, fontFamily: mono ? MONO_FONT : undefined }}
+        style={{ color: toneColor[tone], letterSpacing: mono ? 0.6 : 0.1, fontFamily: mono ? MONO_FONT : undefined }}
       >
         {children}
       </Text>
@@ -391,12 +404,15 @@ export function StatusPill({
   tone,
   label,
   pulse,
+  detail,
   className,
   size = 'md',
 }: {
   tone: Tone
   label: string
   pulse?: boolean
+  /** Optional mono detail — the file being edited, the command running. */
+  detail?: string
   className?: string
   size?: 'sm' | 'md'
 }) {
@@ -406,21 +422,29 @@ export function StatusPill({
       accessibilityRole="text"
       accessibilityLabel={`Status: ${label}`}
       className={cn(
-        'shrink-0 flex-row items-center rounded-sm',
-        size === 'sm' ? 'h-[22px] gap-1.5 px-1.5' : 'h-6 gap-2 px-2',
-        toneClass.soft[tone],
+        'shrink-0 flex-row items-center rounded-pill bg-surface',
+        size === 'sm' ? 'h-[22px] gap-1.5 px-2' : 'h-6 gap-1.5 px-2.5',
         className,
       )}
-      style={{ borderWidth: 1, borderColor: toneBorder[tone] }}
+      style={{ borderWidth: 1, borderColor: palette.line }}
     >
       <Dot tone={tone} pulse={pulse} />
       <Text
-        className={cn('font-semibold', size === 'sm' ? 'text-[10px]' : 'text-[11px]', toneClass.text[tone])}
+        className={cn('font-medium', size === 'sm' ? 'text-[10.5px]' : 'text-[11px]')}
         numberOfLines={1}
-        style={{ letterSpacing: 0.2 }}
+        style={{ color: toneColor[tone] }}
       >
         {label}
       </Text>
+      {detail ? (
+        <Text
+          className="text-[10px] text-ink-3"
+          numberOfLines={1}
+          style={{ fontFamily: MONO_FONT }}
+        >
+          {detail}
+        </Text>
+      ) : null}
     </View>
   )
 }
@@ -464,7 +488,7 @@ export function CardHeader({
     <View className={cn('flex-row items-center justify-between gap-3 border-b border-line px-4 py-3', className)}>
       <View className="min-w-0 flex-1 gap-0.5">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-        <Text className="text-[14.5px] leading-[20px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
+        <Text className="text-[14px] leading-[19px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
           {title}
         </Text>
         {subtitle ? (
@@ -532,7 +556,7 @@ export function Field({
           accessibilityLabel={props.accessibilityLabel ?? label}
           placeholderTextColor={palette.ink4}
           {...props}
-          className={cn('flex-1 text-[14.5px] text-ink', mono && 'text-[13px]')}
+          className={cn('flex-1 text-[13.5px] text-ink', mono && 'text-[12.5px]')}
           style={[
             { paddingVertical: 0, fontFamily: mono ? MONO_FONT : undefined },
             props.style as StyleProp<TextStyle>,
@@ -567,7 +591,7 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-md border border-line bg-field px-3"
+      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-3.5"
       style={style as StyleProp<ViewStyle>}
     >
       <SearchIcon size={15} color={palette.ink3} />
@@ -582,7 +606,7 @@ export function SearchField({
         returnKeyType="search"
         onSubmitEditing={onSubmit}
         clearButtonMode="while-editing"
-        className="flex-1 text-[14px] text-ink"
+        className="flex-1 text-[13.5px] text-ink"
         style={{ paddingVertical: 0 }}
       />
       {value.length > 0 ? (
@@ -628,7 +652,7 @@ export function ToggleRow({
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[14.5px] leading-[20px] font-medium text-ink">{label}</Text>
+        <Text className="text-[13.5px] leading-[19px] font-medium text-ink">{label}</Text>
         {description ? (
           <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3">{description}</Text>
         ) : null}
@@ -688,7 +712,7 @@ export function CheckRow({
       style={{ opacity: disabled ? 0.4 : 1 }}
     >
       <View
-        className="size-[18px] shrink-0 items-center justify-center rounded-xs border"
+        className="size-[18px] shrink-0 items-center justify-center rounded-sm border"
         style={{
           borderColor: checked ? palette.accent : palette.lineStrong,
           backgroundColor: checked ? palette.accent : 'transparent',
@@ -698,7 +722,7 @@ export function CheckRow({
       </View>
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[14px] leading-[19px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[13.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
           {label}
         </Text>
         {description ? (
@@ -738,7 +762,7 @@ export function Segmented<T extends string>({
     <View
       accessibilityRole="tablist"
       accessibilityLabel={label}
-      className={cn('flex-row gap-1 rounded-md border border-line bg-well p-1', className)}
+      className={cn('flex-row gap-1 rounded-pill border border-line bg-well p-1', className)}
     >
       {options.map((option) => {
         const active = option.value === value
@@ -751,7 +775,7 @@ export function Segmented<T extends string>({
             onPress={() => onChange(option.value)}
             hitSlop={HIT_SLOP}
             className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-sm',
+              'flex-1 flex-row items-center justify-center gap-1.5 rounded-pill',
               size === 'sm' ? 'h-8' : 'h-10',
               active ? 'bg-raised' : 'active:bg-raised/60',
             )}
@@ -816,7 +840,7 @@ export function FilterChips<T extends string>({
             }
             accessibilityState={{ selected: active }}
             onPress={() => onChange(option.value)}
-            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-sm border px-3"
+            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-pill border px-3.5"
             style={{
               borderColor: active ? palette.accentBorder : palette.line,
               backgroundColor: active ? palette.accentSoft : 'transparent',
@@ -904,11 +928,10 @@ export function ListRow({
         selected && 'bg-accent-soft',
         disabled && 'opacity-40',
       )}
-      style={selected ? { borderLeftWidth: 2, borderLeftColor: palette.accent } : undefined}
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[13.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
@@ -965,7 +988,7 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
       style={{
         width: size,
         height: size,
-        borderRadius: size * 0.28,
+        borderRadius: size / 2,
         backgroundColor: agentSoft(agent),
         borderWidth: 1,
         borderColor: `${agentColor(agent)}55`,
@@ -991,7 +1014,7 @@ export function IconTile({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="items-center justify-center"
-      style={{ width: size, height: size, borderRadius: size * 0.26, backgroundColor: toneSoft[tone] }}
+      style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: toneSoft[tone] }}
     >
       {icon}
     </View>
@@ -1044,7 +1067,7 @@ export function Stat({
     <View style={{ flex: 1, alignItems: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center', gap: 3 }}>
       <Eyebrow>{label}</Eyebrow>
       <Text
-        className={cn('text-[21px] font-semibold', tone && toneClass.text[tone])}
+        className={cn('text-[21px] font-semibold text-ink', tone && toneClass.text[tone])}
         style={{ letterSpacing: -0.5, fontVariant: ['tabular-nums'] }}
         numberOfLines={1}
       >
@@ -1166,7 +1189,7 @@ export function EmptyState({
           {icon}
         </View>
       ) : null}
-      <Text className="text-center text-[15px] leading-[20px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
+      <Text className="text-center text-[14px] leading-[19px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
         {title}
       </Text>
       {body ? (
@@ -1319,7 +1342,7 @@ export function CopyButton({
         timer.current = setTimeout(() => setCopied(false), 1600)
       }}
       hitSlop={HIT_SLOP}
-      className="min-h-9 flex-row items-center gap-1.5 rounded-sm px-2 active:bg-raised"
+      className="min-h-9 flex-row items-center gap-1.5 rounded-pill px-2.5 active:bg-raised"
       style={copied ? { backgroundColor: palette.okSoft } : undefined}
     >
       {copied ? <Check size={12} color={palette.ok} strokeWidth={2.6} /> : icon ? <Txt as="small">⧉</Txt> : null}

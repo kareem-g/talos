@@ -1,5 +1,5 @@
 /**
- * AgentDeck service worker — an installed remote control that survives flaky
+ * QAI service worker — an installed remote control that survives flaky
  * connections between you and your home machine.
  *
  * Strategy, deliberately boring:
@@ -71,7 +71,7 @@ self.addEventListener('fetch', (event) => {
         caches.match(request).then((hit) => hit ?? caches.match('/')).then(
           (hit) =>
             hit ??
-            new Response('AgentDeck is offline.', {
+            new Response('QAI is offline.', {
               status: 503,
               headers: { 'Content-Type': 'text/plain' },
             }),
@@ -100,11 +100,11 @@ self.addEventListener('push', (event) => {
       // A malformed or empty body still deserves a generic ping rather than
       // dropping the notification on the floor — the user was paged for a
       // reason, even if we cannot name it.
-      data = { title: 'AgentDeck', body: event.data.text() }
+      data = { title: 'QAI', body: event.data.text() }
     }
   }
 
-  const title = data.title || 'AgentDeck'
+  const title = data.title || 'QAI'
   const options = {
     body: data.body || '',
     tag: data.tag || 'agentdeck',

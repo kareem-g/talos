@@ -1,15 +1,13 @@
 /**
- * BrandMark — the app's logo, as the same geometry the icon uses.
+ * BrandMark — the QAI signal mark: a ring, a 45° tail cutting out of it, and
+ * a live core dot. A "Q" that reads as a beacon at 16px and as an app icon
+ * at 1024. The mobile app draws the identical geometry (its `BrandMark` in
+ * `components/ui.tsx` and the generated PNG assets), so the mark is one
+ * design across both surfaces.
  *
- * Two stacked cards (the "deck") with a terminal prompt knocked out of the top
- * one: the product is a deck of agent sessions driven from a command surface.
- * The icon in `resources/icon.png` is generated from these same proportions
- * (`resources/generate-icons.sh`), so the home-screen icon and the in-app mark
- * stay one design.
- *
- * Colours are tokens, so it follows the theme: the accent ramp for the top card,
- * the accent at low opacity for the one behind it, and the knockout in the
- * surface colour so it reads as cut out of whatever card it sits on.
+ * Colours are tokens, so it follows the theme: the accent for the ring and
+ * tail, at full strength — the mark is the one place the accent is allowed to
+ * be the whole picture.
  */
 
 export function BrandMark({ className }: { className?: string }) {
@@ -18,38 +16,20 @@ export function BrandMark({ className }: { className?: string }) {
       viewBox="0 0 1024 1024"
       className={className}
       role="img"
-      aria-label="AgentDeck"
+      aria-label="QAI"
       fill="none"
     >
-      <defs>
-        <linearGradient id="brand-mark-card" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent-hover)" />
-          <stop offset="100%" stopColor="var(--accent-2, var(--accent))" />
-        </linearGradient>
-      </defs>
-
-      {/* Deck: the card behind peeks out down-right. */}
-      <rect
-        x="236"
-        y="212"
-        width="624"
-        height="624"
-        rx="132"
-        fill="var(--accent)"
-        opacity="0.22"
-      />
-      {/* Top card. */}
-      <rect x="172" y="148" width="624" height="624" rx="132" fill="url(#brand-mark-card)" />
-
-      {/* Prompt: chevron + cursor. */}
+      {/* The ring. */}
+      <circle cx="512" cy="512" r="240" stroke="var(--accent)" strokeWidth="64" />
+      {/* The tail, cutting out at 45°. */}
       <path
-        d="M330 338 L450 460 L330 582"
-        stroke="var(--surface)"
-        strokeWidth="58"
+        d="M626 626 L810 810"
+        stroke="var(--accent)"
+        strokeWidth="64"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
-      <rect x="500" y="431" width="140" height="58" rx="29" fill="var(--surface)" />
+      {/* The live core. */}
+      <circle cx="512" cy="512" r="48" fill="var(--accent)" />
     </svg>
   )
 }

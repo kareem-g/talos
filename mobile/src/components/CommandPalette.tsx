@@ -127,7 +127,7 @@ export function SessionSearchSheet({
       icon: <Bot size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Agents')
+        navigation.navigate('Main', { screen: 'Agents' } as never)
       },
     },
     {
@@ -137,7 +137,7 @@ export function SessionSearchSheet({
       icon: <Cpu size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Usage')
+        navigation.navigate('Main', { screen: 'Usage' } as never)
       },
     },
     {
@@ -147,7 +147,7 @@ export function SessionSearchSheet({
       icon: <Globe size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Browsers')
+        navigation.navigate('Main', { screen: 'Browsers' } as never)
       },
     },
     {
@@ -161,23 +161,13 @@ export function SessionSearchSheet({
       },
     },
     {
-      key: 'system',
-      label: 'System',
-      hint: 'Terminals, rooms and the rest of the machinery',
-      icon: <Server size={16} color={palette.ink2} />,
-      run: () => {
-        onClose()
-        navigation.navigate('Main', { screen: 'System' } as never)
-      },
-    },
-    {
-      key: 'settings',
-      label: 'Settings',
-      hint: 'Routes, alerts, pairing and this device',
+      key: 'config',
+      label: 'Configuration',
+      hint: 'Routes, alerts, MCP, tunnels and this device',
       icon: <SettingsIcon size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Settings' } as never)
+        navigation.navigate('Config')
       },
     },
     {

@@ -173,12 +173,15 @@ function AssistantTurn({
   sessionId,
   message,
   project,
+  simple,
   onRespond,
   onViewPlan,
 }: {
   sessionId: string
   message: Message
   project?: string | null
+  /** Desktop timeline-detail toggle: simple folds tool runs to one line. */
+  simple?: boolean
   onRespond: (part: MessagePart & { kind: 'approval' }, decision: string, meta?: { always?: boolean }) => void
   onViewPlan?: () => void
 }) {
@@ -197,7 +200,9 @@ function AssistantTurn({
             if (candidate.kind !== 'tool' && candidate.kind !== 'command') break
             run.push(candidate as never)
           }
-          return <ToolGroup key={index} parts={run} />
+          // Simple mode folds even a LONE tool into the one-line group, which
+          // is exactly what the desktop Timeline does.
+          return <ToolGroup key={index} parts={run} simple={simple} />
         }
 
         switch (part.kind) {
@@ -335,11 +340,14 @@ export function Transcript({
   sessionId,
   messages,
   revision,
+  simple,
   onViewPlan,
 }: {
   sessionId: string
   messages: Message[]
   revision: number
+  /** Desktop timeline-detail toggle: simple folds tool runs to one line. */
+  simple?: boolean
   onViewPlan?: () => void
 }) {
   const listRef = React.useRef<FlatList<Message>>(null)
@@ -409,6 +417,7 @@ export function Transcript({
               sessionId={sessionId}
               message={item}
               project={session?.project}
+              simple={simple}
               onRespond={onRespond}
               onViewPlan={onViewPlan}
             />

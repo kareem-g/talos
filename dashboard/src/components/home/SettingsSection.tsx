@@ -104,7 +104,7 @@ export function SettingsSection({ page = false }: { page?: boolean }) {
         <ol className="flex flex-col gap-2 text-[12px] leading-[1.6] text-ink-2">
           <li className="flex gap-2">
             <span className="font-mono text-[11px] text-accent-ink">01</span>
-            Install an agent CLI (Claude Code, Codex, OpenCode, Grok Build…) — Plumb detects
+            Install an agent CLI (Claude Code, Codex, OpenCode, Grok Build…) — QAI detects
             it automatically.
           </li>
           <li className="flex gap-2">

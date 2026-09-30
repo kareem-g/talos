@@ -1655,7 +1655,7 @@ function VerificationCard({ part }: { part: Extract<MessagePart, { kind: 'verifi
 }
 
 /**
- * The harness-context chip: what the Plumb harness injected into the user's
+ * The harness-context chip: what the QAI harness injected into the user's
  * prompt before it reached the agent (environment, project skills, similar past
  * runs). Rendered under the user message so the enrichment is visible.
  * Developer detail — hidden in simple mode.
@@ -1673,7 +1673,7 @@ export function ContextChip({ part }: { part: Extract<MessagePart, { kind: 'cont
   return (
     <div
       className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-ink-3"
-      title="Injected by the Plumb harness before this prompt reached the agent"
+      title="Injected by the QAI harness before this prompt reached the agent"
     >
       <span aria-hidden>🧠</span>
       <span className="truncate">Context: {bits.join(' · ')}</span>

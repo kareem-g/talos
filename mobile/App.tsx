@@ -22,6 +22,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
 
 import { Navigation, navigateToAction } from '@app/navigation'
+import { NewTaskHost } from '@app/components/NewTaskHost'
+import { DrawerHost } from '@app/components/Drawer'
 import { useStore } from '@app/store'
 import { hydrateCredentials } from '@app/lib/secureStore'
 import { startNotifications } from '@app/lib/notifications'
@@ -87,8 +89,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <Navigation />
-        {/* Above the navigator, so a toast can land over a sheet, a dialog and
-            a pushed screen without any of them knowing it exists. */}
+        {/* Root-mounted chrome, above the navigator: the new-task sheet and
+            the navigation drawer are app-level surfaces that any screen can
+            summon through their emitters, and a toast can land over both. */}
+        <NewTaskHost />
+        <DrawerHost />
         <ToastHost />
         <StatusBar style="light" />
       </SafeAreaProvider>

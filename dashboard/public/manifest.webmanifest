@@ -1,6 +1,6 @@
 {
-  "name": "AgentDeck Remote Control",
-  "short_name": "AgentDeck",
+  "name": "QAI Remote Control",
+  "short_name": "QAI",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

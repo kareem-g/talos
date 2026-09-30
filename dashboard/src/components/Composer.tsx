@@ -265,7 +265,7 @@ export function Composer({
   }, [draftSeed?.nonce])
 
   // Slash menu items: agent-announced first, then curated built-ins, then
-  // Plumb's own commands (/side, /btw).
+  // QAI's own commands (/side, /btw).
   const slashItems = useMemo<MenuItem[]>(() => {
     const announced = (commands ?? []).map((name) => ({
       insert: name.replace(/^\//, ''),

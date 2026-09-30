@@ -42,9 +42,9 @@ function BrandMark() {
   return (
     <span className="flex items-center gap-2 px-1">
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/15">
-        <span className="font-mono text-[12px] font-bold text-accent-ink">A</span>
+        <span className="font-mono text-[12px] font-bold text-accent-ink">Q</span>
       </span>
-      <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Plumb</span>
+      <span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">QAI</span>
     </span>
   )
 }

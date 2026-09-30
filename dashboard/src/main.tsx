@@ -29,7 +29,7 @@ window.addEventListener('error', (errorEvent) => {
 const watchdog = window.setTimeout(() => {
   if (root.childElementCount > 0) return
   root.textContent =
-    'AgentDeck could not start. Close and reopen the app. If it keeps happening, re-pair this device.'
+    'QAI could not start. Close and reopen the app. If it keeps happening, re-pair this device.'
 }, 6000)
 
 registerSW()

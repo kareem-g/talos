@@ -1,7 +1,7 @@
 /**
  * PWA wiring — the browser app installs like an app, because it is one.
  *
- * "Remote control from your pocket" only works if the phone keeps Plumb a
+ * "Remote control from your pocket" only works if the phone keeps QAI a
  * tap away and doesn't treat it as just another tab: installed to the home
  * screen, standalone display, its own icon, service worker for offline shell.
  *

@@ -87,8 +87,8 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
           {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
           <Text
             accessibilityRole="header"
-            className="text-[28px] leading-[34px] font-bold text-ink"
-            style={{ letterSpacing: -0.6 }}
+            className="text-[24px] leading-[30px] font-bold text-ink"
+            style={{ letterSpacing: -0.5 }}
             numberOfLines={2}
           >
             {title}
@@ -456,7 +456,7 @@ export function Section({
               </View>
             ) : null}
             {title ? (
-              <Text className="text-[17px] leading-[22px] font-bold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={2}>
+              <Text className="text-[16px] leading-[21px] font-bold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={2}>
                 {title}
               </Text>
             ) : null}

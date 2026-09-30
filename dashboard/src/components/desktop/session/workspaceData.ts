@@ -137,7 +137,7 @@ export interface DerivedSubagent {
  * the conversation. Claude's `Agent` tool and opencode's task tools both carry a
  * `description` + `prompt` in their input, so we detect either: a tool literally
  * named `Agent`, or any tool whose input has a `prompt` plus a description. This
- * is a transcript-derived view — Plumb has no first-class subagent feed.
+ * is a transcript-derived view — QAI has no first-class subagent feed.
  */
 export function deriveSubagents(messages: Message[]): DerivedSubagent[] {
   const out: DerivedSubagent[] = []
@@ -452,7 +452,7 @@ function agentStatusFor(status: string, hasActivity: boolean): AgentStatus {
 
 /**
  * The primary agent plus every session in the same workspace (the honest
- * "subagents" signal — Plumb has no subagent event stream, so the roster
+ * "subagents" signal — QAI has no subagent event stream, so the roster
  * is other sessions the agent or the user spawned in this project).
  */
 export function useAgentSummaries(session: Session): {
