@@ -100,8 +100,12 @@ pub struct ApiProbeResult {
 /// Returns an `ApiProbeResult` even on failure so the provider is still
 /// reported with an empty model list and the error recorded.
 pub async fn probe_api_provider(provider: &ApiProvider) -> ApiProbeResult {
+    // 6s, not "generous": this probe runs inside the sweep that session-config
+    // reads fan out into, and an endpoint that drops packets instead of
+    // refusing the connection held the whole registry — and therefore every
+    // config read — for the full timeout.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(6))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 

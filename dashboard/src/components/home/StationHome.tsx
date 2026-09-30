@@ -163,12 +163,39 @@ export function StationHome({
     return (id: string) => m.get(id) ?? id
   }, [providers])
 
-  // Hydrate conversations that are in attention but empty
+  // Hydrate conversations that are in attention but empty.
+  //
+  // Each session is attempted once per mount. A session can legitimately stay
+  // empty after hydration (a failed agent has no transcript to replay), and
+  // without the guard every SessionUpdate frame re-fired the whole batch —
+  // a request flood that queued the pairing QR and everything else behind it.
+  // The burst is also spread out: each hydration pulls history AND config,
+  // and two dozen of those in one tick is a stampede.
+  const hydrateAttempted = useRef<Set<string>>(new Set())
   useEffect(() => {
-    for (const s of sessions) {
-      if (s.status !== 'waiting_for_approval' && s.status !== 'waiting_for_input' && s.status !== 'error' && s.status !== 'needs_resume') continue
-      if (getConversation(s.id).messages.length > 0) continue
-      void openSession(s.id)
+    const pending = sessions.filter(
+      (s) =>
+        (s.status === 'waiting_for_approval' ||
+          s.status === 'waiting_for_input' ||
+          s.status === 'error' ||
+          s.status === 'needs_resume') &&
+        getConversation(s.id).messages.length === 0 &&
+        !hydrateAttempted.current.has(s.id),
+    )
+    if (pending.length === 0) return
+    pending.forEach((s) => hydrateAttempted.current.add(s.id))
+    let cancelled = false
+    const timers = pending.map((s, index) =>
+      setTimeout(
+        () => {
+          if (!cancelled) void openSession(s.id)
+        },
+        index * 120,
+      ),
+    )
+    return () => {
+      cancelled = true
+      timers.forEach(clearTimeout)
     }
   }, [sessions, openSession])
 

@@ -77,6 +77,13 @@ struct CacheEntry {
 
 pub struct ProviderRegistry {
     cache: Arc<RwLock<Option<CacheEntry>>>,
+    /// Single-flight guard for the sweep. A sweep spawns every CLI on PATH and
+    /// probes every API endpoint; a dashboard that asks for sixteen sessions'
+    /// config in the same tick used to start sixteen concurrent sweeps, and the
+    /// request flood queued everything else (the pairing QR included) behind
+    /// them for half a minute. Holding this mutex across re-check + sweep +
+    /// cache-fill turns those N sweeps into exactly one.
+    sweep_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Default for ProviderRegistry {
@@ -87,7 +94,7 @@ impl Default for ProviderRegistry {
 
 impl ProviderRegistry {
     pub fn new() -> Self {
-        Self { cache: Arc::new(RwLock::new(None)) }
+        Self { cache: Arc::new(RwLock::new(None)), sweep_lock: Arc::new(tokio::sync::Mutex::new(())) }
     }
 
     /// All known providers, ready or not. Served from cache when fresh *and*
@@ -106,6 +113,16 @@ impl ProviderRegistry {
         context_windows: &HashMap<String, u64>,
     ) -> Vec<ProviderDescriptor> {
         let fingerprint = sweep_fingerprint(custom, api_providers, context_windows);
+        if let Some(entry) = self.cache.read().await.as_ref() {
+            if entry.probed_at.elapsed() < CACHE_TTL && entry.fingerprint == fingerprint {
+                return entry.providers.clone();
+            }
+        }
+        // Second caller with a cold cache must not start a second sweep: wait
+        // for the lock, then re-check the cache — the caller that held it
+        // filled the cache with the same fingerprint, so this caller usually
+        // returns from here without probing anything.
+        let _guard = self.sweep_lock.lock().await;
         if let Some(entry) = self.cache.read().await.as_ref() {
             if entry.probed_at.elapsed() < CACHE_TTL && entry.fingerprint == fingerprint {
                 return entry.providers.clone();

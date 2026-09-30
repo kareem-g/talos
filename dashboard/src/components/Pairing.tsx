@@ -259,9 +259,12 @@ function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
     }
   }
 
-  // Mint an offer whenever the selection changes (and on first auto-pick).
+  // Mint ONE offer as soon as the card mounts. The offer is route-agnostic —
+  // the daemon bakes a QR per route into `qr_options` — so it must not wait
+  // for the endpoints list, and picking a different route must only recompose
+  // the payload, not round-trip a new offer. Re-minted on expiry and by the
+  // explicit "New code" button (via mintNonce) and nothing else.
   useEffect(() => {
-    if (!selectedKey) return
     let cancelled = false
     setOfferLoading(true)
     setOfferError(undefined)
@@ -284,7 +287,7 @@ function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [selectedKey, mintNonce])
+  }, [mintNonce])
 
   // Countdown ticker.
   useEffect(() => {
@@ -325,15 +328,21 @@ function ConnectPhoneCard({ stacked }: { stacked?: boolean }) {
   )
 
   // Build the QR data: prefer the server-baked per-option URL, else
-  // recompose from base_url + the offer's id/secret.
+  // recompose from base_url + the offer's id/secret. While the endpoints
+  // list is still loading (or when it comes back empty) the offer's own
+  // default QR — the daemon's best route — renders instead of a spinner,
+  // so the code is on screen within one round-trip of the page loading.
   const qrPayload = useMemo(() => {
-    if (!offer || !selected) return ''
-    const matchFromList = offer.qr_options?.find(
-      (o) => transportKey(o) === selectedKey,
-    )
-    if (matchFromList?.qr_data) return matchFromList.qr_data
-    const secret = offerSecret(offer)
-    return `${selected.base_url}/mobile/pair?offer=${encodeURIComponent(offer.offer_id)}&secret=${encodeURIComponent(secret)}`
+    if (!offer) return ''
+    if (selected) {
+      const matchFromList = offer.qr_options?.find(
+        (o) => transportKey(o) === selectedKey,
+      )
+      if (matchFromList?.qr_data) return matchFromList.qr_data
+      const secret = offerSecret(offer)
+      return `${selected.base_url}/mobile/pair?offer=${encodeURIComponent(offer.offer_id)}&secret=${encodeURIComponent(secret)}`
+    }
+    return offer.qr_data
   }, [offer, selected, selectedKey])
 
   const expired = offer !== null && remaining === 0
