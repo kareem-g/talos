@@ -136,21 +136,21 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath ../build/AgentDeck.xcarchive \
+            -archivePath ../build/QAI.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             -quiet
 
           mkdir -p ../build/Payload
-          cp -R ../build/AgentDeck.xcarchive/Products/Applications/*.app ../build/Payload/AgentDeck.app
-          cd ../build && zip -qry AgentDeck-rn-unsigned.ipa Payload
+          cp -R ../build/QAI.xcarchive/Products/Applications/*.app ../build/Payload/QAI.app
+          cd ../build && zip -qry QAI-rn-unsigned.ipa Payload
 
           echo "## React Native iOS" >> "$GITHUB_STEP_SUMMARY"
-          echo "Unsigned IPA: AgentDeck-rn-unsigned.ipa (re-sign with Sideloadly/AltStore)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unsigned IPA: QAI-rn-unsigned.ipa (re-sign with Sideloadly/AltStore)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AgentDeck-rn-ios-ipa
-          path: mobile/build/AgentDeck-rn-unsigned.ipa
+          name: QAI-rn-ios-ipa
+          path: mobile/build/QAI-rn-unsigned.ipa
           retention-days: 14
