@@ -1,9 +1,9 @@
 /**
- * Search — the kiln's find-everything glance sheet.
+ * Search — the deck's find-everything glance sheet.
  *
- * EMBER CLAY
- * ----------
- * The desktop's ⌘K as a 62% kiln sheet: sessions by name/agent/workspace,
+ * QAI SIGNAL DECK
+ * ---------------
+ * The desktop's ⌘K as a 62% sheet: sessions by name/agent/workspace,
  * station actions, and — from inside a session — the transcript itself.
  * A full screen would steal what you were looking at; a glance sheet keeps it
  * behind you and dismisses with a downward flick. Same search and jump
@@ -21,8 +21,6 @@ import {
   RefreshCw,
   Server,
   Settings as SettingsIcon,
-  Users,
-  Waypoints,
 } from 'lucide-react-native'
 
 import { basename, relativeTime } from '@/lib/format'
@@ -129,7 +127,7 @@ export function SessionSearchSheet({
       icon: <Bot size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Agents' } as never)
+        navigation.navigate('Agents')
       },
     },
     {
@@ -163,29 +161,19 @@ export function SessionSearchSheet({
       },
     },
     {
-      key: 'subagents',
-      label: 'Spawn a subagent',
-      hint: 'Run a focused task in parallel',
-      icon: <Users size={16} color={palette.ink2} />,
+      key: 'system',
+      label: 'System',
+      hint: 'Terminals, rooms and the rest of the machinery',
+      icon: <Server size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Activity' } as never)
-      },
-    },
-    {
-      key: 'rooms',
-      label: 'Rooms',
-      hint: 'Rosters of workers you can fan a task out to',
-      icon: <Waypoints size={16} color={palette.ink2} />,
-      run: () => {
-        onClose()
-        navigation.navigate('Main', { screen: 'Activity' } as never)
+        navigation.navigate('Main', { screen: 'System' } as never)
       },
     },
     {
       key: 'settings',
-      label: 'Configuration',
-      hint: 'Routes, alerts, tunnels and this device',
+      label: 'Settings',
+      hint: 'Routes, alerts, pairing and this device',
       icon: <SettingsIcon size={16} color={palette.ink2} />,
       run: () => {
         onClose()

@@ -77,7 +77,7 @@ export interface MobileAgent {
   [key: string]: unknown
 }
 
-const STARRED_KEY = 'agentdeck-starred'
+const STARRED_KEY = 'qai-starred'
 
 /** Map a mobile snapshot task onto the shared `Session` row shape. */
 function taskToSession(task: MobileTask): Session {
@@ -112,7 +112,8 @@ interface StoreState {
   starred: string[]
 
   start: () => void
-  loadSnapshot: () => Promise<void>
+  /** `includeArchived` widens the snapshot; the Sessions browser asks for it. */
+  loadSnapshot: (includeArchived?: boolean) => Promise<void>
   openSession: (sessionId: string) => Promise<void>
   createSession: (input: {
     agent: string
@@ -125,6 +126,8 @@ interface StoreState {
   /** Change a live session dimension (model, permission mode, thought, …). */
   setConfig: (sessionId: string, configId: string, value: string) => void
   sendPrompt: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
+  /** Re-send the newest user prompt of a session (retry a failed turn). */
+  resendLastUserPrompt: (sessionId: string) => boolean
   queueMessage: (sessionId: string, text: string, attachments?: AttachmentRef[]) => void
   removeQueued: (sessionId: string, id: string) => void
   steerQueued: (sessionId: string, id: string) => void
@@ -149,8 +152,6 @@ interface StoreState {
   switchEngine: (sessionId: string, agent: string, model?: string) => Promise<boolean>
   pendingActions: import('../lib/api').PendingAction[]
   loadPending: () => Promise<void>
-  theme: 'dark' | 'midnight' | 'oled'
-  setTheme: (theme: 'dark' | 'midnight' | 'oled') => void
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -165,7 +166,6 @@ export const useStore = create<StoreState>((set, get) => ({
   queues: {},
   starred: storage.getJSON<string[]>(STARRED_KEY) ?? [],
   pendingActions: [],
-  theme: (storage.getString('agentdeck-theme') as 'dark' | 'midnight' | 'oled') || 'dark',
 
   /** Connect the socket and wire frames into the store. Idempotent. */
   start() {
@@ -187,10 +187,10 @@ export const useStore = create<StoreState>((set, get) => ({
     void get().loadSnapshot()
   },
 
-  async loadSnapshot() {
+  async loadSnapshot(includeArchived = false) {
     set({ sessionsLoading: true })
     try {
-      const snapshot = await mobileApi.snapshot()
+      const snapshot = await mobileApi.snapshot(includeArchived)
       const sessions: Session[] = []
       for (const workspace of snapshot.workspaces) {
         for (const task of workspace.tasks) sessions.push(taskToSession(task))
@@ -302,7 +302,44 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!finalText) return
     addOptimisticUserMessage(getConversation(sessionId), finalText)
     bump(set, sessionId)
+    // A prompt sent to a stopped-but-resumable session resumes it first, the
+    // same as the desktop: stopping the current turn must not leave the
+    // session dead, and the next message should just work.
+    const session = get().sessions.find((row) => row.id === sessionId)
+    const resumable =
+      session !== undefined &&
+      (session.status === 'needs_resume' || session.status === 'paused' || session.status === 'exited')
+    if (resumable) {
+      void get()
+        .resumeSession(sessionId)
+        .then(() => socket.sendInput(sessionId, finalText))
+      return
+    }
     socket.sendInput(sessionId, finalText)
+  },
+
+  /**
+   * Re-run the agent from the last user prompt — the mobile twin of the
+   * desktop's per-turn retry. Finds the most recent user message and resends
+   * its text, equivalent to re-typing it. Returns false when there is nothing
+   * to resend.
+   */
+  resendLastUserPrompt(sessionId) {
+    const conversation = getConversation(sessionId)
+    for (let index = conversation.messages.length - 1; index >= 0; index--) {
+      const message = conversation.messages[index]
+      if (message.role !== 'user') continue
+      const text = message.parts
+        .map((part) => (part.kind === 'text' ? part.text : ''))
+        .join('')
+        .trim()
+      if (!text) return false
+      addOptimisticUserMessage(conversation, text)
+      bump(set, sessionId)
+      socket.sendInput(sessionId, text)
+      return true
+    }
+    return false
   },
 
   queueMessage(sessionId, text, attachments) {
@@ -457,11 +494,6 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch {
       // offline or error
     }
-  },
-
-  setTheme(theme) {
-    storage.set('agentdeck-theme', theme)
-    set({ theme })
   },
 }))
 

@@ -14,9 +14,9 @@
 import 'react-native-url-polyfill/auto'
 import { storage } from './storage'
 
-export const BASE_URL_KEY = 'agentdeck-device-base-url'
+export const BASE_URL_KEY = 'qai-device-base-url'
 /** Ordered origins the daemon advertised, so the socket can fail over. */
-export const ROUTES_KEY = 'agentdeck-device-routes'
+export const ROUTES_KEY = 'qai-device-routes'
 
 /** Always true here — this module only ships in the native app. */
 export function isNativeApp(): boolean {

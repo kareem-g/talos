@@ -1,29 +1,22 @@
 /**
- * Settings — the kiln hub for everything this device can reach.
+ * Settings — this device, its alerts, and its pairing.
  *
- * EMBER CLAY
- * ----------
- * The desktop's Configuration is a stack of daemon-owned sections; the phone
- * owns its route, its alerts, and its pairing — those come first as lit
- * controls. Desktop-owned destinations follow as ember-tiled navigation (a
- * tile + chevron always means "goes somewhere"), then the device block, then
- * the lone danger zone at the bottom because it is irreversible.
+ * QAI SIGNAL DECK
+ * ---------------
+ * The desktop's Configuration is a stack of daemon-owned sections, and those
+ * live in the System tab now. What is left here is exactly what the *phone*
+ * owns: its route to the daemon, its attention alerts, its identity, and the
+ * one irreversible action (unpair). Order follows ownership: connection first
+ * (it explains every other screen's silence), alerts second (the reason this
+ * app exists in a pocket), identity third, danger last.
  */
 
 import * as React from 'react'
 import { Pressable, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import {
-  Bell,
-  Cpu,
-  Globe,
-  Monitor,
-  Server,
-  Settings as SettingsIcon,
-  Smartphone,
-  Wifi,
-} from 'lucide-react-native'
+import { Bell, Monitor, QrCode, Smartphone } from 'lucide-react-native'
+import * as Application from 'expo-application'
 
 import {
   openSystemNotificationSettings,
@@ -34,7 +27,7 @@ import {
 } from '@app/lib/notify'
 import { clearPairing, getPairingBaseUrl } from '@app/lib/pairing'
 import { deviceRoutes, setDeviceBaseUrl } from '@app/lib/native'
-import { deviceToken } from '@app/lib/api'
+import { deviceToken, pairingApi } from '@app/lib/api'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
@@ -43,14 +36,13 @@ import { ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { ConfirmDialog } from '@app/components/Sheet'
 import {
   Badge,
+  BrandLockup,
   Button,
-  Chevron,
   CopyButton,
   Divider,
   Dot,
   FieldRow,
   IconTile,
-  ListRow,
   Mono,
   Notice,
   haptic,
@@ -73,9 +65,15 @@ export function SettingsScreen() {
   const [active, setActive] = React.useState<string>(() => getPairingBaseUrl())
   const [confirmUnpair, setConfirmUnpair] = React.useState(false)
   const [unpairing, setUnpairing] = React.useState(false)
+  const [about, setAbout] = React.useState<{ device: string; desktopVersion: string } | null>(null)
 
   React.useEffect(() => {
     void permissionState().then(setPerm)
+    // Identity readout: best-effort; the rows simply stay quiet when offline.
+    pairingApi
+      .me()
+      .then((me) => setAbout({ device: me.device.name, desktopVersion: me.desktop.version }))
+      .catch(() => undefined)
   }, [])
 
   async function enable() {
@@ -86,7 +84,7 @@ export function SettingsScreen() {
     else if (next === 'denied') {
       toast({
         message: 'Notifications are blocked',
-        detail: 'Open Settings to allow them for AgentDeck.',
+        detail: 'Open Settings to allow them for QAI.',
         tone: 'wait',
         duration: 6000,
       })
@@ -98,7 +96,7 @@ export function SettingsScreen() {
     const ok = await present(
       {
         id: `test-${Date.now()}`,
-        title: 'AgentDeck',
+        title: 'QAI',
         body: 'Notifications are working. You will be paged when an agent needs you.',
         data: { sessionId: '', kind: 'test' },
       },
@@ -130,8 +128,8 @@ export function SettingsScreen() {
   return (
     <ScreenScaffold
       title="Settings"
-      eyebrow={desktopName}
-      subtitle="This device talks only to your own daemon. Nothing is sent anywhere else."
+      eyebrow="This device"
+      subtitle="QAI talks only to your own daemon. Nothing is sent anywhere else."
       scroll
       contentClassName="pb-12 gap-6"
     >
@@ -144,23 +142,23 @@ export function SettingsScreen() {
               pulse={connection !== 'connected'}
             />
             <Text
-              className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink"
+              className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-medium text-ink"
               numberOfLines={1}
             >
-              {connection === 'connected' ? 'Connected to your desktop' : connection}
+              {connection === 'connected' ? `Connected to ${desktopName}` : connection}
             </Text>
-            <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline>
+            <Badge tone={connection === 'connected' ? 'ok' : 'wait'} outline mono>
               {connection === 'connected' ? 'live' : connection}
             </Badge>
           </View>
 
           {routes.length === 0 ? (
             <View className="px-4 py-3.5">
-              <Text className="text-[13.5px] leading-[19px] text-ink-3">This device is not paired.</Text>
+              <Text className="text-[13px] leading-[18px] text-ink-3">This device is not paired.</Text>
             </View>
           ) : (
             <View>
-              <Text className="px-4 pb-2 pt-3 text-[12.5px] leading-[17px] text-ink-3">
+              <Text className="px-4 pb-2 pt-3 text-[12px] leading-[16px] text-ink-3">
                 Tap a route to pin it. Left alone, the app moves on by itself when the active route
                 stops answering.
               </Text>
@@ -178,7 +176,7 @@ export function SettingsScreen() {
                       style={isActive ? { backgroundColor: palette.accentSoft } : undefined}
                     >
                       <Dot tone={isActive ? 'ok' : 'muted'} />
-                      <Mono className="min-w-0 flex-1 text-[12.5px] leading-[18px] text-ink" numberOfLines={1}>
+                      <Mono className="min-w-0 flex-1 text-[12px] leading-[17px] text-ink" numberOfLines={1}>
                         {route}
                       </Mono>
                       {isActive ? <Badge tone="accent">Active</Badge> : null}
@@ -199,17 +197,17 @@ export function SettingsScreen() {
       <Section enterIndex={1} eyebrow="You own this" title="Attention alerts">
         <ListCard inset={16}>
           <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
-            <IconTile icon={<Bell size={17} color={palette.ink2} />} tone="muted" />
-            <Text className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink">
+            <IconTile icon={<Bell size={16} color={palette.ink2} />} tone="muted" size={34} />
+            <Text className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-medium text-ink">
               {PERMISSION_LABEL[perm]}
             </Text>
-            <Badge tone={perm === 'granted' ? 'ok' : 'muted'} outline>
+            <Badge tone={perm === 'granted' ? 'ok' : 'muted'} outline mono>
               {perm === 'granted' ? 'on' : 'off'}
             </Badge>
           </View>
           <View className="gap-3 px-4 py-3.5">
-            <Text className="text-[13.5px] leading-[19px] text-ink-2">
-              AgentDeck raises a local notification when an agent needs approval, finishes a turn, or
+            <Text className="text-[13px] leading-[18px] text-ink-2">
+              QAI raises a local notification when an agent needs approval, finishes a turn, or
               errors. It rides the connection to your own daemon — no account, no third-party push
               service.
             </Text>
@@ -225,10 +223,10 @@ export function SettingsScreen() {
             ) : (
               <Button size="sm" variant="primary" label="Enable notifications" onPress={() => void enable()} />
             )}
-            <Text className="text-[12px] leading-[17px] text-ink-3">
-              iOS delivers these while the app runs in the background. A fully closed app cannot be
-              woken without Apple push, so anything that arrived while it was closed surfaces the
-              next time you open AgentDeck.
+            <Text className="text-[11.5px] leading-[16px] text-ink-3">
+              Alerts are delivered while the app runs in the background. A fully closed app cannot
+              be woken without platform push, so anything that arrived while it was closed surfaces
+              the next time you open QAI.
             </Text>
             {note ? (
               <Notice
@@ -240,67 +238,70 @@ export function SettingsScreen() {
         </ListCard>
       </Section>
 
-      {/* ── On the desktop ────────────────────────────────────────────
-          These are *navigation*, not settings: each one opens a screen that
-          manages something the daemon owns. They are grouped under one heading
-          and given a chevron each, because a row of unadorned text labels is
-          indistinguishable from a list of values you could edit here. */}
-      <Section enterIndex={2} eyebrow="Managed on the desktop" title="Configuration">
-        <ListCard inset={64}>
-          <Destination
-            title="Usage"
-            subtitle="Token spend and cost, per session"
-            icon={<Cpu size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Usage')}
-          />
-          <Destination
-            title="Browser engines"
-            subtitle="One shared engine per workspace"
-            icon={<Globe size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Browsers')}
-          />
-          <Destination
-            title="MCP servers"
-            subtitle="External tools this desktop can call"
-            icon={<Server size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Mcp')}
-          />
-          <Destination
-            title="Remote access"
-            subtitle="Tunnels, endpoints and paired devices"
-            icon={<Wifi size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Remote')}
-          />
-          <Destination
-            title="Daemon settings"
-            subtitle="Read and edit the daemon's own configuration"
-            icon={<SettingsIcon size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Daemon')}
-          />
-        </ListCard>
-      </Section>
-
       {/* ── This device ─────────────────────────────────────────────── */}
-      <Section enterIndex={3} eyebrow="You own this" title="This device">
-        <ListCard inset={64}>
-          <Destination
-            title="Pair another device"
-            subtitle="Scan a code from the desktop, or enter a link"
-            icon={<Smartphone size={17} color={palette.ink2} />}
-            onPress={() => navigation.navigate('Pairing')}
-          />
+      <Section enterIndex={2} eyebrow="You own this" title="This device">
+        <ListCard inset={16}>
+          <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
+            <IconTile icon={<Smartphone size={16} color={palette.ink2} />} tone="accent" size={34} />
+            <View className="min-w-0 flex-1">
+              <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
+                {about?.device ?? 'This phone'}
+              </Text>
+              <Mono className="text-[11px]" numberOfLines={1}>
+                paired with {desktopName}
+              </Mono>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Pair another device"
+              accessibilityHint="Scan a code from the desktop, or enter a link"
+              onPress={() => {
+                void haptic('light')
+                navigation.navigate('Pairing')
+              }}
+              className="min-h-9 flex-row items-center gap-1.5 rounded-sm border border-line px-3 active:bg-raised"
+            >
+              <QrCode size={14} color={palette.ink2} />
+              <Text className="text-[12px] font-semibold text-ink-2">Pair</Text>
+            </Pressable>
+          </View>
+
+          <Divider inset={16} />
+
           <View className="gap-1.5 px-4 py-3">
             <View className="flex-row items-center gap-3">
-              <IconTile icon={<Monitor size={17} color={palette.ink2} />} tone="muted" />
-              <Text className="min-w-0 flex-1 text-[13.5px] leading-[19px] text-ink-2">Device token</Text>
+              <IconTile icon={<Monitor size={16} color={palette.ink2} />} tone="muted" size={34} />
+              <Text className="min-w-0 flex-1 text-[13px] leading-[18px] text-ink-2">Device token</Text>
               <CopyButton
                 value={deviceToken() ?? ''}
                 label="Copy"
                 accessibilityLabel="Copy this device's API token"
               />
             </View>
-            <Text className="text-[11.5px] leading-[16px] text-ink-3" style={{ marginLeft: 48 }}>
-              Bearer credential for this phone. Revoke it from Remote access if the device is lost.
+            <Text className="text-[11.5px] leading-[16px] text-ink-3" style={{ marginLeft: 46 }}>
+              Bearer credential for this phone. Revoke it from System → Remote access if the device
+              is lost.
+            </Text>
+          </View>
+        </ListCard>
+      </Section>
+
+      {/* ── About ───────────────────────────────────────────────────── */}
+      <Section enterIndex={3} eyebrow="Colophon" title="About">
+        <ListCard inset={16}>
+          <View className="flex-row items-center gap-3 px-4 py-4">
+            <BrandLockup size={22} />
+            <View style={{ flex: 1 }} />
+            <Mono className="text-[11px] text-ink-3">
+              v{Application.nativeApplicationVersion ?? '1.0'}
+            </Mono>
+          </View>
+          <Divider inset={16} />
+          <View className="px-4 py-3">
+            <Text className="text-[12.5px] leading-[18px] text-ink-3">
+              QAI is the mobile command centre for the coding agents running on your desktop —
+              start, steer, approve and inspect from anywhere on your network or tailnet.
+              {about?.desktopVersion ? ` Daemon v${about.desktopVersion}.` : ''}
             </Text>
           </View>
         </ListCard>
@@ -316,7 +317,7 @@ export function SettingsScreen() {
             full
             onPress={() => setConfirmUnpair(true)}
           />
-          <Text className="px-1 text-[12.5px] leading-[18px] text-ink-3">
+          <Text className="px-1 text-[12px] leading-[17px] text-ink-3">
             Removes the token from this phone. The desktop keeps running; you pair again with a new
             code.
           </Text>
@@ -333,37 +334,5 @@ export function SettingsScreen() {
         onConfirm={() => void unpair()}
       />
     </ScreenScaffold>
-  )
-}
-
-/* ── A row that goes somewhere ───────────────────────────────────────────────────
- * The muted icon tile and the chevron together are the whole visual vocabulary
- * of "this is navigation, not a value". The card supplies the hairline, so the
- * row itself stays a plain `ListRow`. */
-
-function Destination({
-  title,
-  subtitle,
-  icon,
-  onPress,
-}: {
-  title: string
-  subtitle: string
-  icon: React.ReactNode
-  onPress: () => void
-}) {
-  return (
-    <ListRow
-      title={title}
-      subtitle={subtitle}
-      leading={<IconTile icon={icon} tone="accent" size={36} />}
-      trailing={<Chevron />}
-      onPress={() => {
-        void haptic('light')
-        onPress()
-      }}
-      accessibilityLabel={title}
-      accessibilityHint={subtitle}
-    />
   )
 }

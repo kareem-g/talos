@@ -1,13 +1,13 @@
 /**
  * Usage — the full token and cost ledger.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * The desktop UsagePage walks stored conversations' `usage` parts and totals
- * per session — same scan, same formatting, so numbers agree. Activity carries
- * the answer; this screen is the evidence: every session on a lit totals slab
- * with an ember edge, whether or not it reported, with unreported sessions at
- * `—` (the CLI did not report, which is not the same as free).
+ * per session — same scan, same formatting, so numbers agree. There is no
+ * usage endpoint; this screen is the evidence: every session under a totals
+ * slab with a signal edge, whether or not it reported, with unreported
+ * sessions at `—` (the CLI did not report, which is not the same as free).
  */
 
 import * as React from 'react'
@@ -114,16 +114,16 @@ export function UsageScreen() {
   return (
     <ScreenScaffold
       title="Usage"
-      eyebrow="Manage"
+      eyebrow="System · ledger"
       subtitle="Totalled from the turns your agents reported."
       scroll
       contentClassName="px-4 pb-12 gap-5"
       headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back" />}
     >
-      <Section eyebrow="Kiln ledger" enterIndex={0}>
+      <Section eyebrow="Fleet ledger" enterIndex={0}>
         <Card className="overflow-hidden">
-          {/* Ember edge: cost is the hottest fact on the page. */}
-          <View style={{ height: 3, backgroundColor: palette.accent, opacity: 0.9 }} />
+          {/* Signal edge: cost is the hottest fact on the page. */}
+          <View style={{ height: 2, backgroundColor: palette.accent, opacity: 0.8 }} />
           {/* The header carries the reporting count rather than the footer: it
               changes how the three numbers below should be read, and a caveat
               under a number has to be read second. */}
@@ -244,8 +244,8 @@ function UsageRow({
           <Mono
             className={
               unmeasured
-                ? 'text-[13.5px] leading-[18px] text-ink-4'
-                : 'text-[13.5px] leading-[18px] font-semibold text-ink'
+                ? 'text-[13px] leading-[18px] text-ink-4'
+                : 'text-[13px] leading-[18px] font-semibold text-ink'
             }
             style={{ fontVariant: ['tabular-nums'] }}
           >

@@ -19,7 +19,7 @@ import {
 } from './secureStore'
 import { storage } from './storage'
 
-const DEVICE_KEY_STORAGE = 'agentdeck-device-key'
+const DEVICE_KEY_STORAGE = 'qai-device-key'
 
 /** True once a token long enough to be real is stored. */
 export function isPaired(): boolean {

@@ -1,14 +1,13 @@
 /**
- * Remote access — kiln tunnels and paired devices.
+ * Remote access — tunnels and paired devices.
  *
- * EMBER CLAY
- * ----------
- * One question — **can this phone reach the kiln, and who else can?** — so
+ * QAI SIGNAL DECK
+ * ---------------
+ * One question — **can this phone reach the daemon, and who else can?** — so
  * tunnels and devices share a screen. Reachability is the lit headline slab
- * (the reachable route promoted, ember-edged); tunnels are firebox controls
- * with start/stop; unreachable routes list beneath as cold fallbacks; paired
- * devices get their own security section with two-step revoke. Same
- * endpoints/start/stop/revoke handlers.
+ * (the reachable route promoted); tunnels are start/stop controls; unreachable
+ * routes list beneath as cold fallbacks; paired devices get their own security
+ * section with two-step revoke. Same endpoints/start/stop/revoke handlers.
  */
 
 import * as React from 'react'
@@ -152,7 +151,7 @@ export function RemoteScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-6"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
     >
       {error ? (
         <View className="mx-4">
@@ -161,7 +160,7 @@ export function RemoteScreen() {
       ) : null}
 
       {/* ── Reachability ────────────────────────────────────────────── */}
-      <Section eyebrow="Kiln heat" title={reachable.length > 0 ? 'Reachable now' : 'Not reachable off-LAN'} enterIndex={0}>
+      <Section eyebrow="Reachability" title={reachable.length > 0 ? 'Reachable now' : 'Not reachable off-LAN'} enterIndex={0}>
         {reachable.length === 0 ? (
           <Card>
             <EmptyState
@@ -304,7 +303,7 @@ function TunnelRow({
           tone={running ? 'ok' : 'muted'}
         />
         <View className="min-w-0 flex-1">
-          <Text className="text-[15.5px] leading-[21px] font-semibold text-ink">{name}</Text>
+          <Text className="text-[14.5px] leading-[20px] font-semibold text-ink">{name}</Text>
           <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
             {hint}
           </Text>
@@ -351,7 +350,7 @@ function DeviceRow({
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
         <IconTile icon={<Smartphone size={16} color={palette.ink2} />} tone="muted" />
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
             {device.name}
           </Text>
           <Mono className="text-[11px] leading-[15px]" numberOfLines={1}>

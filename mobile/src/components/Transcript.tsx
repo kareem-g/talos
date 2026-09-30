@@ -31,14 +31,14 @@
  *    between them, exactly as the desktop does it. It reads as a boundary
  *    rather than as another message, which is the point of a system message.
  *
- * V3: the conversation reads like ChatGPT on a premium dark theme. Assistant
+ * V3: the conversation reads like a premium dark control room. Assistant
  * turns are full-width clean prose — no bubble, no card — separated by clear
- * vertical rhythm; user messages sit in a compact right-aligned raised bubble
- * with one small corner; reasoning is a quiet collapsible row.
+ * vertical rhythm; user messages sit in a compact right-aligned accent-washed
+ * panel with one small corner; reasoning is a quiet collapsible row.
  *
- * EMBER CLAY: user turns are kiln ingots — a warm selected slab with an ember
- * hairline — so your words read as fired clay against the assistant's open
- * parchment prose.
+ * QAI SIGNAL DECK: user turns are signal panels — the accent wash with a
+ * cyan hairline — so your words read as "command input" against the
+ * assistant's open prose on the deck.
  */
 
 import * as React from 'react'
@@ -306,7 +306,7 @@ function TranscriptEmpty() {
       >
         New session — say where to start
       </Text>
-      <Text className="max-w-[36ch] text-center text-[13.5px] leading-[19px] text-ink-3">
+      <Text className="max-w-[36ch] text-center text-[13px] leading-[18px] text-ink-3">
         Describe the change you want. The agent will plan it, ask before anything risky, and
         stream its work back here.
       </Text>
@@ -398,7 +398,7 @@ export function Transcript({
         data={messages}
         keyExtractor={(message) => message.id}
         extraData={revision}
-        contentContainerStyle={{ gap: 22, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 }}
+        contentContainerStyle={{ gap: 18, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}
         renderItem={({ item }) =>
           item.role === 'system' ? (
             <SystemTurn message={item} />

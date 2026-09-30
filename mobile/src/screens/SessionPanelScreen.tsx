@@ -1,19 +1,19 @@
 /**
  * Session panel — the desktop's right rail, as a full screen.
  *
- * EMBER CLAY REDESIGN — "the workbench"
- * -------------------------------------
+ * QAI SIGNAL DECK — the workbench
+ * -------------------------------
  * A phone-native cousin of the desktop RightRail, not a copy. The desktop is
  * a browser-style Agent Workspace: a tab strip with an open-tab picker, a slim
  * toolbar (workspace path + refresh + widen), and content where open tabs stay
  * mounted so browser URL and scroll survive switching. This screen keeps that
  * skeleton but benches it for one thumb:
  *
- *   - **Kiln tab strip.** Browser-style tabs with an ember dot on the live
- *     one, scrolling rather than wrapping, `+` opening the picker of the
- *     rest. Long-press still closes — tools you cannot put away are clutter.
- *   - **Slim workbench bar.** Workspace leaf + open-tab count + session state,
- *     like the desktop's slim toolbar minus the widen control (a phone fills
+ *   - **Instrument tab strip.** Chips with a signal dot on the live one,
+ *     scrolling rather than wrapping, `+` opening the picker of the rest.
+ *     Long-press still closes — tools you cannot put away are clutter.
+ *   - **Slim workbench bar.** Workspace leaf + tab group + link state, like
+ *     the desktop's slim toolbar minus the widen control (a phone fills
  *     whatever width it gets).
  *   - **Full-screen content.** A plan, diff, file tree, browser mirror and
  *     terminal do not fit in a sheet; content deserves the whole screen.
@@ -26,7 +26,7 @@ import * as React from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { ChevronRight, Plus, X } from 'lucide-react-native'
+import { ChevronRight, Plus } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'
 import type { Conversation } from '@/types/conversation'
@@ -53,7 +53,6 @@ import {
   StatusPill,
   Well,
   haptic,
-  toast,
 } from '@app/components/ui'
 import { SubagentSheet } from '@app/components/SubagentModal'
 import { BrowserTab, FilesTab, GitTab, ProjectsTab, RoomsTab, SideTab, TerminalsTab, TrajectoriesTab } from '@app/components/panel/Tabs'
@@ -105,6 +104,7 @@ export function SessionPanelScreen() {
 
   const sessions = useStore((state) => state.sessions)
   const configs = useStore((state) => state.configs)
+  const connection = useStore((state) => state.connection)
   const revision = useStore((state) => state.revisions[sessionId] ?? 0)
   const session = sessions.find((row) => row.id === sessionId)
   const conversation = useConversationFor(sessionId, revision)
@@ -137,18 +137,18 @@ export function SessionPanelScreen() {
         subtitle={railSession.project ?? 'Inbox'}
         left={<BackButton onPress={() => navigation.goBack()} label="Back to the session" />}
         right={
-          <View style={{ paddingRight: 8, alignItems: 'flex-end', gap: 1 }}>
+          <View style={{ paddingRight: 10, alignItems: 'flex-end', gap: 1 }}>
             <Eyebrow>Workbench</Eyebrow>
-            <Text className="text-[10.5px] leading-[13px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+            <Text className="text-[10px] leading-[13px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
               {open.length} open
             </Text>
           </View>
         }
       />
 
-      {/* ── Kiln tab strip ────────────────────────────────────────────────
-          Browser-style tabs with an ember dot on the live one, scrolling
-          rather than wrapping, `+` opening the picker. Long-press closes. */}
+      {/* ── Instrument tab strip ────────────────────────────────────────
+          Chips with a signal dot on the live one, scrolling rather than
+          wrapping, `+` opening the picker. Long-press closes. */}
       <View className="border-b border-line bg-chrome">
         <View className="flex-row items-center">
           <ScrollView
@@ -164,7 +164,7 @@ export function SessionPanelScreen() {
                   key={id}
                   accessibilityRole="tab"
                   accessibilityLabel={spec.label}
-                  accessibilityHint={spec.hint}
+                  accessibilityHint={`${spec.hint} Long-press to close.`}
                   accessibilityState={{ selected: isActive }}
                   onPress={() => {
                     void haptic('select')
@@ -172,10 +172,10 @@ export function SessionPanelScreen() {
                   }}
                   onLongPress={() => closeTab(id)}
                   className={cn(
-                    'mr-1.5 h-9 flex-row items-center gap-2 rounded-md border px-3.5',
+                    'mr-1.5 h-8 flex-row items-center gap-2 rounded-sm border px-3',
                     isActive
                       ? 'border-accent-border bg-accent-soft'
-                      : 'border-transparent active:bg-raised/60',
+                      : 'border-line bg-surface active:bg-raised',
                   )}
                 >
                   <View
@@ -184,7 +184,7 @@ export function SessionPanelScreen() {
                   />
                   <Text
                     style={{
-                      fontSize: 13,
+                      fontSize: 12.5,
                       lineHeight: 16,
                       fontWeight: isActive ? '700' : '500',
                       color: isActive ? palette.ink : palette.ink3,
@@ -206,26 +206,23 @@ export function SessionPanelScreen() {
               setPickerOpen(true)
             }}
             hitSlop={8}
-            className="ml-0.5 mr-2.5 size-9 items-center justify-center rounded-md border border-line-strong bg-raised active:bg-hover"
+            className="ml-0.5 mr-2.5 size-8 items-center justify-center rounded-sm border border-line-strong bg-raised active:bg-hover"
           >
-            <Plus size={17} color={palette.accent} />
+            <Plus size={16} color={palette.accent} />
           </Pressable>
         </View>
 
-        {/* ── Slim workbench bar ──────────────────────────────────────────
-            The desktop's slim toolbar, minus widen: workspace leaf + live tab
-            hint + session state. It names the ground the tools operate on. */}
+        {/* ── Slim workbench bar ────────────────────────────────────────
+            The desktop's slim toolbar, minus widen: workspace leaf + tab
+            group + link state. It names the ground the tools operate on. */}
         <View className="flex-row items-center gap-2 border-t border-line px-4 py-1.5">
-          <Mono className="min-w-0 flex-1 text-[11px] text-ink-3" numberOfLines={1}>
+          <Mono className="min-w-0 flex-1 text-[10.5px] text-ink-3" numberOfLines={1}>
             {railSession.project?.split('/').filter(Boolean).pop() ?? 'inbox'}
           </Mono>
-          <Text className="shrink-0 text-[10.5px] uppercase text-ink-3" style={{ letterSpacing: 0.8 }}>
+          <Text className="shrink-0 text-[10px] uppercase text-ink-3" style={{ letterSpacing: 0.8 }}>
             {TABS.find((entry) => entry.id === active)?.group ?? ''}
           </Text>
-          <View
-            className="size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: session ? palette.ok : palette.ink4 }}
-          />
+          <Dot tone={connection === 'connected' ? 'ok' : 'danger'} />
         </View>
       </View>
 
@@ -316,8 +313,8 @@ function useConversationFor(sessionId: string, _revision: number): Conversation 
 }
 
 /* ── Panel chrome ───────────────────────────────────────────────────────────────
- * Every workbench pane opens the same way: a mono eyebrow, an ember tick, and
- * a hairline. It is the kiln's version of the desktop's panel header — the
+ * Every workbench pane opens the same way: a mono eyebrow, a signal tick, and
+ * a hairline. It is the deck's version of the desktop's panel header — the
  * tick says "this tool is lit" the way the desktop's rule says "this tab is
  * open". */
 
@@ -342,7 +339,7 @@ export function PanelHeader({
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1, minWidth: 0 }}>
-        <View style={{ width: 3, height: 14, borderRadius: 2, backgroundColor: palette.accent }} />
+        <View style={{ width: 2, height: 13, borderRadius: 1, backgroundColor: palette.accent }} />
         <Eyebrow>{eyebrow}</Eyebrow>
       </View>
       {right}
@@ -352,7 +349,7 @@ export function PanelHeader({
 
 /* ── Plan ──────────────────────────────────────────────────────────────────────
  * The plan is a *checklist*, so it is a checklist: one row per step, a glyph
- * sitting in its own small round tile, and the whole thing collapsible. On the
+ * sitting in its own small cut tile, and the whole thing collapsible. On the
  * desktop the chevron rotates and the body clips; the same, measured, so a
  * nine-step plan and a one-step plan both animate at a believable speed. */
 
@@ -394,7 +391,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
             hitSlop={10}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
           >
-            <Text className="text-[11.5px] leading-[15px] text-ink-3">{open ? 'Collapse' : 'Expand'}</Text>
+            <Text className="text-[11px] leading-[14px] text-ink-3">{open ? 'Collapse' : 'Expand'}</Text>
             <ChevronRight
               size={13}
               color={palette.ink3}
@@ -406,7 +403,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
 
       {info.title ? (
         <Text
-          className="mb-3 text-[17px] leading-[23px] font-semibold text-ink"
+          className="mb-3 text-[16px] leading-[22px] font-semibold text-ink"
           style={{ letterSpacing: -0.25 }}
         >
           {info.title}
@@ -415,7 +412,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
 
       <View className="mb-3 gap-1.5">
         <ProgressBar value={steps.length ? done / steps.length : 0} tone={done === steps.length && steps.length > 0 ? 'ok' : 'accent'} />
-        <Text className="text-[11.5px] leading-[15px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+        <Text className="text-[11px] leading-[14px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
           {done} of {steps.length} complete
         </Text>
       </View>
@@ -440,10 +437,10 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
                   <Text
                     key={index}
                     style={{
-                      fontSize: heading ? 14 : 13.5,
-                      lineHeight: heading ? 20 : 19,
+                      fontSize: heading ? 13.5 : 13,
+                      lineHeight: heading ? 19 : 18,
                       fontWeight: heading ? '600' : '400',
-                      color: heading ? palette.ink : palette.ink2,
+                      color: heading ? palette.codeInk : palette.codeDim,
                       marginLeft: bullet ? 10 : 0,
                     }}
                   >
@@ -493,10 +490,10 @@ function StepRow({ index, content, status }: { index: number; content: string; s
     <View
       className={cn(
         'flex-row items-start gap-3 rounded-md px-2.5 py-2',
-        active && 'bg-white/5',
+        active && 'bg-accent-soft',
       )}
     >
-      <View className="mt-0.5 size-[22px] items-center justify-center rounded-full bg-raised">
+      <View className="mt-0.5 size-[22px] items-center justify-center rounded-sm bg-raised">
         <Text
           style={{
             fontSize: 11.5,
@@ -511,8 +508,8 @@ function StepRow({ index, content, status }: { index: number; content: string; s
       <Text
         style={{
           flex: 1,
-          fontSize: 14,
-          lineHeight: 20,
+          fontSize: 13.5,
+          lineHeight: 19,
           color: done ? palette.ink3 : active ? palette.ink : palette.ink2,
           textDecorationLine: done ? 'line-through' : 'none',
           fontWeight: active ? '600' : '400',
@@ -520,7 +517,7 @@ function StepRow({ index, content, status }: { index: number; content: string; s
       >
         {content}
       </Text>
-      <Text className="mt-1 text-[10.5px] leading-[14px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }}>
+      <Text className="mt-1 text-[10px] leading-[13px] text-ink-4" style={{ fontVariant: ['tabular-nums'] }}>
         {index + 1}
       </Text>
     </View>
@@ -552,7 +549,7 @@ function AgentsTab({
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text
-              className="text-[11px] leading-[14px] text-ink-3"
+              className="text-[10.5px] leading-[14px] text-ink-3"
               style={{ fontVariant: ['tabular-nums'] }}
             >
               {subagents.length === 0 ? 'none' : `${running}/${subagents.length} running`}
@@ -563,14 +560,14 @@ function AgentsTab({
       />
 
       <Card className="flex-row items-center gap-3 p-4">
-        <AgentAvatar agent={session.agent || 'agent'} size={38} />
+        <AgentAvatar agent={session.agent || 'agent'} size={36} />
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-[15.5px] leading-[21px] font-semibold text-ink" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[20px] font-semibold text-ink" numberOfLines={1}>
             {session.agent || 'agent'}
           </Text>
           <View className="flex-row items-center gap-1.5">
             <Dot tone="ok" />
-            <Text className="text-[12px] leading-[16px] text-ink-3">Primary</Text>
+            <Text className="text-[11.5px] leading-[15px] text-ink-3">Primary</Text>
           </View>
         </View>
       </Card>
@@ -592,17 +589,17 @@ function AgentsTab({
                 pulse={agent.status === 'working'}
               />
               <View className="min-w-0 flex-1 gap-0.5">
-                <Text className="text-[14.5px] leading-[19px] text-ink" numberOfLines={1}>
+                <Text className="text-[13px] leading-[18px] text-ink" numberOfLines={1}>
                   {agent.name}
                 </Text>
                 <Text
-                  className="text-[11.5px] leading-[15px]"
+                  className="text-[11px] leading-[14px]"
                   style={{ color: subagentTone(agent.status) }}
                 >
                   {subagentLabel(agent.status)}
                 </Text>
               </View>
-              <Mono className="shrink-0 text-[10px] uppercase text-ink-3">{agent.kind}</Mono>
+              <Mono className="shrink-0 text-[9.5px] uppercase text-ink-3">{agent.kind}</Mono>
             </Card>
           ))}
         </View>
@@ -642,7 +639,7 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
       <PanelHeader eyebrow="Goal" right={<StatusPill tone={tone} label={label} size="sm" />} />
 
       <Text
-        className="text-[21px] leading-[27px] font-bold text-ink"
+        className="text-[20px] leading-[26px] font-bold text-ink"
         style={{ letterSpacing: -0.4 }}
       >
         {info?.title ?? session.name ?? 'Session'}
@@ -651,10 +648,10 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
       {objective ? (
         <Card className="mt-3 gap-1.5 p-4">
           <Eyebrow>Objective</Eyebrow>
-          <Text className="text-[15.5px] leading-[22px] text-ink-2">{objective}</Text>
+          <Text className="text-[14.5px] leading-[21px] text-ink-2">{objective}</Text>
         </Card>
       ) : (
-        <Text className="mt-3 text-[13.5px] leading-[19px] text-ink-3">
+        <Text className="mt-3 text-[13px] leading-[18px] text-ink-3">
           No objective yet — this is the first thing you asked the agent.
         </Text>
       )}
@@ -662,9 +659,9 @@ function GoalTab({ session, conversation }: { session: Session; conversation: Co
       {steps.length > 0 ? (
         <View className="mt-4 gap-2.5">
           <View className="flex-row items-baseline justify-between">
-            <Text className="text-[13px] leading-[18px] text-ink-2">Progress</Text>
+            <Text className="text-[12px] leading-[16px] text-ink-2">Progress</Text>
             <Text
-              className="text-[13px] leading-[18px] font-bold text-ink-2"
+              className="text-[12px] leading-[16px] font-bold text-ink-2"
               style={{ fontVariant: ['tabular-nums'] }}
             >
               {done}/{steps.length} · {pct}%
@@ -708,7 +705,7 @@ function TerminalTab({
     <View className="gap-3">
       <PanelHeader
         eyebrow="Terminal"
-        right={<Badge tone={interactive ? 'ok' : 'muted'} outline>{interactive ? 'interactive' : 'read-only'}</Badge>}
+        right={<Badge tone={interactive ? 'ok' : 'muted'} outline mono>{interactive ? 'interactive' : 'read-only'}</Badge>}
       />
 
       {interactive ? (
@@ -756,7 +753,7 @@ function TerminalTab({
           component that guarantees all three. */}
       <Well className="max-h-[460px] rounded-lg border border-line">
         <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 12 }} nestedScrollEnabled>
-          <Mono className="text-[12.5px] leading-[18px] text-code-ink">
+          <Mono className="text-[12px] leading-[17px] text-code-ink">
             {conversation.terminal.trim() ? conversation.terminal : 'No terminal output yet.'}
           </Mono>
         </ScrollView>
@@ -764,5 +761,3 @@ function TerminalTab({
     </View>
   )
 }
-
-export { X, toast }

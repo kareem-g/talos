@@ -249,12 +249,12 @@ function ToastCard({ record, offset }: { record: ToastRecord; offset: number }) 
             style={({ pressed }) => ({
               paddingHorizontal: 12,
               paddingVertical: 8,
-              borderRadius: radius.pill,
+              borderRadius: radius.sm,
               backgroundColor: palette.accent,
               opacity: pressed ? 0.8 : 1,
             })}
           >
-            <Text style={{ color: palette.accentInk, fontSize: 13, fontWeight: '700' }}>
+            <Text style={{ color: palette.accentInk, fontSize: 12.5, fontWeight: '700' }}>
               {record.action.label}
             </Text>
           </Pressable>

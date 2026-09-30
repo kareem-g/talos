@@ -1,11 +1,11 @@
 /**
- * Chat cards — the full-width kiln blocks in an assistant turn.
+ * Chat cards — the full-width instrument blocks in an assistant turn.
  *
- * EMBER CLAY: Plan is a clay tablet with an ember progress edge; Approval
- * stays the one LOUD element (heat fill + tone border + "Needs you" pill +
- * ember radio rings + full-width ember Confirm) because it is where a pocket
- * run unblocks. Resolved approvals collapse to one row so the decision stays
- * in history. Same respond/describeApproval handlers.
+ * QAI SIGNAL DECK: Plan is a checklist card with an accent progress edge;
+ * Approval stays the one LOUD element (tone-tinted fill + tone border +
+ * "Needs you" pill + signal radio rings + full-width accent Confirm) because
+ * it is where a pocket run unblocks. Resolved approvals collapse to one row so
+ * the decision stays in history. Same respond/describeApproval handlers.
  */
 
 import * as React from 'react'
@@ -721,7 +721,7 @@ export function EventCard({
     >
       {icon}
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text className="text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+        <Text className="text-[12px] leading-[16px] text-ink-2" numberOfLines={1}>
           {label}
         </Text>
         {detail ? (

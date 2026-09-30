@@ -122,7 +122,23 @@ export type ClientFrame =
   | { type: 'TerminalInput'; payload: { session_id: string; data: string } }
   | { type: 'TerminalResize'; payload: { session_id: string; cols: number; rows: number } }
   | { type: 'Command'; payload: { action: string; params: Record<string, unknown> } }
-  | { type: 'QuestionAnswer'; payload: { question_id: string; selected_options: string[]; custom_text?: string } }
+  /**
+   * The wire shape is `{payload: {answer: {...}}}` — the backend variant is
+   * `QuestionAnswer { answer: QuestionAnswer }` under serde's adjacent tagging
+   * (backend/src/websocket/mod.rs). A flat payload fails to deserialize and the
+   * frame is dropped server-side, so the answer never arrives.
+   */
+  | {
+      type: 'QuestionAnswer'
+      payload: {
+        answer: {
+          question_id: string
+          session_id?: string
+          selected_options: string[]
+          custom_text?: string
+        }
+      }
+    }
   | { type: 'Ping' }
 
 /**

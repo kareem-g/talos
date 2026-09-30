@@ -1,9 +1,10 @@
 /**
- * The attention pill — the kiln's ember reminder.
+ * The attention pill — the deck's standing alarm.
  *
- * EMBER CLAY: floats top-center out of the thumb's arc, ember-bordered warm
+ * QAI SIGNAL DECK: floats top-center out of the thumb's arc, wait-bordered
  * chrome over blur, wait dot + count + session name. Derived, not stored (a
- * session blocks without a pushed action); vanishes the moment nothing burns.
+ * session blocks without a pushed action); vanishes the moment nothing needs
+ * a human.
  */
 
 import * as React from 'react'
@@ -99,15 +100,17 @@ export function AttentionPill() {
         style={{ maxWidth: '92%' }}
       >
         {/* The one surface in the app allowed to cast a full overlay shadow:
-            this pill genuinely floats over whatever session is behind it. */}
-        <View style={[{ borderRadius: radius.pill }, shadowOverlay]}>
+            this pill genuinely floats over whatever session is behind it. The
+            border is `wait`, not the accent: this is a state that needs a
+            human, and the accent must stay reserved for "actionable/live". */}
+        <View style={[{ borderRadius: radius.sm }, shadowOverlay]}>
           <View
             style={{
               overflow: 'hidden',
-              borderRadius: radius.pill,
+              borderRadius: radius.sm,
               borderWidth: 1,
-              borderColor: palette.accentBorder,
-              backgroundColor: `${palette.chrome}E6`,
+              borderColor: palette.waitBorder,
+              backgroundColor: `${palette.chrome}F0`,
             }}
           >
             <BlurView intensity={60} tint="dark" style={StyleSheetAbsoluteFill} />

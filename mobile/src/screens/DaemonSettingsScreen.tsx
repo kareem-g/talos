@@ -1,13 +1,13 @@
 /**
- * Daemon settings — read and stoke the kiln's own configuration.
+ * Daemon settings — read and edit the daemon's own configuration.
  *
- * EMBER CLAY
- * ----------
- * Each key is its own clay tablet: key in mono up top, value in a well chip
- * below (switch for booleans, numeric field for numbers, mono well for JSON).
- * An edited key lifts onto the ember — tinted tablet, `modified — was …`
- * line, one-tap undo. Only edited keys are sent, so nothing the desktop
- * changed mid-edit is clobbered. Same load/save/coerce handlers.
+ * QAI SIGNAL DECK
+ * ---------------
+ * Each key is its own tablet: key in mono up top, value in a well chip below
+ * (switch for booleans, numeric field for numbers, mono well for JSON). An
+ * edited key lifts onto the accent — tinted tablet, `modified — was …` line,
+ * one-tap undo. Only edited keys are sent, so nothing the desktop changed
+ * mid-edit is clobbered. Same load/save/coerce handlers.
  */
 
 import * as React from 'react'
@@ -156,7 +156,7 @@ export function DaemonSettingsScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-5"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
       headerRight={
         <IconButton label="Reload daemon settings" size={38} onPress={() => void refresh()}>
           <RefreshCw size={18} color={refreshing ? palette.accent : palette.ink2} />
@@ -225,7 +225,7 @@ export function DaemonSettingsScreen() {
           />
         </Card>
       ) : (
-      <Section eyebrow="Kiln configuration" title={`${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`} enterIndex={0}>
+      <Section eyebrow="Keys" title={`${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`} enterIndex={0}>
           <View className="gap-3">
             {Object.keys(settings).length > 10 ? (
               <SearchField

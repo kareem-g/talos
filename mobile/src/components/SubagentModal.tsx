@@ -1,9 +1,9 @@
 /**
- * Subagents — spawn a focused child, or fan out across the kiln.
+ * Subagents — spawn a focused child, or fan out across the fleet.
  *
- * EMBER CLAY
- * ----------
- * A kiln form sheet with a mode switch: single (role + task, one answer) or
+ * QAI SIGNAL DECK
+ * ---------------
+ * A form sheet with a mode switch: single (role + task, one answer) or
  * fan-out (several agents, merge as a first-class switch — merged is one
  * synthesised answer, unmerged is each worker in sequence). Results land in
  * the transcript the primary reads. Same spawn/orchestrate handlers.

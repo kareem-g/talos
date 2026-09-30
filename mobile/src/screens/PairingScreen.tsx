@@ -1,15 +1,15 @@
 /**
- * Pairing — exchange the kiln's QR (or a pasted link) for a device token.
+ * Pairing — exchange the desktop's QR (or a pasted link) for a device token.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * Scanning is the primary state (a phone scans; a browser cannot), manual
  * entry one tap below. Every advertised route is tried in turn — tailnet name
  * first, then IP, then LAN — because the best route when it works is unusable
  * when MagicDNS is off or the phone is away. Transport failures retry across
- * routes; spent offers stop immediately. The reticle burns ember on
- * true-black viewfinder; the landing stacks the kiln mark over one promise
- * and the scan ingot.
+ * routes; spent offers stop immediately. The reticle glows accent on a
+ * true-black viewfinder; the landing stacks the QAI mark over one promise
+ * and the scan button.
  */
 
 import * as React from 'react'
@@ -79,7 +79,7 @@ export function PairingScreen() {
     setError(null)
     const parsed = parsePairingLink(text)
     if (!parsed) {
-      setError('That does not look like an AgentDeck pairing code. Scan the QR on your desktop, or paste the full link.')
+      setError('That does not look like a QAI pairing code. Scan the QR on your desktop, or paste the full link.')
       void haptic('error')
       return
     }
@@ -251,7 +251,7 @@ export function PairingScreen() {
                 overflow: 'hidden',
               }}
             >
-              Point the camera at the pairing code in AgentDeck on your desktop.
+              Point the camera at the pairing code in QAI on your desktop.
             </Text>
           )}
 
@@ -275,7 +275,7 @@ export function PairingScreen() {
                 opacity: busy ? 0.45 : 1,
               }}
             >
-              <Text className="text-[15.5px] leading-[22px] font-semibold text-ink">
+              <Text className="text-[14.5px] leading-[21px] font-semibold text-ink">
                 {busy ? 'Pairing…' : 'Cancel'}
               </Text>
             </View>
@@ -323,13 +323,16 @@ export function PairingScreen() {
           <View style={{ alignItems: 'center', gap: 10 }}>
             <Text
               accessibilityRole="header"
-              className="text-center text-[30px] leading-[36px] font-bold text-ink"
-              style={{ letterSpacing: -0.7 }}
+              className="text-center text-[28px] leading-[34px] font-bold text-ink"
+              style={{ letterSpacing: -0.6 }}
             >
               Pair with your desktop
             </Text>
-            <Text className="max-w-[34ch] text-center text-[13.5px] leading-[19px] text-ink-2">
-              Open AgentDeck on your computer, go to the pairing page, and scan the code with this
+            <Text className="text-center text-[11px] leading-[14px] font-semibold uppercase text-ink-3" style={{ letterSpacing: 1.4 }}>
+              QAI · mobile command centre
+            </Text>
+            <Text className="max-w-[34ch] text-center text-[13px] leading-[18px] text-ink-2">
+              Open QAI on your computer, go to the pairing page, and scan the code with this
               device. It takes about ten seconds.
             </Text>
           </View>
@@ -353,7 +356,7 @@ export function PairingScreen() {
             style={{ alignSelf: 'center' }}
           >
             <View style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 }}>
-              <Text className="text-[13.5px] leading-[19px] font-semibold text-accent">
+              <Text className="text-[13px] leading-[18px] font-semibold text-accent">
                 {showPaste ? 'Hide manual entry' : 'Enter the link manually'}
               </Text>
             </View>

@@ -3,13 +3,15 @@
  *
  * Everything visible is built from this file. A screen may not invent its own
  * button, badge, or card; if it needs one, it belongs here. That constraint is
- * the only reason eleven screens look like one product.
+ * the only reason a dozen screens look like one product.
  *
- * THE V3 LANGUAGE, ENCODED HERE
- * -----------------------------
- * The look is "midnight studio": luminous type on near-black, soft-cornered
- * sheets with hairline edges, one electric accent reserved for what is
- * actionable. The rules:
+ * THE QAI LANGUAGE, ENCODED HERE
+ * ------------------------------
+ * The look is "signal deck": luminous type on a near-black cool deck, cut
+ * corners rather than pillowed ones, hairline rules doing the work shadows
+ * would do elsewhere, and one signal-cyan accent reserved for what is
+ * actionable or alive. Machine output lives on plates darker than the page.
+ * The rules:
  *
  * 1. **48pt minimum touch target.** Anything smaller is its visual size *plus*
  *    a `hitSlop` that grows the tappable area back to 48 without growing the
@@ -31,14 +33,13 @@
  *
  * DENSITY
  * -------
- * A developer control surface, not a consumer app: a `ListRow` stays ~56pt and
+ * A developer control surface, not a consumer app: a `ListRow` stays ~52pt and
  * the primitives stay tight. The extra centimetres a phone buys go to
  * *hierarchy* — a status line that reads as one, a path that reads as one —
  * not to padding.
  */
 
 import * as React from 'react'
-import Clipboard from '@react-native-clipboard/clipboard'
 import {
   ActivityIndicator,
   Animated,
@@ -56,6 +57,8 @@ import {
   type ViewStyle,
 } from 'react-native'
 import { Check, ChevronRight, Search as SearchIcon, X } from 'lucide-react-native'
+import Svg, { Circle, Line } from 'react-native-svg'
+import Clipboard from '@react-native-clipboard/clipboard'
 
 import { cn } from '@/lib/format'
 import {
@@ -87,21 +90,21 @@ type TypeRole = 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption' |
 
 /** The type scale, as class names. Kept in one place so it cannot drift. */
 const TYPE_CLASS: Record<TypeRole, string> = {
-  display: 'text-[30px] leading-[36px] font-bold',
-  title: 'text-[21px] leading-[27px] font-bold',
-  heading: 'text-[16.5px] leading-[22px] font-semibold',
-  body: 'text-[15.5px] leading-[22px]',
-  label: 'text-[15.5px] leading-[22px] font-medium',
-  caption: 'text-[13.5px] leading-[19px]',
-  small: 'text-[12px] leading-[16px]',
-  micro: 'text-[11.5px] leading-[15px] font-medium',
+  display: 'text-[28px] leading-[34px] font-bold',
+  title: 'text-[20px] leading-[26px] font-bold',
+  heading: 'text-[16px] leading-[21px] font-semibold',
+  body: 'text-[14.5px] leading-[21px]',
+  label: 'text-[14.5px] leading-[21px] font-medium',
+  caption: 'text-[13px] leading-[18px]',
+  small: 'text-[11.5px] leading-[15px]',
+  micro: 'text-[11px] leading-[14px] font-medium',
   mono: 'text-[12.5px] leading-[18px]',
   monoSmall: 'text-[11px] leading-[15px] font-medium',
   eyebrow: 'text-[10px] leading-[13px] font-semibold uppercase',
 }
 
 const TYPE_TRACK: Partial<Record<TypeRole, number>> = {
-  display: -0.7,
+  display: -0.6,
   title: -0.4,
   heading: -0.2,
   label: -0.1,
@@ -146,7 +149,10 @@ function Txt({
  */
 export function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <Text className={cn('text-[10px] leading-[13px] font-semibold uppercase text-ink-3', className)} style={{ letterSpacing: 1.2 }}>
+    <Text
+      className={cn('text-[10px] leading-[13px] font-semibold uppercase text-ink-3', className)}
+      style={{ letterSpacing: 1.2, fontFamily: MONO_FONT }}
+    >
       {children}
     </Text>
   )
@@ -293,7 +299,7 @@ export function IconButton({
           height: size,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: radius.pill,
+          borderRadius: radius.sm,
           backgroundColor: active ? toneSoft[tone] : 'transparent',
           opacity: disabled ? 0.35 : 1,
         },
@@ -363,14 +369,14 @@ export function Badge({
   return (
     <View
       className={cn(
-        'h-[22px] shrink-0 flex-row items-center justify-center rounded-pill px-2',
+        'h-[20px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
         outline ? toneClass.border[tone] : toneClass.soft[tone],
         className,
       )}
-      style={outline ? { borderWidth: 1 } : undefined}
+      style={{ borderWidth: outline ? 1 : 0 }}
     >
       <Text
-        className={cn('text-[11px] font-semibold', mono ? 'text-[10px] uppercase' : '', toneClass.text[tone])}
+        className={cn('text-[10.5px] font-semibold', mono ? 'text-[9.5px] uppercase' : '', toneClass.text[tone])}
         numberOfLines={1}
         style={{ letterSpacing: mono ? 0.6 : 0.1, fontFamily: mono ? MONO_FONT : undefined }}
       >
@@ -400,8 +406,8 @@ export function StatusPill({
       accessibilityRole="text"
       accessibilityLabel={`Status: ${label}`}
       className={cn(
-        'shrink-0 flex-row items-center rounded-pill',
-        size === 'sm' ? 'h-6 gap-1.5 px-2' : 'h-7 gap-2 px-2.5',
+        'shrink-0 flex-row items-center rounded-sm',
+        size === 'sm' ? 'h-[22px] gap-1.5 px-1.5' : 'h-6 gap-2 px-2',
         toneClass.soft[tone],
         className,
       )}
@@ -409,8 +415,9 @@ export function StatusPill({
     >
       <Dot tone={tone} pulse={pulse} />
       <Text
-        className={cn('font-semibold', size === 'sm' ? 'text-[10.5px]' : 'text-[11.5px]', toneClass.text[tone])}
+        className={cn('font-semibold', size === 'sm' ? 'text-[10px]' : 'text-[11px]', toneClass.text[tone])}
         numberOfLines={1}
+        style={{ letterSpacing: 0.2 }}
       >
         {label}
       </Text>
@@ -419,8 +426,10 @@ export function StatusPill({
 }
 
 /* ── Surfaces ────────────────────────────────────────────────────────────────────
- * One elevation model, in the order defined by the tokens: `well` is a hole,
- * `canvas` is the page, `surface` is a card, `raised` is a card on a card. */
+ * One elevation model, in the order defined by the tokens: `code` is the
+ * machine plate, `well` is a hole, `canvas` is the page, `surface` is a card,
+ * `raised` is a card on a card. Elevation on the deck is a lighter surface plus
+ * a hairline — never a shadow. */
 
 export function Card({ className, style, tone, ...props }: ViewProps & { tone?: Tone }) {
   return (
@@ -452,14 +461,14 @@ export function CardHeader({
   className?: string
 }) {
   return (
-    <View className={cn('flex-row items-center justify-between gap-3 border-b border-line px-4 py-3.5', className)}>
+    <View className={cn('flex-row items-center justify-between gap-3 border-b border-line px-4 py-3', className)}>
       <View className="min-w-0 flex-1 gap-0.5">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-        <Text className="text-[15px] leading-[20px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
+        <Text className="text-[14.5px] leading-[20px] font-semibold text-ink" numberOfLines={1} style={{ letterSpacing: -0.15 }}>
           {title}
         </Text>
         {subtitle ? (
-          <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
+          <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={2}>
             {subtitle}
           </Text>
         ) : null}
@@ -470,12 +479,12 @@ export function CardHeader({
 }
 
 /**
- * Inset well — code, logs, diffs, terminal output, a mirrored screenshot.
+ * Machine plate — code, logs, diffs, terminal output, a mirrored screenshot.
  *
  * A *hole* in the surface: darker than everything around it, never raised,
  * never the thing you tap. Those three properties are what make a block read
  * as "this is output, not a control", and having one component is what stops
- * five read-only surfaces from being five slightly different grey boxes.
+ * five read-only surfaces from being five slightly different dark boxes.
  */
 export function Well({ className, style, ...props }: ViewProps) {
   return <View {...props} className={cn('rounded-md bg-code', className)} style={style} />
@@ -483,7 +492,8 @@ export function Well({ className, style, ...props }: ViewProps) {
 
 /* ── Inputs ──────────────────────────────────────────────────────────────────────
  * Every field is 48pt, the same as `Button`, so a form built from these aligns
- * without per-screen fudging. */
+ * without per-screen fudging. A field is a *well*: recessed below the card it
+ * sits on, because on a dark deck an input reads as a slot you type into. */
 
 export function Field({
   label,
@@ -511,8 +521,8 @@ export function Field({
       <View
         className={cn(
           'min-h-12 flex-row items-center gap-2.5 rounded-md border bg-field px-3.5',
-          // A field in an error state is bordered, not filled — the fill would
-          // read as the value, and the border reads as "this is wrong".
+          // An errored field keeps the recessed well but its border carries the
+          // danger hue — the value inside must not look tainted, only the slot.
           error ? 'border-danger-border' : 'border-line',
           props.multiline && 'items-start py-3',
         )}
@@ -522,7 +532,7 @@ export function Field({
           accessibilityLabel={props.accessibilityLabel ?? label}
           placeholderTextColor={palette.ink4}
           {...props}
-          className={cn('flex-1 text-[15.5px] text-ink', mono && 'text-[13px]')}
+          className={cn('flex-1 text-[14.5px] text-ink', mono && 'text-[13px]')}
           style={[
             { paddingVertical: 0, fontFamily: mono ? MONO_FONT : undefined },
             props.style as StyleProp<TextStyle>,
@@ -531,9 +541,9 @@ export function Field({
         {trailing}
       </View>
       {error ? (
-        <Text className="text-[12.5px] leading-[17px] text-danger">{error}</Text>
+        <Text className="text-[12px] leading-[16px] text-danger">{error}</Text>
       ) : hint ? (
-        <Text className="text-[12.5px] leading-[17px] text-ink-3">{hint}</Text>
+        <Text className="text-[12px] leading-[16px] text-ink-3">{hint}</Text>
       ) : null}
     </View>
   )
@@ -557,10 +567,10 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-3.5"
+      className="min-h-11 flex-row items-center gap-2.5 rounded-md border border-line bg-field px-3"
       style={style as StyleProp<ViewStyle>}
     >
-      <SearchIcon size={16} color={palette.ink3} />
+      <SearchIcon size={15} color={palette.ink3} />
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -572,7 +582,7 @@ export function SearchField({
         returnKeyType="search"
         onSubmitEditing={onSubmit}
         clearButtonMode="while-editing"
-        className="flex-1 text-[15px] text-ink"
+        className="flex-1 text-[14px] text-ink"
         style={{ paddingVertical: 0 }}
       />
       {value.length > 0 ? (
@@ -582,7 +592,7 @@ export function SearchField({
           onPress={() => onChangeText('')}
           hitSlop={10}
         >
-          <X size={15} color={palette.ink3} />
+          <X size={14} color={palette.ink3} />
         </Pressable>
       ) : null}
     </View>
@@ -618,17 +628,17 @@ export function ToggleRow({
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[15.5px] leading-[21px] font-medium text-ink">{label}</Text>
+        <Text className="text-[14.5px] leading-[20px] font-medium text-ink">{label}</Text>
         {description ? (
-          <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3">{description}</Text>
+          <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3">{description}</Text>
         ) : null}
       </View>
       <View
-        className="h-7 w-[46px] justify-center rounded-pill px-0.5"
+        className="h-[26px] w-[44px] justify-center rounded-pill px-0.5"
         style={{ backgroundColor: value ? palette.accent : palette.raised, borderWidth: 1, borderColor: value ? palette.accent : palette.lineStrong }}
       >
         <View
-          className="size-[22px] rounded-full"
+          className="size-[20px] rounded-full"
           style={{
             transform: [{ translateX: value ? 20 : 0 }],
             backgroundColor: value ? palette.accentInk : palette.ink3,
@@ -678,21 +688,21 @@ export function CheckRow({
       style={{ opacity: disabled ? 0.4 : 1 }}
     >
       <View
-        className="size-5 shrink-0 items-center justify-center rounded-xs border"
+        className="size-[18px] shrink-0 items-center justify-center rounded-xs border"
         style={{
           borderColor: checked ? palette.accent : palette.lineStrong,
           backgroundColor: checked ? palette.accent : 'transparent',
         }}
       >
-        {checked ? <Check size={13} color={palette.accentInk} strokeWidth={3} /> : null}
+        {checked ? <Check size={12} color={palette.accentInk} strokeWidth={3} /> : null}
       </View>
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[14.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[14px] leading-[19px] font-medium text-ink" numberOfLines={1}>
           {label}
         </Text>
         {description ? (
-          <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3" numberOfLines={2}>
+          <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
             {description}
           </Text>
         ) : null}
@@ -728,7 +738,7 @@ export function Segmented<T extends string>({
     <View
       accessibilityRole="tablist"
       accessibilityLabel={label}
-      className={cn('flex-row gap-1 rounded-pill border border-line bg-field p-1', className)}
+      className={cn('flex-row gap-1 rounded-md border border-line bg-well p-1', className)}
     >
       {options.map((option) => {
         const active = option.value === value
@@ -741,24 +751,25 @@ export function Segmented<T extends string>({
             onPress={() => onChange(option.value)}
             hitSlop={HIT_SLOP}
             className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-pill',
+              'flex-1 flex-row items-center justify-center gap-1.5 rounded-sm',
               size === 'sm' ? 'h-8' : 'h-10',
               active ? 'bg-raised' : 'active:bg-raised/60',
             )}
+            style={active ? { borderWidth: 1, borderColor: palette.lineStrong } : undefined}
           >
             <Text
-              className={cn('text-[13px]', active ? 'font-semibold text-ink' : 'font-medium text-ink-3')}
+              className={cn('text-[12.5px]', active ? 'font-semibold text-ink' : 'font-medium text-ink-3')}
               numberOfLines={1}
             >
               {option.label}
             </Text>
             {option.badge !== undefined && option.badge !== 0 ? (
               <View
-                className="min-w-[18px] items-center justify-center rounded-pill px-1"
-                style={{ height: 18, backgroundColor: active ? palette.accent : palette.raised }}
+                className="min-w-[17px] items-center justify-center rounded-xs px-1"
+                style={{ height: 17, backgroundColor: active ? palette.accent : palette.raised }}
               >
                 <Text
-                  className="text-[10px] font-bold"
+                  className="text-[9.5px] font-bold"
                   style={{ color: active ? palette.accentInk : palette.ink2 }}
                 >
                   {option.badge}
@@ -805,14 +816,14 @@ export function FilterChips<T extends string>({
             }
             accessibilityState={{ selected: active }}
             onPress={() => onChange(option.value)}
-            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-pill border px-3.5"
+            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-sm border px-3"
             style={{
               borderColor: active ? palette.accentBorder : palette.line,
               backgroundColor: active ? palette.accentSoft : 'transparent',
             }}
           >
             <Text
-              className="text-[13px]"
+              className="text-[12.5px]"
               style={{
                 color: active ? palette.accent : palette.ink2,
                 fontWeight: active ? '700' : '500',
@@ -824,7 +835,7 @@ export function FilterChips<T extends string>({
               <Text
                 style={{
                   color: active ? palette.accent : palette.ink3,
-                  fontSize: 11,
+                  fontSize: 10.5,
                   fontWeight: '600',
                   fontVariant: ['tabular-nums'],
                 }}
@@ -861,6 +872,7 @@ export function ListRow({
   onLongPress,
   selected,
   disabled,
+  expanded,
   className,
   accessibilityLabel,
   accessibilityHint,
@@ -876,6 +888,8 @@ export function ListRow({
   onLongPress?: () => void
   selected?: boolean
   disabled?: boolean
+  /** For rows that disclose inline content; reported to the a11y tree. */
+  expanded?: boolean
   dense?: boolean
   className?: string
   accessibilityLabel?: string
@@ -885,25 +899,26 @@ export function ListRow({
   const body = (
     <View
       className={cn(
-        'min-h-14 flex-row items-center gap-3 px-4',
-        dense ? 'py-2' : 'py-3',
+        'min-h-[52px] flex-row items-center gap-3 px-4',
+        dense ? 'py-1.5' : 'py-2.5',
         selected && 'bg-accent-soft',
         disabled && 'opacity-40',
       )}
+      style={selected ? { borderLeftWidth: 2, borderLeftColor: palette.accent } : undefined}
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
-          <Mono className="mt-0.5 text-[11.5px] leading-[15px]" numberOfLines={1}>
+          <Mono className="mt-0.5 text-[11px] leading-[14px]" numberOfLines={1}>
             {subtitle}
           </Mono>
         ) : null}
       </View>
       {meta ? (
-        <Mono className="shrink-0 text-[11px]" numberOfLines={1}>
+        <Mono className="shrink-0 text-[10.5px]" numberOfLines={1}>
           {meta}
         </Mono>
       ) : null}
@@ -918,7 +933,7 @@ export function ListRow({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityHint={accessibilityHint ?? subtitle}
-      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
+      accessibilityState={{ selected: !!selected, disabled: !!disabled, expanded }}
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={disabled}
@@ -937,7 +952,8 @@ export function Divider({ className, inset = 0 }: { className?: string; inset?: 
 
 /* ── Agent identity ────────────────────────────────────────────────────────────────
  * The letter avatar. It is the one piece of identity the app can always draw
- * without asking the network, so it is the anchor of every session row. */
+ * without asking the network, so it is the anchor of every session row. A cut
+ * corner (not a circle) keeps it in the deck's machined vocabulary. */
 
 export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: number; name?: string }) {
   const initial = (name ?? agent ?? '?').trim().charAt(0).toUpperCase() || '?'
@@ -949,10 +965,10 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2,
+        borderRadius: size * 0.28,
         backgroundColor: agentSoft(agent),
         borderWidth: 1,
-        borderColor: `${agentColor(agent)}44`,
+        borderColor: `${agentColor(agent)}55`,
       }}
     >
       <Text style={{ color: agentColor(agent), fontSize: size * 0.42, fontWeight: '700' }}>{initial}</Text>
@@ -960,7 +976,7 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
   )
 }
 
-/** A rounded-square icon tile — the second-tier identity mark (features, tools). */
+/** A cut-corner icon tile — the second-tier identity mark (features, tools). */
 export function IconTile({
   icon,
   tone = 'accent',
@@ -975,7 +991,7 @@ export function IconTile({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="items-center justify-center"
-      style={{ width: size, height: size, borderRadius: size * 0.31, backgroundColor: toneSoft[tone] }}
+      style={{ width: size, height: size, borderRadius: size * 0.26, backgroundColor: toneSoft[tone] }}
     >
       {icon}
     </View>
@@ -990,7 +1006,7 @@ export function IconTile({
  * with the row's title for the eye, which is backwards.
  */
 export function Chevron() {
-  return <ChevronRight size={17} color={palette.ink4} />
+  return <ChevronRight size={16} color={palette.ink4} />
 }
 
 /* ── Read-outs ──────────────────────────────────────────────────────────────────────
@@ -1028,7 +1044,7 @@ export function Stat({
     <View style={{ flex: 1, alignItems: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center', gap: 3 }}>
       <Eyebrow>{label}</Eyebrow>
       <Text
-        className={cn('text-[22px] font-semibold', tone && toneClass.text[tone])}
+        className={cn('text-[21px] font-semibold', tone && toneClass.text[tone])}
         style={{ letterSpacing: -0.5, fontVariant: ['tabular-nums'] }}
         numberOfLines={1}
       >
@@ -1082,11 +1098,11 @@ export function KeyValue({
 }) {
   return (
     <View className="min-h-8 flex-row items-center justify-between gap-3">
-      <Text className="text-[13.5px] text-ink-2" numberOfLines={1}>
+      <Text className="text-[13px] text-ink-2" numberOfLines={1}>
         {label}
       </Text>
       <Text
-        className={cn('shrink-0 text-[13px] text-ink', tone && toneClass.text[tone])}
+        className={cn('shrink-0 text-[12.5px] text-ink', tone && toneClass.text[tone])}
         style={mono ? { fontFamily: MONO_FONT } : undefined}
         numberOfLines={1}
       >
@@ -1105,7 +1121,7 @@ export function Loading({ label = 'Loading' }: { label?: string }) {
   return (
     <View accessible accessibilityLabel={label} className="items-center justify-center gap-3 py-12">
       <ActivityIndicator color={palette.accent} />
-      <Text className="text-[13px] text-ink-3">{label}</Text>
+      <Text className="text-[12.5px] text-ink-3">{label}</Text>
     </View>
   )
 }
@@ -1129,16 +1145,16 @@ export function EmptyState({
       accessible
       accessibilityLabel={body ? `${title}. ${body}` : title}
       className="items-center justify-center gap-2.5 px-8"
-      style={{ paddingVertical: compact ? 24 : 48 }}
+      style={{ paddingVertical: compact ? 24 : 44 }}
     >
       {icon ? (
         <View
           style={[
             {
-              width: 54,
-              height: 54,
-              borderRadius: radius.lg,
-              backgroundColor: palette.raised,
+              width: 52,
+              height: 52,
+              borderRadius: radius.md,
+              backgroundColor: palette.well,
               borderWidth: 1,
               borderColor: palette.line,
               alignItems: 'center',
@@ -1150,11 +1166,11 @@ export function EmptyState({
           {icon}
         </View>
       ) : null}
-      <Text className="text-center text-[16px] leading-[21px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
+      <Text className="text-center text-[15px] leading-[20px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
         {title}
       </Text>
       {body ? (
-        <Text className="max-w-[40ch] text-center text-[13.5px] leading-[19px] text-ink-3">{body}</Text>
+        <Text className="max-w-[40ch] text-center text-[13px] leading-[18px] text-ink-3">{body}</Text>
       ) : null}
       {action ? <View style={{ marginTop: 8 }}>{action}</View> : null}
     </View>
@@ -1185,9 +1201,9 @@ export function ErrorState({
       accessibilityLabel={message}
       className={cn('gap-2.5 rounded-lg border border-danger-border bg-danger-soft p-4', className)}
     >
-      <Text className="text-[14px] leading-[19px] font-semibold text-ink">{message}</Text>
+      <Text className="text-[13px] leading-[18px] font-semibold text-danger">{message}</Text>
       {detail ? (
-        <Text className="text-[13px] leading-[18px] text-ink-2">{detail}</Text>
+        <Text className="text-[12px] leading-[16px] text-ink-2">{detail}</Text>
       ) : null}
       {onRetry ? (
         <Button variant="secondary" size="sm" label={retryLabel} onPress={onRetry} />
@@ -1215,7 +1231,7 @@ export function Notice({
       className={cn('flex-row items-center gap-2.5 rounded-md border px-3 py-2.5', className)}
       style={{ borderColor: toneBorder[tone], backgroundColor: toneSoft[tone] }}
     >
-      <Text className="min-w-0 flex-1 text-[13px] leading-[18px]" style={{ color: toneColor[tone] }}>
+      <Text className="min-w-0 flex-1 text-[12px] leading-[16px]" style={{ color: toneColor[tone] }}>
         {message}
       </Text>
       {action ? (
@@ -1228,7 +1244,7 @@ export function Notice({
           className="min-h-8 items-center justify-center rounded-sm px-2.5 active:bg-raised"
           style={{ backgroundColor: palette.raised, opacity: action.busy ? 0.5 : 1 }}
         >
-          <Text className="text-[12.5px] font-semibold text-ink">{action.busy ? 'Working…' : action.label}</Text>
+          <Text className="text-[12px] font-semibold text-ink">{action.busy ? 'Working…' : action.label}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -1306,8 +1322,8 @@ export function CopyButton({
       className="min-h-9 flex-row items-center gap-1.5 rounded-sm px-2 active:bg-raised"
       style={copied ? { backgroundColor: palette.okSoft } : undefined}
     >
-      {copied ? <Check size={13} color={palette.ok} strokeWidth={2.6} /> : icon ? <Txt as="small">⧉</Txt> : null}
-      <Text className="text-[12.5px] font-semibold" style={{ color: copied ? palette.ok : palette.ink3 }}>
+      {copied ? <Check size={12} color={palette.ok} strokeWidth={2.6} /> : icon ? <Txt as="small">⧉</Txt> : null}
+      <Text className="text-[12px] font-semibold" style={{ color: copied ? palette.ok : palette.ink3 }}>
         {copied ? 'Copied' : label}
       </Text>
     </Pressable>
@@ -1318,11 +1334,11 @@ export function CopyButton({
 export function FieldRow({ label, value }: { label: string; value: string }) {
   return (
     <View className="min-h-11 flex-row items-center justify-between gap-3">
-      <Text className="text-[13.5px] text-ink-2" numberOfLines={1}>
+      <Text className="text-[13px] text-ink-2" numberOfLines={1}>
         {label}
       </Text>
       <View className="min-w-0 flex-1 flex-row items-center justify-end gap-1">
-        <Mono className="min-w-0 text-[12px] text-ink" numberOfLines={1}>
+        <Mono className="min-w-0 text-[11.5px] text-ink" numberOfLines={1}>
           {value}
         </Mono>
         <CopyButton value={value} label="Copy" accessibilityLabel={`Copy ${label}`} />
@@ -1334,29 +1350,52 @@ export function FieldRow({ label, value }: { label: string; value: string }) {
 /* ── Brand ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * The kiln mark. Three fired slabs stacked with the ember on top — heat
- * rises. Doubles as the app icon's geometry.
+ * The QAI signal mark: a ring, a 45° tail cutting out of it, and a live core
+ * dot — a "Q" that reads as a beacon at 24pt and as an app icon at 1024. The
+ * same geometry the generated PNG assets carry, drawn as vectors so it is
+ * crisp at every size and takes the accent colour by default.
  */
 export function BrandMark({ size = 24, color = palette.accent }: { size?: number; color?: string }) {
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 1024 1024"
+      fill="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Circle cx={512} cy={512} r={240} stroke={color} strokeWidth={64} />
+      <Line x1={626} y1={626} x2={810} y2={810} stroke={color} strokeWidth={64} strokeLinecap="round" />
+      <Circle cx={512} cy={512} r={48} fill={color} />
+    </Svg>
+  )
+}
+
+/**
+ * The lockup: the signal mark beside the wordmark. Used where the app has to
+ * name itself — the boot screen, pairing, the About page — and nowhere else,
+ * because a product that prints its own name on every screen is a product that
+ * has run out of things to say.
+ */
+export function BrandLockup({ size = 20, title = 'QAI' }: { size?: number; title?: string }) {
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ width: size, height: size, justifyContent: 'center', gap: size * 0.12 }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.4 }}
     >
-      {[1, 0.62, 0.34].map((opacity, index) => (
-        <View
-          key={index}
-          style={{
-            width: index === 0 ? size : size * (0.78 - index * 0.1),
-            height: size * 0.2,
-            borderRadius: size * 0.1,
-            backgroundColor: color,
-            opacity,
-            alignSelf: index === 0 ? 'stretch' : 'center',
-          }}
-        />
-      ))}
+      <BrandMark size={size} />
+      <Text
+        style={{
+          color: palette.ink,
+          fontSize: size * 0.85,
+          fontWeight: '800',
+          letterSpacing: size * 0.06,
+        }}
+      >
+        {title}
+      </Text>
     </View>
   )
 }
@@ -1377,7 +1416,7 @@ export function Popover({
   const enter = useEnter(0, false)
   return (
     <Animated.View
-      className={cn('rounded-lg border border-line-strong bg-raised p-3', className)}
+      className={cn('rounded-md border border-line-strong bg-raised p-3', className)}
       style={[popStyle(enter), shadowOverlay, style]}
     >
       {children}

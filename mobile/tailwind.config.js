@@ -32,16 +32,19 @@ const status = {
 }
 
 module.exports = {
-  // The app is dark-only by design: the tokens are a dark ramp, and a light
-  // theme would need a second full set rather than a flip.
+  // The app is dark-only by design: "signal deck" is a near-black ramp where
+  // elevation is a lift toward the lamp, and a light theme would need a second
+  // full set rather than a flip.
   darkMode: 'class',
   presets: [require('nativewind/preset')],
   content: ['./App.tsx', './index.ts', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        /* Surfaces — one monotonic ramp: well < canvas < chrome < surface <
-           raised < hover. See the header of tokens.ts. */
+        /* Surfaces — one monotonic dark ramp: code < well < canvas < chrome <
+           surface < raised, with `field` (typing wells) recessed below the
+           card and `hover` ABOVE `raised` because a dark deck brightens under
+           a finger. See the header of tokens.ts. */
         well: palette.well,
         canvas: palette.canvas,
         chrome: palette.chrome,
@@ -71,17 +74,23 @@ module.exports = {
         /* Status — the only colours that carry meaning. */
         ...status,
 
-        /* Hairlines: alpha white, never grey. */
+        /* Hairlines: alpha ink, never grey. */
         line: palette.line,
         'line-strong': palette.lineStrong,
         scrim: palette.scrim,
         'scrim-soft': palette.scrimSoft,
 
-        /* Code wells. The diff's *colours* are the status palette — see the
-           note in tokens.ts on why there is no `diff-add` here. */
+        /* Machine plates — the near-black wells, and the lighter twins of the
+           status hues for text ON the plate (diffs, exit codes, terminal
+           output). The plate has its own status ink because the deck-tuned
+           hues read heavier at 11px inside it. */
         code: palette.code,
         'code-ink': palette.codeInk,
         'code-dim': palette.codeDim,
+        'code-ok': palette.codeOk,
+        'code-wait': palette.codeWait,
+        'code-danger': palette.codeDanger,
+        'code-info': palette.codeInfo,
         'diff-add-soft': diffAddSoft,
         'diff-del-soft': diffDelSoft,
       },

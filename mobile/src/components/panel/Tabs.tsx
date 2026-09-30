@@ -2,18 +2,18 @@
  * Panel tabs that talk to the daemon — Git, Files, Browser, Rooms, Projects,
  * Terminals, the scratchpad and the run trace.
  *
- * EMBER CLAY — the workbench tools.
- * ----------------------------------
+ * QAI SIGNAL DECK — the workbench tools.
+ * --------------------------------------
  * Same handlers the desktop calls through `/api/mobile/*`, same structure
  * (Git: branch + changed files + diff + commit; Files: lazy tree + reader
  * with git paths intact; Browser: CDP mirror with tap-to-click; Projects and
- * Rooms as pickers). Kiln grammar throughout: ember-ticked PanelHeaders,
- * clay tablets, ember radio rings, inline Retry on every failure (a dead end
- * with no way out is a bug), content-sized skeletons so nothing reflows when
- * git/file data lands. Where the desktop hovers, these tap.
+ * Rooms as pickers). Deck grammar throughout: signal-ticked PanelHeaders,
+ * cut-corner cards, accent radio rings, inline Retry on every failure (a dead
+ * end with no way out is a bug), content-sized skeletons so nothing reflows
+ * when git/file data lands. Where the desktop hovers, these tap.
  *
  * Git/file/path functions are untouched — only the chrome around them is
- * fired. Branch checkout/create, commit/push, log, worktrees, dir listing,
+ * restyled. Branch checkout/create, commit/push, log, worktrees, dir listing,
  * file reading, serve start/stop, browser goto/click/screenshot, terminal
  * create/close, scratchpad storage, and trace loading all call the same APIs
  * with the same payloads.
@@ -451,7 +451,7 @@ export function GitTab({ session }: { session: Session }) {
               borderColor: palette.line,
             }}
           >
-            <Text className="text-[13.5px] leading-[19px] text-ink-3">Working tree clean.</Text>
+            <Text className="text-[13px] leading-[18px] text-ink-3">Working tree clean.</Text>
           </View>
         ) : (
           <View className="gap-1.5">
@@ -488,7 +488,7 @@ export function GitTab({ session }: { session: Session }) {
             disabled={busy || message.trim().length === 0}
             onPress={() => void commit()}
           />
-          {note ? <Text className="text-[12.5px] leading-[17px] text-ok">{note}</Text> : null}
+          {note ? <Text className="text-[12px] leading-[16px] text-ok">{note}</Text> : null}
         </Card>
       ) : null}
     </View>
@@ -548,7 +548,7 @@ function FileDiffRow({
           diff ? (
             <DiffCard path={file.path} diff={diff} status={file.status} />
           ) : (
-            <Text className="px-3.5 py-3 text-[12.5px] leading-[17px] text-ink-3">No diff for this file.</Text>
+            <Text className="px-3.5 py-3 text-[12px] leading-[16px] text-ink-3">No diff for this file.</Text>
           )
         ) : null}
       </View>
@@ -677,7 +677,7 @@ export function FilesTab({ session }: { session: Session }) {
             </React.Fragment>
           ))}
           {listing.entries.length === 0 ? (
-            <Text className="px-4 py-4 text-[13.5px] leading-[19px] text-ink-3">This directory is empty.</Text>
+            <Text className="px-4 py-4 text-[13px] leading-[18px] text-ink-3">This directory is empty.</Text>
           ) : null}
         </Card>
       ) : loading ? (
@@ -907,7 +907,7 @@ export function BrowserTab({ session }: { session: Session }) {
             </Card>
           ) : (
             <Card className="gap-2.5 p-4">
-              <Text className="text-[12.5px] leading-[17px] text-ink-3">
+              <Text className="text-[12px] leading-[16px] text-ink-3">
                 Start a local dev server to preview this workspace in the agent's browser.
               </Text>
               <View className="flex-row flex-wrap gap-1.5">
@@ -964,7 +964,7 @@ export function BrowserTab({ session }: { session: Session }) {
 
       {!running ? (
         <View className="gap-3">
-          <Text className="text-[13.5px] leading-[19px] text-ink-2">
+          <Text className="text-[13px] leading-[18px] text-ink-2">
             The built-in browser is not running for this session. Start it to mirror the page here
             and drive it by hand — the agent keeps using the same engine.
           </Text>
@@ -1129,7 +1129,7 @@ function RoomCard({
         className="min-h-[56px] flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 active:bg-raised"
       >
         <View className="size-2 rounded-full" style={{ backgroundColor: palette.accent }} />
-        <Text className="min-w-0 flex-1 text-[15.5px] leading-[21px] text-ink" numberOfLines={1}>
+        <Text className="min-w-0 flex-1 text-[14.5px] leading-[20px] text-ink" numberOfLines={1}>
           {room.name}
         </Text>
         {workers > 0 ? (
@@ -1210,7 +1210,7 @@ export function ProjectsTab() {
                         onPress={() => navigation.navigate('Session', { sessionId: session.id })}
                         className="min-h-11 flex-row items-center gap-2.5 pl-10 pr-4 active:bg-raised"
                       >
-                        <Text className="min-w-0 flex-1 text-[13.5px] leading-[18px] text-ink-2" numberOfLines={1}>
+                        <Text className="min-w-0 flex-1 text-[13px] leading-[18px] text-ink-2" numberOfLines={1}>
                           {session.name}
                         </Text>
                         <Mono className="text-[11px] text-ink-3">{relativeTime(session.updated_at)}</Mono>
@@ -1308,7 +1308,7 @@ export function TerminalsTab({ session }: { session: Session }) {
       <View className="gap-2">
         <Eyebrow>Active ({terminals.length})</Eyebrow>
         {terminals.length === 0 ? (
-          <Text className="text-[13.5px] leading-[19px] text-ink-3">No standalone terminals are open.</Text>
+          <Text className="text-[13px] leading-[18px] text-ink-3">No standalone terminals are open.</Text>
         ) : (
           terminals.map((terminal) => (
             <View
@@ -1348,7 +1348,7 @@ export function TerminalsTab({ session }: { session: Session }) {
  * than no notes field, because you will come back looking for what you wrote. */
 
 export function SideTab({ session }: { session: Session }) {
-  const key = `agentdeck-side-${session.project || session.id}`
+  const key = `qai-side-${session.project || session.id}`
   const [notes, setNotes] = React.useState<string>(() => storage.getString(key) ?? '')
 
   function save(text: string) {
@@ -1495,7 +1495,7 @@ function TraceRow({
           ) : null}
         </View>
         {item.summary ? (
-          <Text className="text-[13.5px] leading-[19px] text-ink-2" numberOfLines={3}>
+          <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={3}>
             {item.summary}
           </Text>
         ) : null}

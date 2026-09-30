@@ -31,9 +31,9 @@ import type { IncomingFrame } from '@/types/protocol'
 import { readStringSet, writeStringSet } from './storage'
 import { palette } from '@app/design/tokens'
 
-const DEDUP_KEY = 'agentdeck-notified-ids'
+const DEDUP_KEY = 'qai-notified-ids'
 const CHANNEL_ID = 'agent-attention'
-const CATEGORY_ID = 'agentdeck-attention'
+const CATEGORY_ID = 'qai-attention'
 
 // How a notification presents if the app is foregrounded when one slips through.
 // We mostly suppress in the foreground (the UI is right there), but a banner is

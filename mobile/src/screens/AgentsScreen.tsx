@@ -1,16 +1,15 @@
 /**
- * Agents — what this kiln can actually fire.
+ * Agents — what this deck can actually run.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * The phone asks one practical question, usually from the wrong screen:
  * **why did my task fail?** — a CLI missing, off PATH, or unauthed. So this
- * page leads with *readiness* as one kiln slab: a large fired figure (how many
- * can work right now), ember-edged when all ready, with connection truth
- * beside it. Every agent is a row opening a detail kiln sheet rather than a
- * card per agent. Capability chips stay ordered by what decides a job —
- * approvals first, because a tool that cannot ask cannot be supervised from a
- * pocket.
+ * page leads with *readiness* as one slab: a large figure (how many engines
+ * can work right now), signal-edged when all ready, with connection truth
+ * beside it. Every agent is a row opening a detail sheet rather than a card
+ * per agent. Capability chips stay ordered by what decides a job — approvals
+ * first, because a tool that cannot ask cannot be supervised from a pocket.
  */
 
 import * as React from 'react'
@@ -23,7 +22,7 @@ import { providersApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore, type MobileAgent } from '@app/store'
 import { agentColor, palette } from '@app/design/tokens'
-import { ListCard, ScreenScaffold, Section } from '@app/components/Screen'
+import { BackButton, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   AgentAvatar,
@@ -113,6 +112,7 @@ export function AgentsScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       contentClassName="pb-10"
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
       headerRight={
         <IconButton
           label="Re-scan for agents"
@@ -128,10 +128,10 @@ export function AgentsScreen() {
         </IconButton>
       }
     >
-      <Section enterIndex={0} title="Readiness" eyebrow="Firebox">
+      <Section enterIndex={0} title="Readiness" eyebrow="Roster">
         <Card className="overflow-hidden">
-          {/* Ember edge: lit when something can fire. */}
-          <View style={{ height: 3, backgroundColor: ready > 0 ? palette.ok : palette.line }} />
+          {/* Signal edge: lit when something can run. */}
+          <View style={{ height: 2, backgroundColor: ready > 0 ? palette.ok : palette.lineStrong }} />
           {/* The hero figure is the answer to the question this page exists for.
               Everything else on the card is commentary on it. */}
           <View className="flex-row items-center gap-4 p-4">
@@ -153,7 +153,7 @@ export function AgentsScreen() {
                     ? 'All agents ready'
                     : `of ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} ready`}
               </Text>
-              <Text className="text-[12.5px] leading-[17px] text-ink-3" numberOfLines={2}>
+              <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
                 {ready > 0
                   ? 'Start a task with any of them straight from this phone.'
                   : 'Install a supported CLI on the desktop, then re-scan.'}
@@ -170,7 +170,7 @@ export function AgentsScreen() {
       </Section>
 
       {capabilities.length > 0 ? (
-        <Section enterIndex={1} eyebrow="Across the kiln" title="Capabilities">
+        <Section enterIndex={1} eyebrow="Across the fleet" title="Capabilities">
           <Card>
             <View className="flex-row flex-wrap gap-2 p-4">
               {capabilities.map((capability) => (
@@ -273,7 +273,7 @@ function AgentRow({
         <View className="min-w-0 flex-1 gap-1.5">
           <View className="flex-row items-center gap-2">
             <Text
-              className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-semibold text-ink"
+              className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-semibold text-ink"
               numberOfLines={1}
               style={{ letterSpacing: -0.1 }}
             >
@@ -398,7 +398,7 @@ export function AgentDetailScreen() {
           <View className="border-t border-line px-4 py-3.5">
             <Text className="text-[13px] leading-[18px] text-ink-3">
               The daemon could not find this CLI on its PATH. Install it on the desktop, then
-              re-scan from the Agents tab.
+              re-scan from System → Agents.
             </Text>
           </View>
         ) : null}

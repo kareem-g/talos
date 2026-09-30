@@ -1,13 +1,13 @@
 /**
- * New task — the kiln's only verb, as a two-step firing sheet.
+ * New task — the app's only verb, as a two-step launch sheet.
  *
- * EMBER CLAY
- * ----------
- * The desktop's provider → project → prompt becomes two kiln steps: Where
- * (workspace, most-fired first, Inbox last, plus a typed path) and What and
+ * QAI SIGNAL DECK
+ * ---------------
+ * The desktop's provider → project → prompt becomes two deck steps: Where
+ * (workspace, most-used first, Inbox last, plus a typed path) and What and
  * how (agent, first prompt, model/thought/permissions that matter at creation
  * — permission pre-explained, because `ask` on a long pocket run means
- * approving files one at a time). Rises as a kiln sheet with detents; same
+ * approving files one at a time). Rises as a deck sheet with detents; same
  * create/setConfig handlers and ordering as the desktop.
  */
 
@@ -190,7 +190,7 @@ export function NewTaskSheet({
           ) : (
             <View style={{ gap: 8 }}>
               {error ? (
-                <Text className="text-[12.5px] leading-[17px] text-danger" numberOfLines={2}>
+                <Text className="text-[12px] leading-[16px] text-danger" numberOfLines={2}>
                   {error}
                 </Text>
               ) : null}
@@ -208,7 +208,7 @@ export function NewTaskSheet({
         {step === 1 ? (
           <View style={{ gap: 10 }}>
             {recent.length === 0 ? (
-              <Text className="py-1 text-[13.5px] leading-[19px] text-ink-3">
+              <Text className="py-1 text-[13px] leading-[18px] text-ink-3">
                 No workspaces yet. Start in the Inbox, or type a path that exists on the desktop.
               </Text>
             ) : (
@@ -301,9 +301,9 @@ export function NewTaskSheet({
                     padding: 14,
                   }}
                 >
-                  <Text className="text-[13.5px] leading-[19px] text-ink-2">
+                  <Text className="text-[13px] leading-[18px] text-ink-2">
                     No agent is ready on the desktop. Install a supported CLI there, then re-scan
-                    from the Agents tab.
+                    from System → Agents.
                   </Text>
                 </View>
               ) : (
@@ -605,7 +605,7 @@ function ConfigRow({
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text className="text-[13.5px] leading-[18px] text-ink-2">{label}</Text>
+        <Text className="text-[13px] leading-[18px] text-ink-2">{label}</Text>
         <View style={{ flex: 1 }} />
         {tone === 'wait' && value !== 'Ask before changes' ? (
           <View

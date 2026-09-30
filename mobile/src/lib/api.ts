@@ -225,6 +225,12 @@ export const mobileApi = {
     request<{ transcripts?: unknown[]; events?: unknown[] }>(
       `/api/mobile/sessions/${encodeURIComponent(id)}/transcripts`,
     ),
+  /** Save this session's conversation as a project memory on the desktop. */
+  saveMemory: (id: string, title?: string) =>
+    request<{ saved?: boolean; id?: string; error?: string }>(
+      `/api/mobile/sessions/${encodeURIComponent(id)}/memory`,
+      { method: 'POST', body: JSON.stringify(title ? { title } : {}) },
+    ),
 }
 
 /* ── Attachments ─────────────────────────────────────────────────────────── */

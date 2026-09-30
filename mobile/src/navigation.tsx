@@ -1,33 +1,32 @@
 /**
  * Navigation.
  *
- * EMBER CLAY — the kiln map.
- * --------------------------
+ * QAI — the signal map.
+ * ---------------------
  * ```
- * Pairing ──▶ Main (tabs)  ─┬─ Deck        what burns, what is warming
- *                           ├─ Agents      what can fire here
- *                           ├─ Activity    what fired, and what it cost
- *                           └─ Settings    how this is stoked
+ * Pairing ──▶ Main (tabs)  ─┬─ Deck        what needs you, what is running
+ *                           ├─ Sessions    everything that has run, searchable
+ *                           ├─ System      the machinery: agents, MCP, tunnels
+ *                           └─ Settings    this device, pairing, alerts
  *
  * (root stack, pushed over the tabs)
  *   Session          one conversation — slides in from the right (deeper)
- *   SessionPanel     that session's workbench — slides in from the right (over there)
- *   AgentDetail      one agent in full — rises as a kiln sheet
- *   Usage · Browsers · Mcp · Remote · Daemon — rise as kiln sheets
+ *   SessionPanel     that session's workbench — slides in from the right
+ *   Agents           the engine roster — rises as a deck sheet
+ *   AgentDetail      one agent in full — rises as a deck sheet
+ *   Usage · Mcp · Browsers · Remote · Daemon — rise as deck sheets
  * ```
  *
  * Three decisions live here.
  *
- * **Tabs, not a drawer.** Four tabs cover what you *do*; everything else is a
- * page you open *from* one of them.
- *
- * **The ember is in the middle, not in a header.** Starting a task is the
- * app's only verb — it sits in the tab shelf where a thumb already is.
+ * **Tabs, not a drawer.** Four tabs cover what you *do* and what you *check*;
+ * everything else is a page you open *from* one of them. Starting a task is
+ * the app's only verb, so it sits in the tab shelf where a thumb already is.
  *
  * **Panes open by kind.** Conversations and workbenches slide from the RIGHT
- * (you went deeper / the tools live over there). Reference sheets — agent
- * detail, usage, browsers, MCP, remote, daemon — rise from the BOTTOM as kiln
- * sheets, because they are lookups you dismiss back down, not places you go.
+ * (you went deeper / the tools live over there). Reference surfaces — agents,
+ * usage, MCP, browsers, remote, daemon — rise from the BOTTOM as deck sheets,
+ * because they are lookups you dismiss back down, not places you go.
  * Sheets and pickers handle their own spring entrance.
  *
  * Deep links: every destination is addressable, because a notification, a push
@@ -42,6 +41,7 @@ import {
   NavigationContainer,
   useNavigation,
   type LinkingOptions,
+  type NavigatorScreenParams,
 } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
@@ -49,14 +49,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Linking from 'expo-linking'
 
 import { DeckScreen } from './screens/DeckScreen'
-import { AgentsScreen, AgentDetailScreen } from './screens/AgentsScreen'
-import { ActivityScreen } from './screens/ActivityScreen'
+import { SessionsScreen } from './screens/SessionsScreen'
+import { SystemScreen } from './screens/SystemScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SessionScreen } from './screens/SessionScreen'
 import { SessionPanelScreen, type PanelTabId } from './screens/SessionPanelScreen'
+import { AgentsScreen, AgentDetailScreen } from './screens/AgentsScreen'
 import { UsageScreen } from './screens/UsageScreen'
-import { BrowsersScreen } from './screens/BrowsersScreen'
 import { McpScreen } from './screens/McpScreen'
+import { BrowsersScreen } from './screens/BrowsersScreen'
 import { RemoteScreen } from './screens/RemoteScreen'
 import { DaemonSettingsScreen } from './screens/DaemonSettingsScreen'
 import { PairingScreen } from './screens/PairingScreen'
@@ -68,19 +69,20 @@ import { palette } from '@app/design/tokens'
 /** The four places you can *be*. */
 export type TabParamList = {
   Deck: undefined
-  Agents: undefined
-  Activity: undefined
+  Sessions: undefined
+  System: undefined
   Settings: undefined
 }
 
 export type RootStackParamList = {
-  Main: undefined
+  Main: NavigatorScreenParams<TabParamList> | undefined
   Session: { sessionId: string; approvalId?: string }
   SessionPanel: { sessionId: string; tab?: PanelTabId }
+  Agents: undefined
   AgentDetail: { agentId: string }
   Usage: undefined
-  Browsers: undefined
   Mcp: undefined
+  Browsers: undefined
   Remote: undefined
   Daemon: undefined
   Pairing: undefined
@@ -92,23 +94,24 @@ const Stack = createNativeStackNavigator<RootStackParamList>()
 const Tab = createBottomTabNavigator<TabParamList>()
 
 const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: [Linking.createURL('/'), 'agentdeck://'],
+  prefixes: [Linking.createURL('/'), 'qai://'],
   config: {
     screens: {
       Main: {
         screens: {
           Deck: '',
-          Agents: 'agents',
-          Activity: 'activity',
+          Sessions: 'sessions',
+          System: 'system',
           Settings: 'settings',
         },
       },
       Session: 'session/:sessionId',
       SessionPanel: 'session/:sessionId/panel',
+      Agents: 'agents',
       AgentDetail: 'agent/:agentId',
       Usage: 'usage',
-      Browsers: 'browsers',
       Mcp: 'mcp',
+      Browsers: 'browsers',
       Remote: 'remote',
       Daemon: 'daemon',
       Pairing: 'pair',
@@ -125,6 +128,12 @@ const linking: LinkingOptions<RootStackParamList> = {
 export function navigateToAction(data: { sessionId: string; approvalId?: string }): void {
   if (!navigationRef.isReady()) return
   navigationRef.navigate('Session', { sessionId: data.sessionId, approvalId: data.approvalId })
+}
+
+/** Route to a tab from anywhere below the root stack (notification, dialog). */
+export function navigateToTab(tab: keyof TabParamList): void {
+  if (!navigationRef.isReady()) return
+  navigationRef.navigate('Main', { screen: tab })
 }
 
 /**
@@ -202,8 +211,8 @@ function MainTabs() {
         tabBar={(props) => <TabBar {...props} onNewTask={() => open()} />}
       >
         <Tab.Screen name="Deck" component={DeckScreen} />
-        <Tab.Screen name="Agents" component={AgentsScreen} />
-        <Tab.Screen name="Activity" component={ActivityScreen} />
+        <Tab.Screen name="Sessions" component={SessionsScreen} />
+        <Tab.Screen name="System" component={SystemScreen} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>
 
@@ -221,10 +230,10 @@ function MainTabs() {
 /* ── Screen transitions ───────────────────────────────────────────────────────
  * Panes open by kind: conversations and the workbench slide from the RIGHT
  * (iOS convention — you went deeper / the tools live over there). Reference
- * sheets rise from the BOTTOM as kiln sheets (a lookup you dismiss back down,
+ * sheets rise from the BOTTOM as deck sheets (a lookup you dismiss back down,
  * not a place you go). Pairing fades — it is a gate, not a destination.
  *
- * `gestureEnabled` stays on for the session and its workbench. Kiln sheets
+ * `gestureEnabled` stays on for the session and its workbench. Deck sheets
  * keep the swipe-down-to-dismiss gesture and lose the edge-swipe, so a form
  * with typed text cannot be flung away sideways. */
 
@@ -249,11 +258,12 @@ export function RootNavigator() {
           phone. slide_from_bottom would read as a modal, and a tool surface
           is not a modal. */}
       <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
-      {/* Kiln sheets: lookups that rise and dismiss back down. */}
+      {/* Deck sheets: lookups that rise and dismiss back down. */}
+      <Stack.Screen name="Agents" component={AgentsScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="AgentDetail" component={AgentDetailScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Usage" component={UsageScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen name="Browsers" component={BrowsersScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Mcp" component={McpScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+      <Stack.Screen name="Browsers" component={BrowsersScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Remote" component={RemoteScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Daemon" component={DaemonSettingsScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen

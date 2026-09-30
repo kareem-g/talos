@@ -230,9 +230,18 @@ class SocketClient {
 
   /** Answer an AskUserQuestion tool call that is waiting on the user. */
   answerQuestion(questionId: string, selectedOptions: string[], customText?: string): void {
+    // The backend variant is `QuestionAnswer { answer: QuestionAnswer }` under
+    // serde's adjacent tagging, so the payload must be nested under `answer` —
+    // a flat payload fails to deserialize and the frame is silently dropped.
     this.send({
       type: 'QuestionAnswer',
-      payload: { question_id: questionId, selected_options: selectedOptions, custom_text: customText },
+      payload: {
+        answer: {
+          question_id: questionId,
+          selected_options: selectedOptions,
+          custom_text: customText,
+        },
+      },
     })
   }
 

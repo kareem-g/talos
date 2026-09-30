@@ -1,13 +1,13 @@
 /**
- * Session switcher — the desktop's left rail, as a kiln glance sheet.
+ * Session switcher — the desktop's left rail, as a glance sheet.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * One sheet with a chip switch instead of two panels: Needs you (pre-selected
- * when it burns), All (deck list plus archived, because lost sessions are
- * asked for from inside a session), Rooms. The transcript stays visible behind
- * a 62% detent — switching is a glance, not a page change. Same state ranking
- * and room handlers.
+ * when something is blocked), All (deck list plus archived, because lost
+ * sessions are asked for from inside a session), Rooms. The transcript stays
+ * visible behind a 62% detent — switching is a glance, not a page change.
+ * Same state ranking and room handlers.
  */
 
 import * as React from 'react'

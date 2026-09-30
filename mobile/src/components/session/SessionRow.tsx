@@ -1,11 +1,12 @@
 /**
  * Session presentation — the rows and cards a session list is made of.
  *
- * EMBER CLAY — kiln rows and slabs.
+ * QAI SIGNAL DECK — instrument rows.
  *
- * Shared by the Deck, the Activity log, the session switcher and the panel's
- * project picker, so a session looks the same wherever it appears. A user
- * learning "ember edge on top means it burns for you" learns it once.
+ * Shared by the Deck, the Sessions browser, the session switcher and the
+ * panel's project picker, so a session looks the same wherever it appears. A
+ * user learning "signal stripe on the left means it burns for you" learns it
+ * once.
  *
  * THE ROW
  * -------
@@ -14,12 +15,12 @@
  * ▎           agent · workspace · 4m ago
  * ```
  *
- * A hewn slab — press state rounds with it — floating on its surface, one
- * meta line under a 15.5px title, the status pill on the right. The heat edge
- * on the left is the load-bearing part: a full-height 4pt kiln edge at the
- * very rim, readable at a glance while scrolling, like the desktop triage
- * card's vertical rule. It never stands alone — the pill repeats the state in
- * words on the same row.
+ * A machined slab — press state brightens with it — floating on its surface,
+ * one meta line under a 14.5px title, the status pill on the right. The
+ * signal stripe on the left is the load-bearing part: a full-height 3pt edge
+ * at the very rim, readable at a glance while scrolling, like the desktop
+ * triage card's vertical rule. It never stands alone — the pill repeats the
+ * state in words on the same row.
  *
  * SWIPE
  * -----
@@ -303,33 +304,33 @@ export function SessionRow({
             onOpen()
           }}
           onLongPress={onMore}
-          className="min-h-16 flex-row items-center overflow-hidden rounded-lg active:bg-raised"
+          className="min-h-[60px] flex-row items-center overflow-hidden rounded-lg active:bg-raised"
         >
-          {/* The heat edge: state, readable at a glance while scrolling.
+          {/* The signal stripe: state, readable at a glance while scrolling.
               Clipped to the row's radius so it reads as part of the slab. */}
           <View
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
             style={{
-              width: 4,
+              width: 3,
               alignSelf: 'stretch',
               backgroundColor: human ? toneColor[tone] : 'transparent',
             }}
           />
 
           <View className="flex-1 flex-row items-center gap-3 py-2.5 pl-3 pr-3">
-            <AgentAvatar agent={session.agent} size={36} name={providerName} />
+            <AgentAvatar agent={session.agent} size={34} name={providerName} />
             <View className="min-w-0 flex-1 gap-0.5">
               <View className="flex-row items-center gap-1.5">
                 {starred ? <Star size={12} color={palette.wait} fill={palette.wait} strokeWidth={0} /> : null}
                 <Text
-                  className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-medium text-ink"
+                  className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-medium text-ink"
                   numberOfLines={1}
                 >
                   {session.name}
                 </Text>
               </View>
-              <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
+              <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
                 {[
                   providerName ?? session.agent,
                   !hideWorkspace && session.project ? session.project.split('/').filter(Boolean).pop() : null,
@@ -372,6 +373,7 @@ export function AttentionCard({
   onApprove,
   approveLabel = 'Approve',
   onOpen,
+  secondaryAction,
   enterIndex,
 }: {
   session: Session
@@ -382,6 +384,8 @@ export function AttentionCard({
   onApprove?: () => void
   approveLabel?: string
   onOpen: () => void
+  /** Replaces the plain "Open" ghost button — Retry for failed, Resume for paused. */
+  secondaryAction?: { label: string; onPress: () => void }
   enterIndex?: number
 }) {
   const tone = stateTone(uiState)
@@ -401,12 +405,12 @@ export function AttentionCard({
         className="rounded-lg active:opacity-85"
       >
         <Card tone={tone} className="gap-3 overflow-hidden p-4">
-          {/* Ember edge: heat when it burns for you. */}
-          <View style={{ marginHorizontal: -16, marginTop: -16, height: 3, backgroundColor: toneColor[tone] }} />
+          {/* Signal edge: lit when it burns for you. */}
+          <View style={{ marginHorizontal: -16, marginTop: -16, height: 2, backgroundColor: toneColor[tone] }} />
           <View className="flex-row items-start gap-3">
             <View className="min-w-0 flex-1 gap-0.5">
               <Text
-                className="text-[16px] leading-[21px] font-semibold text-ink"
+                className="text-[15px] leading-[20px] font-semibold text-ink"
                 style={{ letterSpacing: -0.2 }}
                 numberOfLines={2}
               >
@@ -421,7 +425,7 @@ export function AttentionCard({
           </View>
 
           {headline ? (
-            <Text className="text-[13.5px] leading-[19px] text-ink-2" numberOfLines={3}>
+            <Text className="text-[13px] leading-[18px] text-ink-2" numberOfLines={3}>
               {headline}
             </Text>
           ) : null}
@@ -442,11 +446,12 @@ export function AttentionCard({
             <Button
               variant="ghost"
               size="sm"
-              label={uiState === 'failed' ? 'Retry' : 'Open'}
-              accessibilityLabel={`Open ${session.name}`}
+              label={secondaryAction?.label ?? (uiState === 'failed' ? 'Retry' : 'Open')}
+              accessibilityLabel={secondaryAction?.label ?? `Open ${session.name}`}
               onPress={() => {
                 void haptic('light')
-                onOpen()
+                if (secondaryAction) secondaryAction.onPress()
+                else onOpen()
               }}
             />
           </View>
@@ -501,10 +506,10 @@ export function LiveRow({
           />
         </View>
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
             {task ?? session.name}
           </Text>
-          <Text className="text-[12px] leading-[16px] text-ink-3" numberOfLines={1}>
+          <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
             {providerName ?? session.agent}
           </Text>
         </View>
@@ -723,8 +728,8 @@ export function AllClear({ count, onOpenActivity }: { count: number; onOpenActiv
     <View className="flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3.5">
       <IconTile tone="ok" size={34} icon={<Check size={17} color={palette.ok} strokeWidth={2.6} />} />
       <View className="min-w-0 flex-1">
-        <Text className="text-[15.5px] leading-[21px] font-medium text-ink">All clear</Text>
-        <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3" numberOfLines={2}>
+        <Text className="text-[14.5px] leading-[20px] font-medium text-ink">All clear</Text>
+        <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
           {count > 0
             ? `${count} ${count === 1 ? 'session is' : 'sessions are'} running. Nothing is waiting on you.`
             : 'No sessions need you right now.'}

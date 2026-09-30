@@ -1,9 +1,9 @@
 /**
- * Engine switch — move a live session onto a different kiln burner.
+ * Engine switch — move a live session onto a different engine.
  *
- * EMBER CLAY
- * ----------
- * The desktop's EngineModelMenu as a kiln sheet: pick provider, then its own
+ * QAI SIGNAL DECK
+ * ---------------
+ * The desktop's EngineModelMenu as a sheet: pick provider, then its own
  * model list (ids opaque — never split, never lowercased). Honest that
  * switching is not free: a digest survives, a new process and cost begin, and
  * context is no longer byte-identical. Confirm stays disabled until something
@@ -102,7 +102,7 @@ export function EngineSwitchSheet({
       <View style={{ gap: 7 }}>
         <Eyebrow>Agent</Eyebrow>
         {readyAgents.length === 0 ? (
-          <Text className="text-[13.5px] leading-[19px] text-ink-3">
+          <Text className="text-[13px] leading-[18px] text-ink-3">
             No agent is ready on the desktop. Install a supported CLI there, then re-scan from the
             Agents tab.
           </Text>

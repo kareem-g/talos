@@ -1,13 +1,13 @@
 /**
- * Screen scaffolding — the kiln shelf every page is fired on.
+ * Screen scaffolding — the deck every page is mounted on.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * A large title that *collapses into* a compact app bar as the page scrolls,
  * like iOS and like the desktop's sticky header. The title is the headline,
  * not chrome; the bar earns its hairline only once content slides under it.
- * Every section header carries a 3pt ember tick beside its eyebrow, so a long
- * page reads as one document fired in the same kiln.
+ * Every section header carries a 2pt signal tick beside its eyebrow, so a long
+ * page reads as one instrument panel rather than a stack of unrelated cards.
  */
 
 import * as React from 'react'
@@ -73,7 +73,7 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
   })
 
   return (
-    <View style={{ paddingHorizontal: 18, paddingTop: 2, paddingBottom: 10 }}>
+    <View style={{ paddingHorizontal: 16, paddingTop: 2, paddingBottom: 10 }}>
       <Animated.View
         style={{
           opacity: largeOpacity,
@@ -87,14 +87,14 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
           {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
           <Text
             accessibilityRole="header"
-            className="text-[31px] leading-[37px] font-bold text-ink"
-            style={{ letterSpacing: -0.8 }}
+            className="text-[28px] leading-[34px] font-bold text-ink"
+            style={{ letterSpacing: -0.6 }}
             numberOfLines={2}
           >
             {title}
           </Text>
           {subtitle ? (
-            <Text className="mt-1 text-[13.5px] leading-[19px] text-ink-2">{subtitle}</Text>
+            <Text className="mt-1 text-[13px] leading-[18px] text-ink-2">{subtitle}</Text>
           ) : null}
         </View>
         {actions}
@@ -144,7 +144,7 @@ export function AppBar({
   return (
     <View style={{ paddingTop: insets.top }}>
       <BlurView intensity={70} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
-      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: `${palette.chrome}D9` }} />
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: `${palette.chrome}E6` }} />
       <View
         className="min-h-[52px] flex-row items-center gap-2 px-2"
         style={borderless ? undefined : { borderBottomWidth: 1, borderBottomColor: palette.line }}
@@ -154,11 +154,11 @@ export function AppBar({
           accessibilityRole="header"
           style={{ flex: 1, opacity: titleOpacity, paddingHorizontal: 6 }}
         >
-          <Text className="text-[16.5px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
+          <Text className="text-[16px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
-            <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
+            <Text className="text-[11px] leading-[14px] text-ink-3" numberOfLines={1}>
               {subtitle}
             </Text>
           ) : null}
@@ -179,7 +179,7 @@ export function AppBar({
 export function BackButton({ onPress, label = 'Back' }: { onPress: () => void; label?: string }) {
   return (
     <IconButton label={label} size={40} onPress={() => { void haptic('light'); onPress() }}>
-      <ChevronLeft size={23} color={palette.ink} />
+      <ChevronLeft size={22} color={palette.ink} />
     </IconButton>
   )
 }
@@ -347,7 +347,9 @@ function ConnectionStrip() {
     ? connection === 'connecting'
       ? 'Connecting to your desktop…'
       : 'Reconnecting — live updates are paused'
-    : 'Offline — you can still read what was last synced'
+    : connection === 'unauthorized'
+      ? 'Device revoked — pair again from Settings'
+      : 'Offline — you can still read what was last synced'
   const tone = reconnecting ? 'wait' : 'danger'
 
   return (
@@ -355,20 +357,20 @@ function ConnectionStrip() {
       accessibilityLiveRegion="polite"
       style={{
         opacity: progress,
-        height: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 44] }),
+        height: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 40] }),
         overflow: 'hidden',
       }}
     >
       <View
-        className="min-h-11 flex-row items-center gap-2.5 px-4"
+        className="min-h-10 flex-row items-center gap-2.5 px-4"
         style={{ backgroundColor: tone === 'wait' ? palette.waitSoft : palette.dangerSoft }}
       >
         {reconnecting ? (
           <ActivityIndicator size="small" color={toneColor[tone]} />
         ) : (
-          <WifiOff size={15} color={toneColor[tone]} />
+          <WifiOff size={14} color={toneColor[tone]} />
         )}
-        <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px]" style={{ color: toneColor[tone] }} numberOfLines={2}>
+        <Text className="min-w-0 flex-1 text-[12px] leading-[16px]" style={{ color: toneColor[tone] }} numberOfLines={2}>
           {message}
         </Text>
         {!reconnecting ? (
@@ -380,10 +382,10 @@ function ConnectionStrip() {
               void loadSnapshot()
             }}
             hitSlop={10}
-            className="min-h-8 items-center justify-center rounded-pill px-3 active:opacity-70"
+            className="min-h-8 items-center justify-center rounded-sm px-3 active:opacity-70"
             style={{ backgroundColor: `${toneColor[tone]}22` }}
           >
-            <Text className="text-[12px] font-semibold" style={{ color: toneColor[tone] }}>
+            <Text className="text-[11.5px] font-semibold" style={{ color: toneColor[tone] }}>
               Retry
             </Text>
           </Pressable>
@@ -394,7 +396,7 @@ function ConnectionStrip() {
 }
 
 /* ── Section ──────────────────────────────────────────────────────────────────────
- * A titled block of a scrolling page, fired in the kiln grammar: ember tick +
+ * A titled block of a scrolling page, in the deck grammar: signal tick +
  * eyebrow + title + action. The `enter` index staggers the first few sections
  * so a page assembles itself rather than appearing all at once. */
 
@@ -449,12 +451,12 @@ export function Section({
           <View className="min-w-0 flex-1 gap-1">
             {eyebrow ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                <View style={{ width: 3, height: 13, borderRadius: 2, backgroundColor: palette.accent }} />
+                <View style={{ width: 2, height: 12, borderRadius: 1, backgroundColor: palette.accent }} />
                 <Eyebrow>{eyebrow}</Eyebrow>
               </View>
             ) : null}
             {title ? (
-              <Text className="text-[17.5px] leading-[23px] font-bold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={2}>
+              <Text className="text-[17px] leading-[22px] font-bold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={2}>
                 {title}
               </Text>
             ) : null}

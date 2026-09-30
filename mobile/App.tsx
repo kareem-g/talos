@@ -33,6 +33,7 @@ import { useEnter } from '@app/components/motion'
 export default function App() {
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
     let stopNotifications: (() => void) | undefined
@@ -53,7 +54,7 @@ export default function App() {
       cancelled = true
       stopNotifications?.()
     }
-  }, [])
+  }, [nonce])
 
   if (failed) {
     return (
@@ -65,6 +66,7 @@ export default function App() {
           onAction={() => {
             setFailed(null)
             setReady(false)
+            setNonce((value) => value + 1)
           }}
         />
         <StatusBar style="light" />
@@ -75,7 +77,7 @@ export default function App() {
   if (!ready) {
     return (
       <SafeAreaProvider>
-        <BootScreen title="AgentDeck" body="Restoring your pairing…" />
+        <BootScreen title="QAI" body="Restoring your pairing…" />
         <StatusBar style="light" />
       </SafeAreaProvider>
     )
@@ -127,13 +129,13 @@ function BootScreen({
         opacity: enter,
       }}
     >
-      {/* The mark sits on a tile, so the boot screen has the same first frame
-          as the pairing screen it usually precedes. */}
+      {/* The signal mark sits on a tile, so the boot screen has the same first
+          frame as the pairing screen it usually precedes. */}
       <View
         style={{
           width: 76,
           height: 76,
-          borderRadius: 24,
+          borderRadius: 22,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: palette.surface,
@@ -142,15 +144,15 @@ function BootScreen({
           marginBottom: 4,
         }}
       >
-        <BrandMark size={34} />
+        <BrandMark size={40} />
       </View>
       <Text
         style={{
           color: palette.ink,
-          fontSize: 21,
-          lineHeight: 27,
-          fontWeight: '700',
-          letterSpacing: -0.5,
+          fontSize: 24,
+          lineHeight: 30,
+          fontWeight: '800',
+          letterSpacing: title === 'QAI' ? 2 : -0.5,
         }}
       >
         {title}
@@ -158,8 +160,8 @@ function BootScreen({
       <Text
         style={{
           color: palette.ink3,
-          fontSize: 13.5,
-          lineHeight: 19,
+          fontSize: 13,
+          lineHeight: 18,
           textAlign: 'center',
           maxWidth: 320,
         }}
@@ -172,14 +174,15 @@ function BootScreen({
           onPress={onAction}
           style={{
             color: palette.accent,
-            fontSize: 14.5,
+            fontSize: 14,
             fontWeight: '600',
             marginTop: 6,
             paddingVertical: 10,
             paddingHorizontal: 18,
-            borderRadius: 999,
+            borderRadius: 8,
             borderWidth: 1,
             borderColor: palette.accentBorder,
+            overflow: 'hidden',
           }}
         >
           {action}

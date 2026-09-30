@@ -1,14 +1,14 @@
 /**
- * Browser engines — the kiln fleet view.
+ * Browser engines — the CDP fleet view.
  *
- * EMBER CLAY
- * ----------
+ * QAI SIGNAL DECK
+ * ---------------
  * Same page as the desktop BrowsersPage against the same start/stop handlers,
- * restructured as scannable kiln rows: workspace + URL lead (an engine is
- * per-workspace, and one hot engine serves several sessions), engine state as
- * an ember control on the right. Row opens the session; control toggles the
- * engine. Two targets, two meanings. The fleet header counts hot engines with
- * an ember edge when any burn.
+ * restructured as scannable rows: workspace + URL lead (an engine is
+ * per-workspace, and one live engine serves several sessions), engine state
+ * as a start/stop control on the right. Row opens the session; control
+ * toggles the engine. Two targets, two meanings. The fleet header counts live
+ * engines honestly — no engine is shown as running that is not.
  */
 
 import * as React from 'react'
@@ -94,7 +94,7 @@ export function BrowsersScreen() {
   return (
     <ScreenScaffold
       title="Browser engines"
-      eyebrow="Products"
+      eyebrow="System · browsers"
       subtitle="One shared engine per workspace. The agent drives it over MCP; you can drive it by hand from a session's tools."
       onRefresh={() => {
         setRefreshing(true)
@@ -103,7 +103,7 @@ export function BrowsersScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-6"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
     >
       {error ? (
         <View className="mx-4">
@@ -121,7 +121,7 @@ export function BrowsersScreen() {
         </Card>
       ) : (
         <Section
-          eyebrow="Kiln fleet"
+          eyebrow="Engine fleet"
           title={`${runningCount} of ${withProject.length} ${withProject.length === 1 ? 'engine' : 'engines'} running`}
           enterIndex={0}
         >
@@ -202,7 +202,7 @@ function EngineRow({
           <View className="min-w-0 flex-1 gap-1">
             <View className="flex-row items-center gap-2">
               <Text
-                className="min-w-0 flex-1 text-[15.5px] leading-[21px] font-semibold text-ink"
+                className="min-w-0 flex-1 text-[14.5px] leading-[20px] font-semibold text-ink"
                 numberOfLines={1}
               >
                 {name}

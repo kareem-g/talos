@@ -1,22 +1,24 @@
 /**
- * ConfigChips and the context ring — the session's live kiln dials.
+ * ConfigChips and the context ring — the session's live dials.
  *
- * EMBER CLAY: the desktop's composer row / narrow "Model & permissions" layer
- * as a horizontal kiln-dial row in the dock, one tap from the field.
- * Socket `set_config` like the desktop; dimensions are data (a new capability
- * renders with no release). Ember radio rings in the picker; live dials glow.
+ * QAI SIGNAL DECK: the desktop's composer row / narrow "Model & permissions"
+ * layer as a horizontal dial row in the session header's run bar, one tap
+ * from the transcript. Socket `set_config` like the desktop; dimensions are
+ * data (a new capability renders with no release). A live dimension carries
+ * an accent dot; one that only applies on the next run says NEXT — the
+ * difference is a fact, not a detail.
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 
 import type { ConfigOption } from '@/types/provider'
 import { socket } from '@app/lib/socket'
 import { getConversation, useStore } from '@app/store'
 import { palette, radius } from '@app/design/tokens'
-import { PickerSheet } from '@app/components/Sheet'
-import { haptic, KeyValue, Popover, ProgressBar } from '@app/components/ui'
+import { PickerSheet, Sheet } from '@app/components/Sheet'
+import { Divider, Eyebrow, KeyValue, ProgressBar, haptic } from '@app/components/ui'
 
 /** Dimensions that are not meaningful as a chip. */
 const HIDDEN_OPTIONS = new Set(['worktree', 'cwd', 'command'])
@@ -32,8 +34,8 @@ export function ConfigChips({ sessionId }: { sessionId: string }) {
 
   if (options.length === 0) {
     return (
-      <Text className="py-1 text-[11.5px] text-ink-4">
-        This agent exposes no live settings
+      <Text className="py-1 text-[11px] text-ink-4">
+        no live settings reported
       </Text>
     )
   }
@@ -68,19 +70,19 @@ function OptionChip({ option, onOpen }: { option: ConfigOption; onOpen: () => vo
         onOpen()
       }}
       style={({ pressed }) => ({
-        minHeight: 30,
+        minHeight: 28,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        borderRadius: radius.pill,
+        borderRadius: radius.sm,
         borderWidth: 1,
         borderColor: palette.line,
-        backgroundColor: pressed ? palette.hover : palette.raised,
-        paddingLeft: 10,
+        backgroundColor: pressed ? palette.hover : palette.surface,
+        paddingLeft: 9,
         paddingRight: 7,
       })}
     >
-      <Text className="text-[11px] text-ink-3" numberOfLines={1}>
+      <Text className="text-[10.5px] text-ink-3" numberOfLines={1}>
         {option.name}
       </Text>
       <Text className="max-w-[120px] text-[11.5px] font-semibold text-ink-2" numberOfLines={1}>
@@ -129,7 +131,7 @@ function OptionSheet({
   function choose(value: string) {
     if (!option) return
     socket.setConfig(sessionId, option.id, value)
-    haptic('success')
+    void haptic('success')
     onClose()
   }
 
@@ -160,12 +162,11 @@ function OptionSheet({
 /* ── Context ring ──────────────────────────────────────────────────────────────
  * The desktop's context-usage ring, unchanged in meaning: the newest reported
  * turn against the configured window, amber past 60% and red past 85%. Tapping
- * opens the same breakdown, in a popover rather than a sheet, because this is a
- * glance-and-leave read and a sheet would cover the transcript you were reading
- * to decide whether to keep going. */
+ * opens the breakdown as a sheet — the ring lives in a scrolling run bar, where
+ * an anchored popover would be clipped, and the breakdown is a read-and-dismiss
+ * surface anyway. */
 
-const RING_RADIUS = 5.5
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+const RING_CIRCUMFERENCE = (r: number) => 2 * Math.PI * r
 
 function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
@@ -182,7 +183,16 @@ interface Usage {
   window?: number
 }
 
-export function ContextRing({ sessionId, working }: { sessionId: string; working: boolean }) {
+export function ContextRing({
+  sessionId,
+  working,
+  size = 30,
+}: {
+  sessionId: string
+  working: boolean
+  /** Outer box edge in pt. The ring itself is ~60% of it. */
+  size?: number
+}) {
   // The revision counter is what re-derives usage as turns stream in.
   const revision = useStore((state) => state.revisions[sessionId] ?? 0)
   const options = useStore((state) => state.configs[sessionId]?.options)
@@ -217,15 +227,18 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
 
   if (working) {
     return (
-      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator size="small" color={palette.ink3} />
       </View>
     )
   }
-  if (!usage) return <View style={{ width: 30, height: 30 }} />
+  if (!usage) return <View style={{ width: size * 0.6, height: size }} />
 
   const pct = usage.window ? Math.min(100, (usage.input / usage.window) * 100) : 0
   const color = pct > 85 ? palette.danger : pct > 60 ? palette.wait : palette.ok
+  const ringRadius = size * 0.29
+  const box = size * 0.62
+  const circumference = RING_CIRCUMFERENCE(ringRadius)
 
   return (
     <>
@@ -238,127 +251,83 @@ export function ContextRing({ sessionId, working }: { sessionId: string; working
           setOpen(true)
         }}
         style={({ pressed }) => ({
-          width: 30,
-          height: 30,
+          width: size,
+          height: size,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: radius.pill,
+          borderRadius: radius.xs,
           backgroundColor: pressed ? palette.hover : 'transparent',
         })}
       >
-        <Svg width={17} height={17} viewBox="0 0 14 14">
-          <Circle cx={7} cy={7} r={RING_RADIUS} stroke={palette.lineStrong} strokeWidth={2} fill="none" />
+        <Svg width={box} height={box} viewBox={`0 0 ${box} ${box}`}>
+          <Circle
+            cx={box / 2}
+            cy={box / 2}
+            r={ringRadius}
+            stroke={palette.lineStrong}
+            strokeWidth={2}
+            fill="none"
+          />
           {usage.window ? (
             <Circle
-              cx={7}
-              cy={7}
-              r={RING_RADIUS}
+              cx={box / 2}
+              cy={box / 2}
+              r={ringRadius}
               stroke={color}
               strokeWidth={2}
               fill="none"
-              strokeDasharray={`${RING_CIRCUMFERENCE}`}
-              strokeDashoffset={RING_CIRCUMFERENCE * (1 - pct / 100)}
+              strokeDasharray={`${circumference}`}
+              strokeDashoffset={circumference * (1 - pct / 100)}
               rotation={-90}
-              origin={`${7}, ${7}`}
+              origin={`${box / 2}, ${box / 2}`}
             />
           ) : null}
         </Svg>
       </Pressable>
 
-      {open ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close the context breakdown"
-          onPress={() => setOpen(false)}
-          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, zIndex: 30 }}
-        >
-          <View style={{ flex: 1 }} />
-        </Pressable>
-      ) : null}
-
-      {open ? (
-        <View
-          style={{
-            position: 'absolute',
-            right: 8,
-            bottom: 44,
-            width: 262,
-            zIndex: 31,
-          }}
-        >
-          <ContextPopover usage={usage} pct={pct} color={color} onClose={() => setOpen(false)} />
-        </View>
-      ) : null}
-    </>
-  )
-}
-
-function ContextPopover({
-  usage,
-  pct,
-  color,
-  onClose,
-}: {
-  usage: Usage
-  pct: number
-  color: string
-  onClose: () => void
-}) {
-  return (
-    <Popover>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text className="text-[13px] font-semibold text-ink">Context windows</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={onClose}
-          hitSlop={10}
-          className="size-7 items-center justify-center rounded-pill active:bg-hover"
-        >
-          <Text style={{ color: palette.ink3, fontSize: 15, fontWeight: '600' }}>×</Text>
-        </Pressable>
-      </View>
-
-      <View style={{ gap: 6, marginTop: 10 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ color: color, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
-            {formatTokens(usage.input)}
-            {usage.window ? ` / ${formatTokens(usage.window)}` : ''}
-          </Text>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Context window" eyebrow="Last reported turn">
+        <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <Text style={{ color, fontSize: 20, fontWeight: '700', letterSpacing: -0.4, fontVariant: ['tabular-nums'] }}>
+              {formatTokens(usage.input)}
+              {usage.window ? ` / ${formatTokens(usage.window)}` : ''}
+            </Text>
+            {usage.window ? (
+              <Text style={{ color: palette.ink3, fontSize: 13, fontVariant: ['tabular-nums'] }}>
+                {Math.round(pct)}%
+              </Text>
+            ) : null}
+          </View>
           {usage.window ? (
-            <Text style={{ color: palette.ink3, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-              {Math.round(pct)}%
+            <ProgressBar value={pct / 100} tone={pct > 85 ? 'danger' : pct > 60 ? 'wait' : 'ok'} />
+          ) : null}
+
+          <Divider />
+
+          <View style={{ gap: 4 }}>
+            <Eyebrow>Breakdown</Eyebrow>
+            <KeyValue label="Context sent" value={formatTokens(usage.input)} />
+            <KeyValue label="Last output" value={formatTokens(usage.output)} />
+            <KeyValue label="Cache reads" value={formatTokens(usage.cached)} />
+            {usage.cost > 0 ? <KeyValue label="Turn cost" value={`$${usage.cost.toFixed(4)}`} /> : null}
+          </View>
+
+          {pct >= 90 ? (
+            <View
+              className="rounded-md bg-danger-soft"
+              style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+            >
+              <Text className="text-[12px] leading-[17px] text-danger">
+                The window is nearly full. Older messages are compressed automatically to continue.
+              </Text>
+            </View>
+          ) : pct >= 60 ? (
+            <Text className="text-[12px] leading-[17px] text-wait">
+              Auto-compression will activate when the window fills.
             </Text>
           ) : null}
         </View>
-        {usage.window ? <ProgressBar value={pct / 100} tone={pct > 85 ? 'danger' : pct > 60 ? 'wait' : 'ok'} /> : null}
-      </View>
-
-      <View style={{ height: 1, backgroundColor: palette.line, marginTop: 10, marginBottom: 8 }} />
-
-      <View style={{ gap: 4 }}>
-        <KeyValue label="Context sent" value={formatTokens(usage.input)} />
-        <KeyValue label="Last output" value={formatTokens(usage.output)} />
-        <KeyValue label="Cache reads" value={formatTokens(usage.cached)} />
-        {usage.cost > 0 ? <KeyValue label="Cost" value={`$${usage.cost.toFixed(4)}`} /> : null}
-      </View>
-
-      {pct >= 90 ? (
-        <View
-          className="rounded-sm bg-danger-soft"
-          style={{ paddingHorizontal: 9, paddingVertical: 7, marginTop: 8 }}
-        >
-          <Text className="text-[11.5px] leading-[16px] text-danger">
-            The window is nearly full. Older messages are compressed automatically to continue.
-          </Text>
-        </View>
-      ) : pct >= 60 ? (
-        <Text className="mt-2 text-[11.5px] leading-[16px] text-wait">
-          Auto-compression will activate when the window fills.
-        </Text>
-      ) : null}
-    </Popover>
+      </Sheet>
+    </>
   )
 }
-
-export { ScrollView }

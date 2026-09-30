@@ -15,12 +15,12 @@ import * as SecureStore from 'expo-secure-store'
 import { storage } from './storage'
 import { setDeviceBaseUrl, setDeviceRoutes } from './native'
 
-/** MMKV key for the device token (mirrors the web app's localStorage key). */
-export const TOKEN_KEY = 'agentdeck-device-token'
+/** MMKV key for the device token — the synchronous live copy of the keystore secret. */
+export const TOKEN_KEY = 'qai-device-token'
 
-const SECURE_TOKEN = 'ad_device_token'
-const SECURE_BASE = 'ad_device_base_url'
-const SECURE_ROUTES = 'ad_device_routes'
+const SECURE_TOKEN = 'qai_device_token'
+const SECURE_BASE = 'qai_device_base_url'
+const SECURE_ROUTES = 'qai_device_routes'
 
 async function safeSet(key: string, value: string): Promise<void> {
   try {

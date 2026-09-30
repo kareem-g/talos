@@ -1,11 +1,12 @@
 /**
- * Chat rows — the compact kiln lines in an assistant turn.
+ * Chat rows — the compact instrument lines in an assistant turn.
  *
- * EMBER CLAY: a lone tool renders bare; a run folds into one clay tablet
- * whose footer counts steps/time/failures. Diffstat + exit code stay
- * right-aligned tabular; a step in flight keeps its height (spinner swaps the
- * glyph) so the stream never jumps. Slim 22pt ember-glow tiles hold glyphs;
- * numbers are the content. Same describeTool/diff handlers.
+ * QAI SIGNAL DECK: a lone tool renders bare; a run folds into one card whose
+ * footer counts steps/time/failures. Diffstat + exit code stay right-aligned
+ * tabular; a step in flight keeps its height (spinner swaps the glyph) so the
+ * stream never jumps. Slim 22pt cut-corner tiles hold glyphs; numbers are the
+ * content; anything machine-made (output, diffs) sits on the near-black plate
+ * with the plate-tuned status inks. Same describeTool/diff handlers.
  */
 
 import * as React from 'react'
@@ -146,12 +147,12 @@ export function Step({
           paddingHorizontal: 4,
         }}
       >
-        {/* Fixed 22pt tile: a spinner must not change the row's rhythm. */}
+        {/* Fixed 22pt cut-corner tile: a spinner must not change the row's rhythm. */}
         <View
           style={{
             width: 22,
             height: 22,
-            borderRadius: 11,
+            borderRadius: 6,
             alignItems: 'center',
             justifyContent: 'center',
             backgroundColor: palette.raised,
@@ -226,7 +227,7 @@ export function Step({
                 style={{ borderRadius: radius.sm }}
               >
                 <ScrollView nestedScrollEnabled>
-                  <Mono className="text-[11px] leading-[16px] text-ink-2">{part.output}</Mono>
+                  <Mono className="text-[11px] leading-[16px] text-code-ink">{part.output}</Mono>
                 </ScrollView>
               </Well>
             ) : null}
@@ -332,9 +333,15 @@ export function DiffView({ diff, maxHeight = 280 }: { diff: string; maxHeight?: 
               const hunk = line.startsWith('@@')
               // The sign character in the line itself is the redundant
               // encoding, so the colour is reinforcement rather than the only
-              // signal — and it is the *status* palette doing the colouring,
-              // which is why there is no separate diff palette to keep in sync.
-              const color = add ? palette.ok : del ? palette.danger : hunk ? palette.info : palette.ink2
+              // signal — and it is the *machine-plate status* palette doing
+              // the colouring, tuned for the near-black well the diff sits in.
+              const color = add
+                ? palette.codeOk
+                : del
+                  ? palette.codeDanger
+                  : hunk
+                    ? palette.codeInfo
+                    : palette.codeInk
               return (
                 <View
                   key={index}
@@ -345,7 +352,7 @@ export function DiffView({ diff, maxHeight = 280 }: { diff: string; maxHeight?: 
                     paddingRight: 14,
                   }}
                 >
-                  <Mono className="w-9 shrink-0 pr-2 text-right text-[10.5px] leading-[16px] text-ink-4">
+                  <Mono className="w-9 shrink-0 pr-2 text-right text-[10.5px] leading-[16px] text-code-dim">
                     {line.length === 0 ? ' ' : line}
                   </Mono>
                   <Mono className="text-[11.5px] leading-[16px]" style={{ color }}>
@@ -649,7 +656,7 @@ export function ProgressRow({ part }: { part: ProgressPart }) {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
         {part.message ? (
-          <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+          <Text className="min-w-0 flex-1 text-[12px] leading-[16px] text-ink-2" numberOfLines={1}>
             {part.message}
           </Text>
         ) : (
@@ -765,7 +772,7 @@ export function VerificationCard({
       {part.output && !simple ? (
         <Well style={{ maxHeight: 110, borderTopWidth: 1, borderTopColor: palette.line }}>
           <ScrollView nestedScrollEnabled>
-            <Mono className="px-3 py-2 text-[11px] leading-[16px] text-ink-2">{part.output}</Mono>
+            <Mono className="px-3 py-2 text-[11px] leading-[16px] text-code-ink">{part.output}</Mono>
           </ScrollView>
         </Well>
       ) : null}

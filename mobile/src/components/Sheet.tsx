@@ -1,14 +1,14 @@
 /**
- * Overlays — kiln sheets, dialogs, action menus, pickers, confirmations.
+ * Overlays — deck sheets, dialogs, action menus, pickers, confirmations.
  *
- * EMBER CLAY — how panes open.
- * -----------------------------
- * Bottom sheets rise like kiln shelves (spring up, dismiss down with
- * velocity-projected flick); pushed workbenches slide from the right (the
- * tools live over there); reference lookups rise from the bottom. Every sheet
- * carries the kiln grammar: warm scrim, ember grabber, ember tick beside its
- * eyebrow, 26pt hewn top corners. One implementation, so no screen gets the
- * gesture, animation, safe area, or back handling wrong.
+ * QAI SIGNAL DECK — how panes open.
+ * ---------------------------------
+ * Bottom sheets rise on a spring and dismiss down with velocity-projected
+ * flick; pushed workbenches slide from the right; reference lookups rise from
+ * the bottom. Every sheet carries the deck grammar: dense scrim, quiet
+ * grabber, signal tick beside its eyebrow, cut 18pt top corners, hairline
+ * edge — elevation by lift, not by glow. One implementation, so no screen
+ * gets the gesture, animation, safe area, or back handling wrong.
  */
 
 import * as React from 'react'
@@ -105,7 +105,7 @@ export function Sheet({
   // Content-sized sheets fit their body; a detent sheet always fills the screen
   // so it can rest at any point along it.
   const naturalHeight = React.useMemo(() => {
-    const chrome = (title || eyebrow ? 62 : 0) + (footer ? 68 : 0) + (hideGrabber ? 0 : 26)
+    const chrome = (title || eyebrow ? 62 : 0) + (footer ? 68 : 0) + (hideGrabber ? 0 : 24)
     if (detents) return screenHeight
     return Math.min(contentHeight + chrome, screenHeight * maxHeightRatio)
   }, [contentHeight, detents, footer, hideGrabber, maxHeightRatio, screenHeight, title, eyebrow])
@@ -261,19 +261,19 @@ export function Sheet({
               style,
             ]}
           >
-            {/* Ember edge: the shelf is lit. */}
-            <View style={{ height: 3, backgroundColor: palette.accent, opacity: 0.9 }} />
-            {/* The grabber is the primary dismissal affordance — ember, so the
-                thumb finds it first. */}
+            {/* Signal edge: a hairline of accent says "this surface is live
+                above the deck" without shouting. */}
+            <View style={{ height: 2, backgroundColor: palette.accent, opacity: 0.55 }} />
+            {/* The grabber is the primary dismissal affordance — quiet by
+                design; the flick and the scrim teach the rest. */}
             {hideGrabber ? null : (
-              <View {...pan.panHandlers} style={{ height: 26, alignItems: 'center', justifyContent: 'center' }}>
+              <View {...pan.panHandlers} style={{ height: 24, alignItems: 'center', justifyContent: 'center' }}>
                 <View
                   style={{
-                    width: 48,
-                    height: 5,
-                    borderRadius: 3,
-                    backgroundColor: palette.accent,
-                    opacity: 0.85,
+                    width: 36,
+                    height: 4,
+                    borderRadius: 2,
+                    backgroundColor: palette.ink4,
                   }}
                 />
               </View>
@@ -284,12 +284,12 @@ export function Sheet({
                 {...pan.panHandlers}
                 className="flex-row items-center gap-3 border-b border-line px-4 pb-3 pt-1"
               >
-                <View style={{ width: 3, height: 18, borderRadius: 2, backgroundColor: palette.accent }} />
+                <View style={{ width: 2, height: 17, borderRadius: 1, backgroundColor: palette.accent }} />
                 <View className="min-w-0 flex-1">
                   {eyebrow ? <Eyebrow className="mb-1">{eyebrow}</Eyebrow> : null}
                   <Text
-                    className="text-[19.5px] leading-[25px] font-bold text-ink"
-                    style={{ letterSpacing: -0.4 }}
+                    className="text-[18px] leading-[24px] font-bold text-ink"
+                    style={{ letterSpacing: -0.35 }}
                     numberOfLines={1}
                   >
                     {title}
@@ -591,7 +591,7 @@ export function ActionSheet({
       hideGrabber
     >
       {message ? (
-        <Text className="pb-1 text-[13.5px] leading-[19px] text-ink-2">{message}</Text>
+        <Text className="pb-1 text-[13px] leading-[18px] text-ink-2">{message}</Text>
       ) : null}
       <View style={{ marginHorizontal: -16 }}>
         {actions.map((action) => (
@@ -613,13 +613,13 @@ export function ActionSheet({
             {action.icon}
             <View className="min-w-0 flex-1">
               <Text
-                className="text-[15.5px] font-medium"
+                className="text-[14.5px] font-medium"
                 style={{ color: action.tone === 'danger' ? palette.danger : palette.ink }}
               >
                 {action.label}
               </Text>
               {action.hint ? (
-                <Text className="mt-0.5 text-[12.5px] leading-[17px] text-ink-3" numberOfLines={2}>
+                <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-3" numberOfLines={2}>
                   {action.hint}
                 </Text>
               ) : null}
@@ -635,7 +635,7 @@ export function ActionSheet({
         className="min-h-14 items-center justify-center rounded-md active:bg-raised"
         style={{ marginBottom: Math.max(insets.bottom, 0) }}
       >
-        <Text className="text-[15.5px] font-semibold text-accent">{cancelLabel}</Text>
+        <Text className="text-[14.5px] font-semibold text-accent">{cancelLabel}</Text>
       </Pressable>
     </Sheet>
   )
@@ -726,7 +726,7 @@ export function PickerSheet({
 
       <View style={{ gap: 6 }}>
         {visible.length === 0 ? (
-          <Text className="px-4 py-6 text-center text-[13.5px] text-ink-3">{emptyLabel}</Text>
+          <Text className="px-4 py-6 text-center text-[13px] text-ink-3">{emptyLabel}</Text>
         ) : (
           visible.map((option) => {
             const active = option.value === value
@@ -900,7 +900,7 @@ export function FormSheet({
       footer={
         <View style={{ gap: 8 }}>
           {error ? (
-            <Text className="text-[12.5px] leading-[17px] text-danger" numberOfLines={2}>
+            <Text className="text-[12px] leading-[16px] text-danger" numberOfLines={2}>
               {error}
             </Text>
           ) : null}

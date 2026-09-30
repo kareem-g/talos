@@ -1,159 +1,60 @@
 /**
- * The tab bar.
+ * The tab bar — the deck's edge.
  *
- * EMBER CLAY — the kiln shelf.
+ * QAI SIGNAL DECK
+ * ---------------
+ * The four places you *are* in this app: the command deck (what needs you and
+ * what is running), the session browser (everything, searchable), the system
+ * hub (the machinery: agents, MCP, browsers, tunnels), and settings (this
+ * device and its pairing). Anything else is a page you open *from* one of
+ * them. Those four are the tabs, and they are the tabs forever.
  *
- * The four things you do with this app are *check what needs you*, *see what
- * the agents are*, *look back at what happened*, and *change how it is
- * configured*. Those are the four tabs, and they are the tabs forever — not
- * because four is a magic number, but because anything else is a page you open
- * *from* one of them, not a place you *are*.
- *
- * WHY THE EMBER IS IN THE MIDDLE
+ * WHY THE SIGNAL IS IN THE MIDDLE
  * -------------------------------
  * Starting a task is the app's only verb. A centre action puts it under the
- * thumb on both hands rather than in a corner. The tab row is 2 | 2 around it
- * so the composition stays symmetrical. The ember ingot sits proud of the
- * shelf and grows on press — a primary control findable without reading.
+ * thumb on both hands rather than in a corner. The row is 2 | 1 | 2 so the
+ * composition stays symmetrical. The button is a machined accent tile — cut
+ * corners, not a bubble — that grows on press: a primary control findable
+ * without reading.
  *
- * The whole shelf is translucent warm chrome with a real blur, because it
- * floats over content.
+ * The active tab gets a 2pt signal tick on the bar's top edge rather than a
+ * filled background: on a dense dark deck, selection reads as *lit*, not as
+ * *heavier*.
  */
 
 import * as React from 'react'
-import { Animated, Pressable, Text, View, type LayoutChangeEvent } from 'react-native'
+import { Animated, Pressable, Text, View } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Plus } from 'lucide-react-native'
+import { Gauge, MessagesSquare, Plus, Server, Settings } from 'lucide-react-native'
 
 import { useStore } from '@app/store'
 import { palette, radius, spring } from '@app/design/tokens'
 import { haptic } from './ui'
 
-export type TabRoute = 'Deck' | 'Agents' | 'Activity' | 'Settings'
+export type TabRoute = 'Deck' | 'Sessions' | 'System' | 'Settings'
 
 /** Left of the action, then right of it. Symmetric, so the FAB reads centred. */
-const LEFT: TabRoute[] = ['Deck', 'Agents']
-const RIGHT: TabRoute[] = ['Activity', 'Settings']
+const LEFT: TabRoute[] = ['Deck', 'Sessions']
+const RIGHT: TabRoute[] = ['System', 'Settings']
 
 const META: Record<TabRoute, { label: string }> = {
   Deck: { label: 'Deck' },
-  Agents: { label: 'Agents' },
-  Activity: { label: 'Activity' },
+  Sessions: { label: 'Sessions' },
+  System: { label: 'System' },
   Settings: { label: 'Settings' },
 }
 
-const ICONS: Record<TabRoute, keyof typeof GLYPHS> = {
-  Deck: 'layers',
-  Agents: 'bot',
-  Activity: 'pulse',
-  Settings: 'sliders',
-}
-
-/**
- * Icons drawn as views rather than imported from an icon set.
- *
- * The tab bar is the one place in the app where icon *style* has to be
- * perfectly consistent — four glyphs, one weight, one optical size, sitting
- * 4pt apart. Pulling four glyphs from a general-purpose icon set guarantees
- * they are not: they are drawn on different grids with different terminals and
- * different visual weights, and the mismatch is obvious the moment you see two
- * of them next to each other. Four small drawings on one 24-unit grid do not
- * have that problem, and they can animate (the active tab's glyph lifts) which
- * a static set cannot.
- */
-type Shape =
-  | { kind: 'bar'; x: number; y: number; w: number; h: number; r?: number }
-  | { kind: 'box'; x: number; y: number; w: number; h: number; r: number }
-  | { kind: 'dot'; cx: number; cy: number; r: number }
-
-const GLYPHS: Record<string, Shape[]> = {
-  layers: [
-    { kind: 'bar', x: 4, y: 6, w: 16, h: 1.8 },
-    { kind: 'bar', x: 4, y: 11, w: 16, h: 1.8 },
-    { kind: 'bar', x: 4, y: 16, w: 16, h: 1.8 },
-  ],
-  bot: [
-    { kind: 'box', x: 4.5, y: 7.5, w: 15, h: 11, r: 5 },
-    { kind: 'bar', x: 11.1, y: 3.2, w: 1.8, h: 4.3, r: 1 },
-    { kind: 'dot', cx: 9, cy: 12.5, r: 1.5 },
-    { kind: 'dot', cx: 15, cy: 12.5, r: 1.5 },
-  ],
-  pulse: [
-    { kind: 'bar', x: 3, y: 9, w: 4, h: 1.8 },
-    { kind: 'bar', x: 7, y: 13, w: 4, h: 1.8 },
-    { kind: 'bar', x: 11, y: 6, w: 4, h: 1.8 },
-    { kind: 'bar', x: 15, y: 11, w: 4, h: 1.8 },
-  ],
-  sliders: [
-    { kind: 'bar', x: 3.5, y: 7, w: 17, h: 1.6 },
-    { kind: 'bar', x: 3.5, y: 12.6, w: 17, h: 1.6 },
-    { kind: 'bar', x: 3.5, y: 18.2, w: 17, h: 1.6 },
-    { kind: 'dot', cx: 9, cy: 7.8, r: 2.5 },
-    { kind: 'dot', cx: 15, cy: 13.4, r: 2.5 },
-    { kind: 'dot', cx: 8, cy: 19, r: 2.5 },
-  ],
+const ICONS: Record<TabRoute, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
+  Deck: Gauge,
+  Sessions: MessagesSquare,
+  System: Server,
+  Settings: Settings,
 }
 
 function TabIcon({ route, active }: { route: TabRoute; active: boolean }) {
-  const color = active ? palette.accent : palette.ink3
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{ width: 24, height: 24 }}
-    >
-      {GLYPHS[ICONS[route]].map((shape, index) => {
-        if (shape.kind === 'bar') {
-          return (
-            <View
-              key={index}
-              style={{
-                position: 'absolute',
-                left: shape.x,
-                top: shape.y,
-                width: shape.w,
-                height: shape.h,
-                borderRadius: shape.r ?? 1,
-                backgroundColor: color,
-              }}
-            />
-          )
-        }
-        if (shape.kind === 'box') {
-          return (
-            <View
-              key={index}
-              style={{
-                position: 'absolute',
-                left: shape.x,
-                top: shape.y,
-                width: shape.w,
-                height: shape.h,
-                borderRadius: shape.r,
-                borderWidth: 1.8,
-                borderColor: color,
-              }}
-            />
-          )
-        }
-        return (
-          <View
-            key={index}
-            style={{
-              position: 'absolute',
-              left: shape.cx - shape.r,
-              top: shape.cy - shape.r,
-              width: shape.r * 2,
-              height: shape.r * 2,
-              borderRadius: shape.r,
-              backgroundColor: color,
-            }}
-          />
-        )
-      })}
-    </View>
-  )
+  const Icon = ICONS[route]
+  return <Icon size={21} color={active ? palette.accent : palette.ink3} strokeWidth={active ? 2.2 : 1.8} />
 }
 
 export interface TabBarProps {
@@ -190,8 +91,8 @@ export function TabBar({ state, navigation, onNewTask }: TabBarProps) {
         backgroundColor: 'transparent',
       }}
     >
-      {/* Translucent kiln chrome: a real blur under a wash of warm chrome, so
-          content reads through the shelf without tinting the glyphs. */}
+      {/* Translucent deck chrome: a real blur under a wash of chrome, so
+          content reads through the bar without tinting the glyphs. */}
       <BlurView intensity={52} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
       <View
         style={{
@@ -200,9 +101,9 @@ export function TabBar({ state, navigation, onNewTask }: TabBarProps) {
           right: 0,
           top: 0,
           bottom: 0,
-          backgroundColor: 'rgba(20,18,16,0.86)',
-          borderBottomWidth: 1,
-          borderBottomColor: palette.line,
+          backgroundColor: `${palette.chrome}F0`,
+          borderTopWidth: 1,
+          borderTopColor: palette.line,
         }}
       />
       <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 58, paddingHorizontal: 6 }}>
@@ -271,8 +172,6 @@ function ComposeButton() {
       stiffness: 220,
       mass: 0.7,
     })
-    // A short delay: the bar slides in first, then the button lands on it, so
-    // the two do not arrive as one flat object.
     animation.start()
   }, [enter])
 
@@ -299,24 +198,24 @@ function ComposeButton() {
           Animated.spring(progress, { toValue: 0, useNativeDriver: true, ...spring.snappy }).start()
         }
         style={{
-          width: 50,
-          height: 50,
-          borderRadius: 25,
+          width: 48,
+          height: 48,
+          borderRadius: radius.md,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: palette.accent,
-          // A hairline of kiln light separates the ingot from the blur behind
-          // it: planes separate with light, not heavy outlines.
+          // A hairline of signal separates the tile from the blur behind it:
+          // planes separate with light, not heavy outlines.
           borderWidth: 1,
           borderColor: palette.accentBorder,
           shadowColor: palette.accent,
-          shadowOpacity: 0.5,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 5 },
-          elevation: 9,
+          shadowOpacity: 0.35,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 8,
         }}
       >
-        <Plus size={23} color={palette.accentInk} strokeWidth={2.8} />
+        <Plus size={22} color={palette.accentInk} strokeWidth={2.8} />
       </Pressable>
     </Animated.View>
   )
@@ -355,17 +254,31 @@ function TabButton({
         badge > 0 ? `${META[route].label}, ${badge} waiting on you` : META[route].label
       }
       onPress={onPress}
-      style={{ flex: flex ? 1 : undefined, alignItems: 'center', justifyContent: 'center', paddingTop: 6 }}
+      style={{ flex: flex ? 1 : undefined, alignItems: 'center', justifyContent: 'center' }}
     >
+      {/* The signal tick: a 2pt accent bar on the top edge, grown from the
+          centre. Selection as "lit", not as "heavier". */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          height: 2,
+          width: 22,
+          borderRadius: 1,
+          backgroundColor: palette.accent,
+          opacity: progress,
+          transform: [{ scaleX: progress }],
+        }}
+      />
       <Animated.View
         style={{
           alignItems: 'center',
           justifyContent: 'center',
           gap: 3,
-          // A 1.5pt lift and a hair more scale. Enough to read as "this one is
-          // selected" in peripheral vision; not enough to bounce.
+          paddingTop: 8,
           transform: [
-            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] }) },
+            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) },
           ],
         }}
       >
@@ -376,7 +289,7 @@ function TabButton({
               style={{
                 position: 'absolute',
                 top: -3,
-                right: -5,
+                right: -6,
                 minWidth: 16,
                 height: 16,
                 borderRadius: 8,
@@ -399,7 +312,7 @@ function TabButton({
         <Text
           numberOfLines={1}
           style={{
-            fontSize: 10.5,
+            fontSize: 10,
             fontWeight: active ? '700' : '500',
             color: active ? palette.ink : palette.ink3,
             letterSpacing: 0.05,
@@ -419,4 +332,3 @@ export function useTabBarHeight(): number {
 }
 
 export { radius, BlurView }
-export type { LayoutChangeEvent }

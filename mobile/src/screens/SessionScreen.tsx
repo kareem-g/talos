@@ -1,21 +1,22 @@
 /**
  * Session — the conversation with one agent.
  *
- * EMBER CLAY REDESIGN — "the hearth"
- * ----------------------------------
+ * QAI SIGNAL DECK — the cockpit
+ * -----------------------------
  * A phone-native cousin of the desktop SessionView, not a copy. The desktop
  * is a compact remote-control header (back + title + status pill + detail +
  * project + connection, with pane openers for sessions / controls / workspace)
  * over a Timeline + StateZone, with the left navigator and right workspace
- * rail surfacing as side sheets. This screen keeps that skeleton but hearths
- * it for one thumb:
+ * rail surfacing as side sheets. This screen keeps that skeleton but tunes it
+ * for one thumb:
  *
  *   - **Two-row header.** Row one: where you are, what state it is in, the
- *     two panes that matter (sessions left, workspace right) and the overflow.
- *     Row two: the desktop's detail overflow — project, branch, connection —
- *     full-width in mono, because at phone width it never fits beside the
- *     title. The agent hue burns underneath as a 2pt ember line: identity,
- *     not state.
+ *     two panes that matter (switch session, open workbench) and the overflow.
+ *     Row two is the RUN BAR: the session's live configuration — model,
+ *     permission mode, thought level and every other dimension the agent
+ *     advertises — as a scrolling row of chips, always one tap away instead of
+ *     folded under the composer, plus branch, context ring and cost. Settings
+ *     you steer by live above the transcript; the composer stays pure input.
  *   - **HUD island.** The desktop's collapsed FloatingHud as a floating pill
  *     pinned above the composer: plan progress + subagent count, tappable to
  *     the matching workspace tab. A shortcut, not a readout.
@@ -26,19 +27,22 @@
  */
 
 import * as React from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import {
   Archive,
   ArchiveRestore,
-  ChevronLeft,
+  BookmarkPlus,
+  GitBranch,
   GitFork,
   ListTree,
   MoreHorizontal,
   PanelRight,
+  RotateCcw,
   Repeat2,
+  Search,
   Users,
   Zap,
 } from 'lucide-react-native'
@@ -47,6 +51,7 @@ import Clipboard from '@react-native-clipboard/clipboard'
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import type { Session } from '@/types/session'
 import { useStore, useConversation } from '@app/store'
+import { mobileApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { agentColor, palette, radius, shadowFloating } from '@app/design/tokens'
 import { Transcript } from '@app/components/Transcript'
@@ -57,10 +62,22 @@ import { EngineSwitchSheet } from '@app/components/EngineSwitchModal'
 import { SessionSwitcherSheet } from '@app/components/SessionLeftRail'
 import { SessionSearchSheet } from '@app/components/CommandPalette'
 import { AttentionPill } from '@app/components/AttentionPill'
+import { ConfigChips, ContextRing } from '@app/components/ConfigChips'
 import { ActionSheet, ConfirmDialog } from '@app/components/Sheet'
 import { BackButton } from '@app/components/Screen'
 import { deriveSubagents, latestPlanInfo } from '@app/lib/sessionView'
-import { AgentAvatar, Dot, ProgressBar, StatusPill, IconButton, toast } from '@app/components/ui'
+import {
+  AgentAvatar,
+  Dot,
+  Mono,
+  ProgressBar,
+  StatusPill,
+  IconButton,
+  formatCost,
+  formatCount,
+  haptic,
+  toast,
+} from '@app/components/ui'
 
 /** A minimal row, for the window between a deep link and the snapshot landing. */
 const PLACEHOLDER_SESSION: Session = {
@@ -94,7 +111,8 @@ export function SessionScreen() {
   const resumeSession = useStore((state) => state.resumeSession)
   const forkSession = useStore((state) => state.forkSession)
   const archiveSession = useStore((state) => state.archiveSession)
-  const mobileApi = useStore((state) => state.loadSnapshot)
+  const resendLastUserPrompt = useStore((state) => state.resendLastUserPrompt)
+  const loadSnapshot = useStore((state) => state.loadSnapshot)
 
   const [switcherOpen, setSwitcherOpen] = React.useState(false)
   const [searchOpen, setSearchOpen] = React.useState(false)
@@ -161,7 +179,9 @@ export function SessionScreen() {
   const planTotal = plan?.entries?.length ?? plan?.stepCount ?? 0
   const runningSubagents = subagents.filter((agent) => agent.status === 'working').length
 
-  const openPanel = (tab?: 'plan' | 'agents') =>
+  const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
+
+  const openPanel = (tab?: 'plan' | 'agents' | 'git' | 'files') =>
     navigation.navigate('SessionPanel', { sessionId, tab: tab as never })
 
   async function doDelete() {
@@ -177,26 +197,49 @@ export function SessionScreen() {
     }
   }
 
+  /** Save this conversation as a project memory on the desktop. */
+  async function saveMemory() {
+    setMenuOpen(false)
+    try {
+      const result = await mobileApi.saveMemory(sessionId)
+      if (result.saved) toast({ message: 'Saved to project memory', tone: 'ok' })
+      else toast({ message: result.error ?? 'Nothing to remember yet', tone: 'wait' })
+    } catch (cause) {
+      toast({
+        message: 'Could not save a memory',
+        detail: cause instanceof Error ? cause.message : undefined,
+        tone: 'danger',
+      })
+    }
+  }
+
   const projectLeaf = session?.project?.split('/').filter(Boolean).pop() ?? null
   const offline = connection !== 'connected'
 
   return (
     <View className="flex-1 bg-canvas">
-      {/* ── Hearth header ───────────────────────────────────────────────
-          The desktop SessionView's compact header, hearth-styled: row one is
-          navigation + identity + state + the two panes; row two is the detail
-          overflow (project · branch · connection) in mono. */}
-      <View style={{ paddingTop: insets.top, backgroundColor: palette.chrome, borderBottomWidth: 1, borderBottomColor: palette.line }}>
-        <View className="min-h-[56px] flex-row items-center gap-1.5 pl-1 pr-2">
+      {/* ── Cockpit header ──────────────────────────────────────────────
+          Row one: navigation + identity + state + the two panes. Row two:
+          the run bar — the session's live configuration, always visible. */}
+      <View
+        style={{
+          paddingTop: insets.top,
+          backgroundColor: palette.chrome,
+          borderBottomWidth: 1,
+          borderBottomColor: palette.line,
+        }}
+      >
+        <View className="min-h-[52px] flex-row items-center gap-1.5 pl-1 pr-2">
           <BackButton onPress={() => navigation.goBack()} label="Back to the deck" />
-          <AgentAvatar agent={session?.agent ?? ''} name={session?.agent} size={34} />
+          <AgentAvatar agent={session?.agent ?? ''} name={session?.agent} size={32} />
           <View className="min-w-0 flex-1 px-1">
-            <Text className="text-[16px] leading-[21px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
+            <Text className="text-[15px] leading-[20px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
               {session?.name ?? 'Session'}
             </Text>
-            <Text className="text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
+            <Text className="text-[11px] leading-[14px] text-ink-3" numberOfLines={1}>
               {session?.agent || 'loading…'}
               {projectLeaf ? ` · ${projectLeaf}` : ''}
+              {offline ? ` · ${connection}` : ''}
             </Text>
           </View>
           <StatusPill tone={tone} label={display.label} pulse={display.pulse} size="sm" />
@@ -206,7 +249,7 @@ export function SessionScreen() {
             size={36}
             onPress={() => setSwitcherOpen(true)}
           >
-            <Repeat2 size={18} color={palette.ink2} />
+            <Repeat2 size={17} color={palette.ink2} />
           </IconButton>
           <IconButton
             label="Open workspace"
@@ -214,44 +257,69 @@ export function SessionScreen() {
             size={36}
             onPress={() => openPanel()}
           >
-            <PanelRight size={19} color={palette.ink2} />
+            <PanelRight size={18} color={palette.ink2} />
           </IconButton>
           <IconButton
             label="Session actions"
             size={36}
             onPress={() => setMenuOpen(true)}
           >
-            <MoreHorizontal size={19} color={palette.ink2} />
+            <MoreHorizontal size={18} color={palette.ink2} />
           </IconButton>
         </View>
 
-        {/* Detail overflow: the desktop's second row, full-width on narrow. */}
-        {session?.branch || projectLeaf || offline || display.hint ? (
-          <View className="flex-row items-center gap-1.5 px-4 pb-2">
-            {session?.branch ? (
-              <Text className="shrink-0 text-[11px] leading-[14px] text-accent" numberOfLines={1}>
+        {/* ── Run bar ───────────────────────────────────────────────────
+            What this run is: branch, live config dimensions, context load,
+            and the running cost. Scrollable because eight agents' worth of
+            dimensions is a wall; every chip is a control, not a label. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingBottom: 8 }}
+        >
+          {session?.branch ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Branch ${session.branch}`}
+              accessibilityHint="Opens the git workspace"
+              onPress={() => {
+                void haptic('light')
+                openPanel('git')
+              }}
+              className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2 active:bg-raised"
+            >
+              <GitBranch size={11} color={palette.accent} />
+              <Mono className="max-w-[130px] text-[11px] text-ink-2" numberOfLines={1}>
                 {session.branch}
-              </Text>
-            ) : null}
-            {projectLeaf && session?.branch ? (
-              <Text className="text-[11px] text-ink-4">·</Text>
-            ) : null}
-            {projectLeaf ? (
-              <Text className="min-w-0 flex-1 text-[11px] leading-[14px] text-ink-3" numberOfLines={1}>
-                {session?.project}
-              </Text>
-            ) : null}
-            {offline ? (
-              <View className="shrink-0 flex-row items-center gap-1">
-                <Dot tone="danger" />
-                <Text className="text-[11px] capitalize text-ink-3">{connection}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
+              </Mono>
+            </Pressable>
+          ) : null}
 
-        {/* The ember line: identity, not state. */}
-        <View style={{ height: 2, backgroundColor: accent, opacity: session ? 0.85 : 0.2 }} />
+          <ConfigChips sessionId={sessionId} />
+
+          <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2">
+            <ContextRing sessionId={sessionId} working={busy} size={16} />
+          </View>
+
+          {session && (session.cost ?? 0) > 0 ? (
+            <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-line bg-surface px-2">
+              <Mono className="text-[11px] text-ink-3" style={{ fontVariant: ['tabular-nums'] }}>
+                {formatCost(session.cost ?? 0)}
+                {session.tokens_used ? ` · ${formatCount(session.tokens_used)} tok` : ''}
+              </Mono>
+            </View>
+          ) : null}
+
+          {offline ? (
+            <View className="h-[28px] flex-row items-center gap-1.5 rounded-sm border border-danger-border bg-danger-soft px-2">
+              <Dot tone="danger" />
+              <Text className="text-[10.5px] font-semibold capitalize text-danger">{connection}</Text>
+            </View>
+          ) : null}
+        </ScrollView>
+
+        {/* The signal line: agent identity, not state. */}
+        <View style={{ height: 2, backgroundColor: accent, opacity: session ? 0.8 : 0.2 }} />
       </View>
 
       <KeyboardAvoidingView
@@ -349,6 +417,16 @@ export function SessionScreen() {
             onPress: () => setPendingSurface('panel'),
           },
           {
+            label: 'Retry last prompt',
+            hint: 'Re-send your most recent message to the agent',
+            icon: <RotateCcw size={18} color={palette.ink2} />,
+            disabled: busy,
+            onPress: () => {
+              if (resendLastUserPrompt(sessionId)) toast({ message: 'Prompt re-sent', tone: 'ok' })
+              else toast({ message: 'Nothing to re-send yet', tone: 'muted' })
+            },
+          },
+          {
             label: 'Start another task',
             hint: 'Open a new session without losing this conversation',
             icon: <Zap size={18} color={palette.accent} />,
@@ -369,8 +447,14 @@ export function SessionScreen() {
           {
             label: 'Find in this session',
             hint: 'Search the transcript and jump to a message',
-            icon: <ListTree size={18} color={palette.ink2} />,
+            icon: <Search size={18} color={palette.ink2} />,
             onPress: () => setPendingSurface('search'),
+          },
+          {
+            label: 'Save to project memory',
+            hint: 'Store this conversation as a memory on the desktop',
+            icon: <BookmarkPlus size={18} color={palette.ink2} />,
+            onPress: () => void saveMemory(),
           },
           {
             label: 'Copy transcript as JSON',
@@ -439,7 +523,7 @@ export function SessionScreen() {
                   icon: <Archive size={18} color={palette.ink2} />,
                   onPress: () => {
                     void archiveSession(sessionId)
-                    void mobileApi()
+                    void loadSnapshot()
                     toast({ message: 'Archived', tone: 'ok' })
                   },
                 },
@@ -500,14 +584,14 @@ function HudIsland({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          borderRadius: radius.pill,
+          borderRadius: radius.sm,
           borderWidth: 1,
           borderColor: palette.lineStrong,
           backgroundColor: palette.raised,
-          paddingLeft: 6,
-          paddingRight: 6,
-          paddingVertical: 5,
-          gap: 4,
+          paddingLeft: 4,
+          paddingRight: 4,
+          paddingVertical: 4,
+          gap: 2,
           ...shadowFloating,
         }}
       >
@@ -521,7 +605,7 @@ function HudIsland({
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
-              borderRadius: radius.pill,
+              borderRadius: radius.xs,
               paddingHorizontal: 10,
               paddingVertical: 6,
               backgroundColor: pressed ? palette.hover : 'transparent',
@@ -551,7 +635,7 @@ function HudIsland({
               flexDirection: 'row',
               alignItems: 'center',
               gap: 6,
-              borderRadius: radius.pill,
+              borderRadius: radius.xs,
               paddingHorizontal: 10,
               paddingVertical: 6,
               backgroundColor: pressed ? palette.hover : 'transparent',
@@ -571,5 +655,3 @@ function HudIsland({
     </View>
   )
 }
-
-export { ChevronLeft }

@@ -1,12 +1,12 @@
 /**
- * Home sections — Automations and Skills as kiln shelves.
+ * System sections — Automations and Skills.
  *
- * EMBER CLAY: named things you toggle, run and delete. Automations stay
+ * QAI SIGNAL DECK: named things you toggle, run and delete. Automations stay
  * per-device (same template catalog, same MMKV shape, no daemon scheduler —
- * Run spawns a real session, stated on the card). Skills stay shared (daemon
- * `.agentdeck/skills/`, same toggle/install/uninstall/content handlers — a
- * switch here fires on the desktop too). Lit automations lift onto ember
- * hairlines with ember dots; the rest is clay.
+ * Run spawns a real session, stated on the card). Skills stay shared (the
+ * daemon's per-project skills directory, same toggle/install/uninstall/
+ * content handlers — a switch here fires on the desktop too). Enabled
+ * automations lift onto accent hairlines; the rest stays quiet.
  */
 
 import * as React from 'react'
@@ -46,8 +46,8 @@ interface Automation {
   lastRun?: string
 }
 
-const STORAGE_KEY = 'agentdeck-automations'
-const KEEP_AWAKE_KEY = 'agentdeck-keep-awake'
+const STORAGE_KEY = 'qai-automations'
+const KEEP_AWAKE_KEY = 'qai-keep-awake'
 
 const IDLE_TEMPLATES: Array<Omit<Automation, 'id' | 'enabled'>> = [
   {
@@ -165,14 +165,14 @@ export function AutomationsSection() {
     <View className="gap-3">
       <Card>
         <View className="gap-3.5 p-4">
-          <Text className="text-[13.5px] leading-[19px] text-ink-2">
+          <Text className="text-[13px] leading-[18px] text-ink-2">
             Templates you start on demand. Nothing is scheduled by the daemon: “Run” spawns a real
             session with the prompt, on the desktop as well as here.
           </Text>
 
           {automations.length === 0 ? (
             <View className="rounded-md border border-dashed border-line p-3.5">
-              <Text className="text-[13.5px] leading-[19px] text-ink-3">
+              <Text className="text-[13px] leading-[18px] text-ink-3">
                 No automations yet. Add one to keep a prompt you run often.
               </Text>
             </View>
@@ -276,15 +276,15 @@ function AutomationRow({
       <View
         className={cn(
           'flex-row items-center gap-2.5 rounded-md border py-2 pl-3 pr-1',
-          // A lit automation gets an ember hairline — the toggle dot carries
-          // the state, the edge carries the heat.
+          // An enabled automation gets an accent hairline — the toggle dot
+          // carries the state, the edge carries the emphasis.
           automation.enabled ? 'border-accent-border bg-raised' : 'border-line bg-transparent',
         )}
         style={automation.enabled ? undefined : { opacity: 0.72 }}
       >
         <Zap size={14} color={automation.enabled ? palette.ink2 : palette.ink4} />
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-[13.5px] leading-[18px] font-medium text-ink" numberOfLines={1}>
+          <Text className="text-[13px] leading-[18px] font-medium text-ink" numberOfLines={1}>
             {automation.name}
           </Text>
           <Text className="text-[11px] leading-[15px] text-ink-3" numberOfLines={1}>
@@ -503,7 +503,7 @@ export function SkillsSection() {
     return (
       <Card>
         <View className="p-4">
-          <Text className="text-[13.5px] leading-[19px] text-ink-3">
+          <Text className="text-[13px] leading-[18px] text-ink-3">
             No workspace yet. Skills install per project, so start a session first.
           </Text>
         </View>
@@ -515,8 +515,8 @@ export function SkillsSection() {
     <View className="gap-3">
       <Card>
         <View className="gap-3.5 p-4">
-          <Text className="text-[13.5px] leading-[19px] text-ink-2">
-            Skills install to <Mono className="text-[12px]">.agentdeck/skills/</Mono> in the project
+          <Text className="text-[13px] leading-[18px] text-ink-2">
+            Skills install into the project's skills directory on the desktop
             and are injected into every turn by the context assembler — on the desktop as well as
             here. A switch here is not local.
           </Text>
@@ -675,7 +675,7 @@ export function SkillsSection() {
         open={projectPicker}
         onClose={() => setProjectPicker(false)}
         title="Skills are per project"
-        subtitle="Installed into .agentdeck/skills/ on the desktop"
+        subtitle="Installed per project on the desktop"
         searchable
         value={project ?? undefined}
         onSelect={(value) => setProject(value)}

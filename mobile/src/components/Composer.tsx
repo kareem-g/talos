@@ -1,10 +1,11 @@
 /**
  * Composer — the prompt input.
  *
- * A port of the desktop's `Composer`, with the parts the desktop hides on
- * narrow screens moved into it, because on a phone there is no other place for
- * them: the permission mode, the model, the thought level, the context ring and
- * the slash-command menu all belong *here*, not in a header.
+ * A port of the desktop's `Composer`, minus the config dock: on QAI the
+ * session's live dimensions (model, permission mode, thought) ride in the
+ * session header's RUN BAR, always visible above the transcript, so the
+ * composer is pure input. What stays inside, because it belongs to the act of
+ * typing: the follow-up queue, attachments, and the slash-command menu.
  *
  * THE STATE MACHINE (unchanged, because it is right)
  * -------------------------------------------------
@@ -19,21 +20,16 @@
  *
  * THE DOCK
  * --------
- * The dock is a kiln slab floating on the canvas: the multiline field is
- * integrated directly into it (no nested field chrome), the queue and
- * attachment chips stack above the text, and the 'Run' row — the session's
- * live configuration, scrolling horizontally — folds away beneath it. The
- * context ring stays visible even when the rest is collapsed: it is the one
- * dimension you want to know without asking.
+ * A machined slab on the canvas: the multiline field is integrated directly
+ * into it (no nested field chrome), and the queue and attachment chips stack
+ * above the text so what you are about to send is read before you type more.
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   ArrowUp,
-  Brain,
-  ChevronDown,
   CornerUpLeft,
   Paperclip,
   Pencil,
@@ -48,9 +44,7 @@ import { attachmentsApi } from '@app/lib/api'
 import { useStore } from '@app/store'
 import type { AttachmentRef, QueuedMessage } from '@/types/conversation'
 import { palette, radius, shadowOverlay } from '@app/design/tokens'
-import { useCollapse } from '@app/components/motion'
-import { haptic, Mono, Popover } from '@app/components/ui'
-import { ConfigChips, ContextRing } from '@app/components/ConfigChips'
+import { haptic, Mono } from '@app/components/ui'
 import * as ImagePicker from 'expo-image-picker'
 import * as ImageManipulator from 'expo-image-manipulator'
 
@@ -87,13 +81,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
   const [attachments, setAttachments] = React.useState<AttachmentRef[]>([])
   const [uploading, setUploading] = React.useState(false)
   const [attachError, setAttachError] = React.useState<string | null>(null)
-  const [dockOpen, setDockOpen] = React.useState(false)
   const inputRef = React.useRef<TextInput>(null)
 
   const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
   const disabled = connection !== 'connected'
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !disabled
-  const dock = useCollapse(dockOpen)
 
   function submit() {
     const value = text.trim()
@@ -207,7 +199,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               right: 0,
               zIndex: 20,
               marginBottom: 8,
-              borderRadius: radius.lg,
+              borderRadius: radius.md,
               borderWidth: 1,
               borderColor: palette.lineStrong,
               backgroundColor: palette.raised,
@@ -223,7 +215,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 borderBottomWidth: 1,
                 borderBottomColor: palette.line,
                 paddingHorizontal: 14,
-                paddingVertical: 9,
+                paddingVertical: 8,
               }}
             >
               <Wand2 size={13} color={palette.wait} />
@@ -298,16 +290,16 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 6,
-                    borderRadius: radius.pill,
+                    borderRadius: radius.sm,
                     borderWidth: 1,
                     borderColor: palette.line,
                     backgroundColor: palette.raised,
-                    paddingLeft: 12,
+                    paddingLeft: 10,
                     paddingRight: 4,
                     paddingVertical: 3,
                   }}
                 >
-                  <Text className="min-w-0 flex-1 text-[12.5px] leading-[17px] text-ink-2" numberOfLines={1}>
+                  <Text className="min-w-0 flex-1 text-[12px] leading-[16px] text-ink-2" numberOfLines={1}>
                     {message.text || `${message.attachments.length} attachment(s)`}
                     {message.text && message.attachments.length > 0 ? `  +${message.attachments.length}` : ''}
                   </Text>
@@ -323,11 +315,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 4,
-                      borderRadius: radius.pill,
+                      borderRadius: radius.xs,
                       borderWidth: 1,
                       borderColor: palette.line,
                       backgroundColor: pressed ? palette.hover : palette.surface,
-                      paddingHorizontal: 10,
+                      paddingHorizontal: 9,
                     })}
                   >
                     <CornerUpLeft size={12} color={palette.ink2} />
@@ -338,7 +330,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     accessibilityLabel={`Edit queued message ${index + 1} of ${queue.length}`}
                     onPress={() => void editQueued(message)}
                     hitSlop={8}
-                    className="size-8 items-center justify-center rounded-pill active:bg-hover"
+                    className="size-8 items-center justify-center rounded-sm active:bg-hover"
                   >
                     <Pencil size={13} color={palette.ink2} />
                   </Pressable>
@@ -347,7 +339,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     accessibilityLabel={`Remove queued message ${index + 1} of ${queue.length}`}
                     onPress={() => removeQueued(sessionId, message.id)}
                     hitSlop={8}
-                    className="size-8 items-center justify-center rounded-pill active:bg-hover"
+                    className="size-8 items-center justify-center rounded-sm active:bg-hover"
                   >
                     <Trash2 size={13} color={palette.ink3} />
                   </Pressable>
@@ -365,7 +357,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 5,
-                    borderRadius: radius.pill,
+                    borderRadius: radius.sm,
                     borderWidth: 1,
                     borderColor: palette.line,
                     backgroundColor: palette.raised,
@@ -385,7 +377,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                       setAttachments((current) => current.filter((entry) => entry.ref !== attachment.ref))
                     }
                     hitSlop={8}
-                    className="size-7 items-center justify-center rounded-pill active:bg-hover"
+                    className="size-7 items-center justify-center rounded-sm active:bg-hover"
                   >
                     <X size={12} color={palette.ink3} />
                   </Pressable>
@@ -393,25 +385,6 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               ))}
             </View>
           ) : null}
-
-          {/* ── The dock: the session's live configuration ─────────────
-              Collapsible, because eight agents' worth of dimensions is a
-              wall, and the user who needs none of them should not pay for
-              it. The toggle lives in the strip below the field; the options
-              open ABOVE the text so the caret never jumps. */}
-          <View
-            {...(dock.measured ? { onLayout: dock.onLayout } : {})}
-            style={[dock.style, { borderBottomWidth: dockOpen ? 1 : 0, borderBottomColor: palette.line }]}
-          >
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8 }}
-            >
-              <ConfigChips sessionId={sessionId} />
-            </ScrollView>
-          </View>
 
           <TextInput
             ref={inputRef}
@@ -422,12 +395,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
             multiline
             editable={!disabled}
             accessibilityLabel="Message the agent"
-            className="max-h-[132px] min-h-[44px] bg-transparent px-4 pb-1 pt-3 text-[15.5px] leading-[22px] text-ink"
+            className="max-h-[132px] min-h-[44px] bg-transparent px-4 pb-1 pt-3 text-[15px] leading-[21px] text-ink"
           />
 
           {/* ── Control strip ───────────────────────────────────────────
-              Pinned to the bottom edge of the card, ChatGPT-style: attach
-              and the Run toggle on the left, the context ring, then Stop
+              Pinned to the bottom edge of the card: attach on the left, Stop
               beside Send on the right. Because the strip sits *below* the
               growing field instead of after it, the send control stays on
               screen no matter how tall the text gets — the field grows
@@ -442,7 +414,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               style={({ pressed }) => ({
                 width: 36,
                 height: 36,
-                borderRadius: radius.pill,
+                borderRadius: radius.sm,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: pressed ? palette.hover : 'transparent',
@@ -456,37 +428,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
               )}
             </Pressable>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={dockOpen ? 'Hide session controls' : 'Show session controls'}
-              accessibilityState={{ expanded: dockOpen }}
-              onPress={() => setDockOpen((value) => !value)}
-              hitSlop={10}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 5,
-                minHeight: 36,
-                paddingRight: 4,
-              }}
-            >
-              <Brain size={14} color={dockOpen ? palette.accent : palette.ink3} />
-              <Text
-                className="text-[11px] font-semibold uppercase"
-                style={{ color: dockOpen ? palette.accent : palette.ink3, letterSpacing: 0.9 }}
-              >
-                Run
-              </Text>
-              <ChevronDown
-                size={12}
-                color={palette.ink4}
-                style={{ transform: [{ rotate: dockOpen ? '180deg' : '0deg' }] }}
-              />
-            </Pressable>
-
             <View style={{ flex: 1 }} />
-
-            <ContextRing sessionId={sessionId} working={busy} />
 
             {busy ? (
               <Pressable
@@ -500,7 +442,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                   width: 36,
                   height: 36,
                   marginLeft: 4,
-                  borderRadius: radius.pill,
+                  borderRadius: radius.sm,
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: pressed ? palette.dangerBorder : palette.dangerSoft,
@@ -529,7 +471,7 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 5,
-                borderRadius: radius.pill,
+                borderRadius: radius.sm,
                 paddingHorizontal: busy ? 14 : 0,
                 backgroundColor: !canSend
                   ? palette.raised
@@ -558,5 +500,3 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
     </View>
   )
 }
-
-export { Popover }

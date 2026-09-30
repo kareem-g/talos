@@ -1,11 +1,11 @@
 /**
- * MCP servers — the tools this kiln can call.
+ * MCP servers — the external tools agents can call.
  *
- * EMBER CLAY
- * ----------
- * Listing is a kiln shelf of server ingots with ember-tiled icons; adding is
- * a kiln form sheet rising from the bottom (a form you cannot scroll away from
- * once mistaken is a trap). Removing stays two-step in the row — quiet danger
+ * QAI SIGNAL DECK
+ * ---------------
+ * Listing is a shelf of server rows with accent-tiled icons; adding is a form
+ * sheet rising from the bottom (a form you cannot scroll away from once
+ * mistaken is a trap). Removing stays two-step in the row — quiet danger
  * first, filled confirm second — the iOS grammar for exactly this case. Same
  * list/add/remove handlers, same endpoints.
  */
@@ -126,7 +126,7 @@ export function McpScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-6"
-      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to settings" />}
+      headerLeft={<BackButton onPress={() => navigation.goBack()} label="Back to System" />}
       headerRight={
         // A `primary` Button rather than a hand-rolled pill: the accent fill,
         // the label weight and the 48pt target are all the primitive's job, and
@@ -151,7 +151,7 @@ export function McpScreen() {
         </View>
       ) : null}
 
-      <Section eyebrow="Firebox" title={servers.length > 0 ? `${servers.length} ${servers.length === 1 ? 'server' : 'servers'}` : undefined} enterIndex={0}>
+      <Section eyebrow="Registered" title={servers.length > 0 ? `${servers.length} ${servers.length === 1 ? 'server' : 'servers'}` : undefined} enterIndex={0}>
         {servers.length === 0 ? (
           <Card>
             <EmptyState
@@ -254,7 +254,7 @@ function ServerRow({
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
         <IconTile icon={<Server size={16} color={palette.accent} />} tone="accent" />
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-[15.5px] leading-[21px] font-medium text-ink" numberOfLines={1}>
+          <Text className="text-[14.5px] leading-[20px] font-medium text-ink" numberOfLines={1}>
             {server.name}
           </Text>
           {server.command ? (

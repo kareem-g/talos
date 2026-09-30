@@ -1,10 +1,11 @@
 /**
- * Prose — assistant parchment with the desktop's inline markdown treatment.
+ * Prose — assistant output with the desktop's inline markdown treatment.
  *
- * EMBER CLAY: fenced blocks become kiln wells (ember-ticked headers, copyable
- * mono), headings/bullets become real rows, `code`/bold/@tokens glow inline.
- * Agent prose stays 15px/21px for arm's-length reading; the streaming caret
- * burns ember. Same splitFences/parseBlocks/inlineMarkdown handlers.
+ * QAI SIGNAL DECK: fenced blocks become machine plates (hairline headers,
+ * copyable mono, near-black wells), headings/bullets become real rows,
+ * `code`/bold/@tokens glow inline with the signal accent. Agent prose stays
+ * 14.5px/22px for dense arm's-length reading; the streaming caret blinks
+ * accent. Same splitFences/parseBlocks/inlineMarkdown handlers.
  */
 
 import * as React from 'react'
@@ -164,28 +165,29 @@ function InlineText({
       nodes.push(<Text key={`t${pieceIndex}`}>{piece}</Text>)
       return
     }
-    // Token chips: split the remainder on @/$#/ sigils, keeping the sigil.
-    const chunks = piece.split(new RegExp(`(?=${TOKEN_RE.source.slice(1, -1)})`))
-    chunks.forEach((chunk, chunkIndex) => {
-      const match = TOKEN_RE.exec(chunk)
-      if (!match) {
-        if (chunk) nodes.push(<Text key={`x${pieceIndex}-${chunkIndex}`}>{chunk}</Text>)
-        return
-      }
-      const sigil = match[1]
-      const label = match[2].replace(/\(.*\)$/, '').replace(/\/$/, '')
-      // `@file` green, `$skill` violet, `#conversation` blue, `/command` amber.
-      // Violet is the one hue here that is not a status colour, and it is
-      // deliberate: a skill reference names a *kind of thing*, not a state, and
-      // borrowing a status hue would make it read as "this is wrong".
-      const color =
-        sigil === '@'
-          ? palette.ok
-          : sigil === '$'
-            ? agentHue.opencode
-            : sigil === '#'
-              ? palette.info
-              : palette.wait
+      // Token chips: split the remainder on @/$#/ sigils, keeping the sigil.
+      const chunks = piece.split(new RegExp(`(?=${TOKEN_RE.source.slice(1, -1)})`))
+      chunks.forEach((chunk, chunkIndex) => {
+        const match = TOKEN_RE.exec(chunk)
+        if (!match) {
+          if (chunk) nodes.push(<Text key={`x${pieceIndex}-${chunkIndex}`}>{chunk}</Text>)
+          return
+        }
+        const sigil = match[1]
+        const label = match[2].replace(/\(.*\)$/, '').replace(/\/$/, '')
+        // `@file` green, `$skill` violet, `#conversation` blue, `/command` amber.
+        // Violet is the one hue here that is not a status colour, and it is
+        // deliberate: a skill reference names a *kind of thing*, not a state, and
+        // borrowing a status hue would make it read as "this is wrong". It is
+        // also never the accent: a chip must not read as "tap me".
+        const color =
+          sigil === '@'
+            ? palette.ok
+            : sigil === '$'
+              ? agentHue.codex
+              : sigil === '#'
+                ? palette.info
+                : palette.wait
       nodes.push(
         <Text key={`k${pieceIndex}-${chunkIndex}`} style={{ color, fontWeight: '600' }}>
           <Text style={{ opacity: 0.55 }}>{sigil}</Text>
@@ -286,12 +288,12 @@ export function Caret() {
  * to make the *shape* of one answer readable at a glance before you read it. */
 
 const HEADING_STYLE: Record<number, TextStyle> = {
-  1: { fontSize: 20, lineHeight: 27, fontWeight: '700', letterSpacing: -0.4, color: palette.ink },
-  2: { fontSize: 17.5, lineHeight: 24, fontWeight: '700', letterSpacing: -0.3, color: palette.ink },
-  3: { fontSize: 16, lineHeight: 22, fontWeight: '600', letterSpacing: -0.15, color: palette.ink },
+  1: { fontSize: 19, lineHeight: 25, fontWeight: '700', letterSpacing: -0.4, color: palette.ink },
+  2: { fontSize: 16.5, lineHeight: 22, fontWeight: '700', letterSpacing: -0.3, color: palette.ink },
+  3: { fontSize: 15.5, lineHeight: 21, fontWeight: '600', letterSpacing: -0.15, color: palette.ink },
   // h4 is the "fine print heading" level: same weight, one step quieter, which
   // is the only thing distinguishing it from body text.
-  4: { fontSize: 15.5, lineHeight: 21, fontWeight: '600', color: palette.ink2 },
+  4: { fontSize: 14.5, lineHeight: 20, fontWeight: '600', color: palette.ink2 },
 }
 
 export function Prose({
@@ -329,15 +331,15 @@ export function Prose({
               }
               if (block.kind === 'bullets' || block.kind === 'ordered') {
                 return (
-                  <View key={blockIndex} style={{ gap: 7 }}>
+                  <View key={blockIndex} style={{ gap: 6 }}>
                     {block.items.map((item, itemIndex) => (
                       <View key={itemIndex} style={{ flexDirection: 'row', gap: 10 }}>
-                        <Mono className="w-4 text-[14px] leading-[23px] text-ink-3">
+                        <Mono className="w-4 text-[13px] leading-[22px] text-ink-3">
                           {block.kind === 'bullets' ? '•' : `${itemIndex + 1}.`}
                         </Mono>
                         <InlineText
                           text={item}
-                          style={{ flex: 1, fontSize: 15.5, lineHeight: 23, color: palette.ink }}
+                          style={{ flex: 1, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
                           chips={chips}
                         />
                       </View>
@@ -349,7 +351,7 @@ export function Prose({
                 <View key={blockIndex} style={{ flexDirection: 'row' }}>
                   <InlineText
                     text={block.text}
-                    style={{ flex: 1, fontSize: 15.5, lineHeight: 23.5, color: palette.ink }}
+                    style={{ flex: 1, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
                     chips={chips}
                   />
                   {isLastBlock ? <Caret /> : null}
@@ -365,7 +367,7 @@ export function Prose({
 
 /** User-message text: prose with inline token chips and `code`/bold styling. */
 export function Chips({ text }: { text: string }) {
-  return <InlineText text={text} style={{ fontSize: 15.5, lineHeight: 22.5, color: palette.ink }} chips />
+  return <InlineText text={text} style={{ fontSize: 14.5, lineHeight: 21, color: palette.ink }} chips />
 }
 
 export { cn }

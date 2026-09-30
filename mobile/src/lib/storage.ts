@@ -12,7 +12,7 @@
 
 import { MMKV } from 'react-native-mmkv'
 
-export const mmkv = new MMKV({ id: 'agentdeck' })
+export const mmkv = new MMKV({ id: 'qai' })
 
 export const storage = {
   getString(key: string): string | null {
