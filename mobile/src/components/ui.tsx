@@ -60,7 +60,7 @@ import {
 import { Text } from '@app/components/Text'
 import { Check, ChevronRight, Search as SearchIcon, X } from 'lucide-react-native'
 import Svg, { Circle, Line } from 'react-native-svg'
-import Clipboard from '@react-native-clipboard/clipboard'
+import { setClipboardString } from '@app/lib/clipboard'
 
 import { cn } from '@/lib/format'
 import {
@@ -1387,7 +1387,7 @@ export function CopyButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       onPress={() => {
-        Clipboard.setString(value)
+        setClipboardString(value)
         setCopied(true)
         void haptic('success')
         if (timer.current) clearTimeout(timer.current)

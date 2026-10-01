@@ -48,7 +48,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react-native'
-import Clipboard from '@react-native-clipboard/clipboard'
+import { setClipboardString } from '@app/lib/clipboard'
 
 import { cn } from '@/lib/format'
 import { isInternalSession } from '@/lib/sessionState'
@@ -373,7 +373,7 @@ export function DrawerHost() {
                 icon={<KeyRound size={14} color={iconColor} strokeWidth={1.8} />}
                 label="API Key"
                 onPress={() => {
-                  Clipboard.setString(deviceToken() ?? '')
+                  setClipboardString(deviceToken() ?? '')
                   void haptic('success')
                   toast({ message: 'Device token copied', tone: 'ok' })
                 }}

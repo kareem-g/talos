@@ -46,7 +46,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react-native'
-import Clipboard from '@react-native-clipboard/clipboard'
+import { setClipboardString } from '@app/lib/clipboard'
 
 import { sessionUIState, uiStateDisplay } from '@/lib/sessionState'
 import { useStore, useConversation } from '@app/store'
@@ -468,7 +468,7 @@ export function SessionScreen() {
             icon: <Archive size={18} color={palette.ink2} />,
             onPress: () => {
               try {
-                Clipboard.setString(
+                setClipboardString(
                   JSON.stringify({ session: session ?? null, messages: conversation.messages }, null, 2),
                 )
                 toast({ message: 'Transcript copied', tone: 'ok' })

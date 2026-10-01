@@ -5,12 +5,34 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "paths": {
-      "@/*": ["../dashboard/src/*"],
-      "@app/*": ["./src/*"],
-      "clsx": ["./node_modules/clsx"],
-      "tailwind-merge": ["./node_modules/tailwind-merge"]
-    }
+      "@/*": [
+        "../dashboard/src/*"
+      ],
+      "@app/*": [
+        "./src/*"
+      ],
+      "clsx": [
+        "./node_modules/clsx"
+      ],
+      "tailwind-merge": [
+        "./node_modules/tailwind-merge"
+      ]
+    },
+    "types": [
+      "jest",
+      "node"
+    ]
   },
-  "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],
-  "exclude": ["node_modules", "dist", ".expo", "ios", "android"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo",
+    "ios",
+    "android"
+  ]
 }

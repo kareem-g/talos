@@ -15,7 +15,6 @@
  * the attention card does — the same call this language makes everywhere.
  */
 
-import * as React from 'react'
 import { View } from 'react-native'
 
 import { ContextRing } from '@app/components/ConfigChips'

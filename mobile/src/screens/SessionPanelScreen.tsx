@@ -8,7 +8,6 @@
  * own rule for the RightRail.
  */
 
-import * as React from 'react'
 import { View } from 'react-native'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'

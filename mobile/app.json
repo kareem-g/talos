@@ -71,7 +71,9 @@
         {
           "photosPermission": "QAI attaches images from your library to a prompt."
         }
-      ]
+      ],
+      "expo-image",
+      "expo-status-bar"
     ]
   }
 }

@@ -27,7 +27,9 @@ module.exports = {
   // same babel-jest transform the rest of the app uses.
   transform: {
     '^.+\\.(bmp|gif|jpg|jpeg|mp4|png|psd|svg|webp)$':
-      '<rootDir>/node_modules/react-native/jest/assetFileTransformer.js',
+      // React Native 0.86 moved this out of the core package; jest-expo's
+      // preset points at `@react-native/jest-preset`, so ours must too.
+      '<rootDir>/node_modules/@react-native/jest-preset/jest/assetFileTransformer.js',
     '^.+\\.[cm]?[jt]sx?$': ['babel-jest', { caller: { name: 'metro', bundler: 'metro', platform: 'ios' } }],
   },
   transformIgnorePatterns: [

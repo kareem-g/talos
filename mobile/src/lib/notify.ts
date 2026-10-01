@@ -38,14 +38,24 @@ const CATEGORY_ID = 'qai-attention'
 // How a notification presents if the app is foregrounded when one slips through.
 // We mostly suppress in the foreground (the UI is right there), but a banner is
 // the right fallback rather than dropping it silently.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-})
+// Wrapped because this runs at import, and a runtime without the notifications
+// module (Expo Go restricts them) would otherwise take the whole app down with
+// it over a foreground-presentation preference. Notifications are a nicety here;
+// nothing else in the app depends on this having been registered.
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  })
+} catch {
+  if (__DEV__) {
+    console.warn('[qai] Notification handler unavailable in this runtime — alerts will not be presented.')
+  }
+}
 
 /** Data attached to a notification, read back when the user taps it. */
 export interface NotificationData {
