@@ -6,6 +6,11 @@
  * `Authenticate` frame both depend on the stored token. Only then do we render
  * the navigator, connect the store, and start the notification controller.
  *
+ * Fonts load from bundled assets in parallel with the credential read, so the
+ * boot screen covers both — and its gate is `loaded || error`, because a
+ * typeface that fails to decode must degrade to the system face rather than
+ * hold the app on a splash.
+ *
  * The two boot states are the app's only bespoke screens, and both exist for
  * the same reason: a phone is asked to open this app on a bad connection more
  * often than a browser is, so every path that is not "connected" has to look
@@ -20,10 +25,12 @@ import { Text, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
+import { useFonts } from 'expo-font'
 
 import { Navigation, navigateToAction } from '@app/navigation'
 import { NewTaskHost } from '@app/components/NewTaskHost'
 import { DrawerHost } from '@app/components/Drawer'
+import { CommandHost } from '@app/components/CommandPalette'
 import { useStore } from '@app/store'
 import { hydrateCredentials } from '@app/lib/secureStore'
 import { startNotifications } from '@app/lib/notifications'
@@ -31,8 +38,14 @@ import { BrandMark } from '@app/components/ui'
 import { ToastHost } from '@app/components/Toast'
 import { palette } from '@app/design/tokens'
 import { useEnter } from '@app/components/motion'
+import { FONT_ASSETS } from '@app/design/fonts'
 
 export default function App() {
+  // The faces ship with the app, so this resolves from disk in a few ms. The
+  // gate is `loaded || error` rather than `loaded`: a font that fails to decode
+  // must leave the app running in the system face, never on a boot screen
+  // forever — a missing typeface is a downgrade, a blank app is a bug.
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
@@ -76,7 +89,7 @@ export default function App() {
     )
   }
 
-  if (!ready) {
+  if (!ready || (!fontsLoaded && !fontError)) {
     return (
       <SafeAreaProvider>
         <BootScreen title="QAI" body="Restoring your pairing…" />
@@ -94,6 +107,7 @@ export default function App() {
             summon through their emitters, and a toast can land over both. */}
         <NewTaskHost />
         <DrawerHost />
+        <CommandHost />
         <ToastHost />
         <StatusBar style="light" />
       </SafeAreaProvider>

@@ -1,52 +1,58 @@
 /**
- * The tab bar — the desktop rail's destinations, thumb-reachable.
+ * The tab bar — four destinations and one verb.
  *
- * QAI · WARM STUDIO
+ * QAI · THE CONSOLE
  * -----------------
- * The desktop's mobile shell puts every destination in a left drawer (ported
- * here as `components/Drawer`). The tab bar is the fast path to the five the
- * rail groups under Get started / Products / Manage — Home, Agents, Browsers,
- * History, Usage — so the common hops never need the drawer. Configuration
- * lives in the drawer and on Home, exactly where the desktop puts it.
+ * The desktop scatters its surface across a 56-wide rail, a centre pane and a
+ * twelve-tab right rail. On a phone that becomes: four destinations a thumb can
+ * reach, and one raised action in the middle that is the app's only verb.
  *
- * The bar wears the desktop's sidebar tone with a hairline top edge. The
- * active destination is lit the way the rail lights it: an accent-tinted pill
- * behind the glyph and ink on the label — selection reads as *lit*, never as
- * *heavier*.
+ *   Deck      triage — what needs you, the fleet band, what is live
+ *   Sessions  every session, by day, searchable and filterable
+ *   ✚         Command — new task, search, re-spawn, re-scan, pair
+ *   Station   the daemon's world — agents, engines, terminals, MCP, usage
+ *   Device    this phone — routes, alerts, pairing, about, unpair
+ *
+ * The active destination is *lit* the way the console lights a channel: a 2pt
+ * accent bar on the bar's top edge and an accent glyph, never a fatter label.
+ * The raised action is an accent tile; it is the only filled control in the
+ * chrome, which is what makes it the obvious next tap.
  */
 
 import * as React from 'react'
-import { Animated, Pressable, Text, View } from 'react-native'
+import {Animated, Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { BarChart3, Bot, Globe, History as HistoryIcon, Home } from 'lucide-react-native'
+import { Gauge, Layers, LayoutGrid, Plus, Smartphone } from 'lucide-react-native'
 
 import { useStore } from '@app/store'
 import { palette } from '@app/design/tokens'
+import { MONO } from '@app/design/fonts'
+import { openCommand } from '@app/lib/command'
 import { haptic } from './ui'
 
-export type TabRoute = 'Home' | 'Agents' | 'Browsers' | 'History' | 'Usage'
-
-const ORDER: TabRoute[] = ['Home', 'Agents', 'Browsers', 'History', 'Usage']
+export type TabRoute = 'Deck' | 'Sessions' | 'Station' | 'Device'
 
 const META: Record<TabRoute, { label: string }> = {
-  Home: { label: 'Home' },
-  Agents: { label: 'Agents' },
-  Browsers: { label: 'Browsers' },
-  History: { label: 'History' },
-  Usage: { label: 'Usage' },
+  Deck: { label: 'Deck' },
+  Sessions: { label: 'Sessions' },
+  Station: { label: 'Station' },
+  Device: { label: 'Device' },
 }
 
 const ICONS: Record<TabRoute, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
-  Home,
-  Agents: Bot,
-  Browsers: Globe,
-  History: HistoryIcon,
-  Usage: BarChart3,
+  Deck: Gauge,
+  Sessions: Layers,
+  Station: LayoutGrid,
+  Device: Smartphone,
 }
+
+// Tab labels are readouts, so they take the same mono face as every other one.
+const MONO_FACE = MONO
 
 function TabIcon({ route, active }: { route: TabRoute; active: boolean }) {
   const Icon = ICONS[route]
-  return <Icon size={19} color={active ? palette.accent : palette.ink3} strokeWidth={active ? 2.1 : 1.8} />
+  return <Icon size={20} color={active ? palette.accent : palette.ink4} strokeWidth={active ? 2.1 : 1.7} />
 }
 
 export interface TabBarProps {
@@ -59,10 +65,10 @@ export function TabBar({ state, navigation }: TabBarProps) {
   const attention = useStore((store) => store.pendingActions.length)
   const sessions = useStore((store) => store.sessions)
 
-  // The badge is derived, not stored: a session row can enter "needs you"
-  // without any action being pushed, and a badge that only knows about
-  // notifications would sit at zero while a session sat blocked. It rides on
-  // Home, which carries the triage queue.
+  // The badge is derived, not stored: a session can enter "needs you" without
+  // any action being pushed, and a badge that only knew about notifications
+  // would sit at zero while a session sat blocked. It rides on the Deck, which
+  // carries the triage queue.
   const blocked = React.useMemo(
     () =>
       sessions.filter(
@@ -74,7 +80,9 @@ export function TabBar({ state, navigation }: TabBarProps) {
     [attention, sessions],
   )
 
-  const activeName = (state?.routes?.[state.index]?.name ?? 'Home') as TabRoute
+  const activeName = (state?.routes?.[state.index]?.name ?? 'Deck') as TabRoute
+
+  const slots: Array<TabRoute | 'command'> = ['Deck', 'Sessions', 'command', 'Station', 'Device']
 
   return (
     <View
@@ -85,19 +93,29 @@ export function TabBar({ state, navigation }: TabBarProps) {
         borderTopColor: palette.line,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 56, paddingHorizontal: 4 }}>
-        {ORDER.map((route) => (
-          <TabButton
-            key={route}
-            route={route}
-            active={activeName === route}
-            badge={route === 'Home' ? blocked : 0}
-            onPress={() => {
-              void haptic('select')
-              navigation.navigate(route)
-            }}
-          />
-        ))}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', height: 62, paddingHorizontal: 4 }}>
+        {slots.map((slot) =>
+          slot === 'command' ? (
+            <CommandButton
+              key="command"
+              onPress={() => {
+                void haptic('medium')
+                openCommand()
+              }}
+            />
+          ) : (
+            <TabButton
+              key={slot}
+              route={slot}
+              active={activeName === slot}
+              badge={slot === 'Deck' ? blocked : 0}
+              onPress={() => {
+                void haptic('select')
+                navigation.navigate(slot)
+              }}
+            />
+          ),
+        )}
       </View>
     </View>
   )
@@ -134,20 +152,19 @@ function TabButton({
         badge > 0 ? `${META[route].label}, ${badge} waiting on you` : META[route].label
       }
       onPress={onPress}
-      style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 }}
+      style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 9, gap: 5 }}
     >
-      {/* The lit pill behind the glyph — the rail's active treatment. */}
+      {/* The channel light: a short accent bar on the bar's top edge. */}
       <Animated.View
         pointerEvents="none"
         style={{
           position: 'absolute',
-          top: 4,
-          width: 52,
-          height: 28,
-          borderRadius: 14,
-          backgroundColor: palette.accentSoft,
+          top: -1,
+          width: 34,
+          height: 2,
+          backgroundColor: palette.accent,
           opacity: progress,
-          transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
+          transform: [{ scaleX: progress.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
         }}
       />
       <View>
@@ -156,20 +173,21 @@ function TabButton({
           <View
             style={{
               position: 'absolute',
-              top: -3,
-              right: -7,
+              top: -5,
+              right: -9,
               minWidth: 16,
               height: 16,
-              borderRadius: 8,
+              borderRadius: 4,
               paddingHorizontal: 4,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: palette.danger,
+              // Attention is the app's inversion — paper ink, not a red dot.
+              backgroundColor: palette.ink,
               borderWidth: 1.5,
               borderColor: palette.chrome,
             }}
           >
-            <Text style={{ color: palette.badgeInk, fontSize: 9.5, fontWeight: '800' }}>
+            <Text style={{ color: palette.canvas, fontSize: 9.5, fontWeight: '800' }}>
               {badge > 9 ? '9+' : badge}
             </Text>
           </View>
@@ -178,10 +196,12 @@ function TabButton({
       <Text
         numberOfLines={1}
         style={{
-          fontSize: 10,
-          fontWeight: active ? '700' : '500',
-          color: active ? palette.ink : palette.ink3,
-          letterSpacing: 0.05,
+          fontFamily: MONO_FACE,
+          fontSize: 9,
+          fontWeight: '600',
+          letterSpacing: 0.9,
+          textTransform: 'uppercase',
+          color: active ? palette.accent : palette.ink4,
         }}
       >
         {META[route].label}
@@ -190,8 +210,49 @@ function TabButton({
   )
 }
 
+/** The raised action: the only filled control in the chrome. */
+function CommandButton({ onPress }: { onPress: () => void }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center' }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Command — start a task, search a session, or re-scan"
+        onPress={onPress}
+        style={{
+          width: 52,
+          height: 52,
+          marginTop: -14,
+          borderRadius: 14,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: palette.accent,
+          // The ring is the bar's own colour, so the tile reads as punched
+          // through the bar rather than pasted on it.
+          borderWidth: 4,
+          borderColor: palette.chrome,
+        }}
+      >
+        <Plus size={24} color={palette.accentInk} strokeWidth={2.4} />
+      </Pressable>
+      <Text
+        style={{
+          marginTop: 3,
+          fontFamily: MONO_FACE,
+          fontSize: 9,
+          fontWeight: '600',
+          letterSpacing: 0.9,
+          textTransform: 'uppercase',
+          color: palette.ink4,
+        }}
+      >
+        Command
+      </Text>
+    </View>
+  )
+}
+
 /** The height the bar occupies, for screens that need to pad past it. */
 export function useTabBarHeight(): number {
   const insets = useSafeAreaInsets()
-  return 56 + Math.max(insets.bottom, 6)
+  return 62 + Math.max(insets.bottom, 6)
 }

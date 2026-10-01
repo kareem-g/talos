@@ -24,7 +24,8 @@
  */
 
 import * as React from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native'
+import {KeyboardAvoidingView, Platform, Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -58,6 +59,7 @@ import { Composer } from '@app/components/Composer'
 import { SubagentSheet } from '@app/components/SubagentModal'
 import { SessionSearchSheet } from '@app/components/CommandPalette'
 import { AttentionPill } from '@app/components/AttentionPill'
+import { RunBar } from '@app/components/session/RunBar'
 import { LeftPaneSheet } from '@app/components/session/LeftPaneSheet'
 import { SessionControlsSheet } from '@app/components/session/SessionControlsSheet'
 import { WorkspaceRail, type PanelTabId } from '@app/components/panel/WorkspaceRail'
@@ -153,6 +155,7 @@ export function SessionScreen() {
 
   const busy = uiState === 'working' || uiState === 'starting' || uiState === 'resuming'
   const activityDetail = conversation.activity?.detail
+  const working = display.pulse === true
 
   function openWorkspace(tab?: PanelTabId) {
     setWorkspaceTab(tab)
@@ -286,16 +289,20 @@ export function SessionScreen() {
           </IconButton>
         </View>
 
-        {/* Detail overflow (the desktop's row 2): what the agent is touching
-            right now, full width in mono. */}
-        {activityDetail ? (
-          <View className="px-4 pb-1.5">
-            <Mono className="text-[10.5px] text-ink-3" numberOfLines={1}>
-              {activityDetail}
-            </Mono>
-          </View>
-        ) : null}
       </View>
+
+      {/* The RunBar: the desktop's floating HUD and its state zone, folded into
+          one 44pt strip that stays visible at every scroll position. */}
+      <RunBar
+        sessionId={sessionId}
+        tone={tone}
+        label={display.label}
+        pulse={display.pulse}
+        detail={activityDetail}
+        cost={session?.cost ?? undefined}
+        tokens={session?.tokens_used ?? undefined}
+        working={working}
+      />
 
       {notice ? (
         <View className="px-4 pt-2">

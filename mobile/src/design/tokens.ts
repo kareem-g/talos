@@ -2,41 +2,56 @@
  * The design tokens — QAI's single source of truth for colour, type, spacing,
  * radius and motion on mobile.
  *
- * THE PALETTE — "warm studio", ported 1:1 from the desktop
- * --------------------------------------------------------
- * The mobile app wears the desktop's own theme (dashboard/src/index.css):
- * deep charcoal surfaces with warm brown undertones, parchment ink, a soft
- * blue accent reserved for emphasis, and warm muted status hues. Porting the
- * values verbatim is the point: a session opened on the phone and the browser
- * is the same product in the same light, not two designs sharing a backend.
+ * THE PALETTE — the desktop's own "warm studio", 1:1
+ * ---------------------------------------------------
+ * The mobile app wears the desktop's theme verbatim (dashboard/src/index.css):
+ * warm charcoal surfaces with brown undertones, parchment ink, the desktop's
+ * soft blue accent, and hairline rules. Porting the values verbatim is the
+ * point — a session opened on the phone and in the browser is the same product
+ * in the same light, not two designs sharing a backend.
  *
  * The rules that make it work:
  *
- *   1. **The surfaces are a monotonic warm ramp, and elevation is a lift.**
+ *   1. **Elevation is a lift, not a shadow.**
  *
- *        code < well  <  canvas  <  chrome  <  field  <  surface  <  raised
+ *        canvas < code < chrome < well < field < surface < raised < hover
  *
- *      `code` is the terminal plate. `well` is a recess. `canvas` is the page.
- *      `chrome` is the sidebar/navigation tone. `field` is a typing slot.
- *      `surface` is a card, lighter than the page. `raised` is a filled
- *      control or card-on-card. `hover` brightens under a finger.
+ *      `canvas` is the page; `code` is the machine plate; `well` is a recess;
+ *      `chrome` is navigation; `field` is a typing slot; `surface` is a card;
+ *      `raised` is a filled control or card-on-card; `hover` brightens under a
+ *      finger. Only overlays cast (`shadowOverlay`/`shadowFloating`).
  *
  *   2. **Ink is a three-step parchment ramp with a fixed job per step.**
- *      `ink` is body copy (≈15:1 on canvas), `ink2` is secondary prose and
- *      labels (≈7:1), `ink3` is metadata and timestamps (≈4.5:1), `ink4` is
- *      disabled-only.
+ *      `ink` is body copy, `ink2` is secondary prose and labels, `ink3` is
+ *      metadata and timestamps, `ink4` is disabled-only.
  *
- *   3. **Exactly ONE accent.** Soft blue — reserved for the primary action,
- *      the active destination, selection, links, live marks, progress, the
- *      brand. Never decoration.
+ *   3. **Exactly ONE accent — soft blue.** Primary action, the active
+ *      destination, selection, links, live marks, progress, the brand. Never
+ *      decoration.
  *
- *   4. **Status is warm and muted, and never the only channel.** green =
- *      alive, orange/copper = needs a human, red = failed, sky = held/info.
- *      Every status surface ships a word beside its dot.
+ *   4. **No green, no yellow, no orange in the chrome.** This is the rule that
+ *      shapes everything else. A state is carried by **inversion and words**,
+ *      not by spending a hue on it:
  *
- *   5. **The terminal plate gets its own ink.** `codeInk`/`codeDim` and the
- *      `code*` status twins are tuned for `#161618`, the desktop's editor
- *      dark, so diffs and tool output read the same on both surfaces.
+ *        - a human is required (`wait`)  → PAPER INK: a white rail, a white
+ *          pill, a lifted card. The only inverted surface in the app.
+ *        - the machine is working (`accent`) → the accent blue.
+ *        - failure (`danger`) → the desktop's red.
+ *        - held / queued (`info`) → a desaturated sky, never a second accent.
+ *        - finished (`muted`) → grey. Completed work recedes.
+ *
+ *      The single deliberate exception is the diff plate: additions stay
+ *      conventionally green because a unified diff without it is materially
+ *      harder to review. That is content on a machine plate, not chrome.
+ *
+ *   5. **The machine plate gets its own ink.** `codeInk`/`codeDim` and the
+ *      `code*` status twins are tuned for `#161618`, the desktop's editor dark,
+ *      so diffs and tool output read the same on both surfaces.
+ *
+ *   6. **Geometry is the instrument's.** Rectilinear and hairline-framed —
+ *      4pt tags, 8pt controls, 10pt cards, 18pt sheet tops — with `pill`
+ *      reserved for genuinely pill-shaped things (a switch, a status chip's
+ *      capsule, a progress thumb).
  */
 
 /* ── Surfaces ─────────────────────────────────────────────────────────────── */
@@ -53,12 +68,12 @@ export const palette = {
   /** A resting card, list row, or sheet. */
   surface: '#26262B',
   /** A card on a card: nested grouping, filled buttons, selected rows. */
-  raised: '#2C2C33',
+  raised: '#2E2E34',
   /** Pressed / hovered state — the deck brightens under a finger. */
-  hover: '#34343B',
+  hover: '#39393F',
 
   /** A selected row: the surface washed toward the accent. */
-  selected: '#232A3D',
+  selected: '#1D2433',
   /** The tappable body of an input sitting on `surface` — a typing slot. */
   field: '#202024',
 
@@ -68,7 +83,7 @@ export const palette = {
   scrimSoft: 'rgba(0,0,0,0.45)',
 
   /* ── Ink ────────────────────────────────────────────────────────────────
-   * Warm parchment on charcoal. Ratios measured against `canvas` (#131315). */
+   * Warm parchment on charcoal. */
   ink: '#F2F2F3',
   ink2: '#B0B0B6',
   ink3: '#7E7E86',
@@ -88,33 +103,37 @@ export const palette = {
   /** A wash of accent — selected rows, quiet emphasis. */
   accentSoft: 'rgba(91,141,239,0.12)',
   accentSoftStrong: 'rgba(91,141,239,0.20)',
-  accentBorder: 'rgba(91,141,239,0.35)',
+  accentBorder: 'rgba(91,141,239,0.34)',
 
-  /* ── Status ──────────────────────────────────────────────────────────────
-   * The only colours that carry meaning. Warm and muted, per the desktop:
-   * success = green, attention = copper, failure = terracotta red, held =
-   * sky. Each pairs with a distinct word, so colour is never the sole
-   * channel. */
-  ok: '#57AB5A',
-  okSoft: 'rgba(87,171,90,0.12)',
-  okBorder: 'rgba(87,171,90,0.30)',
+  /* ── State ───────────────────────────────────────────────────────────────
+   * Four outcomes, none of them a new hue in the chrome. See rule 4. */
 
-  /** "Needs you" — a human is blocking the run. The app's most important state. */
-  wait: '#DB6D28',
-  waitSoft: 'rgba(219,109,40,0.12)',
-  waitBorder: 'rgba(219,109,40,0.30)',
+  /**
+   * "Needs you" — a human is blocking the run. Deliberately NOT a colour:
+   * paper ink, so the treatment is inversion (white rail, white pill, lifted
+   * card) and it can never be confused with a decorative tint. `waitSoft` and
+   * `waitBorder` are the accent wash the attention card sits on.
+   */
+  wait: '#F2F2F3',
+  waitSoft: 'rgba(91,141,239,0.12)',
+  waitBorder: 'rgba(91,141,239,0.42)',
+
+  /** Completed / verified / connected. The accent itself, so success is calm. */
+  ok: '#5B8DEF',
+  okSoft: 'rgba(91,141,239,0.12)',
+  okBorder: 'rgba(91,141,239,0.30)',
 
   danger: '#F85149',
-  dangerSoft: 'rgba(248,81,73,0.12)',
-  dangerBorder: 'rgba(248,81,73,0.30)',
+  dangerSoft: 'rgba(248,81,73,0.13)',
+  dangerBorder: 'rgba(248,81,73,0.34)',
 
   /** Informational — queued, paused, or otherwise held but not broken. */
   info: '#6396CC',
-  infoSoft: 'rgba(99,150,204,0.12)',
-  infoBorder: 'rgba(99,150,204,0.30)',
+  infoSoft: 'rgba(99,150,204,0.13)',
+  infoBorder: 'rgba(99,150,204,0.32)',
 
   /* ── Hairlines ────────────────────────────────────────────────────────────
-   * Warm brown rules, exactly the desktop's --line family. */
+   * Warm rules, the desktop's --line family. */
   line: '#34343A',
   lineStrong: '#42424A',
 
@@ -125,9 +144,10 @@ export const palette = {
   codeDim: '#7E7E86',
 
   /* ── Machine status ink ───────────────────────────────────────────────────
-   * The plate twins of the status hues, from the desktop's ramps. */
+   * The plate twins, from the desktop's ramps. `codeOk` is the one green in
+   * the app and it only ever draws a diff addition. */
   codeOk: '#6FBC7F',
-  codeWait: '#E0884E',
+  codeWait: '#8FA8C8',
   codeDanger: '#F4736C',
   codeInfo: '#7FA8D8',
 
@@ -154,10 +174,10 @@ export const palette = {
 
 /* ── Diff ──────────────────────────────────────────────────────────────────────
  * Diff rows render INSIDE a machine plate, so their tints are tuned for the
- * terminal dark: a green or red wash at low alpha over #161618, from the
- * desktop's --emerald-300/--red-300 ramp. */
+ * terminal dark. This is the app's one sanctioned green: an addition has to be
+ * green or the diff stops being a diff. */
 
-export const diffAddSoft = 'rgba(111,188,127,0.13)'
+export const diffAddSoft = 'rgba(111,220,158,0.13)'
 export const diffDelSoft = 'rgba(244,115,108,0.12)'
 
 /* ── Elevation ────────────────────────────────────────────────────────────────
@@ -192,14 +212,19 @@ export type PaletteKey = keyof typeof palette
 
 /* ── Tone mapping ─────────────────────────────────────────────────────────────
  * The six semantic states the whole app colours by. Every status component
- * takes a `Tone` and looks up here, so a status colour is defined once. */
+ * takes a `Tone` and looks up here, so a status colour is defined once.
+ *
+ * `wait` resolving to paper ink is the load-bearing part of rule 4: a component
+ * that draws `toneColor.wait` on a dark surface gets white, and a component
+ * that draws it INSIDE an inverted surface inverts it again (see
+ * `StatusPill`/`Badge` in ui.tsx). */
 
 export type Tone = 'ok' | 'wait' | 'danger' | 'info' | 'accent' | 'muted'
 
-/** Text / icon colour for a tone — the deck tuning, for use on light-on-dark surfaces. */
+/** Text / icon colour for a tone — for use on dark surfaces. */
 export const toneColor: Record<Tone, string> = {
   ok: palette.ok,
-  wait: palette.wait,
+  wait: palette.ink,
   danger: palette.danger,
   info: palette.info,
   accent: palette.accent,
@@ -281,23 +306,22 @@ export const toneClass = {
 } as const
 
 /* ── Radii ───────────────────────────────────────────────────────────────────
- * The desktop's own geometry: `rounded-control` and `rounded-chip` are 999px
- * — buttons, rows and chips are FULL PILLS — `rounded-card` is 16px, sheets
- * top out at 16-20. Roundness is the desktop's touchability signal, so the
- * mobile app inherits it verbatim. */
+ * The instrument's geometry: rectilinear and hairline-framed. The old language
+ * was full pills everywhere; here `pill` is reserved for the few shapes that
+ * are genuinely capsules (a switch, a status chip, a progress thumb, the FAB). */
 
 export const radius = {
-  /** Inline code, tiny tags, the desktop's `Chip`. */
-  xs: 6,
-  /** Small controls, the desktop's `rounded-lg`. */
-  sm: 10,
-  /** Inputs, the desktop's `rounded-xl`. */
-  md: 12,
-  /** Cards and panels — the desktop's `rounded-card`. */
-  lg: 16,
-  /** Sheets, dialogs — the desktop Layer's `rounded-t-2xl` and up. */
-  xl: 20,
-  /** Full pill — the desktop's `rounded-control`: buttons, rows, chips, FABs. */
+  /** Inline code, tiny tags, status chips. */
+  xs: 4,
+  /** Small controls, filter chips, a segmented item. */
+  sm: 6,
+  /** Inputs, icon buttons, wells. */
+  md: 8,
+  /** Cards and panels. */
+  lg: 10,
+  /** Sheets and dialogs (top corners). */
+  xl: 18,
+  /** A real capsule — switch, brand tile, FAB. */
   pill: 999,
 } as const
 
@@ -316,21 +340,19 @@ export const space = {
 } as const
 
 /* ── Type ────────────────────────────────────────────────────────────────────
- * The desktop's dense scale, nudged up half a step for arm's-length reading:
- * 13px section titles, 12.5px controls, 11.5px secondary, uppercase
- * micro-labels with wide tracking. A control surface reads like an instrument,
- * not like an article.
+ * A dense instrument scale: a 27px screen hero, 19px section titles, 13.5px
+ * body, 10px uppercase micro-labels with wide tracking.
  *
  * `size`/`height` are RN fontSize/lineHeight; `weight` is the RN fontWeight;
  * `track` is letterSpacing in px. */
 
 export const type = {
-  /** Screen hero title. 24/30, -0.5. */
-  display: { size: 24, height: 30, weight: '700' as const, track: -0.5 },
-  /** Section title. 17/22, -0.3. */
-  title: { size: 17, height: 22, weight: '700' as const, track: -0.3 },
-  /** App-bar title, card title. The desktop's 13px medium header. */
-  heading: { size: 14, height: 19, weight: '600' as const, track: -0.15 },
+  /** Screen hero title. 27/33, -0.8. */
+  display: { size: 27, height: 33, weight: '700' as const, track: -0.8 },
+  /** Section title. 19/24, -0.45. */
+  title: { size: 19, height: 24, weight: '700' as const, track: -0.45 },
+  /** App-bar title, card title. 15/20, -0.25. */
+  heading: { size: 15, height: 20, weight: '600' as const, track: -0.25 },
   /** Body / list row primary. 13.5/20. */
   body: { size: 13.5, height: 20, weight: '400' as const, track: 0 },
   /** List row primary, emphasised. 13/18, 500. */
@@ -339,14 +361,14 @@ export const type = {
   caption: { size: 12, height: 17, weight: '400' as const, track: 0 },
   /** Metadata. 11/15. */
   small: { size: 11, height: 15, weight: '400' as const, track: 0 },
-  /** Dense labels, tool rows, chips. 10.5/14, +0.1. */
-  micro: { size: 10.5, height: 14, weight: '500' as const, track: 0.1 },
+  /** Dense labels, tool rows, chips. 10/14, 600, +0.6. */
+  micro: { size: 10, height: 14, weight: '600' as const, track: 0.6 },
   /** Monospace body — paths, diffs, code, ids. */
   mono: { size: 12, height: 17, weight: '400' as const, track: 0 },
   /** Dense monospace metadata — counters, durations, timestamps. */
-  monoSmall: { size: 10.5, height: 14, weight: '500' as const, track: 0 },
-  /** The uppercase section label. 10/13, +1.1. */
-  eyebrow: { size: 10, height: 13, weight: '600' as const, track: 1.1 },
+  monoSmall: { size: 10.5, height: 14, weight: '500' as const, track: 0.2 },
+  /** The uppercase section label. 10/13, +1.5. */
+  eyebrow: { size: 10, height: 13, weight: '600' as const, track: 1.5 },
 } as const
 
 export type TypeRole = keyof typeof type
@@ -397,22 +419,25 @@ export const spring = {
 export const DISMISS_VELOCITY = 900
 
 /* ── Agent identity ────────────────────────────────────────────────────────────
- * A separate, deliberately narrow hue set — the desktop's warm agent six,
- * verbatim. These identify WHICH agent is running, not what STATE it is in,
- * and none of them is the accent: identity must never read as actionable. */
+ * Which agent is running, not what state it is in. A deliberately cool set: it
+ * stays clear of the accent's hue where it can, and it contains no green,
+ * yellow or orange, so an identity chip can never be mistaken for a state.
+ *
+ * The letters in the avatar carry the identity at a glance; the hue only has to
+ * stop two rows looking identical. */
 
 export const agentHue = {
-  claude: '#E07A5F',
-  codex: '#A78BFA',
-  opencode: '#4FAE7C',
-  grok: '#8B8B93',
-  gemini: '#6396CC',
-  copilot: '#D96A8A',
-  kimi: '#45B8C2',
+  claude: '#A78BFA',
+  codex: '#6FAEE8',
+  opencode: '#E08FC0',
+  gemini: '#8C9BF5',
+  grok: '#8B93A3',
+  copilot: '#C08CF0',
+  kimi: '#6F86C8',
 } as const
 
 /** The hashed cycle for agents the daemon reports that we do not know by name. */
-const AGENT_CYCLE = ['#E07A5F', '#A78BFA', '#4FAE7C', '#6396CC', '#D96A8A', '#45B8C2']
+const AGENT_CYCLE = ['#A78BFA', '#6FAEE8', '#E08FC0', '#8C9BF5', '#C08CF0', '#6F86C8']
 
 /**
  * A stable hue for an agent id, so unknown agents still look owned.

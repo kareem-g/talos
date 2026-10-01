@@ -12,7 +12,8 @@
  */
 
 import * as React from 'react'
-import { Text, View } from 'react-native'
+import {View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { History as HistoryIcon, Search } from 'lucide-react-native'
 
 import { isInternalSession } from '@/lib/sessionState'
@@ -159,7 +160,7 @@ export function HistoryScreen() {
 
   return (
     <ScreenScaffold
-      title="History"
+      title="Sessions"
       eyebrow={`${visible.length} ${visible.length === 1 ? 'session' : 'sessions'}`}
       subtitle="Everything this station has run, newest first."
       onRefresh={() => void onRefresh()}

@@ -10,7 +10,8 @@
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, Text, View } from 'react-native'
+import {ActivityIndicator, Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import Svg, { Circle } from 'react-native-svg'
 
 import type { ConfigOption } from '@/types/provider'

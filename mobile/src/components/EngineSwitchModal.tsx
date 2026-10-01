@@ -11,7 +11,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { Check } from 'lucide-react-native'
 
 import { useStore } from '@app/store'

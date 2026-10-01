@@ -20,7 +20,8 @@
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
+import {ActivityIndicator, Image, Pressable, ScrollView, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import {
   ChevronRight,
   FileText,
@@ -54,6 +55,7 @@ import {
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
 import { palette } from '@app/design/tokens'
+import { MONO } from '@app/design/fonts'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
@@ -273,7 +275,7 @@ export function GitTab({ session }: { session: Session }) {
               accessibilityState={{ selected: branchOpen }}
               onPress={() => setBranchOpen((value) => !value)}
               hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              className="h-9 flex-row items-center gap-2 self-start rounded-pill border border-line-strong bg-raised px-3.5 active:bg-hover"
+              className="h-9 flex-row items-center gap-2 self-start rounded-md border border-line-strong bg-raised px-3.5 active:bg-hover"
             >
               <GitBranch size={14} color={palette.accent} />
               <Mono className="text-[12.5px] font-semibold text-ink">
@@ -526,7 +528,7 @@ function FileDiffRow({
           {file.status ? (
             <Text
               style={{
-                fontFamily: 'Menlo',
+                fontFamily: MONO,
                 fontSize: 11,
                 fontWeight: '700',
                 color: STATUS_COLOR[file.status] ?? palette.ink3,
@@ -920,7 +922,7 @@ export function BrowserTab({ session }: { session: Session }) {
                       accessibilityLabel={preset.label}
                       accessibilityState={{ selected: active }}
                       onPress={() => setServeCommand(preset.command)}
-                      className="h-9 justify-center rounded-pill border px-3.5 active:bg-raised"
+                      className="h-9 justify-center rounded-md border px-3.5 active:bg-raised"
                       style={{
                         borderColor: active ? palette.accentBorder : palette.line,
                         backgroundColor: active ? palette.accentSoft : 'transparent',
@@ -1408,7 +1410,7 @@ function ScratchpadInsert({ label, onPress }: { label: string; onPress: () => vo
       accessibilityLabel={label}
       onPress={onPress}
       hitSlop={8}
-      className="h-9 items-center justify-center rounded-pill border border-line px-3.5 active:bg-raised"
+      className="h-9 items-center justify-center rounded-md border border-line px-3.5 active:bg-raised"
     >
       <Mono className="text-[11.5px] text-ink-2">{label}</Mono>
     </Pressable>

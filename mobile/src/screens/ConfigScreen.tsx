@@ -13,7 +13,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Bell, ChevronRight, Monitor, Plus, QrCode, Server, Settings2, Smartphone, Trash2, Wifi } from 'lucide-react-native'
@@ -28,6 +29,7 @@ import {
 } from '@app/lib/notify'
 import { clearPairing, getPairingBaseUrl } from '@app/lib/pairing'
 import { deviceRoutes, setDeviceBaseUrl } from '@app/lib/native'
+import { formatLatency, probeRoutes, type RouteProbe } from '@app/lib/routeProbe'
 import { deviceToken, pairingApi, terminalsApi } from '@app/lib/api'
 import { socket } from '@app/lib/socket'
 import { useStore } from '@app/store'
@@ -69,6 +71,7 @@ export function ConfigScreen() {
   const [perm, setPerm] = React.useState<PermissionState>('undetermined')
   const [note, setNote] = React.useState<string | null>(null)
   const [routes, setRoutes] = React.useState<string[]>(() => deviceRoutes())
+  const [probes, setProbes] = React.useState<Record<string, RouteProbe>>({})
   const [active, setActive] = React.useState<string>(() => getPairingBaseUrl())
   const [confirmUnpair, setConfirmUnpair] = React.useState(false)
   const [unpairing, setUnpairing] = React.useState(false)
@@ -112,6 +115,24 @@ export function ConfigScreen() {
     setNote(ok ? 'Test notification sent.' : 'Could not send — check the permission above.')
   }
 
+  /**
+   * Time every advertised route.
+   *
+   * Run on mount and on pull-to-refresh rather than on a timer: a latency that
+   * updates while you are looking at it invites you to watch it instead of
+   * choosing, and the number only has to be right at the moment of the decision.
+   */
+  const measure = React.useCallback(async () => {
+    const results = await probeRoutes()
+    const next: Record<string, RouteProbe> = {}
+    for (const result of results) next[result.route] = result
+    setProbes(next)
+  }, [])
+
+  React.useEffect(() => {
+    void measure()
+  }, [measure])
+
   /** Pin the device to a route and redial, so the choice takes effect now. */
   function useRoute(route: string) {
     if (route === active) return
@@ -134,9 +155,9 @@ export function ConfigScreen() {
 
   return (
     <ScreenScaffold
-      title="Configuration"
+      title="Device"
       eyebrow={`QAI · ${desktopName}`}
-      subtitle="This device talks only to your own daemon. Nothing is sent anywhere else."
+      subtitle="This phone talks only to your own daemon. Nothing is sent anywhere else."
       scroll
       contentClassName="pb-12 gap-6"
       headerLeft={<DrawerButton />}
@@ -167,8 +188,8 @@ export function ConfigScreen() {
           ) : (
             <View>
               <Text className="px-4 pb-2 pt-3 text-[11.5px] leading-[16px] text-ink-3">
-                Tap a route to pin it. Left alone, the app moves on by itself when the active route
-                stops answering.
+                Tap a route to pin it — the reading beside each one is a live round-trip. Left
+                alone, the app moves on by itself when the active route stops answering.
               </Text>
               {routes.map((route) => {
                 const isActive = route === active
@@ -183,9 +204,33 @@ export function ConfigScreen() {
                       className="min-h-12 flex-row items-center gap-3 px-4 active:bg-raised"
                       style={isActive ? { backgroundColor: palette.accentSoft } : undefined}
                     >
-                      <Dot tone={isActive ? 'ok' : 'muted'} />
+                      <Dot
+                        tone={
+                          probes[route] === undefined || probes[route].ms !== null
+                            ? isActive
+                              ? 'ok'
+                              : 'muted'
+                            : 'danger'
+                        }
+                      />
                       <Mono className="min-w-0 flex-1 text-[12px] leading-[17px] text-ink" numberOfLines={1}>
                         {route}
+                      </Mono>
+                      {/* The number that makes three URLs a choice: a route that
+                          answers in 4ms and one that answers in 900ms behave
+                          very differently when you are standing in a lift. */}
+                      <Mono
+                        className="text-[10.5px]"
+                        style={{
+                          color:
+                            probes[route] === undefined
+                              ? palette.ink4
+                              : probes[route].ms === null
+                                ? palette.danger
+                                : palette.ink3,
+                        }}
+                      >
+                        {probes[route] === undefined ? '…' : formatLatency(probes[route].ms)}
                       </Mono>
                       {isActive ? <Badge tone="accent">Active</Badge> : null}
                     </Pressable>
@@ -299,7 +344,7 @@ export function ConfigScreen() {
                 void haptic('light')
                 navigation.navigate('Pairing')
               }}
-              className="min-h-9 flex-row items-center gap-1.5 rounded-pill border border-line px-3 active:bg-raised"
+              className="min-h-9 flex-row items-center gap-1.5 rounded-md border border-line px-3 active:bg-raised"
             >
               <QrCode size={14} color={palette.ink2} />
               <Text className="text-[12px] font-semibold text-ink-2">Pair</Text>

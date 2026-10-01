@@ -7,11 +7,12 @@
  *
  * THE QAI LANGUAGE, ENCODED HERE
  * ------------------------------
- * The look is "signal deck": luminous type on a near-black cool deck, cut
- * corners rather than pillowed ones, hairline rules doing the work shadows
- * would do elsewhere, and one signal-cyan accent reserved for what is
- * actionable or alive. Machine output lives on plates darker than the page.
- * The rules:
+ * The look is the desktop's own dark studio, machined for touch: warm charcoal
+ * surfaces, parchment type, hairline rules doing the work shadows would do
+ * elsewhere, and ONE soft-blue accent reserved for what is actionable or
+ * alive. Geometry is rectilinear — 4pt tags, 8pt controls, 10pt cards — and
+ * `pill` survives only for shapes that are genuinely capsules. Machine output
+ * lives on plates darker than the page. The rules:
  *
  * 1. **48pt minimum touch target.** Anything smaller is its visual size *plus*
  *    a `hitSlop` that grows the tappable area back to 48 without growing the
@@ -21,9 +22,11 @@
  *    `accessibilityLabel` are required on the pressable primitives. Pass the
  *    verb ("Archive session"), not the destination.
  *
- * 3. **State is never colour alone.** `Dot` varies *size* as well as hue, and
- *    the states that need a human are drawn larger. `StatusPill` always pairs
- *    the dot with a word.
+ * 3. **State is never colour alone — and it is never a new hue either.** There
+ *    is no green, yellow or orange in the chrome. A state that needs a human is
+ *    drawn as INVERSION (paper ink on canvas) and larger; working is the
+ *    accent; failure is red; finished recedes to grey. `StatusPill` always
+ *    pairs the dot with a word.
  *
  * 4. **Press feedback is a spring, not a colour swap.** See `Touchable` in
  *    `motion.tsx`.
@@ -43,9 +46,7 @@ import * as React from 'react'
 import {
   ActivityIndicator,
   Animated,
-  Platform,
   Pressable,
-  Text,
   TextInput,
   View,
   type PressableProps,
@@ -56,6 +57,7 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native'
+import { Text } from '@app/components/Text'
 import { Check, ChevronRight, Search as SearchIcon, X } from 'lucide-react-native'
 import Svg, { Circle, Line } from 'react-native-svg'
 import Clipboard from '@react-native-clipboard/clipboard'
@@ -73,13 +75,42 @@ import {
   toneSoft,
   type Tone,
 } from '../design/tokens'
+import {
+  MONO,
+  MONO_SEMIBOLD,
+  PROSE,
+  PROSE_MEDIUM,
+  PROSE_SEMIBOLD,
+  SANS_SEMIBOLD,
+} from '../design/fonts'
 import { TOUCH_MIN, Touchable, enterStyle, popStyle, useEnter } from './motion'
 
 export { palette, radius, toneColor, type Tone, shadowOverlay, shadowFloating } from '../design/tokens'
 export { TOUCH_MIN, Skeleton, RowSkeleton, LiveHalo, usePulse, useShimmer } from './motion'
 export { toast, dismissToast, ToastHost } from './Toast'
 
-const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' })
+// The bundled mono face. `Platform.select` used to hand this to Menlo/monospace;
+// a face that ships with the app is the same on both platforms and is the one
+// the desktop uses, so a diff or a path reads identically on either surface.
+const MONO_FONT = MONO
+
+/**
+ * The face per role. Without this, everything inherits the UI grotesque and
+ * Space Grotesk would be doing the job Inter exists for — long-form reading.
+ */
+const ROLE_FONT: Record<TypeRole, string> = {
+  display: SANS_SEMIBOLD,
+  title: SANS_SEMIBOLD,
+  heading: SANS_SEMIBOLD,
+  body: PROSE,
+  label: PROSE_MEDIUM,
+  caption: PROSE,
+  small: PROSE,
+  micro: PROSE_SEMIBOLD,
+  mono: MONO,
+  monoSmall: MONO_SEMIBOLD,
+  eyebrow: MONO_SEMIBOLD,
+}
 
 /** Grow a small control's tappable area without changing how big it looks. */
 const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 }
@@ -90,29 +121,27 @@ type TypeRole = 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption' |
 
 /** The type scale, as class names. Kept in one place so it cannot drift. */
 const TYPE_CLASS: Record<TypeRole, string> = {
-  display: 'text-[24px] leading-[30px] font-bold',
-  title: 'text-[17px] leading-[22px] font-bold',
-  heading: 'text-[14px] leading-[19px] font-semibold',
+  display: 'text-[27px] leading-[33px] font-bold',
+  title: 'text-[19px] leading-[24px] font-bold',
+  heading: 'text-[15px] leading-[20px] font-semibold',
   body: 'text-[13.5px] leading-[20px]',
   label: 'text-[13px] leading-[18px] font-medium',
   caption: 'text-[12px] leading-[17px]',
   small: 'text-[11px] leading-[15px]',
-  micro: 'text-[10.5px] leading-[14px] font-medium',
+  micro: 'text-[10px] leading-[14px] font-semibold',
   mono: 'text-[12px] leading-[17px]',
   monoSmall: 'text-[10.5px] leading-[14px] font-medium',
   eyebrow: 'text-[10px] leading-[13px] font-semibold uppercase',
 }
 
 const TYPE_TRACK: Partial<Record<TypeRole, number>> = {
-  display: -0.5,
-  title: -0.3,
-  heading: -0.15,
+  display: -0.8,
+  title: -0.45,
+  heading: -0.25,
   label: -0.1,
-  micro: 0.1,
-  eyebrow: 1.1,
+  micro: 0.6,
+  eyebrow: 1.5,
 }
-
-const MONO_ROLES: TypeRole[] = ['mono', 'monoSmall', 'eyebrow']
 
 /**
  * `Text` with the type scale applied.
@@ -135,7 +164,10 @@ function Txt({
       {...props}
       className={cn(TYPE_CLASS[as], tone && toneClass.text[tone], 'text-ink', className)}
       style={[
-        MONO_ROLES.includes(as) ? { fontFamily: MONO_FONT } : null,
+        // The family already encodes the weight (one static file per weight), so
+        // the class's fontWeight is neutralised — otherwise iOS synthesises a
+        // second bold on top of an already-bold face and the type looks blunt.
+        { fontFamily: ROLE_FONT[as], fontWeight: 'normal' },
         track !== undefined ? { letterSpacing: track } : null,
         style as StyleProp<TextStyle>,
       ]}
@@ -151,7 +183,7 @@ export function Eyebrow({ children, className }: { children: React.ReactNode; cl
   return (
     <Text
       className={cn('text-[10px] leading-[13px] font-semibold uppercase text-ink-3', className)}
-      style={{ letterSpacing: 1.2, fontFamily: MONO_FONT }}
+      style={{ letterSpacing: 1.5, fontFamily: MONO_FONT }}
     >
       {children}
     </Text>
@@ -197,7 +229,7 @@ const BUTTON_COLOR: Record<ButtonVariant, string> = {
   danger: palette.danger,
 }
 
-const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 36, md: 44, lg: 50 }
+const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 34, md: 42, lg: 48 }
 
 export function Button({
   variant = 'secondary',
@@ -242,8 +274,8 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 7,
-          borderRadius: radius.pill,
-          paddingHorizontal: size === 'sm' ? 16 : 20,
+          borderRadius: radius.md,
+          paddingHorizontal: size === 'sm' ? 13 : 17,
         },
         full ? { alignSelf: 'stretch', width: '100%' } : { alignSelf: 'flex-start' },
         { opacity: disabled ? 0.4 : 1 },
@@ -312,7 +344,7 @@ export function IconButton({
           height: size,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: size / 2,
+          borderRadius: Math.round(size * 0.24),
           backgroundColor: active ? toneSoft[tone] : 'transparent',
           opacity: disabled ? 0.35 : 1,
         },
@@ -346,7 +378,7 @@ const DOT_SIZE: Record<Tone, number> = {
  * colour, marks "live". A *waiting-for-you* session does not pulse: it is
  * stuck on the user, and motion would imply progress that is not happening.
  */
-export function Dot({ tone = 'muted', pulse }: { tone?: Tone; pulse?: boolean }) {
+export function Dot({ tone = 'muted', pulse, color }: { tone?: Tone; pulse?: boolean; color?: string }) {
   const size = DOT_SIZE[tone]
   return (
     <View
@@ -358,7 +390,7 @@ export function Dot({ tone = 'muted', pulse }: { tone?: Tone; pulse?: boolean })
         width: size,
         height: size,
         borderRadius: size / 2,
-        backgroundColor: toneColor[tone],
+        backgroundColor: color ?? toneColor[tone],
         opacity: pulse ? 0.7 : 1,
       }}
     />
@@ -379,19 +411,28 @@ export function Badge({
   outline?: boolean
   mono?: boolean
 }) {
+  const inverted = tone === 'wait'
   return (
     <View
       className={cn(
-        'h-[22px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
-        outline ? toneClass.border[tone] : toneClass.soft[tone],
+        'h-[20px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
+        !inverted && (outline ? toneClass.border[tone] : toneClass.soft[tone]),
         className,
       )}
-      style={{ borderWidth: outline ? 1 : 0 }}
+      style={{
+        borderWidth: inverted || outline ? 1 : 0,
+        borderColor: inverted ? palette.ink : undefined,
+        backgroundColor: inverted ? palette.ink : undefined,
+      }}
     >
       <Text
         className={cn('text-[11.5px]', mono ? 'text-[10px] uppercase' : '')}
         numberOfLines={1}
-        style={{ color: toneColor[tone], letterSpacing: mono ? 0.6 : 0.1, fontFamily: mono ? MONO_FONT : undefined }}
+        style={{
+          color: inverted ? palette.canvas : toneColor[tone],
+          letterSpacing: mono ? 0.6 : 0.1,
+          fontFamily: mono ? MONO_FONT : undefined,
+        }}
       >
         {children}
       </Text>
@@ -416,31 +457,42 @@ export function StatusPill({
   className?: string
   size?: 'sm' | 'md'
 }) {
+  // `wait` is the app's inversion: paper ink on canvas, the only surface in
+  // the chrome that flips. That is what makes "a human is required" findable
+  // while scrolling without spending a colour on it — the words still say it,
+  // and the flip says it louder.
+  const inverted = tone === 'wait'
+  const fg = inverted ? palette.canvas : toneColor[tone]
+  const mutedFg = inverted ? 'rgba(19,19,21,0.62)' : palette.ink3
   return (
     <View
       accessible
       accessibilityRole="text"
       accessibilityLabel={`Status: ${label}`}
       className={cn(
-        'shrink-0 flex-row items-center rounded-pill bg-surface',
-        size === 'sm' ? 'h-[22px] gap-1.5 px-2' : 'h-6 gap-1.5 px-2.5',
+        'shrink-0 flex-row items-center rounded-xs',
+        size === 'sm' ? 'h-[20px] gap-1.5 px-2' : 'h-[23px] gap-1.5 px-2.5',
         className,
       )}
-      style={{ borderWidth: 1, borderColor: palette.line }}
+      style={{
+        borderWidth: 1,
+        borderColor: inverted ? palette.ink : toneBorder[tone],
+        backgroundColor: inverted ? palette.ink : toneSoft[tone],
+      }}
     >
-      <Dot tone={tone} pulse={pulse} />
+      <Dot tone={tone} pulse={pulse} color={fg} />
       <Text
-        className={cn('font-medium', size === 'sm' ? 'text-[10.5px]' : 'text-[11px]')}
+        className={cn('font-semibold uppercase', size === 'sm' ? 'text-[9.5px]' : 'text-[10px]')}
         numberOfLines={1}
-        style={{ color: toneColor[tone] }}
+        style={{ color: fg, letterSpacing: 0.6, fontFamily: MONO_FONT }}
       >
         {label}
       </Text>
       {detail ? (
         <Text
-          className="text-[10px] text-ink-3"
+          className="text-[10px]"
           numberOfLines={1}
-          style={{ fontFamily: MONO_FONT }}
+          style={{ color: mutedFg, fontFamily: MONO_FONT }}
         >
           {detail}
         </Text>
@@ -591,7 +643,7 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-3.5"
+      className="min-h-11 flex-row items-center gap-2.5 rounded-md border border-line bg-field px-3.5"
       style={style as StyleProp<ViewStyle>}
     >
       <SearchIcon size={15} color={palette.ink3} />
@@ -658,7 +710,7 @@ export function ToggleRow({
         ) : null}
       </View>
       <View
-        className="h-[26px] w-[44px] justify-center rounded-pill px-0.5"
+        className="h-[26px] w-[44px] justify-center rounded-full px-0.5"
         style={{ backgroundColor: value ? palette.accent : palette.raised, borderWidth: 1, borderColor: value ? palette.accent : palette.lineStrong }}
       >
         <View
@@ -762,7 +814,7 @@ export function Segmented<T extends string>({
     <View
       accessibilityRole="tablist"
       accessibilityLabel={label}
-      className={cn('flex-row gap-1 rounded-pill border border-line bg-well p-1', className)}
+      className={cn('flex-row gap-1 rounded-md border border-line bg-well p-1', className)}
     >
       {options.map((option) => {
         const active = option.value === value
@@ -775,7 +827,7 @@ export function Segmented<T extends string>({
             onPress={() => onChange(option.value)}
             hitSlop={HIT_SLOP}
             className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-pill',
+              'flex-1 flex-row items-center justify-center gap-1.5 rounded-sm',
               size === 'sm' ? 'h-8' : 'h-10',
               active ? 'bg-raised' : 'active:bg-raised/60',
             )}
@@ -840,7 +892,7 @@ export function FilterChips<T extends string>({
             }
             accessibilityState={{ selected: active }}
             onPress={() => onChange(option.value)}
-            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-pill border px-3.5"
+            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-sm border px-3"
             style={{
               borderColor: active ? palette.accentBorder : palette.line,
               backgroundColor: active ? palette.accentSoft : 'transparent',
@@ -923,7 +975,7 @@ export function ListRow({
   const body = (
     <View
       className={cn(
-        'min-h-[52px] flex-row items-center gap-3 px-4',
+        'min-h-[56px] flex-row items-center gap-3 px-4',
         dense ? 'py-1.5' : 'py-2.5',
         selected && 'bg-accent-soft',
         disabled && 'opacity-40',
@@ -988,7 +1040,7 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2,
+        borderRadius: Math.round(size * 0.26),
         backgroundColor: agentSoft(agent),
         borderWidth: 1,
         borderColor: `${agentColor(agent)}55`,
@@ -1014,7 +1066,7 @@ export function IconTile({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="items-center justify-center"
-      style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: toneSoft[tone] }}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.26), backgroundColor: toneSoft[tone] }}
     >
       {icon}
     </View>
@@ -1093,13 +1145,13 @@ export function ProgressBar({
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      className={cn('h-[3px] overflow-hidden rounded-pill bg-raised', className)}
+      className={cn('h-[3px] overflow-hidden rounded-[2px] bg-raised', className)}
     >
       <View
         style={{
           width: `${Math.max(1.5, clamped * 100)}%`,
           height: '100%',
-          borderRadius: 999,
+          borderRadius: 2,
           backgroundColor: toneColor[tone],
         }}
       />
@@ -1342,7 +1394,7 @@ export function CopyButton({
         timer.current = setTimeout(() => setCopied(false), 1600)
       }}
       hitSlop={HIT_SLOP}
-      className="min-h-9 flex-row items-center gap-1.5 rounded-pill px-2.5 active:bg-raised"
+      className="min-h-9 flex-row items-center gap-1.5 rounded-sm px-2.5 active:bg-raised"
       style={copied ? { backgroundColor: palette.okSoft } : undefined}
     >
       {copied ? <Check size={12} color={palette.ok} strokeWidth={2.6} /> : icon ? <Txt as="small">⧉</Txt> : null}

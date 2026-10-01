@@ -8,8 +8,8 @@
  */
 
 import * as React from 'react'
-import { Animated, Text, View } from 'react-native'
-import { BlurView } from 'expo-blur'
+import {Animated, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChevronRight } from 'lucide-react-native'
 
@@ -100,30 +100,28 @@ export function AttentionPill() {
         style={{ maxWidth: '92%' }}
       >
         {/* The one surface in the app allowed to cast a full overlay shadow:
-            this pill genuinely floats over whatever session is behind it. The
-            border is `wait`, not the accent: this is a state that needs a
-            human, and the accent must stay reserved for "actionable/live". */}
-        <View style={[{ borderRadius: radius.pill }, shadowOverlay]}>
+            this banner genuinely floats over whatever session is behind it.
+            `wait` is the inversion token — a paper rail and paper dot rather
+            than a hue, so "a human is required" cannot be mistaken for a
+            decorative tint and the accent stays reserved for what is live. */}
+        <View style={[{ borderRadius: radius.lg }, shadowOverlay]}>
           <View
             style={{
               overflow: 'hidden',
-              borderRadius: radius.pill,
+              borderRadius: radius.lg,
               borderWidth: 1,
               borderColor: palette.waitBorder,
-              backgroundColor: `${palette.chrome}F0`,
+              backgroundColor: palette.raised,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingLeft: 14,
+              paddingRight: 10,
+              paddingVertical: 9,
             }}
           >
-            <BlurView intensity={60} tint="dark" style={StyleSheetAbsoluteFill} />
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                paddingLeft: 14,
-                paddingRight: 10,
-                paddingVertical: 9,
-              }}
-            >
+            {/* A 3pt ink rail, the same call the session rail makes. */}
+            <View style={{ width: 3, height: 18, borderRadius: 1, backgroundColor: palette.ink }} />
               {/* `wait` is the token that means "a human is blocking the run" —
                   and the word beside it keeps the state from being colour
                   alone. */}
@@ -139,19 +137,10 @@ export function AttentionPill() {
                   </Text>
                 </>
               ) : null}
-              <ChevronRight size={15} color={palette.ink3} />
-            </View>
+            <ChevronRight size={15} color={palette.ink3} />
           </View>
         </View>
       </Touchable>
     </Animated.View>
   )
-}
-
-const StyleSheetAbsoluteFill = {
-  position: 'absolute' as const,
-  left: 0,
-  right: 0,
-  top: 0,
-  bottom: 0,
 }

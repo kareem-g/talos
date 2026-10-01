@@ -1,8 +1,8 @@
 /**
  * Screen scaffolding — the deck every page is mounted on.
  *
- * QAI SIGNAL DECK
- * ---------------
+ * THE CONSOLE
+ * -----------
  * A large title that *collapses into* a compact app bar as the page scrolls,
  * like iOS and like the desktop's sticky header. The title is the headline,
  * not chrome; the bar earns its hairline only once content slides under it.
@@ -18,13 +18,13 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  Text,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
-import { BlurView } from 'expo-blur'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useNavigation } from '@react-navigation/native'
 import { ChevronLeft, WifiOff } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'
@@ -87,8 +87,8 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
           {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
           <Text
             accessibilityRole="header"
-            className="text-[24px] leading-[30px] font-bold text-ink"
-            style={{ letterSpacing: -0.5 }}
+            className="text-[27px] leading-[33px] font-bold text-ink"
+            style={{ letterSpacing: -0.8 }}
             numberOfLines={2}
           >
             {title}
@@ -143,8 +143,10 @@ export function AppBar({
 
   return (
     <View style={{ paddingTop: insets.top }}>
-      <BlurView intensity={70} tint="dark" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
-      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: `${palette.chrome}E6` }} />
+      {/* Flat chrome, not glass: the console is a machined panel, and a blur
+          under a hairline reads as a consumer app's header rather than an
+          instrument's. Opacity is not a stack, so one solid fill is enough. */}
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: palette.chrome }} />
       <View
         className="min-h-[52px] flex-row items-center gap-2 px-2"
         style={borderless ? undefined : { borderBottomWidth: 1, borderBottomColor: palette.line }}
@@ -173,6 +175,18 @@ export function AppBar({
       )}
     </View>
   )
+}
+
+/**
+ * A back button bound to the navigator, for a screen pushed over the tabs.
+ *
+ * Station's destinations (Agents, Browsers, Usage) are deeper into the
+ * machinery rather than peers of it, so the tab bar's destinations keep the
+ * drawer and these get a back affordance instead.
+ */
+export function StationBackButton() {
+  const navigation = useNavigation()
+  return <BackButton onPress={() => navigation.goBack()} />
 }
 
 /** A back button that knows the safe area. Used by every pushed screen. */

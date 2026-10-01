@@ -18,8 +18,9 @@
  * to a component tree instead of a markdown string.
  */
 
+import { Text } from '@app/components/Text'
 import * as React from 'react'
-import { Text } from 'react-native'
+
 import TestRenderer from 'react-test-renderer'
 import type { ReactTestInstance } from 'react-test-renderer'
 
@@ -45,6 +46,7 @@ import {
   palette,
   toneColor,
 } from '@app/components/ui'
+import { agentHue } from '@app/design/tokens'
 
 /* ── Tree helpers ─────────────────────────────────────────────────────────── */
 
@@ -388,9 +390,61 @@ describe('number formatting matches the desktop', () => {
 /* ── Token discipline ─────────────────────────────────────────────────────── */
 
 describe('tone vocabulary', () => {
-  it('gives every tone a distinct colour', () => {
+  it('keeps every tone distinguishable', () => {
+    // The old contract was "six distinct hues". The console replaced it with a
+    // stronger one: there are only four colours in the chrome — the accent,
+    // paper ink, red and grey — and `ok` deliberately IS the accent, because
+    // "completed" should be calm rather than a second, competing hue. What must
+    // hold is that no two tones are confusable *except* ok/accent.
     const tones = ['ok', 'wait', 'danger', 'info', 'accent', 'muted'] as const
-    expect(new Set(tones.map((tone) => toneColor[tone])).size).toBe(tones.length)
+    expect(toneColor.ok).toBe(toneColor.accent)
+    const rest = tones.filter((tone) => tone !== 'ok')
+    expect(new Set(rest.map((tone) => toneColor[tone])).size).toBe(rest.length)
+  })
+
+  it('uses no green, yellow or orange anywhere in the chrome', () => {
+    // The design rule that shaped this palette: state is carried by inversion,
+    // contrast and words, never by spending a hue on it. Only the diff plate is
+    // allowed a green, and it is not a tone — it is a machine-plate colour.
+    const hexToHue = (hex: string): number => {
+      const v = hex.replace('#', '')
+      const r = parseInt(v.slice(0, 2), 16) / 255
+      const g = parseInt(v.slice(2, 4), 16) / 255
+      const b = parseInt(v.slice(4, 6), 16) / 255
+      const max = Math.max(r, g, b)
+      const min = Math.min(r, g, b)
+      const sat = max === 0 ? 0 : (max - min) / max
+      if (sat < 0.12) return -1 // a neutral has no hue to police
+      const d = max - min
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+      return ((h * 60) % 360 + 360) % 360
+    }
+    const chrome = [
+      palette.accent,
+      palette.wait,
+      palette.danger,
+      palette.info,
+      palette.ok,
+      palette.ink,
+      palette.ink2,
+      palette.ink3,
+      palette.ink4,
+      palette.canvas,
+      palette.chrome,
+      palette.surface,
+      palette.raised,
+      palette.field,
+      palette.well,
+      palette.code,
+      palette.line,
+      palette.lineStrong,
+      ...Object.values(agentHue),
+    ]
+    for (const colour of chrome) {
+      const hue = hexToHue(colour)
+      if (hue < 0) continue
+      expect(hue >= 20 && hue <= 200).toBe(false)
+    }
   })
 
   it('does not paint muted metadata with a status hue', () => {
@@ -399,6 +453,13 @@ describe('tone vocabulary', () => {
     expect(toneColor.muted).toBe(palette.ink3)
     expect(toneColor.muted).not.toBe(toneColor.danger)
     expect(toneColor.muted).not.toBe(toneColor.wait)
+  })
+
+  it('draws "needs you" as inversion, not as a hue', () => {
+    // The attention treatment is the load-bearing idea of the palette: paper
+    // ink, so it reads as a flipped surface rather than as decoration. If this
+    // ever becomes a colour again, the whole scheme drifts.
+    expect(toneColor.wait).toBe(palette.ink)
   })
 })
 

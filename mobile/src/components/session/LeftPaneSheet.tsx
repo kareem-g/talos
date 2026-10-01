@@ -13,7 +13,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { PanelRight, Waypoints } from 'lucide-react-native'
 
 import { relativeTime } from '@/lib/format'
@@ -95,7 +96,7 @@ export function LeftPaneSheet({
             void haptic('light')
             onOpenWorkspace()
           }}
-          className="h-9 flex-row items-center justify-center gap-1.5 rounded-pill border border-line bg-surface active:bg-raised"
+          className="h-9 flex-row items-center justify-center gap-1.5 rounded-md border border-line bg-surface active:bg-raised"
         >
           <PanelRight size={13} color={palette.ink2} />
           <Text className="text-[12px] font-medium text-ink-2">Workspace</Text>
@@ -125,7 +126,7 @@ export function LeftPaneSheet({
                   void haptic('light')
                   onSelectSession(room.session_id)
                 }}
-                className="min-h-10 flex-row items-center gap-2.5 rounded-pill px-2.5 py-1.5 active:bg-raised"
+                className="min-h-10 flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5 active:bg-raised"
                 style={{ opacity: room.session_id ? 1 : 0.55 }}
               >
                 <Waypoints size={14} color={palette.ink3} />
@@ -221,7 +222,7 @@ function PaneSessionRow({
       accessibilityHint={`${display.label}. ${relativeTime(session.updated_at)}`}
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      className="min-h-10 flex-row items-center gap-2.5 rounded-pill px-2.5 py-1.5"
+      className="min-h-10 flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5"
       style={{ backgroundColor: active ? palette.accentSoft : 'transparent' }}
     >
       <Dot tone={tone} pulse={display.pulse} />

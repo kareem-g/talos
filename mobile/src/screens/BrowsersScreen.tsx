@@ -12,7 +12,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Globe, Play, Square } from 'lucide-react-native'
@@ -22,8 +23,7 @@ import { browserApi, type BrowserInstance } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore } from '@app/store'
 import { palette } from '@app/design/tokens'
-import { Card, ListCard, ScreenScaffold, Section } from '@app/components/Screen'
-import { DrawerButton } from '@app/components/Drawer'
+import { Card, ListCard, ScreenScaffold, Section, StationBackButton } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Badge,
@@ -104,7 +104,7 @@ export function BrowsersScreen() {
       refreshing={refreshing}
       scroll
       contentClassName="pb-12 gap-6"
-      headerLeft={<DrawerButton />}
+      headerLeft={<StationBackButton />}
     >
       {error ? (
         <View className="mx-4">

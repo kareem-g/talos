@@ -527,6 +527,55 @@ export const providersApi = {
   refresh: () => request<{ providers: unknown[] }>('/api/mobile/providers/refresh', { method: 'POST' }),
 }
 
+/**
+ * A custom API provider — an OpenAI- or Anthropic-compatible endpoint the user
+ * added by hand. The daemon masks the key down to `has_key`, so the phone never
+ * receives the secret back; that is why an update sends `api_key` only when the
+ * user has typed a new one.
+ */
+export interface ApiProviderConfig {
+  id: string
+  name: string
+  api_url: string
+  transport: 'openai_compatible' | 'anthropic_compatible'
+  models: string[]
+  default_model?: string | null
+  has_key: boolean
+}
+
+export interface ApiProviderDraft {
+  id: string
+  name: string
+  api_url: string
+  api_key?: string
+  transport?: string
+  models?: string[]
+  default_model?: string
+}
+
+/**
+ * Custom provider CRUD. The desktop reaches these same handlers through
+ * `/api/providers/api*`; the daemon mirrors them under `/api/mobile` so the
+ * phone can add, probe and remove an endpoint without a desktop session.
+ */
+export const apiProvidersApi = {
+  list: () =>
+    request<{ providers: ApiProviderConfig[] }>('/api/mobile/providers/api').then((body) => body.providers),
+  create: (body: ApiProviderDraft) =>
+    request<{ ok: boolean; id: string }>('/api/mobile/providers/api', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  remove: (id: string) =>
+    request<{ ok: boolean }>(`/api/mobile/providers/api/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Probe an endpoint without saving it; returns the models it advertised. */
+  test: (body: { id: string; name: string; api_url: string; api_key?: string; transport?: string }) =>
+    request<{ ok: boolean; models?: string[]; error?: string }>('/api/mobile/providers/api/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+}
+
 export const settingsApi = {
   get: () => request<{ settings: Record<string, unknown>; config_path?: string }>('/api/mobile/settings'),
   update: (patch: Record<string, unknown>) =>

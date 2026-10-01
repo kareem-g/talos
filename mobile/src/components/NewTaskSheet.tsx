@@ -12,7 +12,8 @@
  */
 
 import * as React from 'react'
-import { Animated, Pressable, Text, View } from 'react-native'
+import {Animated, Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { Check, ChevronDown, ChevronLeft, Folder, Inbox, Sparkles } from 'lucide-react-native'
 
 import { basename } from '@/lib/format'

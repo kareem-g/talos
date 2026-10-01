@@ -12,6 +12,7 @@
  */
 
 import * as React from 'react'
+import { MONO } from '@app/design/fonts'
 import {
   Animated,
   KeyboardAvoidingView,
@@ -20,13 +21,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Text,
   TextInput,
   View,
   useWindowDimensions,
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Check, ChevronDown, Search as SearchIcon, X } from 'lucide-react-native'
 
@@ -799,7 +800,7 @@ export function PickerSheet({
                         fontSize: 9.5,
                         fontWeight: '700',
                         letterSpacing: 0.6,
-                        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+                        fontFamily: MONO,
                       }}
                     >
                       {option.badge}

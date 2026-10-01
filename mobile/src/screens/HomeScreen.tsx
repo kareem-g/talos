@@ -21,7 +21,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { Plus, Search, Wifi } from 'lucide-react-native'
 
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
@@ -45,6 +46,7 @@ import {
   toast,
 } from '@app/components/ui'
 import { ScreenScaffold, Section } from '@app/components/Screen'
+import { FleetBand } from '@app/components/home/FleetBand'
 import { DrawerButton } from '@app/components/Drawer'
 import {
   AllClear,
@@ -73,6 +75,9 @@ export function HomeScreen() {
   const resendLastUserPrompt = useStore((state) => state.resendLastUserPrompt)
   const toggleStar = useStore((state) => state.toggleStar)
   const removeSession = useStore((state) => state.removeSession)
+
+  const pendingActions = useStore((state) => state.pendingActions)
+  const loadPending = useStore((state) => state.loadPending)
 
   const openSession = useOpenSession()
 
@@ -126,16 +131,54 @@ export function HomeScreen() {
     }
   }, [filter, loadSnapshot])
 
-  function approve(sessionId: string) {
-    const requestId = firstOpenApprovalId(getConversation(sessionId))
-    if (!requestId) {
-      // The status says blocked but no open card is loaded — the transcript
-      // has the truth; open it rather than toasting at the user.
+  /**
+   * Answer a pending request straight from the Deck.
+   *
+   * The request id comes from the session's own `/api/mobile/pending` row when
+   * the pending sweep has one — that is the whole point of this screen, since
+   * it means an approval can be resolved without opening the transcript. When
+   * the sweep has not caught up we fall back to the loaded card, and to opening
+   * the session if even that is missing, rather than toasting at the user about
+   * something they cannot see.
+   */
+  React.useEffect(() => {
+    // The Deck is where approvals are answered, so it owns the pending sweep.
+    void loadPending()
+  }, [loadPending])
+
+  /**
+   * The daemon's record of what a blocked session is waiting for, if the sweep
+   * has one. Shaped for the card, which only needs the tool, the ask and the
+   * risk — the options and selection mode stay in the transcript, where there
+   * is room to render them properly.
+   */
+  const pendingFor = React.useCallback(
+    (sessionId: string) => {
+      const action = pendingActions.find((candidate) => candidate.session_id === sessionId)
+      if (!action) return undefined
+      return {
+        id: action.id,
+        kind: action.kind,
+        toolName: action.tool_name,
+        prompt: action.prompt,
+        risk: action.risk_level,
+      }
+    },
+    [pendingActions],
+  )
+
+  function respond(sessionId: string, decision: 'allow' | 'deny', requestId?: string) {
+    const id = requestId ?? firstOpenApprovalId(getConversation(sessionId))
+    if (!id) {
       openSession(sessionId)
       return
     }
-    respondToApproval(sessionId, requestId, 'allow')
-    toast({ message: 'Approved', tone: 'ok' })
+    respondToApproval(sessionId, id, decision)
+    toast(
+      decision === 'allow'
+        ? { message: 'Approved', tone: 'ok' }
+        : { message: 'Denied', tone: 'info' },
+    )
   }
 
   /** Retry a failed turn: bring the engine back, then re-send the last prompt. */
@@ -183,7 +226,7 @@ export function HomeScreen() {
 
   return (
     <ScreenScaffold
-      title="Home"
+      title="Deck"
       eyebrow={`QAI · ${desktopName}`}
       onRefresh={() => void onRefresh()}
       refreshing={refreshing}
@@ -220,6 +263,11 @@ export function HomeScreen() {
         </View>
       }
     >
+      {/* ── 0. The fleet, as one strip ──────────────────────────────── */}
+      <View className="px-4">
+        <FleetBand sessions={sessions} onOpen={openSession} />
+      </View>
+
       {/* ── 1. Triage — needs you ───────────────────────────────────── */}
       <Section eyebrow="Triage" title={needsYou > 0 ? 'Needs you' : 'Queue clear'} enterIndex={0}>
         {needsYou === 0 ? (
@@ -235,8 +283,16 @@ export function HomeScreen() {
                 idleFor={entry.idleFor}
                 providerName={entry.providerName}
                 enterIndex={index}
+                pending={pendingFor(entry.session.id)}
                 onApprove={
-                  entry.uiState === 'approval' ? () => approve(entry.session.id) : undefined
+                  entry.uiState === 'approval'
+                    ? () => respond(entry.session.id, 'allow', pendingFor(entry.session.id)?.id)
+                    : undefined
+                }
+                onDeny={
+                  entry.uiState === 'approval'
+                    ? () => respond(entry.session.id, 'deny', pendingFor(entry.session.id)?.id)
+                    : undefined
                 }
                 secondaryAction={
                   entry.uiState === 'failed'

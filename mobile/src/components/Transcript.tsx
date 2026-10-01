@@ -47,11 +47,11 @@ import {
   Animated,
   FlatList,
   Pressable,
-  Text,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
+import { Text } from '@app/components/Text'
 import { ArrowDown, Check, ChevronDown, Sparkles } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'

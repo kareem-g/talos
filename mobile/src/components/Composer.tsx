@@ -26,7 +26,8 @@
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import {ActivityIndicator, Pressable, TextInput, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   ArrowUp,

@@ -21,7 +21,8 @@
  */
 
 import * as React from 'react'
-import { Animated, PanResponder, Pressable, Text, View } from 'react-native'
+import {Animated, PanResponder, Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { X } from 'lucide-react-native'
 

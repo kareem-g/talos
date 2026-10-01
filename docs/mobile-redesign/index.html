@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAI Mobile — Redesign Proposal</title>
+<link rel="stylesheet" href="board.css">
+<style>
+  .hero { max-width: 1080px; margin-bottom: 46px; }
+  .hero h1 { font-size: 46px; font-weight: 700; letter-spacing: -1.6px; line-height: 1.05; margin: 16px 0 18px; }
+  .hero p { font-size: 16px; line-height: 1.65; color: var(--ink2); max-width: 760px; }
+  .hero p + p { margin-top: 10px; }
+  .hero b { color: var(--ink); font-weight: 600; }
+  .warn { display: inline-flex; align-items: center; gap: 9px; padding: 9px 14px; border-radius: 8px;
+    border: 1px solid var(--wait-border); background: var(--wait-soft); color: var(--wait);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 30px; }
+  .bcard { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden;
+    display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+  .bcard:hover { border-color: var(--accent-border); }
+  .bcard .thumb { display: block; width: 100%; height: 250px; object-fit: cover; object-position: top;
+    border-bottom: 1px solid var(--line); background: #131315; }
+  .bcard .meta { padding: 15px 17px 17px; }
+  .bcard .n { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+    letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); }
+  .bcard h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin: 7px 0 6px; }
+  .bcard p { font-size: 12.5px; line-height: 1.55; color: var(--ink3); }
+  .bcard .open { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink4);
+    margin-top: 12px; letter-spacing: .8px; }
+  .bcard:hover .open { color: var(--accent); }
+  .foot { margin-top: 60px; padding-top: 26px; border-top: 1px solid var(--line); max-width: 900px; }
+  .foot h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .foot ol { margin: 0 0 0 18px; color: var(--ink2); font-size: 13.5px; line-height: 1.9; }
+  .foot code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="board-kicker">QAI Mobile · Redesign Proposal</div>
+  <h1>Console</h1>
+  <p>A complete replacement of the mobile UI/UX for QAI — the remote control for AI agents running on your desktop. It wears <b>the desktop’s own dark palette</b> (warm charcoal, parchment ink, soft blue accent) with a new instrument geometry the desktop does not have: <b>new navigation, new surfaces, new components, new screens and new states.</b></p>
+  <p>The phone’s job is not to show you a transcript. It is to tell you <b>something needs you</b> and let you resolve it in seconds — so the whole interface is built around that one question and one verb.</p>
+  <p style="margin-top:20px"><span class="warn">Design only — no app code changed</span></p>
+</div>
+
+<div class="grid">
+  <a class="bcard" href="1-system.html">
+    <img class="thumb" src="out-1-system.png" alt="Design system board">
+    <div class="meta"><span class="n">Board 01 · System</span>
+      <h3>Palette, type, geometry, navigation</h3>
+      <p>The desktop’s charcoal ramp, one soft-blue accent, rectilinear tokens, the paper-ink attention treatment, the rail + fleet band signature, the full navigation tree and the desktop→mobile mapping.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+  <a class="bcard" href="2-deck.html">
+    <img class="thumb" src="out-2-deck.png" alt="Deck board">
+    <div class="meta"><span class="n">Board 02 · Deck</span>
+      <h3>Deck, Sessions, Command, alerts</h3>
+      <p>The triage loop: the blocker as hero with in-place Allow/Deny, the fleet band, the searchable session browser, ⌘K rebuilt for a thumb, and actionable notifications.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+  <a class="bcard" href="3-session.html">
+    <img class="thumb" src="out-3-session.png" alt="Session board">
+    <div class="meta"><span class="n">Board 03 · Session</span>
+      <h3>RunBar, transcript, approvals, composer</h3>
+      <p>The RunBar readout, every part type the desktop renders, the loud approval card resolved in place, queue/steer/slash composer, and diffs as machine plates.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+  <a class="bcard" href="4-panels.html">
+    <img class="thumb" src="out-4-panels.png" alt="Panels board">
+    <div class="meta"><span class="n">Board 04 · Panels</span>
+      <h3>Model &amp; permissions, Git, Terminal, Browser</h3>
+      <p>The right rail turned into a tabbed sheet, live/next-run config honesty, review and commit, a PTY with a key strip, and a live CDP mirror with tap-to-click.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+  <a class="bcard" href="5-machinery.html">
+    <img class="thumb" src="out-5-machinery.png" alt="Machinery board">
+    <div class="meta"><span class="n">Board 05 · Machinery</span>
+      <h3>Station, Agents, Usage, MCP, Remote, Device</h3>
+      <p>The daemon’s world as a status board with live readouts, engine readiness with remedies, the cost ledger, tunnels and paired devices, and this phone’s own settings.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+  <a class="bcard" href="6-states.html">
+    <img class="thumb" src="out-6-states.png" alt="States board">
+    <div class="meta"><span class="n">Board 06 · Entry &amp; states</span>
+      <h3>New task, pairing, every state</h3>
+      <p>Loading, empty, error, offline, reconnecting, streaming — plus long paths, large diffs, long tool output, long sessions and the keyboard-open case.</p>
+      <div class="open">OPEN →</div></div>
+  </a>
+</div>
+
+<div class="foot">
+  <h3>Decisions I need before building</h3>
+  <ol>
+    <li>Approve the direction — the desktop’s dark palette, rectilinear geometry, mono readouts, no green/yellow/orange in the chrome.</li>
+    <li>Custom API providers: add four <code>/api/mobile/providers/api*</code> routes so they work on the phone?</li>
+    <li>Rooms: full management on mobile, or read-only + open channel?</li>
+    <li>Confirm mobile stays dark-only with one accent.</li>
+    <li>Tab naming: <code>Deck · Sessions · Station · Device</code> with the raised ✚ as Command.</li>
+  </ol>
+</div>
+
+</body>
+</html>

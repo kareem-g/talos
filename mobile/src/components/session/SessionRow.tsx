@@ -33,7 +33,8 @@
  */
 
 import * as React from 'react'
-import { Animated, PanResponder, Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native'
+import {Animated, PanResponder, Pressable, View, type StyleProp, type ViewStyle} from 'react-native'
+import { Text } from '@app/components/Text'
 import {
   Archive,
   ArchiveRestore,
@@ -56,22 +57,30 @@ import { agentColor, palette, toneColor, type Tone } from '@app/design/tokens'
 import { spring } from '@app/design/tokens'
 import { LiveHalo, rowEnterStyle, staggerDelay, useDisclosure, useEnter } from '../motion'
 import { ActionSheet } from '../Sheet'
-import { AgentAvatar, Badge, Button, Card, Eyebrow, IconTile, Mono, Skeleton, StatusPill, haptic } from '../ui'
+import { AgentAvatar, Badge, Button, Card, Eyebrow, IconTile, Mono, Skeleton, StatusPill, Well, haptic } from '../ui'
 
 /** The tone a UI state paints with, mapped to the app's vocabulary. */
 export function stateTone(state: string): Tone {
   switch (state) {
+    // The inversion: a human is the bottleneck. `wait` resolves to paper ink,
+    // so these draw as a white rail and a white pill rather than a hue.
     case 'approval':
     case 'input':
-    case 'paused':
-    case 'resuming':
     case 'reconnecting':
       return 'wait'
+    // Held, not broken — queued or paused. A desaturated sky, never the
+    // attention treatment, because nobody has to do anything about it.
+    case 'paused':
+      return 'info'
     case 'failed':
     case 'offline':
       return 'danger'
+    // The machine is working. `ok` IS the accent, so "live" and "done" share
+    // the one hue the app spends on action — and the word beside the dot is
+    // what tells them apart.
     case 'working':
     case 'starting':
+    case 'resuming':
       return 'ok'
     case 'archived':
     case 'ended':
@@ -372,6 +381,8 @@ export function AttentionCard({
   providerName,
   onApprove,
   approveLabel = 'Approve',
+  onDeny,
+  pending,
   onOpen,
   secondaryAction,
   enterIndex,
@@ -383,6 +394,22 @@ export function AttentionCard({
   providerName?: string
   onApprove?: () => void
   approveLabel?: string
+  /** Refuse the pending request. Only meaningful alongside `pending`. */
+  onDeny?: () => void
+  /**
+   * The daemon's own record of what is being asked, from `/api/mobile/pending`.
+   *
+   * This is what makes the Deck answerable without opening the session: the
+   * tool, the exact thing it wants to do, and the risk, all present on the row.
+   * It is optional because a session can report itself blocked before the
+   * pending sweep has caught up, and the card must still render then.
+   */
+  pending?: {
+    kind: string
+    toolName?: string | null
+    prompt?: string | null
+    risk?: string | null
+  }
   onOpen: () => void
   /** Replaces the plain "Open" ghost button — Retry for failed, Resume for paused. */
   secondaryAction?: { label: string; onPress: () => void }
@@ -404,9 +431,22 @@ export function AttentionCard({
         }}
         className="rounded-lg active:opacity-85"
       >
-        <Card tone={tone} className="gap-3 overflow-hidden p-4">
-          {/* Signal edge: lit when it burns for you. */}
-          <View style={{ marginHorizontal: -16, marginTop: -16, height: 2, backgroundColor: toneColor[tone] }} />
+        <Card tone={tone} className="gap-3 overflow-hidden py-4 pl-5 pr-4">
+          {/* THE RAIL. Every session object in the app carries one, and this is
+              the shape the whole language is built on: a 4pt bar on the left
+              edge whose colour is the state. Here it is `wait` — paper ink, the
+              only white rail in the app — so "a human is required" is findable
+              while scrolling without spending a hue on it. */}
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 4,
+              backgroundColor: toneColor[tone],
+            }}
+          />
           <View className="flex-row items-start gap-3">
             <View className="min-w-0 flex-1 gap-0.5">
               <Text
@@ -430,6 +470,32 @@ export function AttentionCard({
             </Text>
           ) : null}
 
+          {pending?.kind === 'approval' ? (
+            <View className="gap-2">
+              <View className="flex-row items-center gap-2">
+                <Mono className="text-[10px] uppercase text-ink-3" numberOfLines={1}>
+                  {pending.toolName ?? 'tool'}
+                </Mono>
+                <View className="flex-1" />
+                {pending.risk ? (
+                  <Badge tone={/high|critical/i.test(pending.risk) ? 'danger' : 'muted'} outline mono>
+                    {`${pending.risk} risk`}
+                  </Badge>
+                ) : null}
+              </View>
+              {pending.prompt ? (
+                // The exact thing it wants to do, on a machine plate — the
+                // desktop shows this inside the transcript, and on a phone the
+                // decision has to be makeable without going there.
+                <Well className="px-3 py-2.5">
+                  <Mono className="text-[11px] leading-[16px] text-code-ink" numberOfLines={5}>
+                    {pending.prompt}
+                  </Mono>
+                </Well>
+              ) : null}
+            </View>
+          ) : null}
+
           <View className="flex-row items-center gap-2">
             {onApprove ? (
               <Button
@@ -443,17 +509,32 @@ export function AttentionCard({
                 }}
               />
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              label={secondaryAction?.label ?? (uiState === 'failed' ? 'Retry' : 'Open')}
-              accessibilityLabel={secondaryAction?.label ?? `Open ${session.name}`}
-              onPress={() => {
-                void haptic('light')
-                if (secondaryAction) secondaryAction.onPress()
-                else onOpen()
-              }}
-            />
+            {onDeny ? (
+              // Deny alongside Allow, not behind a menu: an approval you can
+              // only say yes to is not an approval.
+              <Button
+                variant="ghost"
+                size="sm"
+                label="Deny"
+                accessibilityLabel={`Deny the pending request in ${session.name}`}
+                onPress={() => {
+                  void haptic('warn')
+                  onDeny()
+                }}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                label={secondaryAction?.label ?? (uiState === 'failed' ? 'Retry' : 'Open')}
+                accessibilityLabel={secondaryAction?.label ?? `Open ${session.name}`}
+                onPress={() => {
+                  void haptic('light')
+                  if (secondaryAction) secondaryAction.onPress()
+                  else onOpen()
+                }}
+              />
+            )}
           </View>
         </Card>
       </Pressable>
@@ -601,7 +682,7 @@ export function WorkspaceGroup({
               accessibilityLabel={`Start a task in ${name}`}
               onPress={onNewTask}
               hitSlop={12}
-              className="size-8 items-center justify-center rounded-pill bg-raised active:bg-hover"
+              className="size-8 items-center justify-center rounded-md bg-raised active:bg-hover"
             >
               <Plus size={17} color={palette.ink2} />
             </Pressable>

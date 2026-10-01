@@ -10,7 +10,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, ScrollView, Text, View } from 'react-native'
+import {Pressable, ScrollView, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { ChevronDown, Eye, Play, Plus, Trash2, Zap } from 'lucide-react-native'
 
 import { basename, cn } from '@/lib/format'

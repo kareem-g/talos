@@ -16,7 +16,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { ChevronRight, Cpu } from 'lucide-react-native'
 
 import type { ConfigOption } from '@/types/provider'

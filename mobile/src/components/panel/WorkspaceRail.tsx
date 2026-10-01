@@ -17,7 +17,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, ScrollView, Text, View } from 'react-native'
+import {Pressable, ScrollView, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { Plus } from 'lucide-react-native'
 
 import { cn } from '@/lib/format'
@@ -186,7 +187,7 @@ export function WorkspaceRail({
                   }}
                   onLongPress={() => closeTab(id)}
                   className={cn(
-                    'mr-1.5 h-8 flex-row items-center gap-2 rounded-pill border px-3',
+                    'mr-1.5 h-8 flex-row items-center gap-2 rounded-md border px-3',
                     isActive
                       ? 'border-accent-border bg-accent-soft'
                       : 'border-line bg-surface active:bg-raised',

@@ -13,7 +13,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Bot, ChevronRight, RefreshCw } from 'lucide-react-native'
@@ -22,8 +23,7 @@ import { providersApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { useStore, type MobileAgent } from '@app/store'
 import { agentColor, palette } from '@app/design/tokens'
-import { ListCard, ScreenScaffold, Section } from '@app/components/Screen'
-import { DrawerButton } from '@app/components/Drawer'
+import { ListCard, ScreenScaffold, Section, StationBackButton } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   AgentAvatar,
@@ -113,7 +113,7 @@ export function AgentsScreen() {
       onRefresh={() => void refresh()}
       refreshing={refreshing}
       contentClassName="pb-10"
-      headerLeft={<DrawerButton />}
+      headerLeft={<StationBackButton />}
       headerRight={
         <IconButton
           label="Re-scan for agents"
@@ -366,7 +366,7 @@ export function AgentDetailScreen() {
           accessibilityLabel="Back to agents"
           onPress={() => navigation.goBack()}
           hitSlop={10}
-          className="min-h-[38px] flex-row items-center rounded-pill px-2.5 active:bg-raised"
+          className="min-h-[38px] flex-row items-center rounded-md px-2.5 active:bg-raised"
         >
           <Text className="text-[14.5px] font-semibold text-accent">Agents</Text>
         </Pressable>

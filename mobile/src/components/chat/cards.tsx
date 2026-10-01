@@ -9,7 +9,8 @@
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import {ActivityIndicator, Pressable, TextInput, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { AlertTriangle, Check, ChevronDown, FileText, Moon, X } from 'lucide-react-native'
 
 import { describeApproval, type ApprovalOption } from '@/lib/approvals'
@@ -747,7 +748,7 @@ export function CloseButton({ onPress }: { onPress: () => void }) {
       accessibilityLabel="Close"
       onPress={onPress}
       hitSlop={10}
-      className="size-9 items-center justify-center rounded-pill active:bg-raised"
+      className="size-9 items-center justify-center rounded-md active:bg-raised"
     >
       <X size={17} color={palette.ink3} />
     </Pressable>

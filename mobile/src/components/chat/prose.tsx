@@ -9,7 +9,9 @@
  */
 
 import * as React from 'react'
-import { Animated, ScrollView, Text, View, type TextStyle } from 'react-native'
+import { MONO, PROSE } from '@app/design/fonts'
+import {Animated, ScrollView, View, type TextStyle} from 'react-native'
+import { Text } from '@app/components/Text'
 
 import { cn } from '@/lib/format'
 import { agentHue, palette, radius } from '@app/design/tokens'
@@ -127,7 +129,7 @@ function InlineText({
         <Text
           key={`c${pieceIndex}`}
           style={{
-            fontFamily: 'Menlo',
+            fontFamily: MONO,
             fontSize: 13,
             color: palette.accent,
             backgroundColor: palette.accentSoft,
@@ -339,7 +341,7 @@ export function Prose({
                         </Mono>
                         <InlineText
                           text={item}
-                          style={{ flex: 1, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
+                          style={{ flex: 1, fontFamily: PROSE, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
                           chips={chips}
                         />
                       </View>
@@ -351,7 +353,7 @@ export function Prose({
                 <View key={blockIndex} style={{ flexDirection: 'row' }}>
                   <InlineText
                     text={block.text}
-                    style={{ flex: 1, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
+                    style={{ flex: 1, fontFamily: PROSE, fontSize: 14.5, lineHeight: 22, color: palette.ink }}
                     chips={chips}
                   />
                   {isLastBlock ? <Caret /> : null}
@@ -367,7 +369,7 @@ export function Prose({
 
 /** User-message text: prose with inline token chips and `code`/bold styling. */
 export function Chips({ text }: { text: string }) {
-  return <InlineText text={text} style={{ fontSize: 14.5, lineHeight: 21, color: palette.ink }} chips />
+  return <InlineText text={text} style={{ fontFamily: PROSE, fontSize: 14.5, lineHeight: 21, color: palette.ink }} chips />
 }
 
 export { cn }

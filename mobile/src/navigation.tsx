@@ -4,18 +4,19 @@
  * QAI — the desktop's mobile shell, natively.
  * -------------------------------------------
  * ```
- * Pairing ──▶ Main (tabs)  ─┬─ Home       StationHome: triage, live, workspaces
- *                           ├─ Agents     the engine roster
- *                           ├─ Browsers   the CDP fleet
- *                           ├─ History    every session, by day
- *                           └─ Usage      the token/cost ledger
+ * Pairing ──▶ Main (tabs)  ─┬─ Deck      triage: blocked first, fleet band, live
+ *                           ├─ Sessions  every session, by day, searchable
+ *                           ├─ Station   the daemon's world: agents, engines,
+ *                           │            terminals, rooms, MCP, tunnels, usage
+ *                           └─ Device    this phone: routes, alerts, pairing
+ *                                ✚ Command sits between them — the app's verb
  *
  * (root stack, pushed over the tabs)
  *   Session          one conversation — the desktop's SessionView, full screen
  *   SessionPanel     that session's workspace rail — deep-linkable full screen
+ *   Agents · Browsers · Usage       the machinery Station opens
  *   AgentDetail      one agent in full — rises as a sheet
- *   Config           configuration: device, alerts, daemon, MCP, tunnels
- *   Mcp · Remote · Daemon — pushed from Config
+ *   Mcp · Remote · Daemon           pushed from Station and Device
  * ```
  *
  * Two navigation surfaces, exactly like the desktop's responsive shell:
@@ -24,10 +25,9 @@
  * destination, the live History list, Quick Access and the device card. It is
  * mounted at the app root and opened from any page's menu button.
  *
- * **The tab bar** is the fast path: the five destinations the desktop rail
- * groups under Get started / Products / Manage, thumb-reachable without the
- * drawer. New task lives in the drawer, the Home header, and the sheet host —
- * the app's primary verb is never further than one tap.
+ * **The tab bar** is the fast path: four destinations — Deck, Sessions,
+ * Station, Device — plus a raised Command action between them. New task is one
+ * tap from anywhere, in the bar, the drawer and the screen headers.
  *
  * Deep links: every destination is addressable (`qai://` + path), because a
  * notification, a push link and a shared URL all need to land somewhere
@@ -54,6 +54,8 @@ import { BrowsersScreen } from './screens/BrowsersScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { UsageScreen } from './screens/UsageScreen'
 import { ConfigScreen } from './screens/ConfigScreen'
+import { StationScreen } from './screens/StationScreen'
+import { ProvidersScreen } from './screens/ProvidersScreen'
 import { SessionScreen } from './screens/SessionScreen'
 import { SessionPanelScreen, type PanelTabId } from './screens/SessionPanelScreen'
 import { McpScreen } from './screens/McpScreen'
@@ -65,18 +67,21 @@ import { openNewTask } from './lib/newTask'
 import { isPaired } from './lib/pairing'
 import { palette } from '@app/design/tokens'
 
-/** The five destinations, mirroring the desktop rail's groups. */
+/** The four destinations, plus the raised Command action between them. */
 export type TabParamList = {
-  Home: undefined
-  Agents: undefined
-  Browsers: undefined
-  History: undefined
-  Usage: undefined
+  Deck: undefined
+  Sessions: undefined
+  Station: undefined
+  Device: undefined
 }
 
 export type RootStackParamList = {
   Main: NavigatorScreenParams<TabParamList> | undefined
   Session: { sessionId: string; approvalId?: string }
+  Agents: undefined
+  Browsers: undefined
+  Usage: undefined
+  Providers: undefined
   SessionPanel: { sessionId: string; tab?: PanelTabId }
   AgentDetail: { agentId: string }
   Config: undefined
@@ -97,13 +102,16 @@ const linking: LinkingOptions<RootStackParamList> = {
     screens: {
       Main: {
         screens: {
-          Home: '',
-          Agents: 'agents',
-          Browsers: 'browsers',
-          History: 'history',
-          Usage: 'usage',
+          Deck: '',
+          Sessions: 'sessions',
+          Station: 'station',
+          Device: 'device',
         },
       },
+      Agents: 'agents',
+      Browsers: 'browsers',
+      Usage: 'usage',
+      Providers: 'providers',
       Session: 'session/:sessionId',
       SessionPanel: 'session/:sessionId/panel',
       AgentDetail: 'agent/:agentId',
@@ -184,11 +192,10 @@ function MainTabs() {
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: palette.canvas } }}
       tabBar={(props) => <TabBar {...props} />}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Agents" component={AgentsScreen} />
-      <Tab.Screen name="Browsers" component={BrowsersScreen} />
-      <Tab.Screen name="History" component={HistoryScreen} />
-      <Tab.Screen name="Usage" component={UsageScreen} />
+      <Tab.Screen name="Deck" component={HomeScreen} />
+      <Tab.Screen name="Sessions" component={HistoryScreen} />
+      <Tab.Screen name="Station" component={StationScreen} />
+      <Tab.Screen name="Device" component={ConfigScreen} />
     </Tab.Navigator>
   )
 }
@@ -215,6 +222,11 @@ export function RootNavigator() {
     >
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen name="Session" component={SessionScreen} />
+      {/* Station's destinations: deeper into the machinery, so they push. */}
+      <Stack.Screen name="Agents" component={AgentsScreen} />
+      <Stack.Screen name="Browsers" component={BrowsersScreen} />
+      <Stack.Screen name="Usage" component={UsageScreen} />
+      <Stack.Screen name="Providers" component={ProvidersScreen} />
       <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="AgentDetail" component={AgentDetailScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Config" component={ConfigScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />

@@ -11,7 +11,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Search } from 'lucide-react-native'
@@ -20,8 +21,7 @@ import { isInternalSession } from '@/lib/sessionState'
 import { getConversation, useStore } from '@app/store'
 import type { RootStackParamList } from '@app/navigation'
 import { palette, radius } from '@app/design/tokens'
-import { ScreenScaffold, Section } from '@app/components/Screen'
-import { DrawerButton } from '@app/components/Drawer'
+import { ScreenScaffold, Section, StationBackButton } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
   Card,
@@ -119,7 +119,7 @@ export function UsageScreen() {
       subtitle="Totalled from the turns your agents reported."
       scroll
       contentClassName="px-4 pb-12 gap-5"
-      headerLeft={<DrawerButton />}
+      headerLeft={<StationBackButton />}
     >
       <Section eyebrow="Fleet ledger" enterIndex={0}>
         <Card className="overflow-hidden">

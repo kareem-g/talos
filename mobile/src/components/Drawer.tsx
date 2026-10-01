@@ -24,10 +24,10 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
-  Text,
   View,
   useWindowDimensions,
 } from 'react-native'
+import { Text } from '@app/components/Text'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   BarChart3,
@@ -40,6 +40,7 @@ import {
   KeyRound,
   Menu,
   Monitor,
+  Plug,
   Plus,
   Smartphone,
   SlidersHorizontal,
@@ -96,7 +97,7 @@ function NavItem({
       accessibilityState={{ selected: !!active }}
       onPress={onPress}
       className={cn(
-        'min-h-[36px] flex-row items-center gap-2.5 rounded-pill px-3 py-[7px]',
+        'min-h-[36px] flex-row items-center gap-2.5 rounded-md px-3 py-[7px]',
         active ? 'bg-accent-soft' : 'active:bg-raised',
       )}
       style={active ? { borderWidth: 1, borderColor: palette.accentBorder } : undefined}
@@ -216,14 +217,14 @@ export function DrawerHost() {
     setOpen(false)
   }
 
-  function goTab(tab: 'Home' | 'Agents' | 'Browsers' | 'History' | 'Usage') {
+  function goTab(tab: 'Deck' | 'Sessions' | 'Station' | 'Device') {
     close()
     // The union-typed `screen` needs the same cast the rest of the app uses
     // for tab targeting; the literals above are checked by hand.
     if (navigationRef.isReady()) navigationRef.navigate('Main', { screen: tab } as never)
   }
 
-  function goStack(name: 'Config' | 'Pairing' | 'Mcp' | 'Remote' | 'Daemon') {
+  function goStack(name: 'Config' | 'Pairing' | 'Mcp' | 'Remote' | 'Daemon' | 'Agents' | 'Browsers' | 'Usage' | 'Providers') {
     close()
     if (navigationRef.isReady()) navigationRef.navigate(name)
   }
@@ -292,7 +293,7 @@ export function DrawerHost() {
                 close()
                 openNewTask()
               }}
-              className="h-9 flex-row items-center justify-center gap-1.5 rounded-pill border border-line bg-surface active:bg-raised"
+              className="h-9 flex-row items-center justify-center gap-1.5 rounded-md border border-line bg-surface active:bg-raised"
             >
               <Plus size={14} color={palette.ink} strokeWidth={2.2} />
               <Text className="text-[12.5px] font-medium text-ink">New task</Text>
@@ -306,24 +307,31 @@ export function DrawerHost() {
           >
             <NavLabel>Get started</NavLabel>
             <View className="gap-px px-1.5">
-              <NavItem icon={<Home size={14} color={iconColor} strokeWidth={1.8} />} label="Home" onPress={() => goTab('Home')} />
+              <NavItem icon={<Home size={14} color={iconColor} strokeWidth={1.8} />} label="Deck" onPress={() => goTab('Deck')} />
             </View>
 
             <NavLabel>Products</NavLabel>
             <View className="gap-px px-1.5">
-              <NavItem icon={<Bot size={14} color={iconColor} strokeWidth={1.8} />} label="Agents" onPress={() => goTab('Agents')} />
-              <NavItem icon={<Globe size={14} color={iconColor} strokeWidth={1.8} />} label="Browsers" onPress={() => goTab('Browsers')} />
+              <NavItem icon={<Bot size={14} color={iconColor} strokeWidth={1.8} />} label="Agents" onPress={() => goStack('Agents')} />
+              <NavItem icon={<Globe size={14} color={iconColor} strokeWidth={1.8} />} label="Browsers" onPress={() => goStack('Browsers')} />
+              <NavItem icon={<Plug size={14} color={iconColor} strokeWidth={1.8} />} label="API providers" onPress={() => goStack('Providers')} />
             </View>
 
             <NavLabel>Manage</NavLabel>
             <View className="gap-px px-1.5">
-              <NavItem icon={<HistoryIcon size={14} color={iconColor} strokeWidth={1.8} />} label="History" onPress={() => goTab('History')} />
-              <NavItem icon={<BarChart3 size={14} color={iconColor} strokeWidth={1.8} />} label="Usage" onPress={() => goTab('Usage')} />
+              <NavItem icon={<HistoryIcon size={14} color={iconColor} strokeWidth={1.8} />} label="Sessions" onPress={() => goTab('Sessions')} />
+              <NavItem icon={<BarChart3 size={14} color={iconColor} strokeWidth={1.8} />} label="Usage" onPress={() => goStack('Usage')} />
               <NavItem
                 icon={<SlidersHorizontal size={14} color={iconColor} strokeWidth={1.8} />}
-                label="Configuration"
+                label="Station"
                 chevron
-                onPress={() => goStack('Config')}
+                onPress={() => goTab('Station')}
+              />
+              <NavItem
+                icon={<SlidersHorizontal size={14} color={iconColor} strokeWidth={1.8} />}
+                label="Device & settings"
+                chevron
+                onPress={() => goTab('Device')}
               />
             </View>
 
@@ -343,7 +351,7 @@ export function DrawerHost() {
                       void haptic('light')
                       goSession(session.id)
                     }}
-                    className="min-h-[34px] flex-row items-center gap-2 rounded-pill px-3 py-[7px] active:bg-raised"
+                    className="min-h-[34px] flex-row items-center gap-2 rounded-md px-3 py-[7px] active:bg-raised"
                   >
                     <Text className="min-w-0 flex-1 text-[12px] text-ink-2" numberOfLines={1}>
                       {session.name}
@@ -371,7 +379,7 @@ export function DrawerHost() {
               <NavItem
                 icon={<Wrench size={14} color={iconColor} strokeWidth={1.8} />}
                 label="Agent Setup"
-                onPress={() => goTab('Agents')}
+                onPress={() => goStack('Agents')}
               />
               <NavItem
                 icon={<BookOpen size={14} color={iconColor} strokeWidth={1.8} />}

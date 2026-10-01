@@ -10,7 +10,8 @@
  */
 
 import * as React from 'react'
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
+import {ActivityIndicator, Image, Pressable, ScrollView, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import {
   AlertTriangle,
   Check,

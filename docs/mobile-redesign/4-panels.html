@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QAI Mobile — 04 Panels</title>
+<link rel="stylesheet" href="board.css">
+<style>
+  .tabstrip { display: flex; gap: 7px; padding: 11px 16px; overflow: hidden; border-bottom: 1px solid var(--line); flex: none; }
+  .tabstrip .chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+  .step-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; }
+  .step-row + .step-row { border-top: 1px solid var(--line); }
+  .mark { width: 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; flex: none; text-align: center; margin-top: 1px; }
+  .keys { display: flex; gap: 6px; padding: 9px 12px 0; }
+  .key { flex: 1; height: 34px; border: 1px solid var(--line); background: var(--raised); border-radius: 7px;
+    display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--ink2); }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-deck" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 12l4.5-3"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.6-8.5 4.6-8.5-4.6z"/><path d="M3.5 12.4l8.5 4.6 8.5-4.6"/><path d="M3.5 16.6l8.5 4.6 8.5-4.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.6" height="6.6" rx="1.6"/><rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6"/><rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6"/><rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.6"/></symbol>
+  <symbol id="i-device" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.6"/><path d="M11 18.4h2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5.5 9.5l6.5 6.5 6.5-6.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6L20 20"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.8l4.4 4.4L19 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.6l8.8 15.6H3.2z"/><path d="M12 9.6v4.2"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.6 12a7.6 7.6 0 11-2.2-5.4"/><path d="M20 4.4v5h-5"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M8.4 12.6l6-6a3.4 3.4 0 014.8 4.8l-7.2 7.2a5.4 5.4 0 01-7.6-7.6l6.6-6.6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.4"/><path d="M6 11.4l6-6 6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="9" r="2.2"/><path d="M7 8.2v7.6"/><path d="M9.2 6h3.3a4.5 4.5 0 014.5 4.5v.5"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.4"/><path d="M7.4 9.6l2.8 2.8-2.8 2.8M12.6 15.4h4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7.2L19 7.8V21H7z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.3 2.5 3.4 5.2 3.4 8.2S14.3 17.7 12 20.2C9.7 17.7 8.6 15 8.6 12S9.7 6.3 12 3.8z"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><path d="M10 3.2v3.3M14 3.2v3.3M10 17.5v3.3M14 17.5v3.3M3.2 10h3.3M3.2 14h3.3M17.5 10h3.3M17.5 14h3.3"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.8 12h4l2.2-6 4.4 12 2.2-6h5.6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5z"/></symbol>
+  <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="6.5" cy="6" r="2.2"/><circle cx="6.5" cy="18" r="2.2"/><circle cx="17.5" cy="12" r="2.2"/><path d="M8.7 6h3.3a3.5 3.5 0 013.5 3.5"/><path d="M8.7 18h3.3a3.5 3.5 0 003.5-3.5"/></symbol>
+  <symbol id="i-plan" viewBox="0 0 24 24"><path d="M5 5.5h14M5 12h14M5 18.5h9"/></symbol>
+  <symbol id="i-goal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.8 12S6.2 6 12 6s9.2 6 9.2 6-3.4 6-9.2 6-9.2-6-9.2-6z"/><circle cx="12" cy="12" r="2.6"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.6a3.6 3.6 0 005.1 0l2.8-2.8a3.6 3.6 0 00-5.1-5.1l-1.4 1.4"/><path d="M14 10.4a3.6 3.6 0 00-5.1 0L6.1 13.2a3.6 3.6 0 005.1 5.1l1.4-1.4"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4.5H4.5V9M15 4.5H19.5V9M9 19.5H4.5V15M15 19.5H19.5V15"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-7-6.5 16-2.6-6.4z"/></symbol>
+  <symbol id="i-arrow-l" viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M12.8 3L5.5 13.4h5.2L10.8 21l7.4-10.4h-5.2z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3.4 9.1a13.2 13.2 0 0117.2 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.8 16a4.1 4.1 0 014.4 0"/><circle cx="12" cy="19.1" r=".95" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.1 2.1 0 10-3-3l-10 10z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9.5 7V4.6h5V7"/><path d="M6.5 7l1 12.2a1.4 1.4 0 001.4 1.3h6.2a1.4 1.4 0 001.4-1.3L17.5 7"/></symbol>
+  <symbol id="i-run" viewBox="0 0 24 24"><rect x="3.2" y="4.5" width="17.6" height="15" rx="2.4"/><path d="M7.5 9.6l2.6 2.4-2.6 2.4M12.8 15.2h3.7"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3.2l8 4.3v9l-8 4.3-8-4.3v-9z"/><path d="M4 7.5l8 4.3 8-4.3"/><path d="M12 11.8V21"/></symbol>
+  <symbol id="i-robot" viewBox="0 0 24 24"><rect x="4.5" y="7.5" width="15" height="11" rx="3"/><path d="M12 3.5v4"/><circle cx="9" cy="13" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1.2" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<div class="board-head">
+  <div class="board-kicker">QAI Mobile · Redesign · Board 04</div>
+  <h1>Panels, sheets and the workbench</h1>
+  <p>The desktop’s 380/680px right rail — twelve tabs of plan, agents, goal, git, files, browser, terminal, sessions, rooms — becomes a <b>detented bottom sheet with a horizontal tab strip</b>, and anything that wants width (a diff, a terminal, a live browser) promotes to a full-screen <b>Workspace</b>. Model and permission control is its own sheet, always reachable from the RunBar’s config chips.</p>
+</div>
+
+<div class="section-label">Sheets &amp; workbench <span>controls · panels · git · terminal · browser · subagents</span></div>
+
+<div class="frames">
+
+<!-- ══════════ MODEL & PERMISSIONS ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Refactor the auth layer</div></div>
+        <span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+      <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span><span class="grow"></span><span class="mono xs dim">28% ctx</span></div>
+      <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.32">
+        <div class="card card-pad" style="margin-bottom:10px"><div class="mono xs dim">12 steps · editing src/auth/session.ts</div></div>
+        <div class="prose">I’m moving the token refresh into a single helper…</div>
+      </div></div>
+
+      <div class="sheet"><div class="sheet-panel" style="max-height:84%">
+        <div class="grabber"></div>
+        <div class="sheet-head"><div class="grow"><div class="ttl-lg">Model &amp; permissions</div>
+          <div class="mono xs" style="color:var(--ink3);margin-top:2px">CLAUDE · OPUS-4.6 · LIVE</div></div>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-x"/></svg></span></div>
+        <div class="scroll"><div class="pad" style="padding-top:12px">
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:58px">
+              <span class="tile" style="background:rgba(167,139,250,.16);color:#A78BFA;border-color:transparent"><svg class="ic"><use href="#i-robot"/></svg></span>
+              <div class="grow"><div class="ttl">Engine</div><div class="mono xs dim" style="margin-top:2px">claude · acp transport</div></div>
+              <span class="mono xs" style="color:var(--accent)">SWITCH</span>
+              <svg class="ic dim" style="color:var(--ink3)"><use href="#i-chev"/></svg>
+            </div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Permissions</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:60px"><span class="ring-radio on" style="border-width:5px;border-color:var(--wait)"></span>
+              <div class="grow"><div class="ttl">Ask before changes</div><div class="mono xs" style="color:var(--wait);margin-top:2px">CURRENT · every write needs approval</div></div></div>
+            <div class="row" style="min-height:56px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Edit automatically</div><div class="mono xs dim" style="margin-top:2px">writes allowed, commands ask</div></div></div>
+            <div class="row" style="min-height:56px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Plan mode</div><div class="mono xs dim" style="margin-top:2px">read-only until a plan is approved</div></div></div>
+            <div class="row" style="min-height:56px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Full access</div><div class="mono xs" style="color:var(--danger);margin-top:2px">no prompts — runs anything</div></div></div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Reported settings</span><span class="fill"></span><span class="mono xs dim">from daemon</span></div>
+          <div class="card">
+            <div class="kv"><span class="k">Model</span><span class="v">opus-4.6 <span class="pill live" style="height:16px;font-size:9px">Live</span></span></div>
+            <div class="kv"><span class="k">Thought level</span><span class="v">high <span class="pill live" style="height:16px;font-size:9px">Live</span></span></div>
+            <div class="kv"><span class="k">Max turns</span><span class="v">40 <span class="pill" style="height:16px;font-size:9px">Next run</span></span></div>
+            <div class="kv"><span class="k">Worktree</span><span class="v dim2">default</span></div>
+          </div>
+          <p class="sub" style="margin-top:12px">Rows come straight from the session’s reported <span class="mono">ConfigOption[]</span>: live values apply now, “next run” values apply when the session restarts. <span class="mono">start_only</span> options stay hidden — they belong to New Task.</p>
+          <div style="height:20px"></div>
+        </div></div>
+      </div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">09 · MODEL &amp; PERMISSIONS</span>
+    <h3>Live config, honestly labelled</h3>
+    <p>One sheet holds the engine, the four permission modes with plain-language consequences, and every config option the daemon actually reports — each tagged <b>live</b> or <b>next run</b> so nothing pretends to apply instantly when it won’t. Reached from the config chips above the composer or the RunBar.</p>
+  </div>
+</div>
+
+<!-- ══════════ WORKSPACE PANEL SHEET ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Refactor the auth layer</div></div><span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+      <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span><span class="grow"></span><span class="mono xs dim">28% ctx</span></div>
+      <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.3"><div class="card card-pad"><div class="mono xs dim">editing src/auth/session.ts</div></div></div></div>
+
+      <div class="sheet"><div class="sheet-panel" style="max-height:90%">
+        <div class="grabber"></div>
+        <div class="sheet-head">
+          <div class="grow"><div class="ttl-lg">Workspace</div>
+            <div class="mono xs" style="color:var(--ink3);margin-top:2px">AGENTDECK-LINUX · QAI-MOBILE-REDESIGN</div></div>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-expand"/></svg></span>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-x"/></svg></span>
+        </div>
+        <div class="tabstrip">
+          <span class="chip on">Plan</span><span class="chip">Agents <span class="n">3</span></span><span class="chip">Goal</span>
+          <span class="chip">Git <span class="n">5</span></span><span class="chip">Files</span><span class="chip">Terminal</span>
+          <span class="chip">Browser</span><span class="chip">Rooms</span>
+        </div>
+        <div class="scroll"><div class="pad" style="padding-top:14px">
+          <div class="hstack gap8" style="margin-bottom:12px"><span class="ttl">Auth refactor — approved</span><span class="grow"></span><span class="pill live"><span class="dot"></span>Approved</span></div>
+          <div class="hstack gap8" style="margin-bottom:6px"><span class="mono xs dim">5 / 9 STEPS</span><span class="grow"></span><span class="mono xs" style="color:var(--accent)">56%</span></div>
+          <div class="bar" style="margin-bottom:16px"><i style="width:56%"></i></div>
+
+          <div class="card" style="margin-bottom:16px">
+            <div style="padding:4px 13px 6px">
+              <div class="step-row"><span class="mark" style="color:var(--ok)">✓</span><div class="grow"><div class="prose" style="font-size:12.5px">Extract token refresh into one helper</div></div></div>
+              <div class="step-row"><span class="mark" style="color:var(--ok)">✓</span><div class="grow"><div class="prose" style="font-size:12.5px">Delete the three duplicated refresh blocks</div></div></div>
+              <div class="step-row"><span class="mark" style="color:var(--ok)">✓</span><div class="grow"><div class="prose" style="font-size:12.5px">Add a retry with backoff on 401</div></div></div>
+              <div class="step-row"><span class="mark" style="color:var(--accent)">▸</span><div class="grow"><div class="prose" style="font-size:12.5px">Update the session store call sites <span class="mono xs" style="color:var(--accent)">running</span></div></div></div>
+              <div class="step-row"><span class="mark dim">○</span><div class="grow"><div class="prose" style="font-size:12.5px;color:var(--ink3)">Rewrite the auth tests</div></div></div>
+              <div class="step-row"><span class="mark" style="color:var(--danger)">!</span><div class="grow"><div class="prose" style="font-size:12.5px">Migrate the stored refresh tokens <span class="mono xs" style="color:var(--danger)">blocked</span></div></div></div>
+              <div class="step-row"><span class="mark dim">○</span><div class="grow"><div class="prose" style="font-size:12.5px;color:var(--ink3)">Remove the legacy AuthProvider shim</div></div></div>
+            </div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Plan body</span></div>
+          <div class="card card-pad" style="margin-bottom:16px">
+            <div class="prose" style="font-size:13px">The refresh path is implemented three times with subtly different error handling. I will collapse them into <span class="mono" style="font-size:12px;color:var(--accent)">refreshToken()</span>, then make every call site go through it.</div>
+            <div class="prose" style="font-size:13px;margin-top:10px;color:var(--ink2)">The risky part is the stored-token migration — it can invalidate live sessions, so it is marked blocked until you approve the shape.</div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Related files</span></div>
+          <div class="card">
+            <div class="row" style="min-height:44px"><span class="tile" style="width:26px;height:26px;border-radius:6px"><svg class="ic" style="width:13px;height:13px"><use href="#i-file"/></svg></span><div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/auth/session.ts</div></div><span class="mono xs" style="color:var(--ok)">+42</span></div>
+            <div class="row" style="min-height:44px"><span class="tile" style="width:26px;height:26px;border-radius:6px"><svg class="ic" style="width:13px;height:13px"><use href="#i-file"/></svg></span><div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/auth/refresh.ts</div></div><span class="mono xs" style="color:var(--ok)">new</span></div>
+          </div>
+          <div style="height:20px"></div>
+        </div></div>
+      </div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">10 · WORKSPACE PANEL SHEET</span>
+    <h3>The right rail, turned into a sheet</h3>
+    <p>All twelve desktop rail tabs live behind one horizontally-scrolling strip: Plan, Agents, Goal, Git, Files, Terminal, Browser, Rooms, Trace, Sessions, Projects. A detented sheet keeps the transcript one swipe away; the expand control promotes it to the full-screen Workspace when the content wants width.</p>
+  </div>
+</div>
+
+<!-- ══════════ FULL-SCREEN GIT ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Git</div><div class="mono xs dim" style="margin-top:1px">agentdeck-linux</div></div>
+        <span class="icon-btn plain"><svg class="ic"><use href="#i-refresh"/></svg></span></div>
+
+      <div class="scroll"><div class="pad" style="padding-top:14px;padding-bottom:14px">
+        <div class="card card-pad" style="margin-bottom:16px">
+          <div class="hstack gap10">
+            <span class="tile" style="background:var(--accent-soft);color:var(--accent);border-color:var(--accent-border)"><svg class="ic"><use href="#i-branch"/></svg></span>
+            <div class="grow cut"><div class="mono cut" style="font-size:12.5px;color:var(--ink)">qai-mobile-redesign</div>
+              <div class="mono xs dim" style="margin-top:2px">5 changed · +284 −61</div></div>
+            <span class="mono xs" style="color:var(--accent)">SWITCH</span>
+          </div>
+        </div>
+
+        <div class="hstack gap8" style="margin-bottom:10px">
+          <span class="mono xs" style="color:var(--ok)">+284</span><span class="mono xs" style="color:var(--danger)">−61</span>
+          <span class="grow"></span><span class="mono xs dim">5 FILES</span>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="row" style="min-height:46px"><span class="pill ok" style="width:20px;justify-content:center">M</span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/auth/session.ts</div></div>
+            <span class="mono xs" style="color:var(--ok)">+42</span><span class="mono xs" style="color:var(--danger)">−18</span></div>
+          <div class="row" style="min-height:46px"><span class="pill ok" style="width:20px;justify-content:center">A</span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/auth/refresh.ts</div></div>
+            <span class="mono xs" style="color:var(--ok)">+96</span><span class="mono xs" style="color:var(--danger)">−0</span></div>
+          <div class="row" style="min-height:46px"><span class="pill danger" style="width:20px;justify-content:center">D</span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/auth/legacy-provider.ts</div></div>
+            <span class="mono xs" style="color:var(--ok)">+0</span><span class="mono xs" style="color:var(--danger)">−43</span></div>
+          <div class="row" style="min-height:46px"><span class="pill info" style="width:20px;justify-content:center">R</span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">src/lib/tokens.ts</div></div>
+            <span class="mono xs dim">renamed</span></div>
+          <div class="row" style="min-height:46px"><span class="pill muted" style="width:20px;justify-content:center">?</span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">notes/auth-notes.md</div></div>
+            <span class="mono xs" style="color:var(--ok)">+7</span></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="row" style="min-height:44px;padding:9px 12px"><div class="grow"><div class="mono" style="font-size:11.5px">src/auth/session.ts</div></div>
+            <span class="grow" style="flex:none"></span><span class="icon-btn plain" style="width:26px;height:26px"><svg class="ic" style="width:14px;height:14px"><use href="#i-chev-d"/></svg></span></div>
+          <div class="well" style="border-radius:0;border-left:0;border-right:0;border-bottom:0;overflow:hidden">
+            <div class="diff"><span class="hunk">@@ -12,4 +12,9 @@</span></div>
+            <div class="diff del"><span class="ln">12</span>−async function refresh() {</div>
+            <div class="diff del"><span class="ln">13</span>−  return fetch('/token').then(r =&gt; r.json())</div>
+            <div class="diff add"><span class="ln">12</span>+async function refresh(): Promise&lt;Token&gt; {</div>
+            <div class="diff add"><span class="ln">13</span>+  const res = await fetch('/token')</div>
+            <div class="diff add"><span class="ln">14</span>+  if (!res.ok) throw new AuthError(res.status)</div>
+            <div class="diff add"><span class="ln">15</span>+  return res.json()</div>
+          </div>
+        </div>
+
+        <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Commit</span><span class="fill"></span><span class="mono xs" style="color:var(--accent)">GENERATE</span></div>
+        <div class="field" style="align-items:flex-start;padding:11px 12px;margin-bottom:10px"><span class="val" style="color:var(--ink);font-family:'Inter'">Collapse the three token-refresh paths into one helper</span></div>
+        <div class="hstack gap10" style="margin-bottom:14px">
+          <span class="toggle on"><i></i></span>
+          <div class="grow"><div class="ttl" style="font-size:13px">Push after commit</div><div class="mono xs dim" style="margin-top:1px">origin/qai-mobile-redesign</div></div>
+        </div>
+        <span class="btn primary full" style="height:46px">Commit &amp; push</span>
+
+        <div class="sechead"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Worktrees</span><span class="fill"></span><span class="mono xs" style="color:var(--accent)">NEW</span></div>
+        <div class="card">
+          <div class="row" style="min-height:56px"><span class="blip live"></span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">agentdeck-linux</div><div class="mono xs cut dim" style="margin-top:2px">qai-mobile-redesign · 2 sessions</div></div>
+            <span class="pill muted">Current</span></div>
+          <div class="row" style="min-height:56px"><span class="blip"></span>
+            <div class="grow cut"><div class="mono cut" style="font-size:11.5px">…/wt/auth-hardening</div><div class="mono xs cut dim" style="margin-top:2px">auth-hardening · 1 session</div></div>
+            <span class="mono xs" style="color:var(--accent)">OPEN</span></div>
+        </div>
+      </div>
+      <div class="fadebot"></div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">11 · GIT &amp; WORKTREES</span>
+    <h3>Review, commit, switch — all of it</h3>
+    <p>Branch switching (checkout / create), the changed-file list with status letters and ±stats, inline unified diffs, an expanded commit composer with push toggle, and the worktree list with per-row open. Worktrees stay read-only on both platforms — the daemon exposes list and overview only, and the desktop has no create/merge UI either.</p>
+  </div>
+</div>
+
+<!-- ══════════ TERMINAL ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass" style="background:var(--code)"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar" style="background:var(--code)"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Terminal</div><div class="mono xs dim" style="margin-top:1px">qai-mobile · 80×24</div></div>
+        <span class="pill live" style="height:22px">Interactive</span>
+        <span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+      <div class="scroll" style="background:var(--code)"><div style="padding:14px 14px 0">
+        <div class="well" style="border:0;background:transparent;padding:0;font-size:11.5px;line-height:1.75">
+<span class="k">kareem@mac-studio</span> <span class="i">~/agentdeck-linux</span> <span class="a">$</span> git status<br>
+<span class="i">On branch qai-mobile-redesign</span><br>
+<span class="i">Changes not staged for commit:</span><br>
+&nbsp;&nbsp;<span class="d">modified:   src/auth/session.ts</span><br>
+&nbsp;&nbsp;<span class="d">modified:   src/auth/refresh.ts</span><br>
+<br>
+<span class="k">kareem@mac-studio</span> <span class="i">~/agentdeck-linux</span> <span class="a">$</span> npm run typecheck<br>
+<br>
+<span class="w">› tsc --noEmit</span><br>
+<br>
+<span class="a">✓ 0 errors, 0 warnings</span>  <span class="k">(4.1s)</span><br>
+<br>
+<span class="k">kareem@mac-studio</span> <span class="i">~/agentdeck-linux</span> <span class="a">$</span> <span style="color:var(--accent)">▍</span>
+        </div>
+      </div></div>
+      <div style="border-top:1px solid var(--line);background:var(--chrome)">
+        <div class="keys"><span class="key">CTRL-C</span><span class="key">TAB</span><span class="key">ESC</span><span class="key">↑</span><span class="key">↓</span><span class="key">⌘K</span></div>
+        <div style="padding:9px 12px 12px">
+          <div class="comp-box"><div class="hstack" style="gap:8px"><span class="mono" style="font-size:12px;color:var(--accent)">$</span><span class="mono" style="font-size:12px;color:var(--ink4)">type a command…</span></div></div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">12 · TERMINAL</span>
+    <h3>A PTY that respects a thumb</h3>
+    <p>The desktop xterm becomes a machine-plate reader with a <b>key strip</b> — Ctrl-C, Tab, Esc, arrows — because a soft keyboard cannot send them. Read-only unless the session reports an interactive terminal. Output is streamed over the existing <span class="mono">TerminalOutput</span> frame, input over <span class="mono">TerminalInput</span>.</p>
+  </div>
+</div>
+
+<!-- ══════════ BROWSER ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Browser</div><div class="mono xs dim" style="margin-top:1px">qai-mobile · cdp</div></div>
+        <span class="pill live" style="height:22px"><span class="dot"></span>Live</span>
+        <span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+
+      <div class="pad" style="padding-top:12px">
+        <div class="card card-pad" style="margin-bottom:12px">
+          <div class="hstack gap8" style="margin-bottom:9px"><span class="mono xs" style="color:var(--ink2)">APP SERVER</span><span class="grow"></span><span class="pill live"><span class="dot"></span>Running</span></div>
+          <div class="hstack gap6" style="flex-wrap:wrap;margin-bottom:9px">
+            <span class="chip on">npm run dev</span><span class="chip">Vite</span><span class="chip">Next</span><span class="chip">Static</span>
+          </div>
+          <div class="hstack gap8"><span class="btn sm ghost">Open</span><span class="btn sm ghost">Stop</span>
+            <span class="grow"></span><span class="mono xs dim">:5173</span></div>
+        </div>
+      </div>
+
+      <div class="pad" style="margin-bottom:10px">
+        <div class="field" style="min-height:38px"><span class="mono xs" style="color:var(--ok)">●</span><span class="val" style="flex:1">localhost:5173/deck</span><span class="mono xs" style="color:var(--accent)">GO</span></div>
+      </div>
+
+      <div class="pad"><div class="card" style="overflow:hidden">
+        <div style="height:392px;background:linear-gradient(160deg,#2A2A31,#19191C);position:relative;border-bottom:1px solid var(--line)">
+          <div style="position:absolute;left:16px;top:16px;right:16px;height:26px;border-radius:7px;background:rgba(255,255,255,.06)"></div>
+          <div style="position:absolute;left:16px;top:56px;width:120px;height:12px;border-radius:3px;background:rgba(91,141,239,.5)"></div>
+          <div style="position:absolute;left:16px;top:78px;width:200px;height:9px;border-radius:3px;background:rgba(255,255,255,.14)"></div>
+          <div style="position:absolute;left:16px;top:104px;right:16px;height:78px;border-radius:9px;border:1px solid rgba(255,255,255,.1)"></div>
+          <div style="position:absolute;left:16px;top:196px;width:150px;height:64px;border-radius:9px;border:1px solid rgba(255,255,255,.1)"></div>
+          <div style="position:absolute;left:180px;top:196px;right:16px;height:64px;border-radius:9px;border:1px solid rgba(255,255,255,.1)"></div>
+          <div style="position:absolute;left:0;right:0;top:246px;text-align:center">
+            <span class="mono xs" style="color:rgba(255,255,255,.35);letter-spacing:1px">LIVE CDP MIRROR · TAP TO CLICK</span></div>
+          <!-- tap ripple -->
+          <div style="position:absolute;left:150px;top:206px;width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);opacity:.8"></div>
+          <div style="position:absolute;left:150px;top:206px;width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);opacity:.3;transform:scale(1.9)"></div>
+        </div>
+        <div class="row" style="min-height:52px"><span class="mono xs dim grow">VIEWPORT 390×844 · TAB 1 OF 2</span>
+          <span class="btn sm ghost">Screenshot</span></div>
+      </div></div>
+      <p class="sub" style="padding:10px 16px 0">Taps map to daemon <span class="mono">browser_cua_click</span> at viewport coordinates; typing, keypresses and screenshots come from the same tool surface.</p>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">13 · BROWSER</span>
+    <h3>Take the wheel from the couch</h3>
+    <p>The workspace app-server card (presets, command, run/stop/open) sits above a live CDP mirror that polls the daemon screenshot. Tap-to-click, with the ripple showing exactly where the tap landed. Start/stop, tabs and viewport all map to the browser tool API.</p>
+  </div>
+</div>
+
+<!-- ══════════ SUBAGENTS ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+        <div class="grow"><div class="ttl">Refactor the auth layer</div></div><span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+      <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span><span class="grow"></span><span class="mono xs dim">28% ctx</span></div>
+      <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.3"><div class="card card-pad"><div class="mono xs dim">3 subagents running</div></div></div></div>
+
+      <div class="sheet"><div class="sheet-panel" style="max-height:86%">
+        <div class="grabber"></div>
+        <div class="sheet-head"><div class="grow"><div class="ttl-lg">Spawn</div>
+          <div class="mono xs" style="color:var(--ink3);margin-top:2px">RUN WORK BESIDE THIS SESSION</div></div>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-x"/></svg></span></div>
+        <div class="scroll"><div class="pad" style="padding-top:14px">
+          <div class="seg" style="margin-bottom:16px"><div class="on">One subagent</div><div>Fan-out</div></div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Role</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:52px"><span class="ring-radio on"></span>
+              <div class="grow"><div class="ttl">Reviewer</div><div class="mono xs dim" style="margin-top:2px">reads the diff, reports findings</div></div></div>
+            <div class="row" style="min-height:52px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Planner</div><div class="mono xs dim" style="margin-top:2px">writes a step plan, no writes</div></div></div>
+            <div class="row" style="min-height:52px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Worker</div><div class="mono xs dim" style="margin-top:2px">executes one scoped task</div></div></div>
+            <div class="row" style="min-height:52px"><span class="ring-radio"></span>
+              <div class="grow"><div class="ttl">Summarizer</div><div class="mono xs dim" style="margin-top:2px">condenses this transcript</div></div></div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Engine</span><span class="fill"></span><span class="mono xs dim">Auto</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:50px"><span class="avatar" style="background:rgba(167,139,250,.16);color:#A78BFA;width:28px;height:28px;font-size:11px">CL</span>
+              <div class="grow"><div class="ttl" style="font-size:13.5px">Claude</div></div><span class="pill muted">Current</span><span class="icon-btn plain" style="width:26px;height:26px"><svg class="ic" style="width:15px;height:15px"><use href="#i-check" /></svg></span></div>
+            <div class="row" style="min-height:50px"><span class="avatar" style="background:rgba(111,174,232,.16);color:#6FAEE8;width:28px;height:28px;font-size:11px">CX</span>
+              <div class="grow"><div class="ttl" style="font-size:13.5px">Codex</div></div><span class="mono xs dim">gpt-5.1</span></div>
+          </div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Task</span></div>
+          <div class="field" style="align-items:flex-start;padding:12px;margin-bottom:12px;min-height:74px">
+            <span class="val" style="font-family:'Inter';color:var(--ink)">Review the token-refresh helper for race conditions and report with file:line references.</span></div>
+
+          <div class="hstack gap10" style="margin-bottom:18px"><span class="toggle on"><i></i></span>
+            <div class="grow"><div class="ttl" style="font-size:13px">Open the subagent when it starts</div></div></div>
+
+          <span class="btn primary full" style="height:46px">Spawn reviewer</span>
+          <p class="sub" style="margin-top:12px">Maps to <span class="mono">POST /subagents</span> for one, <span class="mono">POST /orchestrate</span> for fan-out — the same two calls the desktop makes.</p>
+          <div style="height:16px"></div>
+        </div></div>
+      </div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">14 · SUBAGENTS</span>
+    <h3>Fan-out without the desktop wizard</h3>
+    <p>One sheet covers both daemon calls: a single subagent by role, or a fan-out across several engines with an optional merged synthesis. Engine selection, the role’s consequences in plain words, and the task — nothing the desktop wizard offers is missing.</p>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

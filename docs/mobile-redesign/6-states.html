@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QAI Mobile — 06 States</title>
+<link rel="stylesheet" href="board.css">
+<style>
+  .mini { width: 258px; height: 559px; flex: none; }
+  .mini .phone { transform: scale(0.662); transform-origin: top left; }
+  .mini-set { display: flex; flex-direction: column; gap: 12px; width: 258px; }
+  .mini-set .frame-cap { max-width: 258px; }
+  .mini-set .frame-cap h3 { font-size: 13.5px; }
+  .mini-set .frame-cap p { font-size: 11.5px; }
+  .mini-grid { display: grid; grid-template-columns: repeat(3, 258px); gap: 44px 40px; }
+  .banner { flex: none; display: flex; align-items: center; gap: 9px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+  .banner.warn { background: var(--wait-soft); border-bottom-color: var(--wait-border); }
+  .banner.bad { background: var(--danger-soft); border-bottom-color: var(--danger-border); }
+  .banner.info { background: var(--info-soft); border-bottom-color: rgba(99,150,204,.30); }
+  .banner .m { font-size: 12px; font-weight: 500; }
+  .stickybar { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; background: var(--chrome); border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-deck" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 12l4.5-3"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.6-8.5 4.6-8.5-4.6z"/><path d="M3.5 12.4l8.5 4.6 8.5-4.6"/><path d="M3.5 16.6l8.5 4.6 8.5-4.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.6" height="6.6" rx="1.6"/><rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6"/><rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6"/><rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.6"/></symbol>
+  <symbol id="i-device" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.6"/><path d="M11 18.4h2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5.5 9.5l6.5 6.5 6.5-6.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6L20 20"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.8l4.4 4.4L19 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.6l8.8 15.6H3.2z"/><path d="M12 9.6v4.2"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.6 12a7.6 7.6 0 11-2.2-5.4"/><path d="M20 4.4v5h-5"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M8.4 12.6l6-6a3.4 3.4 0 014.8 4.8l-7.2 7.2a5.4 5.4 0 01-7.6-7.6l6.6-6.6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.4"/><path d="M6 11.4l6-6 6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="9" r="2.2"/><path d="M7 8.2v7.6"/><path d="M9.2 6h3.3a4.5 4.5 0 014.5 4.5v.5"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.4"/><path d="M7.4 9.6l2.8 2.8-2.8 2.8M12.6 15.4h4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7.2L19 7.8V21H7z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.3 2.5 3.4 5.2 3.4 8.2S14.3 17.7 12 20.2C9.7 17.7 8.6 15 8.6 12S9.7 6.3 12 3.8z"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><path d="M10 3.2v3.3M14 3.2v3.3M10 17.5v3.3M14 17.5v3.3M3.2 10h3.3M3.2 14h3.3M17.5 10h3.3M17.5 14h3.3"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.8 12h4l2.2-6 4.4 12 2.2-6h5.6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.6a3.6 3.6 0 005.1 0l2.8-2.8a3.6 3.6 0 00-5.1-5.1l-1.4 1.4"/><path d="M14 10.4a3.6 3.6 0 00-5.1 0L6.1 13.2a3.6 3.6 0 005.1 5.1l1.4-1.4"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M12.8 3L5.5 13.4h5.2L10.8 21l7.4-10.4h-5.2z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3.4 9.1a13.2 13.2 0 0117.2 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.8 16a4.1 4.1 0 014.4 0"/><circle cx="12" cy="19.1" r=".95" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-robot" viewBox="0 0 24 24"><rect x="4.5" y="7.5" width="15" height="11" rx="3"/><path d="M12 3.5v4"/><circle cx="9" cy="13" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a2 2 0 012-2h3.4l2 2.4h7.6a2 2 0 012 2v8.6a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5h4l1.5 3h6l1.5-3h4"/><path d="M3.5 13.5V7a2 2 0 012-2h13a2 2 0 012 2v6.5V19a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4.5 9V6a1.5 1.5 0 011.5-1.5h3M15 4.5h3A1.5 1.5 0 0119.5 6v3M19.5 15v3a1.5 1.5 0 01-1.5 1.5h-3M9 19.5H6A1.5 1.5 0 014.5 18v-3"/><path d="M4.5 12h15"/></symbol>
+  <symbol id="i-arrow-l" viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.6V12l3 2"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4.5H4.5V9M15 4.5H19.5V9M9 19.5H4.5V15M15 19.5H19.5V15"/></symbol>
+</svg>
+
+<div class="board-head">
+  <div class="board-kicker">QAI Mobile · Redesign · Board 06</div>
+  <h1>Entry, states, and the ugly cases</h1>
+  <p>Two ways in — the ✚ Command sheet for a new task, and the pairing gate. Then every state the brief asks for, designed rather than defaulted: loading, empty, error with a retry, offline, reconnecting, streaming, plus the long-content and keyboard cases that break naive layouts.</p>
+</div>
+
+<div class="section-label">Entry points <span>new task · pairing gate</span></div>
+
+<div class="frames">
+
+<!-- ══════════ NEW TASK 1 ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span>
+        <div class="wordmark">QAI</div><div class="grow"></div><span class="pill live" style="height:23px"><span class="dot"></span>Live</span></div>
+      <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.3">
+        <div class="card card-pad"><div class="mono xs dim">FLEET · 12</div></div></div></div>
+
+      <div class="sheet"><div class="sheet-panel" style="max-height:86%">
+        <div class="grabber"></div>
+        <div class="sheet-head">
+          <div class="grow"><div class="mono xs" style="color:var(--ink3);letter-spacing:1.4px">STEP 1 OF 2</div>
+            <div class="ttl-lg" style="margin-top:3px">Where?</div></div>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-x"/></svg></span></div>
+        <div class="scroll"><div class="pad" style="padding-top:14px">
+          <div class="field" style="margin-bottom:16px"><svg class="ic"><use href="#i-search"/></svg><span class="ph">Search workspaces…</span></div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Recent</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:58px"><span class="tile" style="background:var(--accent-soft);color:var(--accent);border-color:var(--accent-border)"><svg class="ic"><use href="#i-folder"/></svg></span>
+              <div class="grow cut"><div class="ttl cut">agentdeck-linux</div>
+                <div class="mono xs cut dim" style="margin-top:3px">~/Documents/agentdeck-linux · 168 sessions</div></div>
+              <span class="icon-btn plain" style="width:28px;height:28px"><svg class="ic" style="width:16px;height:16px;color:var(--accent)"><use href="#i-check"/></svg></span></div>
+            <div class="row" style="min-height:58px"><span class="tile"><svg class="ic"><use href="#i-folder"/></svg></span>
+              <div class="grow cut"><div class="ttl cut">qai-mobile</div>
+                <div class="mono xs cut dim" style="margin-top:3px">~/dev/qai-mobile · 42 sessions</div></div></div>
+            <div class="row" style="min-height:58px"><span class="tile"><svg class="ic"><use href="#i-folder"/></svg></span>
+              <div class="grow cut"><div class="ttl cut">billing-service</div>
+                <div class="mono xs cut dim" style="margin-top:3px">~/work/billing-service · 17 sessions</div></div></div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="row" style="min-height:54px"><span class="tile"><svg class="ic"><use href="#i-inbox"/></svg></span>
+              <div class="grow"><div class="ttl">Inbox</div><div class="mono xs dim" style="margin-top:2px">no workspace — a scratch session</div></div>
+              <svg class="ic dim" style="color:var(--ink4)"><use href="#i-chev"/></svg></div>
+            <div class="row" style="min-height:54px"><span class="tile"><svg class="ic"><use href="#i-term"/></svg></span>
+              <div class="grow"><div class="ttl">Enter a path…</div><div class="mono xs dim" style="margin-top:2px">any directory on the desktop</div></div>
+              <svg class="ic dim" style="color:var(--ink4)"><use href="#i-chev"/></svg></div>
+          </div>
+
+          <span class="btn primary full" style="height:48px;font-size:14px">Continue</span>
+          <div style="height:14px"></div>
+        </div></div>
+      </div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">21 · NEW TASK — WHERE</span>
+    <h3>Two steps, not a wizard</h3>
+    <p>The desktop’s new-session layer, split into two detented sheets. Step one picks the workspace from recents ordered by use, with Inbox and a free path as escape hatches. The chosen row takes the accent check — selection is unmistakable.</p>
+  </div>
+</div>
+
+<!-- ══════════ NEW TASK 2 ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body">
+      <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span>
+        <div class="wordmark">QAI</div><div class="grow"></div><span class="pill live" style="height:23px"><span class="dot"></span>Live</span></div>
+      <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.3"><div class="card card-pad"><div class="mono xs dim">FLEET · 12</div></div></div></div>
+
+      <div class="sheet"><div class="sheet-panel" style="max-height:93%">
+        <div class="grabber"></div>
+        <div class="sheet-head">
+          <div class="grow"><div class="mono xs" style="color:var(--ink3);letter-spacing:1.4px">STEP 2 OF 2 · AGENTDECK-LINUX</div>
+            <div class="ttl-lg" style="margin-top:3px">What and how?</div></div>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-arrow-l"/></svg></span>
+          <span class="icon-btn plain"><svg class="ic"><use href="#i-x"/></svg></span></div>
+        <div class="scroll"><div class="pad" style="padding-top:14px">
+          <div class="sechead" style="padding-top:0"><span class="tick"></span><span class="eyebrow lab">Agent</span></div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="row" style="min-height:56px"><span class="avatar" style="background:rgba(167,139,250,.16);color:#A78BFA">CL</span>
+              <div class="grow"><div class="ttl">Claude</div><div class="mono xs dim" style="margin-top:2px">planning · tools · bash · mcp</div></div>
+              <span class="icon-btn plain" style="width:28px;height:28px"><svg class="ic" style="width:16px;height:16px;color:var(--accent)"><use href="#i-check"/></svg></span></div>
+            <div class="row" style="min-height:52px"><span class="avatar" style="background:rgba(111,174,232,.16);color:#6FAEE8">CX</span>
+              <div class="grow"><div class="ttl">Codex</div><div class="mono xs dim" style="margin-top:2px">tools · bash</div></div></div>
+            <div class="row" style="min-height:52px"><span class="avatar" style="background:rgba(224,143,192,.16);color:#E08FC0">OC</span>
+              <div class="grow"><div class="ttl">OpenCode</div><div class="mono xs dim" style="margin-top:2px">tools · files</div></div></div>
+          </div>
+
+          <div class="field" style="align-items:flex-start;padding:12px;margin-bottom:14px;min-height:70px">
+            <span class="val" style="font-family:'Inter';color:var(--ink)">Fix the flaky pairing test and explain what was racing.</span></div>
+
+          <div class="sechead" style="padding-top:0"><span class="tick" style="background:var(--line-strong)"></span><span class="eyebrow lab">Configuration</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="kv" style="min-height:50px"><span class="k">Model</span><span class="v">opus-4.6 <svg class="ic" style="width:13px;height:13px;color:var(--ink3);vertical-align:-2px"><use href="#i-chev"/></svg></span></div>
+            <div class="kv" style="min-height:50px"><span class="k">Thought level</span><span class="v">high <svg class="ic" style="width:13px;height:13px;color:var(--ink3);vertical-align:-2px"><use href="#i-chev"/></svg></span></div>
+            <div class="kv" style="min-height:50px"><span class="k">Permissions</span><span class="v" style="color:var(--wait)">Ask before changes</span></div>
+          </div>
+
+          <span class="btn primary full" style="height:48px;font-size:14px">Start task</span>
+          <p class="sub" style="margin-top:11px">Model, thought and permission are applied to the session <i>before</i> the first prompt — the same ordering the desktop uses so the run starts with the right config.</p>
+          <div style="height:14px"></div>
+        </div></div>
+      </div></div>
+      <div class="home-ind"></div>
+    </div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">22 · NEW TASK — HOW</span>
+    <h3>Workspace, engine, config, prompt</h3>
+    <p>Ready engines only, each with its capability summary. The prompt is part of creation, not a follow-up. The three config rows match the desktop wizard exactly — including the permission choice, which the desktop applies as a config command after create.</p>
+  </div>
+</div>
+
+<!-- ══════════ PAIRING ══════════ -->
+<div class="frame-set">
+  <div class="phone"><div class="glass" style="background:radial-gradient(120% 60% at 50% 18%, rgba(91,141,239,.10), transparent 62%), var(--canvas)"><div class="island"></div>
+    <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+    <div class="body" style="align-items:center;justify-content:center;padding:0 26px;text-align:center">
+      <span class="brand-mark" style="width:74px;height:74px;border-radius:22px;margin-bottom:22px"><svg class="ic" style="width:38px;height:38px;stroke-width:2.2"><use href="#i-zap"/></svg></span>
+      <div class="wordmark" style="font-size:26px;letter-spacing:7px;margin-bottom:10px">QAI</div>
+      <div class="prose" style="font-size:14px;color:var(--ink2);max-width:280px;margin-bottom:30px">Pair this phone with your desktop to reach the agents running there.</div>
+
+      <div style="width:100%;display:flex;flex-direction:column;gap:10px">
+        <span class="btn primary full" style="height:52px;font-size:15px"><svg class="ic" style="width:18px;height:18px"><use href="#i-scan"/></svg>Scan the pairing code</span>
+        <span class="btn ghost full" style="height:48px">Enter a link by hand</span>
+      </div>
+
+      <div style="width:100%;margin-top:30px;text-align:left">
+        <div class="mono xs" style="color:var(--ink3);letter-spacing:1px;margin-bottom:9px">TRYING ROUTES</div>
+        <div class="card card-pad">
+          <div class="hstack gap8" style="padding:4px 0"><span class="blip ok" style="width:6px;height:6px"></span><span class="mono xs" style="color:var(--ok)">OK</span><span class="mono xs dim grow cut">http://192.168.1.24:8787</span></div>
+          <div class="hstack gap8" style="padding:4px 0"><span class="blip live" style="width:6px;height:6px"></span><span class="mono xs" style="color:var(--accent)">…</span><span class="mono xs dim grow cut">https://mac-studio.tail9f2.ts.net</span></div>
+          <div class="hstack gap8" style="padding:4px 0"><span class="blip" style="width:6px;height:6px"></span><span class="mono xs dim">—</span><span class="mono xs dim grow cut">https://deck.example.dev</span></div>
+        </div>
+      </div>
+      <div class="sub" style="margin-top:22px;max-width:280px">The code is on your desktop under <span class="mono" style="color:var(--ink2)">Pair a device</span>.</div>
+    </div>
+    <div class="home-ind"></div>
+  </div></div>
+  <div class="frame-cap">
+    <span class="n">23 · PAIRING</span>
+    <h3>The gate, with the route race visible</h3>
+    <p>Pairing is the one screen that fades in rather than sliding — it is a gate, not a destination. Scanning tries every advertised route in order and the list shows each attempt live, so a slow Tailscale handshake looks like progress instead of a hang. Manual entry stays one tap away.</p>
+  </div>
+</div>
+
+</div>
+
+<div class="section-label">States <span>loading · empty · error · offline · reconnecting · streaming</span></div>
+<div class="mini-grid">
+
+<!-- LOADING -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span><div class="wordmark">QAI</div><div class="grow"></div><span class="pill live" style="height:23px"><span class="dot"></span>Live</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:16px">
+      <div class="card card-pad" style="margin-bottom:18px"><div class="skel" style="height:10px;width:40%;margin-bottom:14px"></div>
+        <div class="hstack" style="gap:3px;align-items:flex-end;height:30px"><span class="skel" style="height:14px;flex:1"></span><span class="skel" style="height:22px;flex:1"></span><span class="skel" style="height:18px;flex:1"></span><span class="skel" style="height:26px;flex:1"></span><span class="skel" style="height:12px;flex:1"></span><span class="skel" style="height:20px;flex:1"></span><span class="skel" style="height:16px;flex:1"></span><span class="skel" style="height:24px;flex:1"></span><span class="skel" style="height:14px;flex:1"></span><span class="skel" style="height:18px;flex:1"></span><span class="skel" style="height:22px;flex:1"></span><span class="skel" style="height:12px;flex:1"></span></div></div>
+      <div class="skel" style="height:14px;width:32%;margin-bottom:10px"></div>
+      <div class="card" style="margin-bottom:10px"><div class="row"><span class="skel" style="width:32px;height:32px;border-radius:8px"></span><div class="grow"><div class="skel" style="height:11px;width:66%;margin-bottom:7px"></div><div class="skel" style="height:9px;width:40%"></div></div></div></div>
+      <div class="card" style="margin-bottom:10px"><div class="row"><span class="skel" style="width:32px;height:32px;border-radius:8px"></span><div class="grow"><div class="skel" style="height:11px;width:52%;margin-bottom:7px"></div><div class="skel" style="height:9px;width:32%"></div></div></div></div>
+      <div class="skel" style="height:14px;width:24%;margin-bottom:10px"></div>
+      <div class="card"><div class="row"><span class="skel" style="width:32px;height:32px;border-radius:8px"></span><div class="grow"><div class="skel" style="height:11px;width:70%;margin-bottom:7px"></div><div class="skel" style="height:9px;width:44%"></div></div></div></div>
+    </div></div>
+    <div class="tabbar"><div class="tab on"><svg class="ic"><use href="#i-deck"/></svg><span>Deck</span></div><div class="tab"><svg class="ic"><use href="#i-layers"/></svg><span>Sessions</span></div><div class="tab-action"><div class="act-lens"><svg class="ic"><use href="#i-plus"/></svg></div></div><div class="tab"><svg class="ic"><use href="#i-grid"/></svg><span>Station</span></div><div class="tab"><svg class="ic"><use href="#i-device"/></svg><span>Device</span></div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">24 · LOADING</span><h3>Shape, not a spinner</h3><p>Skeletons mirror the real layout — band, hero, rows — so the page does not jump when data lands. Shimmer at 1.6s, never faster.</p></div>
+</div>
+
+<!-- EMPTY -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span><div class="wordmark">QAI</div><div class="grow"></div><span class="pill live" style="height:23px"><span class="dot"></span>Live</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:16px">
+      <div class="card card-pad" style="margin-bottom:20px">
+        <div class="hstack gap8" style="margin-bottom:10px"><span class="eyebrow">Fleet · 0 sessions</span><span class="grow"></span><span class="mono xs dim">ALL CLEAR</span></div>
+        <div class="hstack" style="gap:3px;align-items:flex-end;height:30px;margin-bottom:10px"><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span><span style="flex:1;height:5px;border-radius:2px;background:var(--line)"></span></div>
+        <div class="mono xs dim">NOTHING IS BLOCKED · 0 LIVE</div>
+      </div>
+      <div class="empty-dash" style="padding:30px 18px">
+        <span class="brand-mark" style="width:44px;height:44px;border-radius:13px;margin:0 auto 14px"><svg class="ic" style="width:22px;height:22px;stroke-width:2.2"><use href="#i-plus"/></svg></span>
+        <div class="ttl" style="margin-bottom:6px">No sessions yet</div>
+        <div class="sub" style="margin-bottom:16px">Start a task on any workspace and it will appear here — with the fleet band above showing it live.</div>
+        <span class="btn primary" style="height:42px">Start a task</span>
+      </div>
+    </div></div>
+    <div class="tabbar"><div class="tab on"><svg class="ic"><use href="#i-deck"/></svg><span>Deck</span></div><div class="tab"><svg class="ic"><use href="#i-layers"/></svg><span>Sessions</span></div><div class="tab-action"><div class="act-lens"><svg class="ic"><use href="#i-plus"/></svg></div></div><div class="tab"><svg class="ic"><use href="#i-grid"/></svg><span>Station</span></div><div class="tab"><svg class="ic"><use href="#i-device"/></svg><span>Device</span></div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">25 · EMPTY</span><h3>An invitation, not a void</h3><p>“All clear” is a real state worth rendering well: an empty fleet band with a fixed opinion, then one instruction and the action that resolves it. Never a blank screen.</p></div>
+</div>
+
+<!-- ERROR -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span><div class="wordmark">QAI</div><div class="grow"></div><span class="pill danger" style="height:23px"><span class="dot"></span>Error</span></div>
+    <div class="banner bad"><span class="blip danger" style="width:7px;height:7px"></span><span class="m grow" style="color:var(--danger)">Could not load the fleet</span><span class="mono xs" style="color:var(--danger)">RETRY</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:26px">
+      <div class="card fail" style="padding:24px 18px;text-align:center">
+        <span class="tile" style="width:44px;height:44px;border-radius:13px;margin:0 auto 14px;color:var(--danger);border-color:var(--danger-border);background:var(--danger-soft)"><svg class="ic" style="width:22px;height:22px"><use href="#i-alert"/></svg></span>
+        <div class="ttl" style="margin-bottom:6px">The daemon refused the snapshot</div>
+        <div class="sub" style="margin-bottom:14px">HTTP 502 from the Cloudflare route. Your LAN route is still reachable.</div>
+        <div class="well" style="text-align:left;margin-bottom:16px"><span class="d">error</span> <span class="i">"upstream_unavailable"</span><br><span class="k">route</span> deck.example.dev</div>
+        <span class="btn primary full" style="height:42px"><svg class="ic" style="width:15px;height:15px"><use href="#i-refresh"/></svg>Try again</span>
+        <span class="btn quiet full sm" style="margin-top:8px">Switch to the LAN route</span>
+      </div>
+    </div></div>
+    <div class="tabbar"><div class="tab on"><svg class="ic"><use href="#i-deck"/></svg><span>Deck</span></div><div class="tab"><svg class="ic"><use href="#i-layers"/></svg><span>Sessions</span></div><div class="tab-action"><div class="act-lens"><svg class="ic"><use href="#i-plus"/></svg></div></div><div class="tab"><svg class="ic"><use href="#i-grid"/></svg><span>Station</span></div><div class="tab"><svg class="ic"><use href="#i-device"/></svg><span>Device</span></div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">26 · ERROR</span><h3>Say what broke, and offer the exit</h3><p>Every failure path carries the code, the route that failed, a Retry, and — where one exists — the alternative that works. A dead end is a bug.</p></div>
+</div>
+
+<!-- OFFLINE -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <span class="avatar" style="background:rgba(167,139,250,.16);color:#A78BFA;width:28px;height:28px;font-size:11px">CL</span>
+      <div class="grow cut"><div class="ttl cut">Refactor the auth layer</div><div class="mono xs cut dim" style="margin-top:1px">claude · agentdeck-linux</div></div>
+      <span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+    <div class="banner bad"><span class="blip danger" style="width:7px;height:7px"></span><span class="m grow" style="color:var(--danger)">Offline — showing the last 42 events</span><span class="mono xs" style="color:var(--danger)">RECONNECT</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:16px">
+      <div class="card card-pad" style="margin-bottom:12px;opacity:.7"><div class="mono xs dim">12 steps · 1m 20s · 2 files</div></div>
+      <div class="prose" style="opacity:.8;font-size:13px">Three cases are in. The QR path and the bad-secret case pass; I’m waiting on the already-paired case.</div>
+    </div></div>
+    <div class="composer">
+      <div class="comp-box" style="opacity:.6;background:var(--well)">
+        <div class="hstack" style="gap:8px"><span style="font-size:12.5px;color:var(--ink4)">Reconnect to send</span></div>
+        <div class="comp-actions"><span class="round" style="opacity:.4"><svg class="ic"><use href="#i-clip"/></svg></span><span class="grow"></span><span class="send" style="background:var(--line-strong);color:var(--ink4)"><svg class="ic"><use href="#i-up"/></svg></span></div>
+      </div>
+    </div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">27 · OFFLINE</span><h3>The transcript survives</h3><p>Cached events stay readable and dimmed; the composer locks with a reason instead of silently failing. Reconnect is one tap, and never loses the queued message.</p></div>
+</div>
+
+<!-- RECONNECTING -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="brand-mark"><svg class="ic" style="width:15px;height:15px;stroke-width:2.4"><use href="#i-zap"/></svg></span><div class="wordmark">QAI</div><div class="grow"></div><span class="pill wait" style="height:23px"><span class="dot"></span>Reconnecting</span></div>
+    <div class="banner warn"><span class="blip wait" style="width:7px;height:7px"></span><span class="m grow" style="color:var(--wait)">Reconnecting · attempt 3 of 6</span><span class="mono xs" style="color:var(--wait)">14s</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:16px;opacity:.55">
+      <div class="card card-pad" style="margin-bottom:14px"><div class="eyebrow" style="margin-bottom:10px">Fleet · 12</div>
+        <div class="band-ticks"><span class="tick wait"></span><span class="tick live"></span><span class="tick live"></span><span class="tick done"></span><span class="tick done"></span><span class="tick done"></span></div></div>
+      <div class="card" style="margin-bottom:10px"><div class="row"><span class="avatar" style="background:rgba(167,139,250,.16);color:#A78BFA">CL</span><div class="grow cut"><div class="ttl cut">Refactor the auth layer</div><div class="mono xs cut dim" style="margin-top:3px">waiting for approval</div></div><span class="pill wait"><span class="dot"></span>Needs you</span></div></div>
+    </div></div>
+    <div class="tabbar"><div class="tab on"><svg class="ic"><use href="#i-deck"/></svg><span>Deck</span></div><div class="tab"><svg class="ic"><use href="#i-layers"/></svg><span>Sessions</span></div><div class="tab-action"><div class="act-lens" style="background:var(--line-strong);color:var(--ink3)"><svg class="ic"><use href="#i-plus"/></svg></div></div><div class="tab"><svg class="ic"><use href="#i-grid"/></svg><span>Station</span></div><div class="tab"><svg class="ic"><use href="#i-device"/></svg><span>Device</span></div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">28 · RECONNECTING</span><h3>Backoff you can see</h3><p>The socket retries on a 0.5→15s backoff; the banner shows the attempt and the elapsed time so a slow recovery never reads as a freeze. Cached data stays legible and actions that need the wire are disabled.</p></div>
+</div>
+
+<!-- STREAMING -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <span class="avatar" style="background:rgba(224,143,192,.16);color:#E08FC0;width:28px;height:28px;font-size:11px">OC</span>
+      <div class="grow cut"><div class="ttl cut">Write integration tests</div><div class="mono xs cut dim" style="margin-top:1px">opencode · qai-mobile</div></div>
+      <span class="icon-btn plain"><svg class="ic"><use href="#i-more"/></svg></span></div>
+    <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span><span class="grow"></span>
+      <div class="spark"><i style="height:6px"></i><i style="height:12px"></i><i style="height:8px"></i><i style="height:18px;background:var(--accent)"></i><i style="height:11px;background:var(--accent)"></i></div></div>
+    <div class="scroll"><div class="pad" style="padding-top:16px">
+      <div class="aturn"><div class="achip"><span class="avatar" style="width:24px;height:24px;font-size:10px;background:rgba(224,143,192,.16);color:#E08FC0">OC</span><span class="mono xs" style="color:var(--ink2)">opencode</span></div>
+        <div class="prose" style="font-size:13px">Three cases are in. The QR path and the bad-secret case pass; I’m now checking the already-paired case, which touches the store and may<span class="mono" style="color:var(--accent)">▍</span></div></div>
+    </div></div>
+    <div class="composer"><div class="comp-box"><div class="hstack" style="gap:8px"><span style="font-size:12.5px;color:var(--ink4)">Message opencode…</span></div>
+      <div class="comp-actions"><span class="grow"></span><span class="round" style="color:var(--danger);border-color:var(--danger-border)"><svg class="ic"><use href="#i-stop"/></svg></span><span class="send"><svg class="ic"><use href="#i-up"/></svg></span></div></div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">29 · STREAMING</span><h3>A caret, not a jump</h3><p>Text arrives with a blinking caret; the RunBar sparkline ticks with each event. Auto-follow stops the moment you scroll up, and a “Latest” control appears instead of yanking you to the bottom.</p></div>
+</div>
+
+</div>
+
+<div class="section-label">The ugly cases <span>long paths · large diffs · long tool output · long sessions · keyboard</span></div>
+<div class="mini-grid">
+
+<!-- LONG PATH -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <div class="grow cut"><div class="ttl">Files</div><div class="mono xs cut dim" style="margin-top:1px">DEEP TREE</div></div></div>
+    <div class="scroll"><div class="pad" style="padding-top:14px">
+      <div class="card" style="margin-bottom:12px">
+        <div class="row" style="min-height:44px;padding:8px 12px"><span class="mono xs dim">..</span></div>
+        <div class="row" style="min-height:44px;padding:8px 12px"><span class="tile" style="width:24px;height:24px;border-radius:6px"><svg class="ic" style="width:12px;height:12px"><use href="#i-folder"/></svg></span><span class="mono cut grow" style="font-size:11px">packages/server/internal/transport/handlers</span></div>
+        <div class="row" style="min-height:44px;padding:8px 12px"><span class="tile" style="width:24px;height:24px;border-radius:6px"><svg class="ic" style="width:12px;height:12px"><use href="#i-file"/></svg></span><span class="mono cut grow" style="font-size:11px">supercalifragilistic_session_manager_factory_impl.ts</span></div>
+        <div class="row" style="min-height:44px;padding:8px 12px"><span class="tile" style="width:24px;height:24px;border-radius:6px"><svg class="ic" style="width:12px;height:12px"><use href="#i-file"/></svg></span><span class="mono cut grow" style="font-size:11px">handlers.go</span></div>
+      </div>
+      <div class="mono xs dim" style="padding:0 4px;line-height:1.7">PATHS TRUNCATE MIDDLE-LEFT: the filename tail is what you scan for, so the row ellipsises and the leading directories are dropped first.</div>
+      <div class="card" style="margin-top:14px;padding:12px">
+        <div class="mono xs dim" style="margin-bottom:6px">TWO-LINE VARIANT (pinned rows)</div>
+        <div class="mono" style="font-size:11px;line-height:1.5;word-break:break-all">~/Documents/agentdeck-linux/mobile/src/components/panel/WorkspaceRail.tsx</div>
+      </div>
+    </div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">30 · LONG PATHS</span><h3>Truncate where the eye lands</h3><p>Ids, paths and filenames are mono and single-line-ellipsised, keeping the tail. Rows that must stay verifiable get a two-line break-all variant instead of a horizontal scroll.</p></div>
+</div>
+
+<!-- LARGE DIFF -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass" style="background:var(--code)"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="stickybar"><span class="icon-btn plain" style="width:30px;height:30px"><svg class="ic" style="width:16px;height:16px;stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <div class="grow cut"><div class="mono cut" style="font-size:11.5px;color:var(--ink)">src/auth/session.ts</div><div class="mono xs" style="color:var(--ok)">+284 −61 · 7 HUNKS</div></div>
+      <span class="mono xs" style="color:var(--accent)">NEXT ›</span></div>
+    <div style="padding:10px 12px 2px"><div class="well" style="border:0;background:transparent;padding:0">
+      <div class="diff"><span class="hunk">@@ -12,4 +12,9 @@ async function refresh()</span></div>
+      <div class="diff del"><span class="ln">12</span>−return fetch('/token').then(r =&gt; r.json())</div>
+      <div class="diff add"><span class="ln">12</span>+const res = await fetch('/token')</div>
+      <div class="diff add"><span class="ln">13</span>+if (!res.ok) throw new AuthError(res.status)</div>
+      <div class="diff add"><span class="ln">14</span>+return res.json()</div>
+      <div class="diff"><span class="ln">15</span> <span class="i">}</span></div>
+      <div class="diff"><span class="hunk">@@ -58,3 +63,7 @@ export class Session</span></div>
+      <div class="diff add"><span class="ln">63</span>+  private readonly refresh: Refresher</div>
+      <div class="diff"><span class="ln">64</span> <span class="i">  constructor(private cfg: Config) {</span></div>
+      <div class="diff del"><span class="ln">65</span>−    this.token = cfg.token</div>
+      <div class="diff add"><span class="ln">66</span>+    this.token = cfg.token ?? null</div>
+      <div class="diff add"><span class="ln">67</span>+    this.refresh = makeRefresher(cfg)</div>
+      <div class="diff"><span class="hunk">@@ -120,2 +129,4 @@ private async rotate()</span></div>
+      <div class="diff add"><span class="ln">129</span>+  await this.persist()</div>
+      <div class="diff add"><span class="ln">130</span>+  audit('token.rotated', this.id)</div>
+    </div></div>
+    <div style="position:absolute;right:14px;bottom:14px" class="mono xs">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--accent-ink);padding:8px 11px;border-radius:8px;font-weight:600">FULL SCREEN</span></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">31 · LARGE DIFFS</span><h3>Sticky header, hunk by hunk</h3><p>One file at a time, sticky filename with the ±stat and hunk count, and Next/Prev to step hunks horizontally. “Full screen” promotes to the Workspace where the diff can use the whole width.</p></div>
+</div>
+
+<!-- LONG TOOL OUTPUT -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <div class="grow cut"><div class="ttl cut">Write integration tests</div><div class="mono xs cut dim" style="margin-top:1px">opencode · qai-mobile</div></div></div>
+    <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:14px">
+      <div class="card" style="margin-bottom:12px">
+        <div style="padding:11px 13px">
+          <div class="hstack gap8"><span class="mono" style="font-size:11.5px;color:var(--ink)">npx jest tests/pairing --verbose</span><span class="grow"></span>
+            <span class="pill danger" style="height:19px">exit 1</span></div>
+          <div class="hstack gap8" style="margin-top:5px"><span class="mono xs dim">4.2s · 1,842 lines of output</span></div>
+        </div>
+        <div class="well" style="border-radius:0;border-left:0;border-right:0;border-bottom:0;max-height:150px">
+          <span class="k">PASS</span> tests/pairing.test.ts<br>
+          <span class="k">  ✓</span> scans a QR and pairs (412ms)<br>
+          <span class="k">  ✓</span> rejects a bad secret (88ms)<br>
+          <span class="d">  ✕</span> refuses an already-paired device (1.2s)<br>
+          <span class="d">    Expected: 409</span><br>
+          <span class="d">    Received: 200</span><br>
+          <span class="k">      at tests/pairing.test.ts:88:24</span><br>
+          <span class="i">  … 1,812 more lines</span>
+        </div>
+        <div style="padding:10px 13px">
+          <span class="mono xs" style="color:var(--accent)">EXPAND FULL OUTPUT</span>
+          <span class="mono xs dim" style="margin-left:12px">COPY</span>
+        </div>
+      </div>
+      <div class="prose" style="font-size:12.5px">The already-paired case returns 200 where the spec wants 409. I’ll patch the guard.</div>
+    </div></div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">32 · LONG TOOL OUTPUT</span><h3>Clamped plate, honest count</h3><p>Tool output is clamped with the line count stated, then expandable or copyable. Never an unbounded wall of text inside a scroll inside a scroll.</p></div>
+</div>
+
+<!-- LONG CONVERSATION -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <div class="grow cut"><div class="ttl cut">Refactor the auth layer</div><div class="mono xs cut dim" style="margin-top:1px">claude · 214 TURNS</div></div>
+      <span class="icon-btn plain"><svg class="ic"><use href="#i-search"/></svg></span></div>
+    <div class="runbar" style="background:rgba(91,141,239,.06)"><span class="blip ok"></span><span class="mono xs" style="color:var(--ok)">DONE</span><span class="grow"></span><span class="mono xs dim">2h 14m · $9.40</span></div>
+    <div class="scroll" style="position:relative"><div class="pad" style="padding-top:14px">
+      <div class="uturn" style="margin-bottom:12px"><span class="rail muted"></span><div class="lb" style="padding-left:4px">YOU · 11:48</div><div class="prose" style="font-size:12.5px">Move the retry into the transport layer.</div></div>
+      <div class="prose" style="font-size:12.5px;margin-bottom:12px">Moved. The transport now retries 401 once with backoff before surfacing.</div>
+      <div class="uturn" style="margin-bottom:12px"><span class="rail muted"></span><div class="lb" style="padding-left:4px">YOU · 11:55</div><div class="prose" style="font-size:12.5px">Now the tests.</div></div>
+      <div class="prose" style="font-size:12.5px">Written — three new cases in tests/auth/refresh.test.ts.</div>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center">
+      <span style="display:inline-flex;align-items:center;gap:7px;background:var(--raised);border:1px solid var(--line-strong);color:var(--ink2);padding:8px 13px;border-radius:999px;font-family:'JetBrains Mono';font-size:10px;letter-spacing:.8px">
+        <svg class="ic" style="width:13px;height:13px;transform:rotate(180deg)"><use href="#i-chev-d"/></svg>LATEST</span></div>
+    </div></div>
+    <div class="composer" style="padding-bottom:8px"><div class="comp-box"><div class="hstack" style="gap:8px"><span style="font-size:12.5px;color:var(--ink4)">Say something to resume</span></div>
+      <div class="comp-actions"><span class="grow"></span><span class="send"><svg class="ic"><use href="#i-up"/></svg></span></div></div></div>
+    <div class="home-ind"></div></div></div></div>
+  <div class="frame-cap"><span class="n">33 · LONG SESSIONS</span><h3>Jump back, don’t get dragged</h3><p>Auto-follow stops when you scroll up; a “Latest” pill appears at the bottom instead of yanking the view. Transcript search lives in the header. Turn count sits in the subtitle so long runs are visible.</p></div>
+</div>
+
+<!-- KEYBOARD -->
+<div class="mini-set"><div class="mini"><div class="phone"><div class="glass"><div class="island"></div>
+  <div class="statusbar"><span>9:41</span><span class="r"><span class="sig"><i></i><i></i><i></i><i></i></span><svg class="ic" style="width:15px;height:15px"><use href="#i-wifi"/></svg><span class="batt"><i></i></span></span></div>
+  <div class="body">
+    <div class="appbar"><span class="icon-btn plain"><svg class="ic" style="stroke-width:2"><use href="#i-arrow-l"/></svg></span>
+      <span class="avatar" style="background:rgba(224,143,192,.16);color:#E08FC0;width:28px;height:28px;font-size:11px">OC</span>
+      <div class="grow cut"><div class="ttl cut">Write integration tests</div><div class="mono xs cut dim" style="margin-top:1px">opencode · qai-mobile</div></div></div>
+    <div class="runbar"><span class="blip live"></span><span class="mono xs" style="color:var(--accent)">WORKING</span><span class="grow"></span><span class="mono xs dim">4m</span></div>
+    <div class="scroll"><div class="pad" style="padding-top:12px">
+      <div class="prose" style="font-size:12.5px;opacity:.6">Three cases are in. The QR path and the bad-secret case pass.</div>
+    </div></div>
+    <div class="composer">
+      <div class="hstack gap6" style="margin-bottom:8px"><span class="cfgchip"><span class="d"></span>gpt-5.1-codex</span><span class="cfgchip"><span class="d"></span>think high</span></div>
+      <div class="comp-box focus" style="margin-bottom:0">
+        <div class="hstack" style="gap:8px;min-height:22px"><span class="mono" style="font-size:12.5px;color:var(--ink)">Also cover the revoked device case<span class="mono" style="color:var(--accent)">▍</span></span></div>
+        <div class="comp-actions"><span class="round"><svg class="ic"><use href="#i-clip"/></svg></span><span class="grow"></span><span class="round" style="color:var(--danger);border-color:var(--danger-border)"><svg class="ic"><use href="#i-stop"/></svg></span><span class="send"><svg class="ic"><use href="#i-up"/></svg></span></div>
+      </div>
+    </div>
+    <div style="flex:none;height:264px;background:#202024;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(10,1fr);grid-template-rows:repeat(4,1fr);gap:5px;padding:8px">
+      <div class="key" style="height:auto">q</div><div class="key" style="height:auto">w</div><div class="key" style="height:auto">e</div><div class="key" style="height:auto">r</div><div class="key" style="height:auto">t</div><div class="key" style="height:auto">y</div><div class="key" style="height:auto">u</div><div class="key" style="height:auto">i</div><div class="key" style="height:auto">o</div><div class="key" style="height:auto">p</div>
+      <div class="key" style="height:auto;grid-column:span 1;background:transparent;border:0"></div><div class="key" style="height:auto">a</div><div class="key" style="height:auto">s</div><div class="key" style="height:auto">d</div><div class="key" style="height:auto">f</div><div class="key" style="height:auto">g</div><div class="key" style="height:auto">h</div><div class="key" style="height:auto">j</div><div class="key" style="height:auto">k</div><div class="key" style="height:auto">l</div>
+      <div class="key" style="height:auto;background:transparent;border:0"></div><div class="key" style="height:auto">z</div><div class="key" style="height:auto">x</div><div class="key" style="height:auto">c</div><div class="key" style="height:auto">v</div><div class="key" style="height:auto">b</div><div class="key" style="height:auto">n</div><div class="key" style="height:auto">m</div><div class="key" style="height:auto;grid-column:span 2">⌫</div>
+      <div class="key" style="height:auto;grid-column:span 2">123</div><div class="key" style="height:auto;grid-column:span 5">space</div><div class="key" style="height:auto;grid-column:span 3;background:var(--accent);color:var(--accent-ink);border-color:transparent">return</div>
+    </div>
+    <div class="home-ind"></div></div></div></div></div>
+  <div class="frame-cap"><span class="n">34 · KEYBOARD OPEN</span><h3>Composer rides the keyboard</h3><p>The composer is keyboard-avoiding: it lifts with the keyboard rather than being covered, the config chips compress to two, and the transcript shrinks rather than scrolling behind the keys. Slash menus render above the field, never under the keyboard.</p></div>
+</div>
+
+</div>
+</body>
+</html>

@@ -11,7 +11,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import {
   Bot,
   Cpu,
@@ -41,6 +42,8 @@ import {
   toast,
 } from '@app/components/ui'
 import { useNavigation } from '@react-navigation/native'
+import { openNewTask } from '@app/lib/newTask'
+import { setCommandListener } from '@app/lib/command'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '@app/navigation'
 
@@ -127,7 +130,7 @@ export function SessionSearchSheet({
       icon: <Bot size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Agents' } as never)
+        navigation.navigate('Agents')
       },
     },
     {
@@ -137,7 +140,7 @@ export function SessionSearchSheet({
       icon: <Cpu size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Usage' } as never)
+        navigation.navigate('Usage')
       },
     },
     {
@@ -147,7 +150,7 @@ export function SessionSearchSheet({
       icon: <Globe size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Browsers' } as never)
+        navigation.navigate('Browsers')
       },
     },
     {
@@ -417,3 +420,34 @@ function searchTranscript(messages: Message[], needle: string): TranscriptHitVal
 }
 
 export { getConversation }
+
+/**
+ * The root-mounted Command sheet.
+ *
+ * The raised action in the tab bar is the app's only verb, and this is what it
+ * opens: search every session and transcript, start a task, re-scan providers,
+ * spawn a subagent, scan a pairing code. Mounted once above the navigator —
+ * like the drawer and the toasts — so no screen owns it and none can swallow
+ * it, and the header of every screen keeps working unchanged.
+ */
+export function CommandHost() {
+  const [open, setOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    // A plain function on the emitter, so the tab bar does not need to be
+    // inside this component's tree to open it.
+    setCommandListener(() => setOpen(true))
+    return () => setCommandListener(null)
+  }, [])
+
+  return (
+    <SessionSearchSheet
+      open={open}
+      onClose={() => setOpen(false)}
+      onNewTask={() => {
+        setOpen(false)
+        openNewTask()
+      }}
+    />
+  )
+}

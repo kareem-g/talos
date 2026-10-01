@@ -11,7 +11,8 @@
  */
 
 import * as React from 'react'
-import { Text, TextInput, View } from 'react-native'
+import {TextInput, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { RefreshCw, SearchX, Settings2, Undo2 } from 'lucide-react-native'
@@ -19,6 +20,7 @@ import { RefreshCw, SearchX, Settings2, Undo2 } from 'lucide-react-native'
 import { settingsApi } from '@app/lib/api'
 import type { RootStackParamList } from '@app/navigation'
 import { palette } from '@app/design/tokens'
+import { MONO } from '@app/design/fonts'
 import { BackButton, Card, ScreenScaffold, Section } from '@app/components/Screen'
 import { rowEnterStyle, staggerDelay, useEnter } from '@app/components/motion'
 import {
@@ -389,7 +391,7 @@ function RawInput({
         paddingTop: multiline ? 10 : 0,
         paddingBottom: multiline ? 10 : 0,
         textAlignVertical: multiline ? 'top' : 'center',
-        fontFamily: 'Menlo',
+        fontFamily: MONO,
       }}
     />
   )

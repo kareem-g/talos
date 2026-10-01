@@ -10,7 +10,8 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {Pressable, View} from 'react-native'
+import { Text } from '@app/components/Text'
 import { Check, Layers, Users } from 'lucide-react-native'
 
 import { mobileApi } from '@app/lib/api'
