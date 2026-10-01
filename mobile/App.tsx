@@ -106,9 +106,16 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <Navigation />
-        {/* Root-mounted chrome, above the navigator: the new-task sheet and
-            the navigation drawer are app-level surfaces that any screen can
-            summon through their emitters, and a toast can land over both. */}
+        {/* Root-mounted chrome, ABOVE the navigator: these are app-level
+            surfaces any screen can summon through their emitters, and they
+            have to be able to land over a pushed screen.
+
+            THE RULE for anything mounted here: navigate through `navigationRef`
+            (as the drawer, the new-task host and the command sheet all do), and
+            never through `useNavigation` — there is no NavigationContainer above
+            this point, so a hook-based navigation throws
+            "Couldn't find a navigation object" on first render. That is exactly
+            how the command sheet broke. */}
         <NewTaskHost />
         <DrawerHost />
         <CommandHost />

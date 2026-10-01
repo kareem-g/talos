@@ -45,10 +45,10 @@ import {
   haptic,
   toast,
 } from '@app/components/ui'
-import { useNavigation } from '@react-navigation/native'
+import { StackActions } from '@react-navigation/native'
 import { openNewTask } from '@app/lib/newTask'
 import { setCommandListener } from '@app/lib/command'
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { navigationRef } from '@app/lib/navigationRef'
 import type { RootStackParamList } from '@app/navigation'
 
 export function SessionSearchSheet({
@@ -63,7 +63,25 @@ export function SessionSearchSheet({
   sessionId?: string
   onNewTask?: () => void
 }) {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
+  /**
+   * Go somewhere from the sheet.
+   *
+   * Via `navigationRef`, not `useNavigation`: this sheet is mounted twice — inside
+   * a session, and at the app root by `CommandHost` so the raised tab-bar action
+   * can open it from anywhere. `useNavigation` throws outside a
+   * NavigationContainer, so the root-mounted copy would crash on first render.
+   * The drawer and the new-task host navigate the same way for the same reason.
+   */
+  const go = (screen: keyof RootStackParamList, params?: object) => {
+    if (!navigationRef.isReady()) return
+    // The container ref's `navigate` is overloaded per route, which a dynamic
+    // target cannot satisfy. The route name is still checked at every call
+    // site; only the dispatch itself is widened.
+    ;(navigationRef as unknown as { navigate: (name: string, params?: object) => void }).navigate(
+      screen,
+      params,
+    )
+  }
   const sessions = useStore((s) => s.sessions)
   const agents = useStore((s) => s.agents)
   const loadSnapshot = useStore((s) => s.loadSnapshot)
@@ -134,7 +152,7 @@ export function SessionSearchSheet({
       icon: <Bot size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Agents')
+        go('Agents')
       },
     },
     {
@@ -144,7 +162,7 @@ export function SessionSearchSheet({
       icon: <Cpu size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Usage')
+        go('Usage')
       },
     },
     {
@@ -154,7 +172,7 @@ export function SessionSearchSheet({
       icon: <Globe size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Browsers')
+        go('Browsers')
       },
     },
     {
@@ -164,7 +182,7 @@ export function SessionSearchSheet({
       icon: <Server size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Mcp')
+        go('Mcp')
       },
     },
     {
@@ -174,7 +192,7 @@ export function SessionSearchSheet({
       icon: <SettingsIcon size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Main', { screen: 'Device' } as never)
+        go('Main', { screen: 'Device' })
       },
     },
     {
@@ -261,7 +279,9 @@ export function SessionSearchSheet({
                 current={session.id === sessionId}
                 onPress={() => {
                   onClose()
-                  if (session.id !== sessionId) navigation.push('Session', { sessionId: session.id })
+                  if (session.id !== sessionId && navigationRef.isReady()) {
+                    navigationRef.dispatch(StackActions.push('Session', { sessionId: session.id }))
+                  }
                 }}
               />
             ))}

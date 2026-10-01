@@ -41,7 +41,6 @@
 
 import * as React from 'react'
 import {
-  createNavigationContainerRef,
   DarkTheme,
   NavigationContainer,
   useNavigation,
@@ -52,6 +51,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Linking from 'expo-linking'
+
+import { navigationRef } from './lib/navigationRef'
 
 import { HomeScreen } from './screens/HomeScreen'
 import { AgentsScreen, AgentDetailScreen } from './screens/AgentsScreen'
@@ -97,7 +98,9 @@ export type RootStackParamList = {
   Pairing: undefined
 }
 
-export const navigationRef = createNavigationContainerRef<RootStackParamList>()
+// The ref lives in its own module so screens and chrome can import it
+// without cycling back through this file. Re-exported for the container below.
+export { navigationRef }
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
 const Tab = createBottomTabNavigator<TabParamList>()

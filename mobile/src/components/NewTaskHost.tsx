@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 
-import { navigationRef } from '@app/navigation'
+import { navigationRef } from '@app/lib/navigationRef'
 import { setNewTaskListener } from '@app/lib/newTask'
 import { NewTaskSheet } from './NewTaskSheet'
 
