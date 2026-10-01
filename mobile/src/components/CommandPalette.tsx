@@ -11,7 +11,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import {
   Bot,
@@ -283,7 +287,7 @@ function ActionRow({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
@@ -310,7 +314,7 @@ function ActionRow({
           </Text>
         </View>
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -329,7 +333,7 @@ function SessionHit({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={current ? `${session.name} (open)` : session.name}
@@ -358,14 +362,14 @@ function SessionHit({
         </View>
         {current ? <Badge tone="accent" mono>open</Badge> : null}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 
 function TranscriptHit({ hit, index }: { hit: TranscriptHitValue; index: number }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View
         style={{
           paddingHorizontal: 13,
@@ -387,7 +391,7 @@ function TranscriptHit({ hit, index }: { hit: TranscriptHitValue; index: number 
           {hit.preview}
         </Text>
       </View>
-    </View>
+    </Animated.View>
   )
 }
 

@@ -11,7 +11,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { Check } from 'lucide-react-native'
 
@@ -168,7 +172,7 @@ function AgentRow({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="radio"
         accessibilityLabel={name}
@@ -208,7 +212,7 @@ function AgentRow({
         ) : null}
         {active && !current ? <Check size={17} color={palette.accent} strokeWidth={2.6} /> : null}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 

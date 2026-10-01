@@ -1223,7 +1223,7 @@ export function EmptyState({
       style={{ paddingVertical: compact ? 24 : 44 }}
     >
       {icon ? (
-        <View
+        <Animated.View
           style={[
             {
               width: 52,
@@ -1239,7 +1239,7 @@ export function EmptyState({
           ]}
         >
           {icon}
-        </View>
+        </Animated.View>
       ) : null}
       <Text className="text-center text-[14px] leading-[19px] font-semibold text-ink" style={{ letterSpacing: -0.2 }}>
         {title}

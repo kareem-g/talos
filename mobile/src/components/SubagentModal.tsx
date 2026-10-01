@@ -10,7 +10,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { Check, Layers, Users } from 'lucide-react-native'
 
@@ -210,7 +214,7 @@ function RoleChoice({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="radio"
         accessibilityLabel={role.label}
@@ -262,7 +266,7 @@ function RoleChoice({
         </View>
         {active ? <Check size={17} color={palette.accent} strokeWidth={2.6} /> : null}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -288,13 +292,13 @@ function AgentToggle({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <CheckRow
         label={agent.name}
         checked={checked}
         onPress={onPress}
         leading={<AgentAvatar agent={agent.id} size={26} name={agent.name} />}
       />
-    </View>
+    </Animated.View>
   )
 }

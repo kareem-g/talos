@@ -19,7 +19,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import { Plus, Server } from 'lucide-react-native'
@@ -363,7 +367,7 @@ function ProviderRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
         <IconTile icon={<Server size={16} color={palette.accent} />} tone="accent" />
         <View className="min-w-0 flex-1 gap-0.5">
@@ -413,6 +417,6 @@ function ProviderRow({
           </Pressable>
         )}
       </View>
-    </View>
+    </Animated.View>
   )
 }

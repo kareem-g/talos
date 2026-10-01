@@ -18,7 +18,12 @@
  */
 
 import * as React from 'react'
-import { Pressable, Text, View } from 'react-native'
+import {
+  Animated,
+  Pressable,
+  Text,
+  View,
+} from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import { MessagesSquare, Plus, Users } from 'lucide-react-native'
 
@@ -302,7 +307,7 @@ function RoomRow({
   // worker objects — counting it is the honest readout.
   const workers = room.roster?.length ?? 0
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
         <IconTile icon={<MessagesSquare size={16} color={palette.accent} />} tone="accent" />
         <View className="min-w-0 flex-1 gap-0.5">
@@ -362,6 +367,6 @@ function RoomRow({
           </View>
         )}
       </View>
-    </View>
+    </Animated.View>
   )
 }

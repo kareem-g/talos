@@ -12,7 +12,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -184,7 +188,7 @@ function EngineRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View className="flex-row items-center">
         <Pressable
           accessibilityRole="button"
@@ -247,6 +251,6 @@ function EngineRow({
           )}
         </IconButton>
       </View>
-    </View>
+    </Animated.View>
   )
 }

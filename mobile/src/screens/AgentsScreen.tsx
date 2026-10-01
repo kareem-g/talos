@@ -13,7 +13,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -258,7 +262,7 @@ function AgentRow({
   const present = CAPABILITIES.filter((capability) => capabilities[capability.key])
 
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={agent.name}
@@ -317,7 +321,7 @@ function AgentRow({
           <ChevronRight size={17} color={palette.ink4} />
         )}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 

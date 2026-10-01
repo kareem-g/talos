@@ -21,7 +21,11 @@ import 'react-native-gesture-handler'
 import './global.css'
 
 import { useEffect, useState } from 'react'
-import { Text, View } from 'react-native'
+import {
+  Animated,
+  Text,
+  View,
+} from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
@@ -137,7 +141,7 @@ function BootScreen({
 }) {
   const enter = useEnter(0, false)
   return (
-    <View
+    <Animated.View
       style={{
         flex: 1,
         alignItems: 'center',
@@ -207,6 +211,6 @@ function BootScreen({
           {action}
         </Text>
       ) : null}
-    </View>
+    </Animated.View>
   )
 }

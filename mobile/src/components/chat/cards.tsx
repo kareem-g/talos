@@ -9,7 +9,13 @@
  */
 
 import * as React from 'react'
-import {ActivityIndicator, Pressable, TextInput, View} from 'react-native'
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  TextInput,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { AlertTriangle, Check, ChevronDown, FileText, Moon, X } from 'lucide-react-native'
 
@@ -211,7 +217,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
         />
       </Pressable>
 
-      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+      <Animated.View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
         <View style={{ borderTopWidth: 1, borderTopColor: palette.line, paddingTop: 10, paddingHorizontal: 6 }}>
           {steps.slice(0, 20).map((step, index) => {
             const isDone = step.status === 'completed'
@@ -315,7 +321,7 @@ export function Plan({ part, onViewPlan }: { part: PlanPart; onViewPlan?: () => 
             ) : null}
           </View>
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   )
 }

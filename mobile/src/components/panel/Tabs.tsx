@@ -20,7 +20,14 @@
  */
 
 import * as React from 'react'
-import {ActivityIndicator, Image, Pressable, ScrollView, View} from 'react-native'
+import {
+  ActivityIndicator,
+  Animated,
+  Image,
+  Pressable,
+  ScrollView,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import {
   ChevronRight,
@@ -513,7 +520,7 @@ function FileDiffRow({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View
         className="overflow-hidden rounded-md border bg-surface"
         style={{ borderColor: open ? palette.accentBorder : palette.line }}
@@ -555,7 +562,7 @@ function FileDiffRow({
           )
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -701,7 +708,7 @@ function DirRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 8)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={entry.name}
@@ -715,7 +722,7 @@ function DirRow({
         </Mono>
         {entry.dir ? <ChevronRight size={13} color={palette.ink4} /> : null}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -1118,7 +1125,7 @@ function RoomCard({ room, index }: { room: RoomInfo; index: number }) {
   const enter = useEnter(staggerDelay(index), false)
   const workers = room.roster?.length ?? 0
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View
         className="min-h-[56px] flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3"
       >
@@ -1132,7 +1139,7 @@ function RoomCard({ room, index }: { room: RoomInfo; index: number }) {
           </Badge>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -1478,7 +1485,7 @@ function TraceRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 8)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Card className="gap-1 p-4">
         <View className="flex-row items-center justify-between gap-2">
           <Mono className="text-[11.5px] font-semibold text-accent" numberOfLines={1}>
@@ -1494,6 +1501,6 @@ function TraceRow({
           </Text>
         ) : null}
       </Card>
-    </View>
+    </Animated.View>
   )
 }

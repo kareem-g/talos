@@ -11,7 +11,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -215,7 +219,7 @@ function UsageRow({
   const unmeasured = row.inputTokens + row.outputTokens === 0
 
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={row.name}
@@ -263,7 +267,7 @@ function UsageRow({
           </Mono>
         </View>
       </Pressable>
-    </View>
+    </Animated.View>
   )
 }
 

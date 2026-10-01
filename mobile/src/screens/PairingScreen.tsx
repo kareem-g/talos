@@ -15,6 +15,7 @@
 import * as React from 'react'
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -305,7 +306,7 @@ export function PairingScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[{ alignItems: 'center', gap: 18 }, enterStyle(heroEnter, 12)]}>
+        <Animated.View style={[{ alignItems: 'center', gap: 18 }, enterStyle(heroEnter, 12)]}>
           <View
             style={{
               width: 76,
@@ -336,9 +337,9 @@ export function PairingScreen() {
               device. It takes about ten seconds.
             </Text>
           </View>
-        </View>
+        </Animated.View>
 
-        <View style={[{ width: '100%', maxWidth: 400, gap: 12, marginTop: 40 }, enterStyle(actionsEnter, 10)]}>
+        <Animated.View style={[{ width: '100%', maxWidth: 400, gap: 12, marginTop: 40 }, enterStyle(actionsEnter, 10)]}>
           <Button
             variant="primary"
             label="Scan the pairing code"
@@ -403,7 +404,7 @@ export function PairingScreen() {
             this phone, the same code also carries the tailnet IP and your home LAN address, and the
             app tries each in turn.
           </Text>
-        </View>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   )

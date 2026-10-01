@@ -10,7 +10,14 @@
  */
 
 import * as React from 'react'
-import {ActivityIndicator, Image, Pressable, ScrollView, View} from 'react-native'
+import {
+  ActivityIndicator,
+  Animated,
+  Image,
+  Pressable,
+  ScrollView,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import {
   AlertTriangle,
@@ -207,7 +214,7 @@ export function Step({
       </Pressable>
 
       {expandable ? (
-        <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+        <Animated.View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
           <View
             style={{
               marginLeft: 15,
@@ -233,7 +240,7 @@ export function Step({
               </Well>
             ) : null}
           </View>
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   )
@@ -265,13 +272,13 @@ export function ToolGroup({ parts, simple }: { parts: Array<ToolPart | CommandPa
         overflow: 'hidden',
       }}
     >
-      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+      <Animated.View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
         <View style={{ gap: 1, padding: 5 }}>
           {parts.map((part, index) => (
             <Step key={index} part={part} simple={simple} />
           ))}
         </View>
-      </View>
+      </Animated.View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${parts.length} tool steps${failed ? ', some failed' : ''}`}
@@ -590,7 +597,7 @@ function FileChip({
           style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
         />
       </Pressable>
-      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+      <Animated.View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
         {loading ? (
           <View style={{ padding: 14, alignItems: 'center' }}>
             <ActivityIndicator size="small" color={palette.ink3} />
@@ -600,7 +607,7 @@ function FileChip({
         ) : diff ? (
           <DiffView diff={diff} maxHeight={240} />
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   )
 }

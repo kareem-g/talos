@@ -11,7 +11,11 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -256,7 +260,7 @@ function EndpointRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View className="min-h-14 flex-row items-center gap-3 px-4 py-3">
         <Dot tone={endpoint.reachable ? 'ok' : 'muted'} />
         <View className="min-w-0 flex-1 gap-0.5">
@@ -279,7 +283,7 @@ function EndpointRow({
           accessibilityLabel={`Copy ${endpoint.base_url}`}
         />
       </View>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -347,7 +351,7 @@ function DeviceRow({
 }) {
   const enter = useEnter(staggerDelay(Math.min(index, 5)), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-3">
         <IconTile icon={<Smartphone size={16} color={palette.ink2} />} tone="muted" />
         <View className="min-w-0 flex-1 gap-0.5">
@@ -389,6 +393,6 @@ function DeviceRow({
           </Pressable>
         )}
       </View>
-    </View>
+    </Animated.View>
   )
 }

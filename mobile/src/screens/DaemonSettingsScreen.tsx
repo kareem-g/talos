@@ -11,7 +11,11 @@
  */
 
 import * as React from 'react'
-import {TextInput, View} from 'react-native'
+import {
+  Animated,
+  TextInput,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -295,7 +299,7 @@ function SettingRow({
   const value = isEdited ? edited : display(original)
 
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View
         className="gap-2.5 rounded-md border p-3.5"
         style={{
@@ -349,7 +353,7 @@ function SettingRow({
           </View>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   )
 }
 

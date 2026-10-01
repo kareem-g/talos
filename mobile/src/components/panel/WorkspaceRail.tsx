@@ -17,7 +17,12 @@
  */
 
 import * as React from 'react'
-import {Pressable, ScrollView, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  ScrollView,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { Plus } from 'lucide-react-native'
 
@@ -373,7 +378,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
         </Text>
       </View>
 
-      <View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
+      <Animated.View {...(collapse.measured ? { onLayout: collapse.onLayout } : {})} style={collapse.style}>
         <View className="gap-0.5">
           {steps.map((step, index) => (
             <StepRow key={index} index={index} content={step.content} status={step.status ?? 'pending'} />
@@ -418,7 +423,7 @@ function PlanTab({ conversation }: { conversation: Conversation }) {
             ))}
           </View>
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   )
 }

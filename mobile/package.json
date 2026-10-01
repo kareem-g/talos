@@ -67,7 +67,8 @@
     "check:tokens": "node scripts/check-token-usage.mjs",
     "probe:api": "node scripts/probe-api.mjs",
     "probe:api:write": "node scripts/probe-api-write.mjs",
-    "verify": "npm run typecheck && npm test && npm run check:api && npm run check:colors && npm run check:tokens"
+    "verify": "npm run typecheck && npm test && npm run check:api && npm run check:colors && npm run check:tokens && npm run check:motion",
+    "check:motion": "node scripts/check-motion.mjs"
   },
   "private": true
 }

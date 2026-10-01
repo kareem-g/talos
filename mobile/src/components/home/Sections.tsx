@@ -10,7 +10,12 @@
  */
 
 import * as React from 'react'
-import {Pressable, ScrollView, View} from 'react-native'
+import {
+  Animated,
+  Pressable,
+  ScrollView,
+  View,
+} from 'react-native'
 import { Text } from '@app/components/Text'
 import { ChevronDown, Eye, Play, Plus, Trash2, Zap } from 'lucide-react-native'
 
@@ -273,7 +278,7 @@ function AutomationRow({
 }) {
   const enter = useEnter(staggerDelay(index), false)
   return (
-    <View style={rowEnterStyle(enter)}>
+    <Animated.View style={rowEnterStyle(enter)}>
       <View
         className={cn(
           'flex-row items-center gap-2.5 rounded-md border py-2 pl-3 pr-1',
@@ -371,7 +376,7 @@ function AutomationRow({
           </Pressable>
         )}
       </View>
-    </View>
+    </Animated.View>
   )
 }
 
