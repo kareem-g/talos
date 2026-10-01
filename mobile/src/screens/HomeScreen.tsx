@@ -477,7 +477,7 @@ export function HomeScreen() {
           accessibilityHint="Routes, alerts, tunnels, daemon settings"
           onPress={() => {
             void haptic('light')
-            if (navigationRef.isReady()) navigationRef.navigate('Config')
+            if (navigationRef.isReady()) navigationRef.navigate('Main', { screen: 'Device' } as never)
           }}
           className="flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3.5 active:bg-raised"
         >

@@ -170,7 +170,7 @@ export function SessionSearchSheet({
       icon: <SettingsIcon size={16} color={palette.ink2} />,
       run: () => {
         onClose()
-        navigation.navigate('Config')
+        navigation.navigate('Main', { screen: 'Device' } as never)
       },
     },
     {

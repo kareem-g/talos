@@ -44,6 +44,7 @@ import {
   Plus,
   Smartphone,
   SlidersHorizontal,
+  Users,
   Wrench,
   X,
 } from 'lucide-react-native'
@@ -224,7 +225,7 @@ export function DrawerHost() {
     if (navigationRef.isReady()) navigationRef.navigate('Main', { screen: tab } as never)
   }
 
-  function goStack(name: 'Config' | 'Pairing' | 'Mcp' | 'Remote' | 'Daemon' | 'Agents' | 'Browsers' | 'Usage' | 'Providers') {
+  function goStack(name: 'Pairing' | 'Mcp' | 'Remote' | 'Daemon' | 'Agents' | 'Browsers' | 'Usage' | 'Providers' | 'Rooms') {
     close()
     if (navigationRef.isReady()) navigationRef.navigate(name)
   }
@@ -315,6 +316,7 @@ export function DrawerHost() {
               <NavItem icon={<Bot size={14} color={iconColor} strokeWidth={1.8} />} label="Agents" onPress={() => goStack('Agents')} />
               <NavItem icon={<Globe size={14} color={iconColor} strokeWidth={1.8} />} label="Browsers" onPress={() => goStack('Browsers')} />
               <NavItem icon={<Plug size={14} color={iconColor} strokeWidth={1.8} />} label="API providers" onPress={() => goStack('Providers')} />
+              <NavItem icon={<Users size={14} color={iconColor} strokeWidth={1.8} />} label="Rooms" onPress={() => goStack('Rooms')} />
             </View>
 
             <NavLabel>Manage</NavLabel>

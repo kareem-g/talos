@@ -51,6 +51,7 @@ import {
   terminalsApi,
   workspaceApi,
   type DirEntry,
+  type RoomInfo,
 } from '@app/lib/api'
 import { storage } from '@app/lib/storage'
 import { useStore } from '@app/store'
@@ -1056,15 +1057,14 @@ export function BrowserTab({ session }: { session: Session }) {
 /* ── Rooms ──────────────────────────────────────────────────────────────────── */
 
 export function RoomsTab() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
-  const [rooms, setRooms] = React.useState<Awaited<ReturnType<typeof roomsApi.list>>['rooms']>([])
+  const [rooms, setRooms] = React.useState<RoomInfo[]>([])
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     setError(null)
     try {
-      setRooms((await roomsApi.list()).rooms ?? [])
+      setRooms((await roomsApi.list()) ?? [])
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load rooms')
     } finally {
@@ -1095,13 +1095,6 @@ export function RoomsTab() {
               key={room.id}
               room={room}
               index={index}
-              onPress={() => {
-                if (!room.session_id) {
-                  toast({ message: 'That room has no channel session yet', tone: 'muted' })
-                  return
-                }
-                navigation.navigate('Session', { sessionId: room.session_id })
-              }}
             />
           ))}
         </View>
@@ -1110,25 +1103,24 @@ export function RoomsTab() {
   )
 }
 
-function RoomCard({
-  room,
-  index,
-  onPress,
-}: {
-  room: { id: string; name: string; session_id?: string; workers?: unknown }
-  index: number
-  onPress: () => void
-}) {
+/**
+ * One room, in the session rail's Rooms tab.
+ *
+ * Deliberately not a tap target. The daemon's `GET /rooms` returns a *derived*
+ * identity — id, name, roster, chief, skip-permits — and no channel session id,
+ * because the channel lives in the stored record, which only arrives over
+ * `RoomUpsert`. The previous version navigated on a `session_id` field that
+ * never existed on the wire, so every tap produced "that room has no channel
+ * session yet". Better to render the roster and offer nothing than to offer a
+ * button that cannot work; creating and editing rooms lives in Station › Rooms.
+ */
+function RoomCard({ room, index }: { room: RoomInfo; index: number }) {
   const enter = useEnter(staggerDelay(index), false)
-  const workers = Array.isArray(room.workers) ? room.workers.length : 0
+  const workers = room.roster?.length ?? 0
   return (
     <View style={rowEnterStyle(enter)}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={room.name}
-        accessibilityHint={room.session_id ? 'Opens the room channel' : 'This room has no channel session yet'}
-        onPress={onPress}
-        className="min-h-[56px] flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 active:bg-raised"
+      <View
+        className="min-h-[56px] flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3"
       >
         <View className="size-2 rounded-full" style={{ backgroundColor: palette.accent }} />
         <Text className="min-w-0 flex-1 text-[14.5px] leading-[20px] text-ink" numberOfLines={1}>
@@ -1139,7 +1131,7 @@ function RoomCard({
             {workers} {workers === 1 ? 'worker' : 'workers'}
           </Badge>
         ) : null}
-      </Pressable>
+      </View>
     </View>
   )
 }

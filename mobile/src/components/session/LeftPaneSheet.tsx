@@ -52,7 +52,7 @@ export function LeftPaneSheet({
     if (!open) return
     roomsApi
       .list()
-      .then((result) => setRooms(result.rooms ?? []))
+      .then((result) => setRooms(result ?? []))
       .catch(() => setRooms([]))
   }, [open])
 

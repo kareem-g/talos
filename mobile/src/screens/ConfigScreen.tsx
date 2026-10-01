@@ -72,6 +72,7 @@ export function ConfigScreen() {
   const [note, setNote] = React.useState<string | null>(null)
   const [routes, setRoutes] = React.useState<string[]>(() => deviceRoutes())
   const [probes, setProbes] = React.useState<Record<string, RouteProbe>>({})
+  const [refreshing, setRefreshing] = React.useState(false)
   const [active, setActive] = React.useState<string>(() => getPairingBaseUrl())
   const [confirmUnpair, setConfirmUnpair] = React.useState(false)
   const [unpairing, setUnpairing] = React.useState(false)
@@ -133,6 +134,19 @@ export function ConfigScreen() {
     void measure()
   }, [measure])
 
+  /**
+   * Pull to re-measure.
+   *
+   * The reading is a snapshot, and the moment you want a fresh one is the
+   * moment you have moved — into a lift, onto a tailnet, off wifi — so the
+   * gesture is the natural clock rather than a timer that ticks while you read.
+   */
+  async function refresh() {
+    setRefreshing(true)
+    await measure()
+    setRefreshing(false)
+  }
+
   /** Pin the device to a route and redial, so the choice takes effect now. */
   function useRoute(route: string) {
     if (route === active) return
@@ -155,6 +169,8 @@ export function ConfigScreen() {
 
   return (
     <ScreenScaffold
+      onRefresh={() => void refresh()}
+      refreshing={refreshing}
       title="Device"
       eyebrow={`QAI · ${desktopName}`}
       subtitle="This phone talks only to your own daemon. Nothing is sent anywhere else."

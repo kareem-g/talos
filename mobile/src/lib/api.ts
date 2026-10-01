@@ -510,8 +510,64 @@ export const skillsApi = {
 
 /* ── Rooms, MCP, memory, providers, settings, terminals ──────────────────── */
 
+/**
+ * What `GET /rooms` actually returns: the daemon's *derived* identity for a
+ * room — id, name, a roster of [worker, skillIds], the chief and whether runs
+ * skip the permission gate.
+ *
+ * Note it is NOT the stored room JSON. The daemon keeps that opaquely and only
+ * projects the dispatch-relevant fields onto the list response, which is why
+ * `skip_permissions` is snake_case here and `workers` is absent. The full
+ * record reaches clients over the websocket as `RoomUpsert`.
+ */
+export interface RoomInfo {
+  id: string
+  name: string
+  /** `[workerName, skillIds][]` — a tuple list, not objects. */
+  roster?: Array<[string, string[]]>
+  chief?: string | null
+  skip_permissions?: boolean
+}
+
+/**
+ * The room record as *stored* — what a write must send. The daemon persists
+ * this JSON as given, and derives `RoomInfo` from it, so a create that omitted
+ * `workers` would produce a room with an empty roster.
+ */
+export interface RoomRecord {
+  id: string
+  name: string
+  workers: Array<{
+    name: string
+    sessionId?: string
+    avatar?: { gradient: number; emoji?: string }
+    skills?: string[]
+  }>
+  chief?: string | null
+  sessionId?: string | null
+  skipPermissions?: boolean | null
+  project?: string | null
+  createdAt?: string
+}
+
+/**
+ * Rooms — the daemon's orchestration channels.
+ *
+ * The daemon broadcasts `RoomUpsert` / `RoomDeleted` over the websocket on
+ * every write, so two clients looking at the same room converge without either
+ * polling.
+ */
 export const roomsApi = {
-  list: () => request<{ rooms: Array<{ id: string; name: string; session_id?: string; workers?: unknown[] }> }>('/api/mobile/rooms'),
+  list: () => request<{ rooms: RoomInfo[] }>('/api/mobile/rooms').then((body) => body.rooms ?? []),
+  create: (room: RoomRecord) =>
+    request<RoomRecord>('/api/mobile/rooms', { method: 'POST', body: JSON.stringify(room) }),
+  upsert: (room: RoomRecord) =>
+    request<RoomRecord>(`/api/mobile/rooms/${encodeURIComponent(room.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(room),
+    }),
+  remove: (roomId: string) =>
+    request<{ deleted: boolean }>(`/api/mobile/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' }),
 }
 
 export const mcpApi = {

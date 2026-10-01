@@ -15,8 +15,13 @@
  *   Session          one conversation — the desktop's SessionView, full screen
  *   SessionPanel     that session's workspace rail — deep-linkable full screen
  *   Agents · Browsers · Usage       the machinery Station opens
+ *   Providers        API providers  — pushed from Station
  *   AgentDetail      one agent in full — rises as a sheet
  *   Mcp · Remote · Daemon           pushed from Station and Device
+ *
+ * There is one configuration surface, the Device tab. The desktop splits its
+ * preferences across a page and modals; a phone does not have room for two
+ * doors onto the same room.
  * ```
  *
  * Two navigation surfaces, exactly like the desktop's responsive shell:
@@ -56,6 +61,7 @@ import { UsageScreen } from './screens/UsageScreen'
 import { ConfigScreen } from './screens/ConfigScreen'
 import { StationScreen } from './screens/StationScreen'
 import { ProvidersScreen } from './screens/ProvidersScreen'
+import { RoomsScreen } from './screens/RoomsScreen'
 import { SessionScreen } from './screens/SessionScreen'
 import { SessionPanelScreen, type PanelTabId } from './screens/SessionPanelScreen'
 import { McpScreen } from './screens/McpScreen'
@@ -82,9 +88,9 @@ export type RootStackParamList = {
   Browsers: undefined
   Usage: undefined
   Providers: undefined
+  Rooms: undefined
   SessionPanel: { sessionId: string; tab?: PanelTabId }
   AgentDetail: { agentId: string }
-  Config: undefined
   Mcp: undefined
   Remote: undefined
   Daemon: undefined
@@ -103,19 +109,23 @@ const linking: LinkingOptions<RootStackParamList> = {
       Main: {
         screens: {
           Deck: '',
-          Sessions: 'sessions',
+          // `history` and `config` are the paths this app shipped before the
+          // rename. A saved link, a home-screen shortcut or a bookmark from the
+          // old build must still land somewhere sensible, so they are aliases
+          // rather than silently broken routes.
+          Sessions: { path: 'sessions', alias: ['history'] },
           Station: 'station',
-          Device: 'device',
+          Device: { path: 'device', alias: ['config'] },
         },
       },
       Agents: 'agents',
       Browsers: 'browsers',
       Usage: 'usage',
       Providers: 'providers',
+      Rooms: 'rooms',
       Session: 'session/:sessionId',
       SessionPanel: 'session/:sessionId/panel',
       AgentDetail: 'agent/:agentId',
-      Config: 'config',
       Mcp: 'mcp',
       Remote: 'remote',
       Daemon: 'daemon',
@@ -227,9 +237,9 @@ export function RootNavigator() {
       <Stack.Screen name="Browsers" component={BrowsersScreen} />
       <Stack.Screen name="Usage" component={UsageScreen} />
       <Stack.Screen name="Providers" component={ProvidersScreen} />
+      <Stack.Screen name="Rooms" component={RoomsScreen} />
       <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="AgentDetail" component={AgentDetailScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen name="Config" component={ConfigScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Mcp" component={McpScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Remote" component={RemoteScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="Daemon" component={DaemonSettingsScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />

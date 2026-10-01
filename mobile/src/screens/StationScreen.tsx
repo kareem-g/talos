@@ -200,11 +200,10 @@ export function StationScreen() {
           <ListRow
             leading={<IconTile icon={<Users size={17} color={palette.accent} />} />}
             title="Rooms"
-            subtitle={host ? 'orchestration channels' : 'open a session to reach its rooms'}
+            subtitle="rosters and their channel sessions"
             meta={count(counts.rooms, 'channels', 'channel')}
-            disabled={!host}
             trailing={<Chevron />}
-            onPress={host ? () => navigation.navigate('SessionPanel', { sessionId: host, tab: 'rooms' }) : undefined}
+            onPress={() => navigation.navigate('Rooms')}
             accessibilityLabel="Open rooms"
           />
         </ListCard>
