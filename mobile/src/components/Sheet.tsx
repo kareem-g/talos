@@ -250,6 +250,12 @@ export function Sheet({
             style={[
               {
                 height: naturalHeight,
+                // A detent sheet is SCREEN-height and rests translated down by
+                // the hidden amount, so without this its bottom `offset` pixels
+                // — which is exactly where the pinned footer lives — hang below
+                // the display. Reserving them as padding puts the footer back on
+                // the screen's bottom edge, where it belongs.
+                paddingBottom: detents ? offsetFor(snapIndex) : 0,
                 borderTopLeftRadius: radius.xl,
                 borderTopRightRadius: radius.xl,
                 borderTopWidth: 1,

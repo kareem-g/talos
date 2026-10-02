@@ -481,11 +481,11 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
                     : palette.accent,
               })}
             >
-              <ArrowUp size={18} color={canSend ? palette.accentInk : palette.ink4} strokeWidth={2.6} />
+              <ArrowUp size={18} color={canSend ? palette.accentInk : palette.ink2} strokeWidth={2.6} />
               {busy ? (
                 <Text
                   className="text-[13px] font-bold"
-                  style={{ color: canSend ? palette.accentInk : palette.ink4 }}
+                  style={{ color: canSend ? palette.accentInk : palette.ink2 }}
                 >
                   Queue
                 </Text>

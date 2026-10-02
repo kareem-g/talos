@@ -26,6 +26,9 @@ export const Text = React.forwardRef<RNText, RNTextProps>(function Text({ style,
   // `flatten` rather than a shallow check: callers pass arrays, and a family
   // nested one level down would otherwise be missed and overridden.
   const resolved = React.useMemo(() => {
+    // Nothing to add when the app is using the platform face — and adding
+    // `fontFamily: undefined` would still shadow nothing useful.
+    if (!SANS) return style
     const flat = StyleSheet.flatten(style) as { fontFamily?: string } | undefined
     if (flat?.fontFamily) return style
     return [{ fontFamily: SANS }, style]

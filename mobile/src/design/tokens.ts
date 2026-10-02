@@ -58,118 +58,111 @@
 
 export const palette = {
   /** The machine plate — terminal output, diffs, tool results. */
-  code: '#161618',
+  code: '#050506',
   /** A hole in the page — recesses, quoted blocks, inline wells. */
-  well: '#19191C',
-  /** The page itself. Warm charcoal. Everything else is a lift off this. */
-  canvas: '#131315',
-  /** Navigation chrome: top bars, drawer, tab bar. The desktop's sidebar tone. */
-  chrome: '#17171B',
-  /** A resting card, list row, or sheet. */
-  surface: '#26262B',
-  /** A card on a card: nested grouping, filled buttons, selected rows. */
-  raised: '#2E2E34',
-  /** Pressed / hovered state — the deck brightens under a finger. */
-  hover: '#39393F',
+  well: '#0E0E10',
+  /** The page. True black, so an OLED phone's chrome disappears into the glass. */
+  canvas: '#000000',
+  /** Navigation chrome: bars, drawer, sheets. */
+  chrome: '#0B0B0C',
+  /** A resting card, list row, or sheet — Apple's secondarySystemBackground. */
+  surface: '#1C1C1E',
+  /** A card on a card: nested grouping, a filled control, a selected row. */
+  raised: '#2C2C2E',
+  /** Pressed / hovered state — the surface lifts under a finger. */
+  hover: '#3A3A3C',
 
-  /** A selected row: the surface washed toward the accent. */
-  selected: '#1D2433',
-  /** The tappable body of an input sitting on `surface` — a typing slot. */
-  field: '#202024',
+  /** A selected row: the surface washed very slightly toward the accent. */
+  selected: '#12253C',
+  /** The tappable body of an input — the composer's grey well on black. */
+  field: '#1C1C1E',
 
-  /** Scrim behind a sheet, dialog or drawer. The desktop's black/65. */
-  scrim: 'rgba(0,0,0,0.65)',
+  /** Scrim behind a sheet, dialog or drawer. */
+  scrim: 'rgba(0,0,0,0.7)',
   /** A lighter scrim for stacked overlays (a picker over a sheet). */
-  scrimSoft: 'rgba(0,0,0,0.45)',
+  scrimSoft: 'rgba(0,0,0,0.5)',
 
   /* ── Ink ────────────────────────────────────────────────────────────────
-   * Warm parchment on charcoal. */
-  ink: '#F2F2F3',
-  ink2: '#B0B0B6',
-  ink3: '#7E7E86',
+   * Apple's label ramp. Pure white for primary, then the three system greys. */
+  ink: '#FFFFFF',
+  ink2: '#AEAEB2',
+  ink3: '#8E8E93',
   /** Disabled / placeholder only. Never for information. */
-  ink4: '#5B5B63',
+  ink4: '#636366',
 
   /* ── Accent ──────────────────────────────────────────────────────────────
-   * Soft blue. The desktop's --accent family, verbatim. */
-  accent: '#5B8DEF',
-  accentHover: '#6F9BF2',
-  accentPressed: '#4A76D1',
-  /**
-   * Text drawn ON `accent`. The desktop's --accent-ink: a deep blue-black, so
-   * a label on the fill reads as part of it rather than punched through it.
-   */
-  accentInk: '#0D1322',
-  /** A wash of accent — selected rows, quiet emphasis. */
-  accentSoft: 'rgba(91,141,239,0.12)',
-  accentSoftStrong: 'rgba(91,141,239,0.20)',
-  accentBorder: 'rgba(91,141,239,0.34)',
+   * One blue, used the way iOS uses it: links, selection, live marks — never a
+   * fill for a primary action. The primary action is a LIGHT pill (see
+   * `Button`), which is what keeps the chrome monochrome. */
+  accent: '#0A84FF',
+  accentHover: '#3D9BFF',
+  accentPressed: '#0069D9',
+  /** Text drawn on the accent fill. */
+  accentInk: '#FFFFFF',
+  accentSoft: 'rgba(10,132,255,0.14)',
+  accentSoftStrong: 'rgba(10,132,255,0.22)',
+  accentBorder: 'rgba(10,132,255,0.36)',
 
   /* ── State ───────────────────────────────────────────────────────────────
-   * Four outcomes, none of them a new hue in the chrome. See rule 4. */
+   * Deliberately almost colourless. A screen full of amber and green chips is
+   * what made the app read as noisy; here a state is carried by a word, by the
+   * fill of a pill, and by inversion — and only failure gets a colour. */
+
+  /** "Needs you" — paper ink, drawn as inversion rather than as a hue. */
+  wait: '#FFFFFF',
+  waitSoft: 'rgba(255,255,255,0.08)',
+  waitBorder: 'rgba(255,255,255,0.22)',
+
+  /** Completed / verified / connected. The accent, so success stays quiet. */
+  ok: '#0A84FF',
+  okSoft: 'rgba(10,132,255,0.14)',
+  okBorder: 'rgba(10,132,255,0.30)',
+
+  /** The one state that earns a colour: something broke. */
+  danger: '#FF453A',
+  dangerSoft: 'rgba(255,69,58,0.14)',
+  dangerBorder: 'rgba(255,69,58,0.34)',
 
   /**
-   * "Needs you" — a human is blocking the run. Deliberately NOT a colour:
-   * paper ink, so the treatment is inversion (white rail, white pill, lifted
-   * card) and it can never be confused with a decorative tint. `waitSoft` and
-   * `waitBorder` are the accent wash the attention card sits on.
+   * Held / queued / paused — a grey, because nothing is being asked of you.
+   * Deliberately one step brighter than `muted`: "queued" is still something,
+   * and the two must not collapse into the same swatch.
    */
-  wait: '#F2F2F3',
-  waitSoft: 'rgba(91,141,239,0.12)',
-  waitBorder: 'rgba(91,141,239,0.42)',
-
-  /** Completed / verified / connected. The accent itself, so success is calm. */
-  ok: '#5B8DEF',
-  okSoft: 'rgba(91,141,239,0.12)',
-  okBorder: 'rgba(91,141,239,0.30)',
-
-  danger: '#F85149',
-  dangerSoft: 'rgba(248,81,73,0.13)',
-  dangerBorder: 'rgba(248,81,73,0.34)',
-
-  /** Informational — queued, paused, or otherwise held but not broken. */
-  info: '#6396CC',
-  infoSoft: 'rgba(99,150,204,0.13)',
-  infoBorder: 'rgba(99,150,204,0.32)',
+  info: '#AEAEB2',
+  infoSoft: 'rgba(174,174,178,0.14)',
+  infoBorder: 'rgba(174,174,178,0.30)',
 
   /* ── Hairlines ────────────────────────────────────────────────────────────
-   * Warm rules, the desktop's --line family. */
-  line: '#34343A',
-  lineStrong: '#42424A',
+   * Apple's separator greys. */
+  line: '#2C2C2E',
+  lineStrong: '#3A3A3C',
 
   /* ── Machine plate ink ────────────────────────────────────────────────────
    * Text colours for use ON `palette.code` only. */
-  codeInk: '#E6E6E9',
+  codeInk: '#E5E5E7',
   /** The gutter / line-number column inside a diff. */
-  codeDim: '#7E7E86',
+  codeDim: '#8E8E93',
 
   /* ── Machine status ink ───────────────────────────────────────────────────
-   * The plate twins, from the desktop's ramps. `codeOk` is the one green in
-   * the app and it only ever draws a diff addition. */
+   * The plate twins. `codeOk` is the one green in the app and it only ever
+   * draws a diff addition — a diff without it stops being a diff. */
   codeOk: '#6FBC7F',
-  codeWait: '#8FA8C8',
-  codeDanger: '#F4736C',
-  codeInfo: '#7FA8D8',
+  codeWait: '#AEAEB2',
+  codeDanger: '#FF6961',
+  codeInfo: '#8E8E93',
 
   /** The shimmer band that runs across a skeleton while it loads. */
-  shimmer: 'rgba(255,255,255,0.06)',
+  shimmer: 'rgba(255,255,255,0.07)',
 
   /**
-   * The camera viewfinder behind the pairing scanner.
-   *
-   * Genuinely pure black, and deliberately not a step on the surface ramp: a
-   * viewfinder is not part of the app's visual system, and putting it on
-   * `canvas` would tint the live image the user is trying to read a QR code
-   * out of. It is the one place a black outside the ramp is correct.
+   * The camera viewfinder behind the pairing scanner. Genuinely pure black —
+   * a viewfinder is not part of the app's visual system and tinting it would
+   * change the live image the user is reading a QR code out of.
    */
   viewfinder: '#000000',
 
-  /**
-   * Ink for a badge drawn on a *saturated* fill (danger count). Paper white,
-   * very slightly greyed so a count does not buzz against a red fill the way
-   * pure white does.
-   */
-  badgeInk: '#F6F6F7',
+  /** Ink for a badge drawn on a saturated fill (danger count). */
+  badgeInk: '#FFFFFF',
 } as const
 
 /* ── Diff ──────────────────────────────────────────────────────────────────────
@@ -311,17 +304,17 @@ export const toneClass = {
  * are genuinely capsules (a switch, a status chip, a progress thumb, the FAB). */
 
 export const radius = {
-  /** Inline code, tiny tags, status chips. */
-  xs: 4,
-  /** Small controls, filter chips, a segmented item. */
-  sm: 6,
-  /** Inputs, icon buttons, wells. */
-  md: 8,
-  /** Cards and panels. */
-  lg: 10,
+  /** Inline code, small tags. */
+  xs: 6,
+  /** Small chips, segmented items. */
+  sm: 10,
+  /** Inputs, icon buttons, wells — the composer's rounded box. */
+  md: 14,
+  /** Cards, panels, grouped lists — Apple's grouped-list corner. */
+  lg: 18,
   /** Sheets and dialogs (top corners). */
-  xl: 18,
-  /** A real capsule — switch, brand tile, FAB. */
+  xl: 22,
+  /** A capsule. Buttons, filter chips, rows, the floating action. */
   pill: 999,
 } as const
 

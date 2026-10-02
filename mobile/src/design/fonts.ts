@@ -1,50 +1,45 @@
 /**
  * The app's faces.
  *
- * Three families, each with one job — the same division the boards use:
+ * THE UI IS THE SYSTEM FONT, ON PURPOSE.
+ * -------------------------------------
+ * The reference for this app is iOS itself: the page is black, the cards are
+ * Apple's greys, the controls are capsules, and the type is SF Pro. A bundled
+ * grotesque — which is what this file used to load — fights all of that. It made
+ * every screen read as "an app with a brand font" instead of "the phone",
+ * which is the opposite of the quiet, native feel the design is after.
  *
- *   Space Grotesk  the instrument's voice: chrome, labels, headings, readouts.
- *                  A grotesque with a little character in the counters, which
- *                  is what stops a dense control surface reading as a settings
- *                  screen.
- *   Inter          the one place a human reading face is correct — the prose an
- *                  agent wrote. Grotesques tire the eye over paragraphs.
- *   JetBrains Mono every id, path, count, timestamp and status word, so the
- *                  app reads in columns.
+ * So the UI face is the platform's own: no `fontFamily`, and the type scale
+ * carries the weight. That also means there is nothing to load at boot for the
+ * UI, and nothing to fall back from.
  *
- * These are static instances (one file per weight) fetched from Google Fonts
- * under the OFL, bundled in `assets/fonts` and registered by `expo-font` at
- * boot. RN cannot interpolate a variable font, which is why they are static
- * rather than one variable file per family.
+ * THE MONO FACE IS BUNDLED, because it is a *readout*, not prose. Every id,
+ * path, count, timestamp and status word is set in it so the app reads in
+ * columns, and the platform monos (Menlo, Droid Sans Mono) are the one thing
+ * iOS and Android do not agree on. JetBrains Mono is what the desktop uses, so
+ * a diff on the phone and a diff in the browser are the same typeface.
  */
 
-import SpaceGroteskMedium from '../../assets/fonts/SpaceGrotesk-Medium.ttf'
-import SpaceGroteskSemiBold from '../../assets/fonts/SpaceGrotesk-SemiBold.ttf'
-import InterRegular from '../../assets/fonts/Inter-Regular.ttf'
-import InterMedium from '../../assets/fonts/Inter-Medium.ttf'
-import InterSemiBold from '../../assets/fonts/Inter-SemiBold.ttf'
 import JetBrainsMonoRegular from '../../assets/fonts/JetBrainsMono-Regular.ttf'
 import JetBrainsMonoSemiBold from '../../assets/fonts/JetBrainsMono-SemiBold.ttf'
 
 /** Passed straight to `useFonts`. The keys ARE the family names. */
 export const FONT_ASSETS = {
-  'SpaceGrotesk-Medium': SpaceGroteskMedium,
-  'SpaceGrotesk-SemiBold': SpaceGroteskSemiBold,
-  'Inter-Regular': InterRegular,
-  'Inter-Medium': InterMedium,
-  'Inter-SemiBold': InterSemiBold,
   'JetBrainsMono-Regular': JetBrainsMonoRegular,
   'JetBrainsMono-SemiBold': JetBrainsMonoSemiBold,
 } as const
 
-/** The default UI face. Every `Text` in the app gets this unless it says otherwise. */
-export const SANS = 'SpaceGrotesk-Medium'
-export const SANS_SEMIBOLD = 'SpaceGrotesk-SemiBold'
+/**
+ * The UI face. `undefined` means "let the platform choose" — SF Pro on iOS,
+ * Roboto on Android — which is the whole point.
+ */
+export const SANS: string | undefined = undefined
+export const SANS_SEMIBOLD: string | undefined = undefined
 
-/** Long-form agent prose. */
-export const PROSE = 'Inter-Regular'
-export const PROSE_MEDIUM = 'Inter-Medium'
-export const PROSE_SEMIBOLD = 'Inter-SemiBold'
+/** Long-form prose the agent wrote: also the system face, for the same reason. */
+export const PROSE: string | undefined = undefined
+export const PROSE_MEDIUM: string | undefined = undefined
+export const PROSE_SEMIBOLD: string | undefined = undefined
 
 /** Data. */
 export const MONO = 'JetBrainsMono-Regular'

@@ -21,21 +21,19 @@
  */
 
 import * as React from 'react'
-import {Pressable, View} from 'react-native'
+import { View } from 'react-native'
 import { Text } from '@app/components/Text'
-import { Plus, Search, Wifi } from 'lucide-react-native'
+import { Plus, Search } from 'lucide-react-native'
 
 import { deriveHomeView, type HomeFilter } from '@/lib/homeView'
 import { firstOpenApprovalId } from '@/lib/sessionState'
 import { getConversation, useStore } from '@app/store'
 import { mobileApi } from '@app/lib/api'
 import { useOpenSession } from '@app/navigation'
-import { navigationRef } from '@app/lib/navigationRef'
 import { openNewTask } from '@app/lib/newTask'
 import { palette } from '@app/design/tokens'
 import { ConfirmDialog } from '@app/components/Sheet'
 import {
-  Badge,
   Button,
   Card,
   Dot,
@@ -47,7 +45,6 @@ import {
   toast,
 } from '@app/components/ui'
 import { ScreenScaffold, Section } from '@app/components/Screen'
-import { FleetBand } from '@app/components/home/FleetBand'
 import { DrawerButton } from '@app/components/Drawer'
 import {
   AllClear,
@@ -58,7 +55,6 @@ import {
   SessionRow,
   WorkspaceGroup,
 } from '@app/components/session/SessionRow'
-import { AutomationsSection, SkillsSection } from '@app/components/home/Sections'
 
 export function HomeScreen() {
   const sessions = useStore((state) => state.sessions)
@@ -227,8 +223,21 @@ export function HomeScreen() {
 
   return (
     <ScreenScaffold
-      title="Deck"
-      eyebrow={`QAI · ${desktopName}`}
+      floatingAction={
+        <Button
+          variant="primary"
+          size="lg"
+          label="New task"
+          icon={<Plus size={17} color={palette.canvas} strokeWidth={2.8} />}
+          accessibilityLabel="Start a new task"
+          onPress={() => {
+            void haptic('medium')
+            openNewTask()
+          }}
+        />
+      }
+      title="Projects"
+      eyebrow={desktopName}
       onRefresh={() => void onRefresh()}
       refreshing={refreshing}
       contentClassName="gap-6 pb-12"
@@ -264,11 +273,6 @@ export function HomeScreen() {
         </View>
       }
     >
-      {/* ── 0. The fleet, as one strip ──────────────────────────────── */}
-      <View className="px-4">
-        <FleetBand sessions={sessions} onOpen={openSession} />
-      </View>
-
       {/* ── 1. Triage — needs you ───────────────────────────────────── */}
       <Section eyebrow="Triage" title={needsYou > 0 ? 'Needs you' : 'Queue clear'} enterIndex={0}>
         {needsYou === 0 ? (
@@ -461,53 +465,7 @@ export function HomeScreen() {
         )}
       </Section>
 
-      {/* ── 4. Automations + Skills — the desktop's anchor sections ─── */}
-      <Section eyebrow="Automations" title="Run on demand" enterIndex={3}>
-        <AutomationsSection />
-      </Section>
-
-      <Section eyebrow="Prompt library" title="Skills" enterIndex={4}>
-        <SkillsSection />
-      </Section>
-
-      {/* ── 5. Device — the connection truth and the route to Config ── */}
-      <Section eyebrow="This device" title="Connection" enterIndex={5}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open configuration"
-          accessibilityHint="Routes, alerts, tunnels, daemon settings"
-          onPress={() => {
-            void haptic('light')
-            if (navigationRef.isReady()) navigationRef.navigate('Main', { screen: 'Device' } as never)
-          }}
-          className="flex-row items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3.5 active:bg-raised"
-        >
-          <View
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 12,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: palette.accentSoft,
-            }}
-          >
-            <Wifi size={17} color={palette.accent} strokeWidth={1.8} />
-          </View>
-          <View className="min-w-0 flex-1">
-            <Text className="text-[13.5px] leading-[19px] font-semibold text-ink" numberOfLines={1}>
-              {live ? `Connected to ${desktopName}` : connection}
-            </Text>
-            <Text className="mt-0.5 text-[11.5px] leading-[15px] text-ink-3" numberOfLines={1}>
-              Routes, alerts, MCP, tunnels and daemon settings
-            </Text>
-          </View>
-          <Badge tone={live ? 'ok' : 'danger'} outline mono>
-            {live ? 'live' : 'down'}
-          </Badge>
-        </Pressable>
-      </Section>
-
+      {/* Long-press actions for a session row: resume, fork, archive, delete. */}
       <SessionActionsSheet
         session={menuRow}
         providerName={menuRow ? providerNameFor(menuRow.agent) : undefined}

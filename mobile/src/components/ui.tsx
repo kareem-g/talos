@@ -98,7 +98,7 @@ const MONO_FONT = MONO
  * The face per role. Without this, everything inherits the UI grotesque and
  * Space Grotesk would be doing the job Inter exists for — long-form reading.
  */
-const ROLE_FONT: Record<TypeRole, string> = {
+const ROLE_FONT: Record<TypeRole, string | undefined> = {
   display: SANS_SEMIBOLD,
   title: SANS_SEMIBOLD,
   heading: SANS_SEMIBOLD,
@@ -164,10 +164,13 @@ function Txt({
       {...props}
       className={cn(TYPE_CLASS[as], tone && toneClass.text[tone], 'text-ink', className)}
       style={[
-        // The family already encodes the weight (one static file per weight), so
-        // the class's fontWeight is neutralised — otherwise iOS synthesises a
-        // second bold on top of an already-bold face and the type looks blunt.
-        { fontFamily: ROLE_FONT[as], fontWeight: 'normal' },
+        // A bundled family encodes its own weight (one static file per weight),
+        // so the class's fontWeight is neutralised for those roles — otherwise
+        // iOS synthesises a second bold on an already-bold face. Roles on the
+        // system face keep the class's weight, which is what makes them bold.
+        ROLE_FONT[as]
+          ? { fontFamily: ROLE_FONT[as], fontWeight: 'normal' as const }
+          : null,
         track !== undefined ? { letterSpacing: track } : null,
         style as StyleProp<TextStyle>,
       ]}
@@ -204,8 +207,10 @@ export function Mono({ className, style, ...props }: TextProps) {
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const BUTTON_SURFACE: Record<ButtonVariant, string> = {
-  primary: 'bg-accent border border-line-strong',
-  secondary: 'bg-surface border border-line',
+  // The primary action is INK, not the accent: a white pill on black is the
+  // reference's "New chat", and it is what lets the accent stay a whisper.
+  primary: 'bg-ink border border-ink',
+  secondary: 'bg-raised border border-line-strong',
   ghost: 'bg-transparent border border-line',
   danger: 'bg-danger-soft border border-danger-border',
 }
@@ -223,13 +228,13 @@ const BUTTON_TEXT: Record<ButtonVariant, string> = {
  * default BLACK — invisible on this theme. An inline colour cannot fail.
  */
 const BUTTON_COLOR: Record<ButtonVariant, string> = {
-  primary: palette.accentInk,
+  primary: palette.canvas,
   secondary: palette.ink,
   ghost: palette.ink2,
   danger: palette.danger,
 }
 
-const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 34, md: 42, lg: 48 }
+const BUTTON_HEIGHT: Record<'sm' | 'md' | 'lg', number> = { sm: 34, md: 44, lg: 50 }
 
 export function Button({
   variant = 'secondary',
@@ -274,8 +279,8 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 7,
-          borderRadius: radius.md,
-          paddingHorizontal: size === 'sm' ? 13 : 17,
+          borderRadius: radius.pill,
+          paddingHorizontal: size === 'sm' ? 15 : 20,
         },
         full ? { alignSelf: 'stretch', width: '100%' } : { alignSelf: 'flex-start' },
         { opacity: disabled ? 0.4 : 1 },
@@ -344,7 +349,7 @@ export function IconButton({
           height: size,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: Math.round(size * 0.24),
+          borderRadius: size / 2,
           backgroundColor: active ? toneSoft[tone] : 'transparent',
           opacity: disabled ? 0.35 : 1,
         },
@@ -415,7 +420,7 @@ export function Badge({
   return (
     <View
       className={cn(
-        'h-[20px] shrink-0 flex-row items-center justify-center rounded-xs px-1.5',
+        'h-[20px] shrink-0 flex-row items-center justify-center rounded-sm px-2',
         !inverted && (outline ? toneClass.border[tone] : toneClass.soft[tone]),
         className,
       )}
@@ -470,8 +475,8 @@ export function StatusPill({
       accessibilityRole="text"
       accessibilityLabel={`Status: ${label}`}
       className={cn(
-        'shrink-0 flex-row items-center rounded-xs',
-        size === 'sm' ? 'h-[20px] gap-1.5 px-2' : 'h-[23px] gap-1.5 px-2.5',
+        'shrink-0 flex-row items-center rounded-pill',
+        size === 'sm' ? 'h-[22px] gap-1.5 px-2.5' : 'h-[26px] gap-1.5 px-3',
         className,
       )}
       style={{
@@ -643,7 +648,7 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-md border border-line bg-field px-3.5"
+      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-4"
       style={style as StyleProp<ViewStyle>}
     >
       <SearchIcon size={15} color={palette.ink3} />
@@ -814,7 +819,7 @@ export function Segmented<T extends string>({
     <View
       accessibilityRole="tablist"
       accessibilityLabel={label}
-      className={cn('flex-row gap-1 rounded-md border border-line bg-well p-1', className)}
+      className={cn('flex-row gap-1 rounded-pill border border-line bg-well p-1', className)}
     >
       {options.map((option) => {
         const active = option.value === value
@@ -827,7 +832,7 @@ export function Segmented<T extends string>({
             onPress={() => onChange(option.value)}
             hitSlop={HIT_SLOP}
             className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-sm',
+              'flex-1 flex-row items-center justify-center gap-1.5 rounded-pill',
               size === 'sm' ? 'h-8' : 'h-10',
               active ? 'bg-raised' : 'active:bg-raised/60',
             )}
@@ -892,7 +897,7 @@ export function FilterChips<T extends string>({
             }
             accessibilityState={{ selected: active }}
             onPress={() => onChange(option.value)}
-            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-sm border px-3"
+            className="mr-2 min-h-9 flex-row items-center gap-1.5 rounded-pill border px-3.5"
             style={{
               borderColor: active ? palette.accentBorder : palette.line,
               backgroundColor: active ? palette.accentSoft : 'transparent',
@@ -975,7 +980,7 @@ export function ListRow({
   const body = (
     <View
       className={cn(
-        'min-h-[56px] flex-row items-center gap-3 px-4',
+        'min-h-[58px] flex-row items-center gap-3 px-4',
         dense ? 'py-1.5' : 'py-2.5',
         selected && 'bg-accent-soft',
         disabled && 'opacity-40',
@@ -1040,7 +1045,7 @@ export function AgentAvatar({ agent, size = 36, name }: { agent: string; size?: 
       style={{
         width: size,
         height: size,
-        borderRadius: Math.round(size * 0.26),
+        borderRadius: Math.round(size * 0.29),
         backgroundColor: agentSoft(agent),
         borderWidth: 1,
         borderColor: `${agentColor(agent)}55`,
@@ -1066,7 +1071,7 @@ export function IconTile({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className="items-center justify-center"
-      style={{ width: size, height: size, borderRadius: Math.round(size * 0.26), backgroundColor: toneSoft[tone] }}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.29), backgroundColor: toneSoft[tone] }}
     >
       {icon}
     </View>
@@ -1394,7 +1399,7 @@ export function CopyButton({
         timer.current = setTimeout(() => setCopied(false), 1600)
       }}
       hitSlop={HIT_SLOP}
-      className="min-h-9 flex-row items-center gap-1.5 rounded-sm px-2.5 active:bg-raised"
+      className="min-h-9 flex-row items-center gap-1.5 rounded-pill px-3 active:bg-raised"
       style={copied ? { backgroundColor: palette.okSoft } : undefined}
     >
       {copied ? <Check size={12} color={palette.ok} strokeWidth={2.6} /> : icon ? <Txt as="small">⧉</Txt> : null}

@@ -4,20 +4,22 @@
  * QAI — the desktop's mobile shell, natively.
  * -------------------------------------------
  * ```
- * Pairing ──▶ Main (tabs)  ─┬─ Deck      triage: blocked first, fleet band, live
- *                           ├─ Sessions  every session, by day, searchable
- *                           ├─ Station   the daemon's world: agents, engines,
- *                           │            terminals, rooms, MCP, tunnels, usage
- *                           └─ Device    this phone: routes, alerts, pairing
- *                                ✚ Command sits between them — the app's verb
+ * Pairing ──▶ Main         the projects list: every workspace and what is
+ *              │           running inside it. There is NO tab bar — a phone
+ *              │           shows one thing at a time, and the sidebar is how
+ *              │           you reach anything else.
+ *              │
+ *              ├─ Sessions  every session, by day, searchable
+ *              ├─ Station   the daemon's world: agents, engines, terminals,
+ *              │            rooms, MCP, tunnels, usage
+ *              └─ Device    this phone: routes, alerts, pairing
  *
- * (root stack, pushed over the tabs)
+ * (root stack, all pushed from the sidebar)
  *   Session          one conversation — the desktop's SessionView, full screen
  *   SessionPanel     that session's workspace rail — deep-linkable full screen
- *   Agents · Browsers · Usage       the machinery Station opens
- *   Providers        API providers  — pushed from Station
+ *   Agents · Browsers · Usage · Providers · Rooms   the machinery, from Station
  *   AgentDetail      one agent in full — rises as a sheet
- *   Mcp · Remote · Daemon           pushed from Station and Device
+ *   Mcp · Remote · Daemon
  *
  * There is one configuration surface, the Device tab. The desktop splits its
  * preferences across a page and modals; a phone does not have room for two
@@ -30,9 +32,11 @@
  * destination, the live History list, Quick Access and the device card. It is
  * mounted at the app root and opened from any page's menu button.
  *
- * **The tab bar** is the fast path: four destinations — Deck, Sessions,
- * Station, Device — plus a raised Command action between them. New task is one
- * tap from anywhere, in the bar, the drawer and the screen headers.
+ * **The sidebar** is the navigation. It carries every destination — the four
+ * top-level pages, the whole machinery, and the live session list — so nothing
+ * is reachable "only from that one screen". The bottom bar the app used to
+ * carry is gone: on a phone it was six labelled glyphs competing with the
+ * content, and the reference this design follows has none.
  *
  * Deep links: every destination is addressable (`qai://` + path), because a
  * notification, a push link and a shared URL all need to land somewhere
@@ -48,7 +52,6 @@ import {
   type NavigatorScreenParams,
 } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Linking from 'expo-linking'
 
@@ -69,7 +72,6 @@ import { McpScreen } from './screens/McpScreen'
 import { RemoteScreen } from './screens/RemoteScreen'
 import { DaemonSettingsScreen } from './screens/DaemonSettingsScreen'
 import { PairingScreen } from './screens/PairingScreen'
-import { TabBar } from './components/TabBar'
 import { openNewTask } from './lib/newTask'
 import { isPaired } from './lib/pairing'
 import { palette } from '@app/design/tokens'
@@ -83,7 +85,11 @@ export type TabParamList = {
 }
 
 export type RootStackParamList = {
+  /** The projects list. */
   Main: NavigatorScreenParams<TabParamList> | undefined
+  Sessions: undefined
+  Station: undefined
+  Device: undefined
   Session: { sessionId: string; approvalId?: string }
   Agents: undefined
   Browsers: undefined
@@ -103,24 +109,18 @@ export type RootStackParamList = {
 export { navigationRef }
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
-const Tab = createBottomTabNavigator<TabParamList>()
 
 const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [Linking.createURL('/'), 'qai://'],
   config: {
     screens: {
-      Main: {
-        screens: {
-          Deck: '',
-          // `history` and `config` are the paths this app shipped before the
-          // rename. A saved link, a home-screen shortcut or a bookmark from the
-          // old build must still land somewhere sensible, so they are aliases
-          // rather than silently broken routes.
-          Sessions: { path: 'sessions', alias: ['history'] },
-          Station: 'station',
-          Device: { path: 'device', alias: ['config'] },
-        },
-      },
+      Main: '',
+      // `history` and `config` are the paths this app shipped before the
+      // rename. A saved link or a bookmark from an old build must still land
+      // somewhere sensible, so they are aliases rather than broken routes.
+      Sessions: { path: 'sessions', alias: ['history'] },
+      Station: 'station',
+      Device: { path: 'device', alias: ['config'] },
       Agents: 'agents',
       Browsers: 'browsers',
       Usage: 'usage',
@@ -151,7 +151,12 @@ export function navigateToAction(data: { sessionId: string; approvalId?: string 
 /** Route to a tab from anywhere below the root stack (drawer, dialog, toast). */
 export function navigateToTab(tab: keyof TabParamList): void {
   if (!navigationRef.isReady()) return
-  navigationRef.navigate('Main', { screen: tab })
+  // The projects list IS the root, so it is the only one that is not a push.
+  if (tab === 'Deck') {
+    navigationRef.navigate('Main')
+    return
+  }
+  navigationRef.navigate(tab as never)
 }
 
 /**
@@ -199,18 +204,9 @@ export function useNewTask(): (agentId?: string, project?: string) => void {
   return openNewTask
 }
 
-function MainTabs() {
-  return (
-    <Tab.Navigator
-      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: palette.canvas } }}
-      tabBar={(props) => <TabBar {...props} />}
-    >
-      <Tab.Screen name="Deck" component={HomeScreen} />
-      <Tab.Screen name="Sessions" component={HistoryScreen} />
-      <Tab.Screen name="Station" component={StationScreen} />
-      <Tab.Screen name="Device" component={ConfigScreen} />
-    </Tab.Navigator>
-  )
+/** The root surface: the projects list. Everything else is pushed over it. */
+function MainScreen() {
+  return <HomeScreen />
 }
 
 /* ── Screen transitions ───────────────────────────────────────────────────────
@@ -233,7 +229,10 @@ export function RootNavigator() {
         contentStyle: { backgroundColor: palette.canvas },
       }}
     >
-      <Stack.Screen name="Main" component={MainTabs} />
+      <Stack.Screen name="Main" component={MainScreen} />
+      <Stack.Screen name="Sessions" component={HistoryScreen} />
+      <Stack.Screen name="Station" component={StationScreen} />
+      <Stack.Screen name="Device" component={ConfigScreen} />
       <Stack.Screen name="Session" component={SessionScreen} />
       {/* Station's destinations: deeper into the machinery, so they push. */}
       <Stack.Screen name="Agents" component={AgentsScreen} />

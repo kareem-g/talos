@@ -226,6 +226,7 @@ export function ScreenScaffold({
   keyboardAware = false,
   headerRight,
   headerLeft,
+  floatingAction,
   style,
 }: {
   title: string
@@ -243,6 +244,8 @@ export function ScreenScaffold({
   keyboardAware?: boolean
   headerRight?: React.ReactNode
   headerLeft?: React.ReactNode
+  /** Pinned over the content, bottom-centre — the app's primary verb. */
+  floatingAction?: React.ReactNode
   style?: StyleProp<ViewStyle>
 }) {
   const scrollY = React.useRef(new Animated.Value(0)).current
@@ -297,6 +300,14 @@ export function ScreenScaffold({
           body
         )}
         {bottomInset > 0 ? <View style={{ height: bottomInset }} /> : null}
+        {floatingAction ? (
+          <View
+            pointerEvents="box-none"
+            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingBottom: 18 }}
+          >
+            {floatingAction}
+          </View>
+        ) : null}
       </View>
     </ScrollProgressContext.Provider>
   )

@@ -32,6 +32,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Section, ScreenScaffold, ListCard } from '@app/components/Screen'
 import { Card, Chevron, IconTile, ListRow, Mono, StatusPill, formatCost, formatCount } from '@app/components/ui'
 import { DrawerButton } from '@app/components/Drawer'
+import { AutomationsSection, SkillsSection } from '@app/components/home/Sections'
 import { useStore } from '@app/store'
 import { mcpApi, remoteApi, roomsApi, terminalsApi } from '@app/lib/api'
 import { palette } from '@app/design/tokens'
@@ -244,6 +245,14 @@ export function StationScreen() {
             accessibilityLabel="Open usage"
           />
         </ListCard>
+      </Section>
+
+      <Section eyebrow="Automations" className="mt-5">
+        <AutomationsSection />
+      </Section>
+
+      <Section eyebrow="Skills" className="mt-5">
+        <SkillsSection />
       </Section>
 
       <Section eyebrow="System" className="mt-5">
