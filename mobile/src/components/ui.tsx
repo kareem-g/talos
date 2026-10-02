@@ -68,6 +68,7 @@ import {
   agentSoft,
   palette,
   radius,
+  shadowFloating,
   shadowOverlay,
   toneBorder,
   toneClass,
@@ -718,8 +719,10 @@ export function ToggleRow({
           className="size-[27px] rounded-full"
           style={{
             transform: [{ translateX: value ? 20 : 0 }],
+            // The knob's cast shadow lives in the tokens (the one file allowed
+            // to name a shadow colour) rather than being written here.
             backgroundColor: palette.ink,
-            shadowColor: '#000000',
+            ...shadowFloating,
             shadowOpacity: 0.25,
             shadowRadius: 2,
             shadowOffset: { width: 0, height: 1 },
