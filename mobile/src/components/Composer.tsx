@@ -261,9 +261,10 @@ export function Composer({ sessionId, uiState }: { sessionId: string; uiState: U
 
         <View
           style={{
+            // The reference's composer: a filled grey box with no outline. The
+            // fill is the affordance; a hairline on top of it is what made the
+            // old one look like a form control.
             borderRadius: radius.lg,
-            borderWidth: 1,
-            borderColor: palette.lineStrong,
             backgroundColor: palette.surface,
             overflow: 'hidden',
           }}

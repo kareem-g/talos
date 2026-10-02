@@ -289,11 +289,14 @@ export function Sheet({
                 {...pan.panHandlers}
                 className="flex-row items-center gap-3 border-b border-line px-4 pb-3 pt-1"
               >
-                <View className="min-w-0 flex-1">
-                  {eyebrow ? <Eyebrow className="mb-1">{eyebrow}</Eyebrow> : null}
+                {/* A spacer the width of the Done pill keeps the title on the
+                    sheet's midline, the way a navigation bar does. */}
+                <View style={{ width: 68 }} />
+                <View className="min-w-0 flex-1 items-center">
+                  {eyebrow ? <Eyebrow className="mb-0.5">{eyebrow}</Eyebrow> : null}
                   <Text
-                    className="text-[15px] leading-[20px] font-semibold text-ink"
-                    style={{ letterSpacing: -0.2 }}
+                    className="text-[17px] leading-[21px] font-semibold text-ink"
+                    style={{ letterSpacing: -0.3 }}
                     numberOfLines={1}
                   >
                     {title}
@@ -315,9 +318,16 @@ export function Sheet({
                     />
                   </IconButton>
                 ) : null}
-                <IconButton label="Close" size={36} onPress={onClose}>
-                  <X size={18} color={palette.ink3} />
-                </IconButton>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
+                  onPress={onClose}
+                  hitSlop={8}
+                  className="h-[34px] items-center justify-center rounded-pill px-4 active:opacity-70"
+                  style={{ backgroundColor: palette.raised, minWidth: 68 }}
+                >
+                  <Text className="text-[15px] font-semibold text-ink">Done</Text>
+                </Pressable>
               </View>
             ) : null}
 

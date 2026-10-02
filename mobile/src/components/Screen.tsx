@@ -83,18 +83,18 @@ function LargeHeader({ title, eyebrow, subtitle, actions, below }: LargeHeaderPr
           gap: 12,
         }}
       >
-        <View style={{ flex: 1, gap: 3 }}>
+        <View style={{ flex: 1, gap: 2 }}>
           {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
           <Text
             accessibilityRole="header"
-            className="text-[27px] leading-[33px] font-bold text-ink"
-            style={{ letterSpacing: -0.8 }}
+            className="text-[34px] leading-[41px] font-bold text-ink"
+            style={{ letterSpacing: -1.1 }}
             numberOfLines={2}
           >
             {title}
           </Text>
           {subtitle ? (
-            <Text className="mt-1 text-[13px] leading-[18px] text-ink-2">{subtitle}</Text>
+            <Text className="mt-1.5 text-[14px] leading-[19px] text-ink-3">{subtitle}</Text>
           ) : null}
         </View>
         {actions}
@@ -148,15 +148,19 @@ export function AppBar({
           instrument's. Opacity is not a stack, so one solid fill is enough. */}
       <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: palette.chrome }} />
       <View
-        className="min-h-[52px] flex-row items-center gap-2 px-2"
+        className="min-h-[56px] flex-row items-center gap-2 px-3"
         style={borderless ? undefined : { borderBottomWidth: 1, borderBottomColor: palette.line }}
       >
         {left}
+        {/* Centred, the way a navigation bar titles itself — the flanking
+            controls are circles of the same size, so the title sits on the
+            screen's midline rather than wherever the left button happens to
+            end. */}
         <Animated.View
           accessibilityRole="header"
-          style={{ flex: 1, opacity: titleOpacity, paddingHorizontal: 6 }}
+          style={{ flex: 1, opacity: titleOpacity, alignItems: 'center', paddingHorizontal: 4 }}
         >
-          <Text className="text-[16px] font-semibold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={1}>
+          <Text className="text-[17px] font-semibold text-ink" style={{ letterSpacing: -0.3 }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
@@ -474,14 +478,9 @@ export function Section({
       {eyebrow || title || action ? (
         <View className="flex-row items-end justify-between gap-3">
           <View className="min-w-0 flex-1 gap-1">
-            {eyebrow ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                <View style={{ width: 2, height: 12, borderRadius: 1, backgroundColor: palette.accent }} />
-                <Eyebrow>{eyebrow}</Eyebrow>
-              </View>
-            ) : null}
+            {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
             {title ? (
-              <Text className="text-[16px] leading-[21px] font-bold text-ink" style={{ letterSpacing: -0.25 }} numberOfLines={2}>
+              <Text className="text-[22px] leading-[28px] font-bold text-ink" style={{ letterSpacing: -0.6 }} numberOfLines={2}>
                 {title}
               </Text>
             ) : null}
@@ -519,7 +518,7 @@ export function ListCard({
   const items = React.Children.toArray(children).filter(Boolean)
   return (
     <View
-      className={cn('overflow-hidden rounded-lg border border-line bg-surface', className)}
+      className={cn('overflow-hidden rounded-lg bg-surface', className)}
       style={style}
     >
       {items.map((child, index) => (
@@ -536,7 +535,7 @@ export function ListCard({
 export function Card({ children, className, style }: { children: React.ReactNode; className?: string; style?: StyleProp<ViewStyle> }) {
   return (
     <View
-      className={cn('overflow-hidden rounded-lg border border-line bg-surface', className)}
+      className={cn('overflow-hidden rounded-lg bg-surface', className)}
       style={style}
     >
       {children}

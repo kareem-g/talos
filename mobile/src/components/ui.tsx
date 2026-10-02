@@ -184,10 +184,7 @@ function Txt({
  */
 export function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <Text
-      className={cn('text-[10px] leading-[13px] font-semibold uppercase text-ink-3', className)}
-      style={{ letterSpacing: 1.5, fontFamily: MONO_FONT }}
-    >
+    <Text className={cn('text-[13px] leading-[17px] font-semibold text-ink-3', className)}>
       {children}
     </Text>
   )
@@ -209,10 +206,10 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 const BUTTON_SURFACE: Record<ButtonVariant, string> = {
   // The primary action is INK, not the accent: a white pill on black is the
   // reference's "New chat", and it is what lets the accent stay a whisper.
-  primary: 'bg-ink border border-ink',
-  secondary: 'bg-raised border border-line-strong',
-  ghost: 'bg-transparent border border-line',
-  danger: 'bg-danger-soft border border-danger-border',
+  primary: 'bg-ink',
+  secondary: 'bg-raised',
+  ghost: 'bg-transparent',
+  danger: 'bg-danger-soft',
 }
 
 const BUTTON_TEXT: Record<ButtonVariant, string> = {
@@ -350,7 +347,7 @@ export function IconButton({
           alignItems: 'center',
           justifyContent: 'center',
           borderRadius: size / 2,
-          backgroundColor: active ? toneSoft[tone] : 'transparent',
+          backgroundColor: active ? toneSoft[tone] : palette.raised,
           opacity: disabled ? 0.35 : 1,
         },
         style as StyleProp<ViewStyle>,
@@ -516,10 +513,10 @@ export function Card({ className, style, tone, ...props }: ViewProps & { tone?: 
   return (
     <View
       {...props}
-      className={cn('rounded-lg border', tone ? undefined : 'border-line bg-surface', className)}
+      className={cn('rounded-lg', tone ? undefined : 'bg-surface', className)}
       style={[
         tone
-          ? { borderColor: toneBorder[tone], backgroundColor: toneSoft[tone] }
+          ? { borderWidth: 1, borderColor: toneBorder[tone], backgroundColor: toneSoft[tone] }
           : undefined,
         style as StyleProp<ViewStyle>,
       ]}
@@ -601,10 +598,9 @@ export function Field({
       {label ? <Txt as="small" className="font-semibold text-ink-2">{label}</Txt> : null}
       <View
         className={cn(
-          'min-h-12 flex-row items-center gap-2.5 rounded-md border bg-field px-3.5',
-          // An errored field keeps the recessed well but its border carries the
-          // danger hue — the value inside must not look tainted, only the slot.
-          error ? 'border-danger-border' : 'border-line',
+          'min-h-12 flex-row items-center gap-2.5 rounded-md bg-field px-4',
+          // Only an error draws an outline; a resting field is a fill.
+          error ? 'border border-danger-border' : '',
           props.multiline && 'items-start py-3',
         )}
       >
@@ -648,10 +644,10 @@ export function SearchField({
 }) {
   return (
     <View
-      className="min-h-11 flex-row items-center gap-2.5 rounded-pill border border-line bg-field px-4"
+      className="min-h-10 flex-row items-center gap-2 rounded-md bg-field px-3.5"
       style={style as StyleProp<ViewStyle>}
     >
-      <SearchIcon size={15} color={palette.ink3} />
+      <SearchIcon size={17} color={palette.ink3} />
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -704,7 +700,7 @@ export function ToggleRow({
       accessibilityState={{ checked: value, disabled: !!disabled }}
       disabled={disabled}
       onPress={() => onChange(!value)}
-      className="min-h-14 flex-row items-center gap-3 rounded-md px-1 py-3 active:bg-raised"
+      className="min-h-14 flex-row items-center gap-3 px-1 py-3 active:opacity-70"
       style={{ opacity: disabled ? 0.4 : 1 }}
     >
       {leading}
@@ -715,14 +711,18 @@ export function ToggleRow({
         ) : null}
       </View>
       <View
-        className="h-[26px] w-[44px] justify-center rounded-full px-0.5"
-        style={{ backgroundColor: value ? palette.accent : palette.raised, borderWidth: 1, borderColor: value ? palette.accent : palette.lineStrong }}
+        className="h-[31px] w-[51px] justify-center rounded-full"
+        style={{ backgroundColor: value ? palette.accent : palette.raised, paddingHorizontal: 2 }}
       >
         <View
-          className="size-[20px] rounded-full"
+          className="size-[27px] rounded-full"
           style={{
             transform: [{ translateX: value ? 20 : 0 }],
-            backgroundColor: value ? palette.accentInk : palette.ink3,
+            backgroundColor: palette.ink,
+            shadowColor: '#000000',
+            shadowOpacity: 0.25,
+            shadowRadius: 2,
+            shadowOffset: { width: 0, height: 1 },
           }}
         />
       </View>
@@ -988,13 +988,13 @@ export function ListRow({
     >
       {leading}
       <View className="min-w-0 flex-1">
-        <Text className="text-[13.5px] leading-[19px] font-medium text-ink" numberOfLines={1}>
+        <Text className="text-[16px] leading-[21px] text-ink" numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
-          <Mono className="mt-0.5 text-[11px] leading-[14px]" numberOfLines={1}>
+          <Text className="mt-0.5 text-[13px] leading-[17px] text-accent" numberOfLines={1}>
             {subtitle}
-          </Mono>
+          </Text>
         ) : null}
       </View>
       {meta ? (
