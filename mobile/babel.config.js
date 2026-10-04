@@ -8,16 +8,16 @@ module.exports = function (api) {
       'nativewind/babel',
     ],
     plugins: [
-      // `@` resolves to the web dashboard's source so the framework-agnostic
-      // core (types, the event reducer, and the pure derivations) is shared
-      // verbatim instead of copied. `@app` is this app's own source. Both babel
-      // (bundling) and tsconfig (types) use the same mapping.
+      // `@` is this app's own source — the shared core (types, the event
+      // reducer, the pure derivations) lives in src/lib and src/types, so the
+      // phone builds standalone. `@app` is the same tree by its other name.
+      // Both babel (bundling) and tsconfig (types) use the same mapping.
       [
         'module-resolver',
         {
           extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
           alias: {
-            '@': path.resolve(__dirname, '../dashboard/src'),
+            '@': path.resolve(__dirname, './src'),
             '@app': path.resolve(__dirname, './src'),
           },
         },

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAI — 03 · Session</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .sess-head { flex-shrink: 0; padding: 6px 8px 8px; }
+  .sess-row-1 { display: flex; align-items: center; gap: 6px; }
+  .sh-main { flex: 1; min-width: 0; margin-left: 2px; }
+  .sh-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sh-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11.5px; color: var(--ink-3); }
+  .sh-status .proj { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sh-detail { margin: 4px 8px 0; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .turn-gap { height: 14px; }
+
+  /* resolved approval */
+  .ap-resolved {
+    margin: 8px 18px;
+    display: flex; align-items: center; gap: 9px;
+    background: var(--card); border-radius: 12px; padding: 11px 14px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+  }
+  .ap-resolved .ok { color: var(--green); }
+  .ap-resolved .r-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ap-resolved .r-decision { color: var(--ink-3); flex-shrink: 0; }
+
+  /* error card */
+  .err-line {
+    margin: 8px 18px;
+    display: flex; gap: 9px; align-items: flex-start;
+    background: var(--red-fill); border-radius: 14px; padding: 12px 14px;
+    font-size: 13px; line-height: 1.5; color: var(--ink-2);
+  }
+  .err-line svg { color: var(--red); flex-shrink: 0; margin-top: 1px; }
+
+  /* resume card */
+  .resume {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-bottom: 8px;
+    height: 44px; border-radius: 14px;
+    background: var(--card-2);
+    font-size: 14px; font-weight: 600; color: var(--ink);
+  }
+  .resume .r-sub { font-weight: 400; color: var(--ink-3); font-size: 12.5px; }
+
+  /* slash menu */
+  .slash { background: var(--card-2); border-radius: 14px; overflow: hidden; margin-bottom: 8px; border: 0.5px solid var(--line); }
+  .slash-head { padding: 7px 14px 5px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-3); border-bottom: 0.5px solid var(--line-soft); }
+  .slash-item { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; font-family: var(--mono); font-size: 13px; color: var(--ink); }
+  .slash-item + .slash-item { border-top: 0.5px solid var(--line-soft); }
+  .slash-item .s-desc { margin-left: auto; font-size: 11px; color: var(--ink-3); font-family: var(--sans); }
+
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: spin 0.9s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  .agent-dot-badge { width: 8px; height: 8px; border-radius: 50%; background: var(--agent-purple); }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9.5 4v16"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4.5v15l13-7.5z"/></symbol>
+</svg>
+
+<div class="stage">
+  <div class="stage-header">
+    <div class="crumb">QAI redesign · screen 03</div>
+    <h1>Session — the conversation</h1>
+    <p>The full remote-control surface: compact translucent header (back · title + status + project · model &amp; permissions · sessions · detail toggle), the timeline with every part card, and the composer in its three states — idle, working with queue + slash commands, and paused with the resume card. Message bubbles follow the iOS grammar: yours in blue, the agent's as plain prose, machine output on quiet mono rows.</p>
+  </div>
+
+  <div class="stage-row">
+
+    <!-- ── Frame 1 · timeline, detailed ─────────────────────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Timeline — detailed</div>
+        <div class="cap-sub">Tool steps expanded, an in-progress plan, and a high-risk approval with option descriptions, custom answer, always-allow and Confirm. Quiet rows carry usage, turn summary, files and subagents.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="navbar sess-head">
+              <div class="sess-row-1">
+                <a class="icobtn" href="02-home.html" aria-label="Back" style="background:transparent"><svg class="icon"><use href="#i-chev-l"/></svg></a>
+                <div class="sh-main">
+                  <div class="sh-title">Redesign mobile shell</div>
+                  <div class="sh-status">
+                    <span class="pill pill-green" style="height:20px"><span class="dot dot-green dot-sm"></span>Working</span>
+                    <span class="proj">agentdeck-linux</span>
+                  </div>
+                </div>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Model and permissions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-sliders"/></svg></a>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Sessions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-panel"/></svg></a>
+                <a class="icobtn on" href="#" aria-label="Toggle technical detail"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-list"/></svg></a>
+              </div>
+              <div class="sh-detail">claude-code · sonnet-4.5 · medium reasoning</div>
+            </div>
+
+            <div class="scroll">
+              <div style="height: 8px"></div>
+
+              <div class="bubble-user">Port the desktop composer, then run the chat tests before you commit.</div>
+
+              <div class="turn-gap"></div>
+
+              <div class="prose">
+                <p>Done — the composer is ported and the suite is green. What changed:</p>
+                <ul>
+                  <li>Queue-when-busy: the send button becomes <b>Queue</b> without moving</li>
+                  <li>Slash commands filter from the caret token</li>
+                  <li>Attachments upload through <code>/api/mobile/attachments</code></li>
+                </ul>
+              </div>
+
+              <div class="toolrun">
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Read src/chat/StateZone.tsx</span><span class="st-ms">34ms</span></div>
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Grep "queueMessage" · 12 files</span><span class="st-ms">210ms</span></div>
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Edit src/chat/StateZone.tsx</span><span class="st-ms">96ms</span></div>
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Bash npm test -- chat</span><span class="st-ms">4.2s</span></div>
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Edit src/chat/Timeline.tsx</span><span class="st-ms">88ms</span></div>
+                <div class="step"><span class="dot dot-green dot-sm"></span><span class="st-name">Read src/store/index.ts</span><span class="st-ms">29ms</span></div>
+                <div class="toolrun-foot">
+                  <span class="dot dot-green dot-sm"></span>
+                  <span>Used 6 tools</span>
+                  <span class="tf-ms">38s</span>
+                  <svg class="icon icon-sm chev" style="width:14px;height:14px"><use href="#i-chev-d"/></svg>
+                </div>
+              </div>
+
+              <div class="plan">
+                <div class="plan-head">
+                  <span class="p-title">Plan — Pairing keep-alive fix</span>
+                  <span class="pill">2/6</span>
+                </div>
+                <div class="plan-steps">
+                  <div class="plan-step done"><span class="tick done"><svg class="icon icon-sm" style="width:11px;height:11px;stroke-width:3"><use href="#i-check"/></svg></span><span class="ps-text">Read the pairing lib and the token refresh path</span></div>
+                  <div class="plan-step"><span class="tick now"></span><span class="ps-text">Add retry with exponential backoff on 401</span></div>
+                  <div class="plan-step"><span class="tick"></span><span class="ps-text">Add a test for the expired-offer path</span></div>
+                </div>
+              </div>
+
+              <div class="approval risky">
+                <div class="ap-head">
+                  <div class="ap-eyebrow"><span class="dot dot-orange"></span>Needs approval <span class="pill pill-red" style="height:19px">HIGH RISK</span></div>
+                  <div class="ap-title">Run a command</div>
+                  <div class="ap-prompt">rm -rf node_modules && npm install</div>
+                </div>
+                <div class="ap-body">
+                  <div class="opt on">
+                    <span class="o-letter">A</span>
+                    <span class="o-main"><div class="o-label">Allow once</div><div class="o-desc">Runs this command only</div></span>
+                  </div>
+                  <div class="opt">
+                    <span class="o-letter">B</span>
+                    <span class="o-main"><div class="o-label">Always allow rm here</div><div class="o-desc">Skips this prompt for similar commands in this project</div></span>
+                  </div>
+                  <div class="opt">
+                    <span class="o-letter">C</span>
+                    <span class="o-main"><div class="o-label">Deny</div></span>
+                  </div>
+                  <div class="field multi" style="margin-bottom:4px">Or write your own answer…</div>
+                  <div class="ap-foot">
+                    <span class="checkline"><span class="checkbox"></span>Always allow</span>
+                    <a class="btn btn-fill btn-sm" href="#">Confirm</a>
+                  </div>
+                </div>
+              </div>
+
+              <div class="quiet-row"><svg class="icon icon-sm" style="width:13px;height:13px;color:var(--ink-3)"><use href="#i-check"/></svg><span style="color:var(--ink-3)">src/chat/StateZone.tsx</span></div>
+              <div class="quiet-row"><span class="dot dot-accent dot-sm"></span><span>reviewer — scanning diffs</span><span style="margin-left:auto;color:var(--ink-3)">running</span></div>
+              <div class="quiet-row"><span style="color:var(--ink-3)">↑ 12.4k ↓ 3.1k · $0.042</span></div>
+              <div class="quiet-row"><span class="dot dot-dim dot-sm"></span><span style="color:var(--ink-3)">end_turn · 38s · 3.1k out</span></div>
+
+              <div style="height: 12px"></div>
+            </div>
+
+            <div class="composer">
+              <div class="composer-field">
+                <span class="mini-icon" style="width:32px;height:32px"><svg class="icon icon-sm"><use href="#i-clip"/></svg></span>
+                <div class="composer-input">looks good — ship it</div>
+                <span class="send on"><svg class="icon icon-sm"><use href="#i-up"/></svg></span>
+              </div>
+            </div>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+    <!-- ── Frame 2 · working: queue + slash + notice ───────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Working — queue &amp; slash</div>
+        <div class="cap-sub">The control never moves while busy: send becomes Queue, stop appears, and queued follow-ups stack as chips with Steer / edit / remove. Typing “/” opens the command menu. A reconnect notice can ride under the header.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="navbar sess-head">
+              <div class="sess-row-1">
+                <a class="icobtn" href="02-home.html" aria-label="Back" style="background:transparent"><svg class="icon"><use href="#i-chev-l"/></svg></a>
+                <div class="sh-main">
+                  <div class="sh-title">Redesign mobile shell</div>
+                  <div class="sh-status">
+                    <span class="pill pill-green" style="height:20px"><span class="dot dot-green dot-sm"></span>Working</span>
+                    <span class="proj">agentdeck-linux</span>
+                  </div>
+                </div>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Model and permissions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-sliders"/></svg></a>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Sessions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-panel"/></svg></a>
+                <a class="icobtn" href="03-session.html" aria-label="Toggle technical detail"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-list"/></svg></a>
+              </div>
+              <div class="sh-detail">claude-code · sonnet-4.5 · medium reasoning</div>
+            </div>
+
+            <div class="notice">
+              <svg class="icon icon-sm" style="margin-top:1px; color: var(--orange)"><use href="#i-alert"/></svg>
+              <span style="flex:1">Connection lost — reconnecting. Your message is safe to queue.</span>
+              <svg class="icon icon-sm" style="color:var(--ink-3)"><use href="#i-x"/></svg>
+            </div>
+
+            <div class="scroll">
+              <div style="height: 10px"></div>
+              <div class="bubble-user">Now sweep the mobile routes against the daemon while you're in there.</div>
+              <div class="turn-gap"></div>
+              <div class="toolrun">
+                <div class="step"><span class="spinner"></span><span class="st-name">Grep "/api/mobile" · 41 files</span></div>
+                <div class="toolrun-foot">
+                  <span class="dot dot-accent dot-sm pulse" style="color: var(--accent)"></span>
+                  <span>Working…</span>
+                  <span class="tf-ms">3.1s</span>
+                  <svg class="icon icon-sm chev" style="width:14px;height:14px"><use href="#i-chev-d"/></svg>
+                </div>
+              </div>
+              <div style="height: 12px"></div>
+            </div>
+
+            <div class="composer">
+              <div class="slash">
+                <div class="slash-head">COMMANDS</div>
+                <div class="slash-item">/review <span class="s-desc">Ask the agent to review its diff</span></div>
+                <div class="slash-item">/release-notes <span class="s-desc">Summarise changes since the last tag</span></div>
+              </div>
+
+              <div class="queue-chip" style="width:fit-content">
+                <svg class="icon icon-sm" style="width:13px;height:13px;color:var(--ink-3)"><use href="#i-clip"/></svg>
+                <span class="q-text">stack-trace.png</span>
+                <span class="mini-icon"><svg class="icon icon-sm" style="width:12px;height:12px"><use href="#i-x"/></svg></span>
+              </div>
+
+              <div class="queue-chip">
+                <span class="q-text">add a retry test for the 401 path</span>
+                <span class="mini-action">Steer</span>
+                <span class="mini-icon"><svg class="icon icon-sm" style="width:13px;height:13px"><use href="#i-pencil"/></svg></span>
+                <span class="mini-icon"><svg class="icon icon-sm" style="width:13px;height:13px"><use href="#i-trash"/></svg></span>
+              </div>
+
+              <div class="composer-field">
+                <span class="mini-icon" style="width:32px;height:32px"><svg class="icon icon-sm"><use href="#i-clip"/></svg></span>
+                <div class="composer-input">/re</div>
+                <span class="stopbtn"><svg class="icon icon-sm" style="width:12px;height:12px"><use href="#i-stop"/></svg></span>
+                <span class="send queue"><svg class="icon icon-sm" style="width:14px;height:14px"><use href="#i-up"/></svg>Queue</span>
+              </div>
+            </div>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+    <!-- ── Frame 3 · paused: resume + proposed plan ─────────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Paused — plan awaiting you</div>
+        <div class="cap-sub">The engine is down but the session lives: the resume card sits on the composer, a proposed plan asks Approve / Decline, earlier approvals collapse to resolved rows, and failures surface as red cards with their message.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="navbar sess-head">
+              <div class="sess-row-1">
+                <a class="icobtn" href="02-home.html" aria-label="Back" style="background:transparent"><svg class="icon"><use href="#i-chev-l"/></svg></a>
+                <div class="sh-main">
+                  <div class="sh-title">Port the timeline</div>
+                  <div class="sh-status">
+                    <span class="pill pill-sky" style="height:20px"><span class="dot dot-sky dot-sm"></span>Paused</span>
+                    <span class="proj">agentdeck-linux</span>
+                  </div>
+                </div>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Model and permissions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-sliders"/></svg></a>
+                <a class="icobtn" href="04-session-panes.html" aria-label="Sessions"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-panel"/></svg></a>
+                <a class="icobtn" href="03-session.html" aria-label="Toggle technical detail"><svg class="icon icon-sm" style="width:18px;height:18px"><use href="#i-list"/></svg></a>
+              </div>
+              <div class="sh-detail">opencode · gpt-5.2 · high reasoning</div>
+            </div>
+
+            <div class="scroll">
+              <div style="height: 10px"></div>
+
+              <div class="ap-resolved">
+                <svg class="icon icon-sm ok" style="width:13px;height:13px"><use href="#i-check"/></svg>
+                <span class="r-text">Write mobile/src/ui.tsx</span>
+                <span class="r-decision">allow_once</span>
+              </div>
+
+              <div class="approval normal" style="margin-top: 12px">
+                <div class="ap-head">
+                  <div class="ap-eyebrow"><span class="dot dot-orange"></span>Question</div>
+                  <div class="ap-title">Which fixture runner should the tests use?</div>
+                </div>
+                <div class="ap-body">
+                  <div class="opt on">
+                    <span class="o-letter">A</span>
+                    <span class="o-main"><div class="o-label">Vitest</div><div class="o-desc">Already in the repo's devDependencies</div></span>
+                  </div>
+                  <div class="opt on">
+                    <span class="o-letter">B</span>
+                    <span class="o-main"><div class="o-label">Node's built-in runner</div><div class="o-desc">Zero extra deps, fewer matchers</div></span>
+                  </div>
+                  <div class="opt">
+                    <span class="o-letter">C</span>
+                    <span class="o-main"><div class="o-label">Jest</div></span>
+                  </div>
+                  <div class="ap-foot">
+                    <span class="checkline" style="color:var(--ink-3)">Select all that apply</span>
+                    <a class="btn btn-fill btn-sm" href="03-session.html">Submit</a>
+                  </div>
+                </div>
+              </div>
+
+              <div class="plan">
+                <div class="plan-head">
+                  <span class="p-title">Plan — Port the timeline</span>
+                  <span class="pill pill-orange" style="height:19px">PROPOSED</span>
+                </div>
+                <div class="plan-steps">
+                  <div class="plan-step"><span class="tick"></span><span class="ps-text">Fork the desktop's Turn renderer for touch</span></div>
+                  <div class="plan-step"><span class="tick"></span><span class="ps-text">Fold consecutive tool calls into one run card</span></div>
+                  <div class="plan-step"><span class="tick"></span><span class="ps-text">Port plan / approval / error cards as sheets-safe views</span></div>
+                </div>
+                <div style="display:flex; gap:8px; justify-content:flex-end; padding: 10px 14px 12px; border-top: 0.5px solid var(--line-soft)">
+                  <a class="btn btn-gray btn-sm" href="#">Decline</a>
+                  <a class="btn btn-fill btn-sm" href="03-session.html">Approve Plan</a>
+                </div>
+              </div>
+
+              <div class="err-line">
+                <svg class="icon icon-sm"><use href="#i-alert"/></svg>
+                <span>The agent exited while writing src/chat/Timeline.tsx — exit code 1. Resume to continue from the last checkpoint.</span>
+              </div>
+
+              <div class="toolrun">
+                <div class="step"><span class="dot dot-red dot-sm"></span><span class="st-name">Edit src/chat/Timeline.tsx</span><span class="st-ms">—</span></div>
+                <div class="toolrun-foot">
+                  <span class="dot dot-red dot-sm"></span>
+                  <span>Ran into a problem</span>
+                  <span class="tf-ms">1 of 3</span>
+                  <svg class="icon icon-sm chev" style="width:14px;height:14px"><use href="#i-chev-d"/></svg>
+                </div>
+              </div>
+
+              <div style="height: 12px"></div>
+            </div>
+
+            <div class="composer">
+              <div class="resume">
+                <svg class="icon icon-sm" style="width:14px;height:14px;color:var(--green)"><use href="#i-play"/></svg>
+                Resume session <span class="r-sub">· continue from where it left off</span>
+              </div>
+              <div class="composer-field">
+                <span class="mini-icon" style="width:32px;height:32px;opacity:0.4"><svg class="icon icon-sm"><use href="#i-clip"/></svg></span>
+                <div class="composer-input"><span class="ph">Message the agent…</span></div>
+                <span class="send"><svg class="icon icon-sm"><use href="#i-up"/></svg></span>
+              </div>
+            </div>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

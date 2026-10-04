@@ -12,6 +12,8 @@
  * browser, skills, orchestration) are added as their screens are ported.
  */
 
+import { File } from 'expo-file-system'
+
 import { resolveApiUrl } from './native'
 import { storage } from './storage'
 import { persistToken, TOKEN_KEY } from './secureStore'
@@ -247,14 +249,20 @@ export interface UploadedAttachment {
 
 export const attachmentsApi = {
   /**
-   * Upload one local file. `FormData` with a `{ uri, name, type }` part is how
-   * React Native streams a file, so no blob has to be read into JS memory.
+   * Upload one local file.
+   *
+   * React Native's classic trick — appending `{ uri, name, type }` to a
+   * `FormData` — does not work here: this app fetches through Expo's `fetch`,
+   * which serialises the body itself and only understands a `string`, a `Blob`
+   * or an object with `bytes()`. An `{ uri }` part throws "Unsupported
+   * FormDataPart implementation", so every attachment failed. `expo-file-system`'s
+   * `File` is a `Blob` over a path, which is the shape the serializer wants.
    */
   upload: async (sessionId: string, file: { uri: string; name: string; type?: string }) => {
     const form = new FormData()
-    // RN's FormData accepts this shape at runtime; the cast satisfies TS, which
-    // models the DOM's File/Blob union instead.
-    form.append(file.name, { uri: file.uri, name: file.name, type: file.type ?? 'application/octet-stream' } as never)
+    // `File` derives its media type from the extension — which is why the
+    // composer normalises every attachment to .jpg before it gets here.
+    form.append(file.name, new File(file.uri) as unknown as Blob)
     const token = deviceToken()
     const target = resolveApiUrl(
       `/api/mobile/attachments/upload?session=${encodeURIComponent(sessionId)}`,
@@ -365,19 +373,52 @@ export interface DirEntry {
   dir: boolean
 }
 
+export interface DirRoot {
+  name: string
+  path: string
+}
+
 export interface DirListing {
   path: string
   exists: boolean
   home?: string
+  /** Absent at the filesystem root, where there is nowhere further up. */
   parent?: string
-  roots?: string[]
+  /** Shortcut folders under `$HOME` — only sent when no path was requested. */
+  roots?: DirRoot[]
   entries: DirEntry[]
 }
 
+/**
+ * The daemon's overview of a project's working tree: the branch, the files that
+ * differ from HEAD — each carrying its own patch — and the worktrees checked
+ * out beside it.
+ *
+ * The field names are the daemon's, verbatim: `files` (not `changed_files`),
+ * and a worktree names itself `worktree` (not `path`). They were previously
+ * declared the other way here, which is part of why no view ever rendered
+ * them — a type nobody can satisfy is a type nobody reads.
+ */
+export interface WorkspaceFile {
+  path: string
+  /** `M` / `A` / `D` / `??` — git's own short status. */
+  status?: string
+  staged?: boolean
+  /** The unified diff for this file, when the daemon computed one. */
+  diff?: string
+}
+
+export interface WorkspaceWorktree {
+  worktree: string
+  branch?: string
+  HEAD?: string
+}
+
 export interface WorkspaceOverview {
-  worktrees?: Array<{ path: string; branch?: string; [key: string]: unknown }>
-  changed_files?: Array<{ path: string; status?: string; [key: string]: unknown }>
-  diffs?: Record<string, string>
+  project?: string
+  branch?: string
+  files?: WorkspaceFile[]
+  worktrees?: WorkspaceWorktree[]
   [key: string]: unknown
 }
 

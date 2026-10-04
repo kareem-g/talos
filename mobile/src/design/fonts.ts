@@ -1,46 +1,37 @@
 /**
- * The app's faces.
- *
- * THE UI IS THE SYSTEM FONT, ON PURPOSE.
- * -------------------------------------
- * The reference for this app is iOS itself: the page is black, the cards are
- * Apple's greys, the controls are capsules, and the type is SF Pro. A bundled
- * grotesque — which is what this file used to load — fights all of that. It made
- * every screen read as "an app with a brand font" instead of "the phone",
- * which is the opposite of the quiet, native feel the design is after.
- *
- * So the UI face is the platform's own: no `fontFamily`, and the type scale
- * carries the weight. That also means there is nothing to load at boot for the
- * UI, and nothing to fall back from.
- *
- * THE MONO FACE IS BUNDLED, because it is a *readout*, not prose. Every id,
- * path, count, timestamp and status word is set in it so the app reads in
- * columns, and the platform monos (Menlo, Droid Sans Mono) are the one thing
- * iOS and Android do not agree on. JetBrains Mono is what the desktop uses, so
- * a diff on the phone and a diff in the browser are the same typeface.
+ * fonts — the JetBrains Mono faces ship as assets for machine text; the sans
+ * ramp is the platform system face, addressed through distinct weight
+ * sentinels so semibold and bold resolve honestly.
  */
 
-import JetBrainsMonoRegular from '../../assets/fonts/JetBrainsMono-Regular.ttf'
-import JetBrainsMonoSemiBold from '../../assets/fonts/JetBrainsMono-SemiBold.ttf'
+import JetBrainsRegular from '../../assets/fonts/JetBrainsMono-Regular.ttf'
+import JetBrainsSemiBold from '../../assets/fonts/JetBrainsMono-SemiBold.ttf'
 
-/** Passed straight to `useFonts`. The keys ARE the family names. */
 export const FONT_ASSETS = {
-  'JetBrainsMono-Regular': JetBrainsMonoRegular,
-  'JetBrainsMono-SemiBold': JetBrainsMonoSemiBold,
+  'JetBrainsMono-Regular': JetBrainsRegular,
+  'JetBrainsMono-SemiBold': JetBrainsSemiBold,
 } as const
 
-/**
- * The UI face. `undefined` means "let the platform choose" — SF Pro on iOS,
- * Roboto on Android — which is the whole point.
- */
-export const SANS: string | undefined = undefined
-export const SANS_SEMIBOLD: string | undefined = undefined
-
-/** Long-form prose the agent wrote: also the system face, for the same reason. */
-export const PROSE: string | undefined = undefined
-export const PROSE_MEDIUM: string | undefined = undefined
-export const PROSE_SEMIBOLD: string | undefined = undefined
-
-/** Data. */
 export const MONO = 'JetBrainsMono-Regular'
-export const MONO_SEMIBOLD = 'JetBrainsMono-SemiBold'
+export const MONO_BOLD = 'JetBrainsMono-SemiBold'
+
+export const W_MEDIUM = 'sans:500'
+export const W_SEMI = 'sans:600'
+export const W_BOLD = 'sans:700'
+
+export function fontOf(token?: string): { fontFamily?: string; fontWeight?: '400' | '500' | '600' | '700' } {
+  switch (token) {
+    case W_MEDIUM:
+      return { fontWeight: '500' }
+    case W_SEMI:
+      return { fontWeight: '600' }
+    case W_BOLD:
+      return { fontWeight: '700' }
+    case MONO:
+      return { fontFamily: MONO }
+    case MONO_BOLD:
+      return { fontFamily: MONO, fontWeight: '600' }
+    default:
+      return {}
+  }
+}

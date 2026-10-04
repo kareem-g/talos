@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAI — 08 · Usage</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hero { padding: 14px 16px 0; }
+  .u-row { display: flex; align-items: center; gap: 10px; padding: 12px 16px; min-height: 54px; position: relative; }
+  .u-row + .u-row::before { content: ''; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--line-soft); }
+  .u-name { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .u-tokens { font-family: var(--mono); font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .u-cost { width: 64px; text-align: right; font-family: var(--mono); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .stats { display: flex; gap: 12px; margin: 16px 16px 0; }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><path d="M4 8h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/><path d="M9 17v-3"/><path d="M15 17v-3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+</svg>
+
+<div class="stage">
+  <div class="stage-header">
+    <div class="crumb">QAI redesign · screen 08</div>
+    <h1>Usage — the cost of the fleet</h1>
+    <p>Per-session token and cost accounting, scanned on-device from the loaded conversations (there is no server endpoint for it), plus the fleet total. Rows stay live as transcripts stream.</p>
+  </div>
+
+  <div class="stage-row">
+
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Fleet totals + per session</div>
+        <div class="cap-sub">Sorted by cost, heaviest first. Tokens in compact mono; costs tabular so the column aligns.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="scroll">
+              <div class="hero">
+                <div class="large-title">Usage</div>
+              </div>
+
+              <div class="stats">
+                <div class="statcard">
+                  <div class="sc-label">Fleet cost</div>
+                  <div class="sc-value">$12.48</div>
+                </div>
+                <div class="statcard">
+                  <div class="sc-label">Tokens</div>
+                  <div class="sc-value">1.2M</div>
+                </div>
+              </div>
+
+              <div class="card" style="margin-top: 16px">
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-purple)"></span>
+                  <span class="u-name">Redesign mobile shell</span>
+                  <span class="u-tokens">412k</span>
+                  <span class="u-cost">$4.81</span>
+                </div>
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-teal)"></span>
+                  <span class="u-name">Sweep the API surface</span>
+                  <span class="u-tokens">286k</span>
+                  <span class="u-cost">$2.97</span>
+                </div>
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-green)"></span>
+                  <span class="u-name">Scaffold the pairing e2e test</span>
+                  <span class="u-tokens">198k</span>
+                  <span class="u-cost">$1.94</span>
+                </div>
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-teal)"></span>
+                  <span class="u-name">Draft the usage page</span>
+                  <span class="u-tokens">141k</span>
+                  <span class="u-cost">$1.31</span>
+                </div>
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-blue)"></span>
+                  <span class="u-name">Session hydration bug</span>
+                  <span class="u-tokens">84k</span>
+                  <span class="u-cost">$0.79</span>
+                </div>
+                <div class="u-row">
+                  <span class="dot" style="background: var(--agent-pink)"></span>
+                  <span class="u-name">Typescript strict pass</span>
+                  <span class="u-tokens">62k</span>
+                  <span class="u-cost">$0.66</span>
+                </div>
+              </div>
+
+              <div class="footer-note">Scanned from the conversations this device has loaded — totals grow as sessions are opened.</div>
+              <div style="height: 30px"></div>
+            </div>
+
+            <nav class="tabbar">
+              <a class="tab" href="02-home.html"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+              <a class="tab" href="06-history.html"><svg class="icon"><use href="#i-clock"/></svg>History</a>
+              <a class="tab" href="07-agents.html"><svg class="icon"><use href="#i-bot"/></svg>Agents</a>
+              <a class="tab on" href="08-usage.html"><svg class="icon"><use href="#i-chart"/></svg>Usage</a>
+              <a class="tab" href="09-config.html"><svg class="icon"><use href="#i-sliders"/></svg>Config</a>
+            </nav>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

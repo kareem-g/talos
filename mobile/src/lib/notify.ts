@@ -25,11 +25,29 @@
  *    approval screen re-fetches state from the backend and the user must act.
  */
 
-import * as Notifications from 'expo-notifications'
 import { Linking, Platform } from 'react-native'
 import type { IncomingFrame } from '@/types/protocol'
 import { readStringSet, writeStringSet } from './storage'
 import { palette } from '@app/design/tokens'
+
+// expo-notifications removed remote push from Expo Go (SDK 53+ on Android) and
+// its module now THROWS during evaluation there — before any guard below could
+// run, taking the whole app down on the splash screen. So the module is
+// required lazily once: a runtime that cannot provide it gets `null`, and
+// every entry point degrades to "notifications unavailable" (the permission
+// and tap paths report undetermined / no-op, nothing is scheduled). A dev
+// build or a real install gets the real module and identical behavior.
+const Notifications: typeof import('expo-notifications') | null = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-notifications') as typeof import('expo-notifications')
+  } catch {
+    if (__DEV__) {
+      console.warn('[qai] expo-notifications unavailable in this runtime — alerts will not be presented.')
+    }
+    return null
+  }
+})()
 
 const DEDUP_KEY = 'qai-notified-ids'
 const CHANNEL_ID = 'agent-attention'
@@ -38,12 +56,10 @@ const CATEGORY_ID = 'qai-attention'
 // How a notification presents if the app is foregrounded when one slips through.
 // We mostly suppress in the foreground (the UI is right there), but a banner is
 // the right fallback rather than dropping it silently.
-// Wrapped because this runs at import, and a runtime without the notifications
-// module (Expo Go restricts them) would otherwise take the whole app down with
-// it over a foreground-presentation preference. Notifications are a nicety here;
-// nothing else in the app depends on this having been registered.
+// Notifications are a nicety here; nothing else in the app depends on this
+// having been registered.
 try {
-  Notifications.setNotificationHandler({
+  Notifications?.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
       shouldShowList: true,
@@ -101,6 +117,7 @@ export function resetDedup(): void {
 
 /** Create the Android channel and the iOS category once, at app start. */
 export async function ensureNotificationSetup(): Promise<void> {
+  if (!Notifications) return
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
       name: 'Agent attention',
@@ -117,6 +134,7 @@ export async function ensureNotificationSetup(): Promise<void> {
 }
 
 export async function permissionState(): Promise<PermissionState> {
+  if (!Notifications) return 'undetermined'
   const { status } = await Notifications.getPermissionsAsync()
   return normalize(status)
 }
@@ -127,6 +145,7 @@ export async function permissionState(): Promise<PermissionState> {
  * prompt once, and burning it before the user understands why is wasteful.
  */
 export async function requestPermission(): Promise<PermissionState> {
+  if (!Notifications) return 'undetermined'
   const { status } = await Notifications.requestPermissionsAsync({
     ios: { allowAlert: true, allowBadge: true, allowSound: true },
   })
@@ -166,6 +185,7 @@ export async function openSystemNotificationSettings(): Promise<void> {
  * which should always fire so the user gets confirmation.
  */
 export async function present(n: AttentionNotification, force = false): Promise<boolean> {
+  if (!Notifications) return false
   // Permission check is async, so do it FIRST, then check-and-claim the dedup id
   // synchronously. Claiming after the await means two concurrent calls for the
   // same id (a replayed/duplicate frame, or a realtime event racing a reconnect
@@ -187,7 +207,7 @@ export async function present(n: AttentionNotification, force = false): Promise<
     // null trigger = deliver immediately.
     trigger: null,
     ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-  } as Notifications.NotificationRequestInput)
+  } as import('expo-notifications').NotificationRequestInput)
   return true
 }
 
@@ -317,6 +337,7 @@ export function notificationForPending(pending: {
 export function onNotificationTap(
   handler: (data: NotificationData) => void,
 ): () => void {
+  if (!Notifications) return () => undefined
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data = response.notification.request.content.data as unknown as NotificationData | undefined
     if (data && typeof data.sessionId === 'string') handler(data)

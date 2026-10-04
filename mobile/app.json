@@ -7,11 +7,11 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#131315",
+    "backgroundColor": "#000000",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#131315"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
@@ -29,7 +29,7 @@
     "android": {
       "package": "com.qai.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#131315",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -50,7 +50,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#131315"
+          "backgroundColor": "#000000"
         }
       ],
       [
@@ -63,7 +63,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#5B8DEF"
+          "color": "#0A84FF"
         }
       ],
       [

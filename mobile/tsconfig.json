@@ -6,7 +6,7 @@
     "noUnusedParameters": true,
     "paths": {
       "@/*": [
-        "../dashboard/src/*"
+        "./src/*"
       ],
       "@app/*": [
         "./src/*"

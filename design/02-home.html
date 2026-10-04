@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAI — 02 · Home</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hero { padding: 14px 16px 0; }
+  .hero-row { display: flex; align-items: flex-end; gap: 10px; }
+  .hero-sub {
+    margin-top: 7px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hero-sub .dot { width: 7px; height: 7px; }
+  .hero-sub b { color: var(--ink-2); font-weight: 500; }
+
+  .triage-card { margin: 0 16px 10px; background: var(--card); border-radius: var(--r-card); padding: 14px 16px 12px; }
+  .tc-head { display: flex; align-items: center; gap: 8px; }
+  .tc-name { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tc-when { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .tc-headline { margin-top: 6px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--ink-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .tc-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 11px; }
+
+  .active-card {
+    margin: 0 16px 10px; background: var(--card); border-radius: var(--r-card);
+    display: flex; align-items: center; gap: 12px; padding: 13px 16px;
+  }
+  .ac-main { flex: 1; min-width: 0; }
+  .ac-name { font-size: 15.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-sub { margin-top: 2px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-task { margin-top: 5px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+  .loader { display: flex; gap: 3.5px; align-items: center; }
+  .loader i { width: 4.5px; height: 4.5px; border-radius: 50%; background: var(--ink-2); animation: breathe 1.15s ease-in-out infinite; }
+  .loader i:nth-child(2) { animation-delay: 0.18s; }
+  .loader i:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .loader i { animation: none; opacity: 0.6; } }
+  .ac-detail { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  .proj-card { margin: 0 16px 12px; background: var(--card); border-radius: var(--r-card); overflow: hidden; }
+  .proj-head { display: flex; align-items: center; gap: 11px; padding: 12px 16px; }
+  .proj-folder { width: 30px; height: 30px; border-radius: 8px; background: var(--fill); color: var(--ink-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .proj-name-wrap { flex: 1; min-width: 0; }
+  .proj-badges { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+  .proj-path { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .minibadge { display: inline-flex; align-items: center; gap: 4px; height: 19px; padding: 0 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
+  .minibadge .dot { width: 5px; height: 5px; }
+  .mb-green { background: var(--green-fill); color: var(--green); }
+  .mb-orange { background: var(--orange-fill); color: var(--orange); }
+  .proj-plus { width: 27px; height: 27px; border-radius: 50%; background: var(--fill); color: var(--ink-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .proj-chev { color: var(--ink-3); flex-shrink: 0; }
+  .proj-chev.closed svg { transform: rotate(-90deg); }
+
+  .sess-row { display: flex; align-items: center; gap: 10px; padding: 11px 16px; text-decoration: none; color: inherit; position: relative; }
+  .sess-row + .sess-row::before { content: ''; position: absolute; top: 0; left: 36px; right: 16px; height: 0.5px; background: var(--line-soft); }
+  .sess-name { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; }
+  .sess-name .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .star { color: var(--ink-4); flex-shrink: 0; }
+  .star.on { color: var(--orange); }
+  .star.on svg { fill: var(--orange); }
+
+  .skel {
+    background: var(--card);
+    border-radius: var(--r-card);
+    margin: 0 16px 10px;
+    position: relative;
+    overflow: hidden;
+    animation: skelfade 1.6s ease-in-out infinite alternate;
+  }
+  .skel::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.06) 50%, transparent 70%);
+    background-size: 220% 100%;
+    animation: skelsweep 1.8s ease-in-out infinite;
+  }
+  .skel-line { height: 11px; border-radius: 6px; background: var(--fill); }
+  .skel-pill { height: 20px; width: 74px; border-radius: 999px; background: var(--fill); }
+  .skel-dot { width: 30px; height: 30px; border-radius: 8px; background: var(--fill); flex-shrink: 0; }
+  @keyframes skelfade { from { opacity: 0.62; } to { opacity: 1; } }
+  @keyframes skelsweep { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+  @media (prefers-reduced-motion: reduce) { .skel, .skel::after { animation: none; } }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><path d="M4 8h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/><path d="M9 17v-3"/><path d="M15 17v-3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+</svg>
+
+<div class="stage">
+  <div class="stage-header">
+    <div class="crumb">QAI redesign · screen 02</div>
+    <h1>Home — Projects</h1>
+    <p>The default tab. A large title with the connection truth, the session filter strip, the needs-you triage with inline Allow / Resume / Retry, the running-agent cards, and the collapsible project groups. Everything the current HomeScreen does — same sections, same controls — rebuilt in the iOS grouped idiom. Pull-to-refresh stays.</p>
+  </div>
+
+  <div class="stage-row">
+
+    <!-- ── Frame 1 · populated ─────────────────────────────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Populated</div>
+        <div class="cap-sub">3 sessions need you (an approval, a pause, a crash), 3 running, 6 projects. The attention count echoes in the filter strip.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="scroll">
+
+              <div class="hero">
+                <div class="hero-row">
+                  <div class="large-title">Projects</div>
+                  <div style="flex:1"></div>
+                  <a class="icobtn" href="05-new-task.html" aria-label="New session"><svg class="icon"><use href="#i-plus"/></svg></a>
+                </div>
+                <div class="hero-sub">
+                  <span class="dot dot-green pulse" style="color: var(--green)"></span>
+                  <b>Live</b><span>·</span><span>kareem-desktop</span><span>·</span><span>6 projects · 14 sessions</span>
+                </div>
+              </div>
+
+              <div class="search"><svg class="icon icon-sm"><use href="#i-search"/></svg>Search sessions, projects, agents</div>
+
+              <div class="chips">
+                <span class="chip on">All <span class="n">14</span></span>
+                <span class="chip"><span class="dot dot-orange dot-sm"></span>Attention <span class="n">3</span></span>
+                <span class="chip">Active <span class="n">3</span></span>
+                <span class="chip">Starred <span class="n">2</span></span>
+                <span class="chip">Archived <span class="n">1</span></span>
+              </div>
+
+              <!-- Triage -->
+              <div class="section-head">
+                <span class="s-title">Needs You</span><span class="s-count">3</span>
+                <span class="s-spacer"></span>
+              </div>
+
+              <div class="triage-card">
+                <div class="tc-head">
+                  <span class="tc-name">Redesign mobile shell</span>
+                  <span class="pill pill-orange"><span class="dot dot-orange"></span>Approval</span>
+                  <span class="tc-when">14m</span>
+                </div>
+                <div class="tc-headline">rm -rf node_modules && npm install — run this command in ~/agentdeck-linux?</div>
+                <div class="tc-actions">
+                  <a class="btn btn-fill btn-sm" href="03-session.html">Allow</a>
+                  <a class="btn btn-ghost btn-sm" href="03-session.html">Open <svg class="icon icon-sm" style="width:13px;height:13px"><use href="#i-chev-r"/></svg></a>
+                </div>
+              </div>
+
+              <div class="triage-card">
+                <div class="tc-head">
+                  <span class="tc-name">Port the timeline</span>
+                  <span class="pill pill-sky"><span class="dot dot-sky"></span>Paused</span>
+                  <span class="tc-when">2h</span>
+                </div>
+                <div class="tc-headline">Engine exited — waiting for you before it continues</div>
+                <div class="tc-actions">
+                  <a class="btn btn-fill btn-sm" href="03-session.html">Resume</a>
+                  <a class="btn btn-ghost btn-sm" href="03-session.html">Open <svg class="icon icon-sm" style="width:13px;height:13px"><use href="#i-chev-r"/></svg></a>
+                </div>
+              </div>
+
+              <div class="triage-card">
+                <div class="tc-head">
+                  <span class="tc-name">Add trail difficulty</span>
+                  <span class="pill pill-red"><span class="dot dot-red"></span>Failed</span>
+                  <span class="tc-when">2d</span>
+                </div>
+                <div class="tc-headline">gemini CLI not found on PATH (exit 1)</div>
+                <div class="tc-actions">
+                  <a class="btn btn-gray btn-sm" href="03-session.html">Retry</a>
+                  <a class="btn btn-ghost btn-sm" href="03-session.html">Open <svg class="icon icon-sm" style="width:13px;height:13px"><use href="#i-chev-r"/></svg></a>
+                </div>
+              </div>
+
+              <!-- Active -->
+              <div class="section-head">
+                <span class="s-title">Active</span><span class="s-count">3 running</span>
+                <span class="s-spacer"></span>
+              </div>
+
+              <a class="active-card" href="03-session.html">
+                <div class="ac-main">
+                  <div class="ac-name">Fix the pairing keep-alive</div>
+                  <div class="ac-sub">Claude · agentdeck-linux</div>
+                  <div class="ac-task">Make the token refresh retry with backoff</div>
+                </div>
+                <div class="ac-side">
+                  <span class="loader"><i></i><i></i><i></i></span>
+                  <span class="ac-detail">Editing ui.tsx · 6s</span>
+                </div>
+              </a>
+
+              <a class="active-card" href="03-session.html">
+                <div class="ac-main">
+                  <div class="ac-name">Draft the usage page</div>
+                  <div class="ac-sub">OpenCode · qai-docs</div>
+                  <div class="ac-task">Write the fleet-cost section, then lint</div>
+                </div>
+                <div class="ac-side">
+                  <span class="loader"><i></i><i></i><i></i></span>
+                  <span class="ac-detail">Thinking · 12s</span>
+                </div>
+              </a>
+
+              <a class="active-card" href="03-session.html">
+                <div class="ac-main">
+                  <div class="ac-name">Sweep the API surface</div>
+                  <div class="ac-sub">Codex · agentdeck-linux</div>
+                  <div class="ac-task">Cross-check every mobile route against the daemon</div>
+                </div>
+                <div class="ac-side">
+                  <span class="loader"><i></i><i></i><i></i></span>
+                  <span class="ac-detail">Grep · 2s</span>
+                </div>
+              </a>
+
+              <!-- Projects -->
+              <div class="section-head">
+                <span class="s-title">Projects</span><span class="s-count">6</span>
+                <span class="s-spacer"></span>
+              </div>
+
+              <div class="proj-card">
+                <div class="proj-head">
+                  <div class="proj-folder"><svg class="icon icon-sm" style="width:16px;height:16px"><use href="#i-folder"/></svg></div>
+                  <div class="proj-name-wrap">
+                    <div class="tc-name">agentdeck-linux</div>
+                    <div class="proj-badges">
+                      <span class="minibadge mb-green"><span class="dot dot-green"></span>2 running</span>
+                      <span class="minibadge mb-orange"><span class="dot dot-orange"></span>1 needs you</span>
+                    </div>
+                    <div class="proj-path">~/Documents/agentdeck-linux</div>
+                  </div>
+                  <a class="proj-plus" href="05-new-task.html" aria-label="New session in this project"><svg class="icon icon-sm" style="width:14px;height:14px"><use href="#i-plus"/></svg></a>
+                  <svg class="icon icon-sm proj-chev" style="width:15px;height:15px"><use href="#i-chev-d"/></svg>
+                </div>
+
+                <a class="sess-row" href="03-session.html">
+                  <span class="dot dot-agent" style="background: var(--agent-purple)"></span>
+                  <span class="sess-name"><span class="n">Redesign mobile shell</span>
+                    <span class="pill"><span class="dot dot-orange dot-sm"></span>Approval</span>
+                  </span>
+                  <svg class="icon icon-sm star on" style="width:15px;height:15px"><use href="#i-star"/></svg>
+                  <svg class="icon icon-sm" style="width:14px;height:14px;color:var(--ink-3)"><use href="#i-chev-r"/></svg>
+                </a>
+                <a class="sess-row" href="03-session.html">
+                  <span class="dot" style="background: var(--agent-purple)"></span>
+                  <span class="sess-name"><span class="n">Fix the pairing keep-alive</span>
+                    <span class="pill pill-green"><span class="dot dot-green dot-sm"></span>Working</span>
+                  </span>
+                  <svg class="icon icon-sm star" style="width:15px;height:15px"><use href="#i-star"/></svg>
+                  <svg class="icon icon-sm" style="width:14px;height:14px;color:var(--ink-3)"><use href="#i-chev-r"/></svg>
+                </a>
+                <a class="sess-row" href="03-session.html">
+                  <span class="dot" style="background: var(--agent-teal)"></span>
+                  <span class="sess-name"><span class="n">Sweep the API surface</span>
+                    <span class="pill pill-green"><span class="dot dot-green dot-sm"></span>Working</span>
+                  </span>
+                  <svg class="icon icon-sm star" style="width:15px;height:15px"><use href="#i-star"/></svg>
+                  <svg class="icon icon-sm" style="width:14px;height:14px;color:var(--ink-3)"><use href="#i-chev-r"/></svg>
+                </a>
+                <a class="sess-row" href="03-session.html">
+                  <span class="dot" style="background: var(--agent-green)"></span>
+                  <span class="sess-name"><span class="n">Session hydration bug</span>
+                    <span class="pill">Ready</span>
+                  </span>
+                  <svg class="icon icon-sm star" style="width:15px;height:15px"><use href="#i-star"/></svg>
+                  <svg class="icon icon-sm" style="width:14px;height:14px;color:var(--ink-3)"><use href="#i-chev-r"/></svg>
+                </a>
+              </div>
+
+              <div class="proj-card">
+                <div class="proj-head">
+                  <div class="proj-folder"><svg class="icon icon-sm" style="width:16px;height:16px"><use href="#i-folder"/></svg></div>
+                  <div class="proj-name-wrap">
+                    <div class="tc-name">qai-docs</div>
+                    <div class="proj-badges">
+                      <span class="minibadge mb-green"><span class="dot dot-green"></span>1 running</span>
+                    </div>
+                    <div class="proj-path">~/code/qai-docs</div>
+                  </div>
+                  <a class="proj-plus" href="05-new-task.html" aria-label="New session in this project"><svg class="icon icon-sm" style="width:14px;height:14px"><use href="#i-plus"/></svg></a>
+                  <svg class="icon icon-sm proj-chev closed" style="width:15px;height:15px"><use href="#i-chev-d"/></svg>
+                </div>
+              </div>
+
+              <div style="height: 26px"></div>
+            </div>
+
+            <nav class="tabbar">
+              <a class="tab on" href="02-home.html"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+              <a class="tab" href="06-history.html"><svg class="icon"><use href="#i-clock"/></svg>History</a>
+              <a class="tab" href="07-agents.html"><svg class="icon"><use href="#i-bot"/></svg>Agents</a>
+              <a class="tab" href="08-usage.html"><svg class="icon"><use href="#i-chart"/></svg>Usage</a>
+              <a class="tab" href="09-config.html"><svg class="icon"><use href="#i-sliders"/></svg>Config</a>
+            </nav>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+    <!-- ── Frame 2 · empty ─────────────────────────────────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Empty — fresh pairing</div>
+        <div class="cap-sub">No sessions yet. The empty state carries the one verb that matters: start a task. Same state serves “no matches” with a clear-the-filters hint instead.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="scroll">
+              <div class="hero">
+                <div class="hero-row">
+                  <div class="large-title">Projects</div>
+                  <div style="flex:1"></div>
+                  <a class="icobtn" href="05-new-task.html" aria-label="New session"><svg class="icon"><use href="#i-plus"/></svg></a>
+                </div>
+                <div class="hero-sub">
+                  <span class="dot dot-green pulse" style="color: var(--green)"></span>
+                  <b>Live</b><span>·</span><span>kareem-desktop</span>
+                </div>
+              </div>
+
+              <div class="search"><svg class="icon icon-sm"><use href="#i-search"/></svg>Search sessions, projects, agents</div>
+
+              <div class="chips">
+                <span class="chip on">All</span>
+                <span class="chip">Attention</span>
+                <span class="chip">Active</span>
+                <span class="chip">Starred</span>
+                <span class="chip">Archived</span>
+              </div>
+
+              <div class="empty" style="margin-top: 30px">
+                <svg class="icon icon-lg" style="margin: 0 auto 12px; color: var(--ink-3); width:30px;height:30px"><use href="#i-folder"/></svg>
+                <div class="e-title">No workspaces yet</div>
+                <div class="e-sub">Launch an agent in a project folder on the desktop and it appears here.</div>
+                <a class="btn btn-fill" href="05-new-task.html" style="margin-top: 16px">New Session</a>
+              </div>
+
+              <div style="height: 40px"></div>
+            </div>
+
+            <nav class="tabbar">
+              <a class="tab on" href="02-home.html"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+              <a class="tab" href="06-history.html"><svg class="icon"><use href="#i-clock"/></svg>History</a>
+              <a class="tab" href="07-agents.html"><svg class="icon"><use href="#i-bot"/></svg>Agents</a>
+              <a class="tab" href="08-usage.html"><svg class="icon"><use href="#i-chart"/></svg>Usage</a>
+              <a class="tab" href="09-config.html"><svg class="icon"><use href="#i-sliders"/></svg>Config</a>
+            </nav>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+    <!-- ── Frame 3 · loading skeleton ──────────────────────────────────── -->
+    <div class="frame">
+      <div class="caption">
+        <div class="cap-title">Loading — first paint</div>
+        <div class="cap-sub">Chrome and filter strip render immediately; the sections arrive as breathing skeletons in their final geometry, so nothing shifts when the snapshot lands.</div>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-right">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="white"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1" opacity="0.35"/></svg>
+              <svg width="17" height="12" viewBox="0 0 24 18" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round"><path d="M2 5.5a15 15 0 0 1 20 0"/><path d="M5.5 9.5a10 10 0 0 1 13 0"/><path d="M9 13.5a5 5 0 0 1 6 0"/><path d="M12 17h.01"/></svg>
+              <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="white" stroke-opacity="0.4"/><rect x="2" y="2" width="14" height="7" rx="1.5" fill="white"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="white" fill-opacity="0.4"/></svg>
+            </span>
+          </div>
+          <div class="app">
+            <div class="scroll">
+              <div class="hero">
+                <div class="hero-row">
+                  <div class="large-title">Projects</div>
+                  <div style="flex:1"></div>
+                  <a class="icobtn" href="05-new-task.html" aria-label="New session"><svg class="icon"><use href="#i-plus"/></svg></a>
+                </div>
+                <div class="hero-sub">
+                  <span class="dot dot-green pulse" style="color: var(--green)"></span>
+                  <b>Live</b><span>·</span><span>kareem-desktop</span>
+                </div>
+              </div>
+
+              <div class="search"><svg class="icon icon-sm"><use href="#i-search"/></svg>Search sessions, projects, agents</div>
+
+              <div class="chips">
+                <span class="chip on">All</span>
+                <span class="chip">Attention</span>
+                <span class="chip">Active</span>
+                <span class="chip">Starred</span>
+                <span class="chip">Archived</span>
+              </div>
+
+              <div class="section-head"><span class="s-title">Needs You</span></div>
+              <div class="skel" style="height:96px; padding:16px">
+                <div style="display:flex; align-items:center; gap:10px">
+                  <div class="skel-line" style="width:120px"></div>
+                  <div class="skel-pill"></div>
+                </div>
+                <div class="skel-line" style="width:75%; margin-top:12px"></div>
+              </div>
+
+              <div class="section-head"><span class="s-title">Active</span></div>
+              <div class="skel" style="height:72px; padding:14px">
+                <div class="skel-line" style="width:55%"></div>
+                <div class="skel-line" style="width:35%; margin-top:10px; opacity:0.6"></div>
+              </div>
+              <div class="skel" style="height:72px; padding:14px">
+                <div class="skel-line" style="width:48%"></div>
+                <div class="skel-line" style="width:62%; margin-top:10px; opacity:0.6"></div>
+              </div>
+
+              <div class="section-head"><span class="s-title">Projects</span></div>
+              <div class="skel" style="height:190px; padding:14px 16px">
+                <div style="display:flex; gap:11px; align-items:center">
+                  <div class="skel-dot"></div>
+                  <div style="flex:1">
+                    <div class="skel-line" style="width:60%"></div>
+                    <div class="skel-line" style="width:80%; margin-top:9px; opacity:0.6"></div>
+                  </div>
+                </div>
+                <div class="skel-line" style="width:70%; margin-top:22px; opacity:0.7"></div>
+                <div class="skel-line" style="width:85%; margin-top:16px; opacity:0.5"></div>
+              </div>
+
+              <div style="height: 26px"></div>
+            </div>
+
+            <nav class="tabbar">
+              <a class="tab on" href="02-home.html"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+              <a class="tab" href="06-history.html"><svg class="icon"><use href="#i-clock"/></svg>History</a>
+              <a class="tab" href="07-agents.html"><svg class="icon"><use href="#i-bot"/></svg>Agents</a>
+              <a class="tab" href="08-usage.html"><svg class="icon"><use href="#i-chart"/></svg>Usage</a>
+              <a class="tab" href="09-config.html"><svg class="icon"><use href="#i-sliders"/></svg>Config</a>
+            </nav>
+          </div>
+          <div class="homeindicator"></div>
+        </div>
+        <div class="island"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAI — iOS redesign, mockups for approval</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .stage { gap: 40px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .badge { height: 30px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 999px; background: rgba(255,255,255,0.06); color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+
+  .links { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .linkcard {
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--card); border-radius: 14px; padding: 16px 18px;
+    text-decoration: none; border: 1px solid rgba(255,255,255,0.06);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .linkcard:hover { background: #26262b; transform: translateY(-1px); }
+  .linkcard:active { transform: scale(0.99); }
+  .linkcard .lc-num { font-family: var(--mono); font-size: 11px; color: var(--ink-3); letter-spacing: 0.06em; }
+  .linkcard .lc-title { font-size: 16px; font-weight: 600; color: var(--ink); }
+  .linkcard .lc-sub { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+  .linkcard .lc-frames { margin-top: 4px; font-size: 11.5px; color: var(--ink-3); }
+
+  h2 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); margin: 20px 0 10px; }
+  .stage-header p { max-width: 820px; }
+
+  table.map { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.map th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  table.map td { padding: 9px 12px; border-bottom: 0.5px solid rgba(255,255,255,0.07); color: var(--ink-2); vertical-align: top; line-height: 1.5; }
+  table.map td:first-child { color: var(--ink); font-weight: 500; white-space: nowrap; }
+  .tbl-wrap { background: var(--card); border-radius: 14px; overflow: hidden; padding: 6px 4px; }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="stage-header">
+    <div class="crumb">QAI mobile · redesign for approval</div>
+    <h1>iOS-native redesign — every screen, every feature</h1>
+    <p>Ten static mockups of the whole app, rebuilt as a first-party iOS app: true-black canvas, elevated grouped cards, translucent blurred chrome, the SF-style type ramp, one system blue, traffic-light states, mono reserved for machine text. <b>Functionality is unchanged</b> — every control, state, sheet and flow in the current app appears below; this is a visual + navigation-grammar proposal only. Click any card to walk the screens; tab bars, buttons and rows are wired.</p>
+    <div class="badges">
+      <span class="badge">True black canvas</span>
+      <span class="badge">Grouped inset cards</span>
+      <span class="badge">Translucent header / tab bar</span>
+      <span class="badge">SF type ramp</span>
+      <span class="badge">iOS blue · #0A84FF</span>
+      <span class="badge">Traffic-light states</span>
+      <span class="badge">Bottom tab bar</span>
+      <span class="badge">Bottom sheets &amp; side panes</span>
+    </div>
+  </div>
+
+  <div>
+    <h2>Navigation decision — drawer → tab bar</h2>
+    <p style="font-size:13.5px; line-height:1.6; max-width:860px">
+      Six destinations don't fit an iOS tab bar, so the redesign replaces the drawer with <b>five tabs — Home, History, Agents, Usage, Config</b> — and folds <b>Browsers</b> into the Agents tab as a segmented control (the drawer already grouped them under “Products”). Nothing is lost:
+      recents → the History tab · API-key copy → Config's machine card · Agent Setup → Agents tab · Documentation → Config › About · device/connection card → Config › Machine and every Home header · New task → the “+” on Home &amp; History.
+      Deep links (<span class="mono">qai://…</span>) and notification routing are untouched. <i>If you'd rather keep the drawer or trade a different tab, say so — the screens themselves don't change.</i>
+    </p>
+  </div>
+
+  <div>
+    <h2>Screens</h2>
+    <div class="links">
+      <a class="linkcard" href="01-pairing.html">
+        <span class="lc-num">01</span>
+        <span class="lc-title">Pairing</span>
+        <span class="lc-sub">QR viewfinder, manual URL + offer JSON, failure state.</span>
+        <span class="lc-frames">2 frames</span>
+      </a>
+      <a class="linkcard" href="02-home.html">
+        <span class="lc-num">02</span>
+        <span class="lc-title">Home — Projects</span>
+        <span class="lc-sub">Triage, active agents, project groups, filters, search, empty, loading.</span>
+        <span class="lc-frames">3 frames</span>
+      </a>
+      <a class="linkcard" href="03-session.html">
+        <span class="lc-num">03</span>
+        <span class="lc-title">Session</span>
+        <span class="lc-sub">Timeline with every part card; composer idle / queue / paused.</span>
+        <span class="lc-frames">3 frames</span>
+      </a>
+      <a class="linkcard" href="04-session-panes.html">
+        <span class="lc-num">04</span>
+        <span class="lc-title">Session panes</span>
+        <span class="lc-sub">Sessions list, model &amp; permissions, engine switch.</span>
+        <span class="lc-frames">3 frames</span>
+      </a>
+      <a class="linkcard" href="05-new-task.html">
+        <span class="lc-num">05</span>
+        <span class="lc-title">New session</span>
+        <span class="lc-sub">Where → what &amp; how → pickers, with the custom fallback.</span>
+        <span class="lc-frames">4 frames</span>
+      </a>
+      <a class="linkcard" href="06-history.html">
+        <span class="lc-num">06</span>
+        <span class="lc-title">History</span>
+        <span class="lc-sub">Day groups, search, stars, status pills.</span>
+        <span class="lc-frames">1 frame</span>
+      </a>
+      <a class="linkcard" href="07-agents.html">
+        <span class="lc-num">07</span>
+        <span class="lc-title">Agents &amp; Browsers</span>
+        <span class="lc-sub">Provider fleet with re-scan; CDP engines with start/stop.</span>
+        <span class="lc-frames">2 frames</span>
+      </a>
+      <a class="linkcard" href="08-usage.html">
+        <span class="lc-num">08</span>
+        <span class="lc-title">Usage</span>
+        <span class="lc-sub">Fleet cost + tokens, per-session rows.</span>
+        <span class="lc-frames">1 frame</span>
+      </a>
+      <a class="linkcard" href="09-config.html">
+        <span class="lc-num">09</span>
+        <span class="lc-title">Config</span>
+        <span class="lc-sub">Machine card, integrations, about, unpair.</span>
+        <span class="lc-frames">1 frame</span>
+      </a>
+    </div>
+  </div>
+
+  <div>
+    <h2>Feature coverage — current app → mockup</h2>
+    <div class="tbl-wrap">
+      <table class="map">
+        <tr><th>Current</th><th>Where it lives in the redesign</th></tr>
+        <tr><td>Pairing: QR scan, camera permission, manual URL + offer, failure, scan⇄type toggle</td><td>01, both frames</td></tr>
+        <tr><td>Home: menu, brand, workspace summary, attention badge, New</td><td>02 — large-title row, live sub-line, “+” button</td></tr>
+        <tr><td>Home: Triage — approval Allow, paused Resume, failed Retry, Open, idle-for</td><td>02 frame 1, three triage cards</td></tr>
+        <tr><td>Home: Active rows — provider, project, task, live activity</td><td>02 frame 1</td></tr>
+        <tr><td>Home: filters (all/active/attention/starred/archived, counts), search, collapsible groups, “+ New session”, session lines with pill + star, empty + loading states, pull-to-refresh</td><td>02 — chip strip, search capsule, group cards; empty in frame 2 (refresh is a gesture, unchanged)</td></tr>
+        <tr><td>Session: back, title + status pill + project, connection state, model/permissions pane, sessions pane, detail toggle, agent detail line</td><td>03 header row, all frames; panes in 04</td></tr>
+        <tr><td>Session: Notice strip (error, dismiss)</td><td>03 frame 2</td></tr>
+        <tr><td>Timeline: user turns, prose, folded + expanded tool runs, plan card (states + approve/decline), approval card (options, multi-select, custom text, always-allow, resolved), errors, usage/turn/file/subagent quiet rows</td><td>03 — frame 1 risky approval expanded; frame 3 multi-select question, proposed plan, resolved approval, failed tool run</td></tr>
+        <tr><td>Composer: queue-when-busy, steer/edit/remove queue, attachments, slash menu, stop, resume card, attach error, connection-gated input</td><td>03 frames 2–3 — queue chip, attachment chip, slash menu, stop, resume (errors print inline under the field)</td></tr>
+        <tr><td>Sessions pane: this workspace + others, replace-not-push</td><td>04 frame 1</td></tr>
+        <tr><td>Controls pane: engine row + switch sub-view (keeps transcript), live config dimensions with apply timing, empty-agents note</td><td>04 frames 2–3</td></tr>
+        <tr><td>New task: recent projects + counts, Inbox, custom path, agents with hues, first prompt, model/thought/permission pickers + custom fallback, error, busy</td><td>05 — four frames (busy/error ride the footer button)</td></tr>
+        <tr><td>History: search, day groups, rows with pill/star/day, New, archived hidden</td><td>06</td></tr>
+        <tr><td>Agents: ordered ready-first, protocol, ready/down, reason, re-scan</td><td>07 frame 1</td></tr>
+        <tr><td>Browsers: per-session engines, start/stop, busy, no-project sessions</td><td>07 frame 2</td></tr>
+        <tr><td>Usage: fleet totals, per-session rows, live scan note</td><td>08</td></tr>
+        <tr><td>Config: machine + copy token, config path, endpoints w/ reachability, MCP count, API providers, daemon settings, about + docs, unpair</td><td>09</td></tr>
+        <tr><td>Drawer: recents, API key, Agent Setup, Documentation, device/connection card, New task</td><td>Absorbed — see the navigation decision above</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <h2>After approval</h2>
+    <p style="font-size:13.5px; line-height:1.6; max-width:860px; color:var(--ink-2)">
+      Implementation re-skins the React Native screens only — store, lib and api layers stay untouched, exactly as DESIGN.md's golden rules require. The tokens map 1:1 to a new <span class="mono">tokens.ts</span> palette; each mockup component has a direct RN counterpart.
+    </p>
+  </div>
+</div>
+
+</body>
+</html>

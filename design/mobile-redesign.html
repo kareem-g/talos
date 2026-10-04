@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QAI Mobile — Redesign Review</title>
+<style>
+  /* ─── Design system — iOS-native dark, per the fluid-interface skill ───────
+     Canvas is true black; elevation lifts toward #2C2C2E. Chrome is a
+     translucent material (blur + saturate) that content scrolls beneath.
+     Type is the platform font with size-specific tracking; data is mono.
+     One accent (system blue); state carried by green/orange/red dots + words,
+     never by flooding surfaces. Every press answers instantly. */
+  :root {
+    --bg: #000;
+    --elev: #1c1c1e;
+    --raised: #2c2c2e;
+    --sep: rgba(84, 84, 88, .55);
+    --hair: rgba(255, 255, 255, .07);
+    --ink: #f2f2f7;
+    --ink2: #aeaeb2;
+    --ink3: #8e8e93;
+    --blue: #0a84ff;
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #0c0c0e;
+    color: var(--ink);
+    font: 14px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    padding: 40px 32px 80px;
+  }
+  h1 { font-size: 26px; letter-spacing: -.025em; font-weight: 700; }
+  h2 { font-size: 15px; letter-spacing: -.015em; color: var(--ink2); font-weight: 600; margin: 8px 0 28px; }
+  .row-label { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .12em; color: var(--ink3); margin: 56px 0 20px; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  .frame { display: flex; flex-direction: column; gap: 12px; }
+  .frame figcaption { width: 300px; font-size: 12.5px; color: var(--ink2); line-height: 1.5; }
+  .frame figcaption b { color: var(--ink); font-size: 13.5px; display: block; margin-bottom: 3px; letter-spacing: -.01em; }
+  .frame figcaption code { font-family: var(--mono); font-size: 11px; color: var(--ink3); }
+
+  /* ─── Phone chrome ─── */
+  .phone {
+    width: 390px; height: 844px; flex: none;
+    background: var(--bg); border-radius: 54px;
+    border: 6px solid #232326;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.05);
+    position: relative; overflow: hidden; transform: scale(.62); transform-origin: top left;
+    margin-bottom: -320px;
+  }
+  .island { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 122px; height: 34px; border-radius: 20px; background: #000; z-index: 60; }
+  .status { position: absolute; top: 0; left: 0; right: 0; height: 54px; display: flex; align-items: center; justify-content: space-between; padding: 14px 30px 0; font: 600 15px/1 -apple-system, system-ui; z-index: 55; pointer-events: none; }
+  .status .sicons { display: flex; gap: 6px; align-items: center; }
+  .status .sicons i { display: inline-block; width: 17px; height: 11px; border-radius: 3px; background: var(--ink); clip-path: polygon(0 40%, 100% 40%, 100% 100%, 0 100%); }
+  .status .sicons i.batt { width: 25px; border: 1.5px solid var(--ink); background: none; clip-path: none; border-radius: 4px; position: relative; }
+  .status .sicons i.batt::after { content: ""; position: absolute; inset: 2px; background: var(--ink); border-radius: 1.5px; width: 70%; }
+  .homebar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 140px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.35); z-index: 60; }
+
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .scroll { flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 90px; }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  /* ─── Translucent bars (material, not a divider) ─── */
+  .bar {
+    position: sticky; top: 0; z-index: 30;
+    background: rgba(10,10,12,.72);
+    backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
+  }
+  .bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.12) 12%, rgba(255,255,255,.12) 88%, transparent); }
+  .barrow { display: flex; align-items: center; gap: 10px; padding: 58px 16px 10px; }
+  .title { font-size: 17px; font-weight: 600; letter-spacing: -.022em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subline { font: 11px/1.4 var(--mono); color: var(--ink3); letter-spacing: .01em; }
+
+  /* iOS large title */
+  .largetitle { padding: 6px 20px 2px; font-size: 31px; font-weight: 700; letter-spacing: -.028em; }
+
+  /* ─── Controls ─── */
+  .icbtn {
+    width: 36px; height: 36px; border-radius: 50%; flex: none;
+    background: rgba(255,255,255,.09); border: none; color: var(--ink);
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: transform .1s ease-out, background .15s;
+    font-size: 15px;
+  }
+  .icbtn:active { transform: scale(.9); background: rgba(255,255,255,.16); }
+  .icbtn.small { width: 30px; height: 30px; font-size: 13px; }
+  .icbtn.accent { background: var(--blue); color: #fff; }
+  .icbtn.accent:active { background: #3396ff; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 40px; padding: 0 18px; border-radius: 999px; border: none; cursor: pointer;
+    font: 600 14px/1 -apple-system, system-ui; letter-spacing: -.01em; color: #fff;
+    background: rgba(255,255,255,.1);
+    transition: transform .1s ease-out, filter .15s;
+  }
+  .btn:active { transform: scale(.96); filter: brightness(1.15); }
+  .btn.primary { background: var(--blue); }
+  .btn.primary:active { background: #3396ff; }
+  .btn.bright { background: #fff; color: #000; }
+  .btn.danger { background: rgba(255,69,58,.16); color: var(--red); }
+  .btn.small { min-height: 30px; padding: 0 13px; font-size: 12.5px; }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .4; }
+
+  /* pills & chips */
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; border: .5px solid var(--sep); background: rgba(120,120,128,.14); font: 500 11.5px/1 -apple-system, system-ui; color: var(--ink2); white-space: nowrap; }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .dot.green { background: var(--green); } .dot.orange { background: var(--orange); } .dot.red { background: var(--red); } .dot.blue { background: var(--blue); } .dot.gray { background: var(--ink3); } .dot.blink { animation: blink 1.6s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .chips { display: flex; gap: 8px; padding: 0 16px 12px; overflow-x: auto; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; height: 30px; padding: 0 13px; border-radius: 999px; background: rgba(120,120,128,.14); border: none; color: var(--ink2); font: 500 12.5px/1 -apple-system, system-ui; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform .1s; }
+  .chip:active { transform: scale(.95); }
+  .chip.on { background: var(--ink); color: #000; font-weight: 600; }
+  .chip b { font-family: var(--mono); font-weight: 500; opacity: .7; }
+
+  .sec { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink3); padding: 26px 20px 8px; }
+
+  /* cards & rows */
+  .card { background: var(--elev); border: .5px solid var(--hair); border-radius: 16px; margin: 0 16px 12px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .row + .row { border-top: .5px solid rgba(84,84,88,.35); }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .name { font-size: 15px; font-weight: 500; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .meta { font-size: 12.5px; color: var(--ink3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .disc { color: var(--ink3); font-size: 15px; flex: none; }
+
+  .group { border-radius: 16px; margin: 0 16px 14px; overflow: hidden; background: var(--elev); border: .5px solid var(--hair); }
+  .group > header { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; }
+  .group > header .chev { transition: transform .25s cubic-bezier(.3,.7,.3,1); color: var(--ink3); }
+  .group.closed > header .chev { transform: rotate(-90deg); }
+  .group.closed .body { display: none; }
+  .folder { width: 30px; height: 30px; border-radius: 9px; background: rgba(10,132,255,.18); color: var(--blue); display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+
+  /* search */
+  .search { margin: 0 16px 14px; height: 38px; border-radius: 12px; background: rgba(120,120,128,.14); display: flex; align-items: center; gap: 7px; padding: 0 11px; color: var(--ink3); font-size: 16px; }
+  .search span { font-size: 16px; color: var(--ink3); }
+
+  /* FAB */
+  .fab { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 40; box-shadow: 0 10px 30px rgba(10,132,255,.4); }
+
+  /* ─── Chat ─── */
+  .chat { padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
+  .bubble-user { align-self: flex-end; max-width: 80%; background: var(--blue); color: #fff; border-radius: 20px; border-bottom-right-radius: 7px; padding: 9px 14px; font-size: 16px; letter-spacing: -.015em; line-height: 1.35; }
+  .msg { font-size: 16px; line-height: 1.45; letter-spacing: -.015em; max-width: 92%; }
+  .msg h4 { font-size: 16.5px; letter-spacing: -.02em; margin: 6px 0 2px; }
+  .inlinecode { font: 12.5px/1.4 var(--mono); background: rgba(120,120,128,.18); padding: 1px 5px; border-radius: 5px; }
+  .codecard { background: #161618; border: .5px solid var(--hair); border-radius: 12px; overflow: hidden; max-width: 96%; }
+  .codecard .lang { font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink3); padding: 9px 12px 0; }
+  .codecard pre { font: 12px/1.6 var(--mono); color: #d4d4d8; padding: 6px 12px 12px; overflow-x: auto; white-space: pre; }
+  .run { max-width: 96%; background: var(--elev); border: .5px solid var(--hair); border-radius: 14px; overflow: hidden; }
+  .run .head { display: flex; align-items: center; gap: 9px; padding: 11px 14px; cursor: pointer; }
+  .run .head .t { font: 500 13px/1 -apple-system, system-ui; color: var(--ink); flex: 1; }
+  .run .steps { border-top: .5px solid rgba(84,84,88,.35); }
+  .run .step { display: flex; align-items: center; gap: 9px; padding: 8px 14px; font: 12px/1.3 var(--mono); color: var(--ink2); }
+  .run .step .dur { margin-left: auto; color: var(--ink3); font-size: 11px; }
+  .run .foot { padding: 9px 14px; border-top: .5px solid rgba(84,84,88,.35); font: 500 12px/1 -apple-system, system-ui; color: var(--ink3); display: flex; gap: 7px; align-items: center; }
+  .run .steps.hidden { display: none; }
+
+  .glow { max-width: 96%; border-radius: 16px; border: 1px solid rgba(255,159,10,.35); background: linear-gradient(180deg, rgba(255,159,10,.12), rgba(255,159,10,.05)); padding: 14px; }
+  .glow .gt { font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--orange); margin-bottom: 8px; }
+  .glow .q { font-size: 15.5px; font-weight: 500; letter-spacing: -.015em; line-height: 1.35; }
+  .opt { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding: 11px 12px; border-radius: 12px; background: rgba(255,255,255,.05); border: .5px solid transparent; cursor: pointer; transition: transform .1s; }
+  .opt:active { transform: scale(.985); }
+  .opt .key { width: 20px; height: 20px; border-radius: 6px; background: rgba(255,255,255,.1); font: 600 11px/20px var(--mono); text-align: center; color: var(--ink2); flex: none; }
+  .opt .lbl { font-size: 14px; flex: 1; letter-spacing: -.01em; }
+  .opt.on { border-color: var(--blue); background: rgba(10,132,255,.16); }
+  .opt.on .key { background: var(--blue); color: #fff; }
+  .custom { width: 100%; margin-top: 9px; background: rgba(255,255,255,.05); border: .5px solid var(--sep); border-radius: 12px; padding: 11px 12px; color: var(--ink); font: 14px/1.4 -apple-system, system-ui; }
+  .checkline { display: flex; align-items: center; gap: 9px; margin-top: 11px; font-size: 13px; color: var(--ink2); }
+  .checkline .box { width: 20px; height: 20px; border-radius: 6px; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .risk { font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 4px 8px; border-radius: 999px; background: rgba(255,159,10,.16); color: var(--orange); }
+  .resolved { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; background: rgba(48,209,88,.1); border: .5px solid rgba(48,209,88,.25); font: 500 13px/1.3 -apple-system, system-ui; color: var(--ink2); }
+  .planstep { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; padding: 4px 0; letter-spacing: -.01em; }
+  .planstep .ic { width: 18px; text-align: center; flex: none; }
+  .quiet { display: flex; align-items: center; gap: 8px; font: 12px/1.3 var(--mono); color: var(--ink3); }
+
+  .notice { margin: 0 16px 12px; border-radius: 12px; padding: 10px 13px; display: flex; align-items: center; gap: 9px; font: 500 13px/1.35 -apple-system, system-ui; }
+  .notice.warn { background: rgba(255,159,10,.14); color: var(--orange); border: .5px solid rgba(255,159,10,.3); }
+  .notice.err { background: rgba(255,69,58,.14); color: var(--red); border: .5px solid rgba(255,69,58,.3); }
+  .notice .x { margin-left: auto; color: inherit; opacity: .7; cursor: pointer; }
+
+  /* composer */
+  .composer-wrap { position: absolute; left: 0; right: 0; bottom: 0; z-index: 35; background: rgba(10,10,12,.8); backdrop-filter: blur(22px) saturate(180%); padding: 8px 12px 34px; border-top: .5px solid rgba(255,255,255,.08); }
+  .composer { display: flex; align-items: flex-end; gap: 8px; }
+  .input { flex: 1; background: rgba(120,120,128,.16); border-radius: 20px; padding: 10px 15px; font-size: 16px; letter-spacing: -.015em; color: var(--ink); min-height: 40px; }
+  .input .dim { color: var(--ink3); }
+  .qchip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 6px 0 11px; border-radius: 999px; background: rgba(255,159,10,.14); border: .5px solid rgba(255,159,10,.3); font: 500 12px/1 -apple-system, system-ui; color: var(--orange); margin: 0 6px 8px 0; }
+  .qchip button { border: none; background: rgba(255,255,255,.12); color: var(--ink2); width: 20px; height: 20px; border-radius: 50%; font-size: 10px; cursor: pointer; }
+  .attachrow { display: flex; gap: 6px; padding: 0 4px 8px; }
+  .attach { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; background: rgba(120,120,128,.16); font: 500 11.5px/1 var(--mono); color: var(--ink2); }
+  .slashmenu { margin: 0 4px 8px; border-radius: 14px; background: var(--raised); border: .5px solid var(--hair); overflow: hidden; }
+  .slashmenu .cmd { display: flex; gap: 10px; padding: 10px 13px; font-size: 13.5px; }
+  .slashmenu .cmd .c { font-family: var(--mono); color: var(--blue); font-size: 12.5px; }
+  .slashmenu .cmd .d { margin-left: auto; color: var(--ink3); font-size: 12px; }
+  .resumeline { display: flex; align-items: center; gap: 10px; margin: 0 4px 8px; border-radius: 14px; background: rgba(255,159,10,.12); border: .5px solid rgba(255,159,10,.3); padding: 11px 13px; font-size: 13.5px; color: var(--ink); }
+
+  /* ─── Sheets & drawer ─── */
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .3s cubic-bezier(.3,.7,.3,1); z-index: 70; }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 82%; background: #18181a; border-radius: 22px 22px 0 0; transform: translateY(102%); transition: transform .38s cubic-bezier(.24,.8,.3,1); z-index: 80; display: flex; flex-direction: column; box-shadow: 0 -20px 60px rgba(0,0,0,.6); }
+  .sheet.open { transform: translateY(0); }
+  .sheet .grab { width: 38px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.22); margin: 8px auto 4px; }
+  .sheet .shead { display: flex; align-items: center; padding: 8px 18px 12px; }
+  .sheet .stitle { font-size: 17px; font-weight: 600; letter-spacing: -.022em; flex: 1; }
+  .sheet .sbody { overflow-y: auto; padding: 0 14px 34px; }
+  .sheet-left { position: absolute; top: 0; bottom: 0; left: 0; width: 78%; max-width: 320px; background: #141416; transform: translateX(-102%); transition: transform .38s cubic-bezier(.24,.8,.3,1); z-index: 80; box-shadow: 20px 0 60px rgba(0,0,0,.6); border-right: .5px solid var(--hair); display: flex; flex-direction: column; }
+  .sheet-left.open { transform: translateX(0); }
+
+  .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 300px; background: rgba(20,20,22,.96); backdrop-filter: blur(24px) saturate(160%); transform: translateX(-102%); transition: transform .36s cubic-bezier(.24,.8,.3,1); z-index: 80; box-shadow: 20px 0 60px rgba(0,0,0,.65); display: flex; flex-direction: column; padding: 62px 0 24px; }
+  .drawer.open { transform: translateX(0); }
+  .drawer .dbrand { display: flex; align-items: center; gap: 11px; padding: 4px 18px 16px; }
+  .qmark { width: 34px; height: 34px; border-radius: 10px; background: var(--blue); color: #fff; font: 700 18px/34px var(--mono); text-align: center; flex: none; }
+  .navitem { display: flex; align-items: center; gap: 12px; margin: 1px 10px; padding: 10px 10px; border-radius: 11px; font-size: 14.5px; font-weight: 500; letter-spacing: -.015em; color: var(--ink); cursor: pointer; }
+  .navitem .ic { width: 22px; text-align: center; color: var(--ink2); font-size: 15px; }
+  .navitem.on { background: rgba(10,132,255,.22); box-shadow: inset 0 0 0 1px rgba(10,132,255,.5); }
+  .navitem .n { margin-left: auto; font: 500 11px/1 var(--mono); color: var(--ink3); }
+  .devcard { margin: auto 14px 0; border-radius: 14px; background: rgba(120,120,128,.12); border: .5px solid var(--hair); padding: 12px 14px; }
+
+  /* misc */
+  .kv { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; }
+  .kv + .kv { border-top: .5px solid rgba(84,84,88,.35); }
+  .kv .k { font-size: 15px; letter-spacing: -.01em; }
+  .kv .v { font: 12.5px/1.4 var(--mono); color: var(--ink3); text-align: right; max-width: 55%; }
+  .badge-next { font: 600 9.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--orange); border: .5px solid rgba(255,159,10,.4); border-radius: 999px; padding: 3px 6px; }
+  .badge-live { font: 600 9.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--green); border: .5px solid rgba(48,209,88,.35); border-radius: 999px; padding: 3px 6px; }
+  .segment { display: flex; background: rgba(120,120,128,.16); border-radius: 10px; padding: 2px; }
+  .segment button { flex: 1; border: none; background: none; color: var(--ink2); font: 500 12.5px/1 -apple-system, system-ui; padding: 7px 0; border-radius: 8px; cursor: pointer; }
+  .segment button.on { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+  .statcard { flex: 1; background: var(--elev); border: .5px solid var(--hair); border-radius: 16px; padding: 14px; }
+  .statcard .l { font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink3); }
+  .statcard .v { font-size: 26px; font-weight: 700; letter-spacing: -.03em; margin-top: 6px; }
+  .viewfinder { margin: 0 16px; aspect-ratio: 1; border-radius: 22px; border: 1.5px dashed rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; color: var(--ink3); background: #0a0a0b; }
+  .field { margin: 0 16px 12px; background: rgba(120,120,128,.14); border-radius: 12px; padding: 12px 14px; font-size: 15.5px; color: var(--ink2); }
+  .field.mono { font: 12.5px/1.5 var(--mono); }
+  .steps-dots { display: flex; gap: 6px; justify-content: center; margin: 4px 0 14px; }
+  .steps-dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.2); }
+  .steps-dots i.on { background: var(--blue); }
+  .agentcard { display: flex; align-items: center; gap: 11px; margin: 0 16px 8px; padding: 13px 14px; border-radius: 14px; background: var(--elev); border: 1px solid var(--hair); cursor: pointer; transition: transform .1s; }
+  .agentcard:active { transform: scale(.99); }
+  .agentcard.on { border-color: var(--blue); background: rgba(10,132,255,.12); }
+  .agentcard .radio { width: 21px; height: 21px; border-radius: 50%; border: 2px solid var(--ink3); flex: none; }
+  .agentcard.on .radio { border: 6.5px solid var(--blue); }
+  .checkmark-cell { color: var(--blue); font-weight: 600; }
+  .caption-note { font: 12.5px/1.5 -apple-system, system-ui; color: var(--ink3); padding: 4px 20px 0; }
+  .divider-lbl { text-align: center; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<h1>QAI Mobile — redesign</h1>
+<h2>Every screen, designed for iPhone. iOS materials, system type, springs-in-mind motion. Tap the buttons in these frames — drawer, sheets, approvals and collapsibles actually work. Approve (or mark what to change), and it gets built in the native app.</h2>
+
+<div class="gallery">
+
+  <!-- ═════════ 1 · HOME ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="scroll">
+        <div class="bar" style="margin-top:-0px">
+          <div class="barrow">
+            <button class="icbtn" data-open="drawer">☰</button>
+            <div class="title" style="display:flex;flex-direction:column;gap:1px">
+              <span style="display:flex;align-items:center;gap:7px"><span class="qmark" style="width:22px;height:22px;font:700 12px/22px var(--mono)">Q</span>QAI</span>
+            </div>
+            <span class="pill" style="border-color:rgba(255,69,58,.4)"><span class="dot red blink"></span>2</span>
+            <button class="btn primary small">＋ New</button>
+          </div>
+        </div>
+        <div class="largetitle">Home</div>
+        <div style="padding:0 20px 10px" class="subline">agentdeck-linux · 3 projects · 11 sessions · <span style="color:var(--green)">● live</span></div>
+        <div class="chips">
+          <button class="chip on">All</button><button class="chip">Active <b>3</b></button><button class="chip">Attention <b>2</b></button><button class="chip">★ Starred</button><button class="chip">Archived <b>2</b></button>
+        </div>
+
+        <div class="sec">Needs you</div>
+        <div class="card">
+          <div class="row">
+            <span class="dot orange blink" style="flex:none"></span>
+            <div class="grow"><div class="name">payments-service</div><div class="meta" style="font-family:var(--mono);font-size:12px">rm migrations/2024_x.sql — destructive command</div></div>
+            <button class="btn primary small">Allow</button>
+          </div>
+          <div class="row">
+            <span class="dot red" style="flex:none"></span>
+            <div class="grow"><div class="name">site</div><div class="meta">Connection lost mid-turn — nothing was lost</div></div>
+            <button class="btn small">Retry</button>
+          </div>
+          <div class="row">
+            <span class="dot orange" style="flex:none"></span>
+            <div class="grow"><div class="name">docs-refresh</div><div class="meta">Paused by you · last turn complete</div></div>
+            <button class="btn small">Resume</button>
+          </div>
+        </div>
+
+        <div class="sec">Active</div>
+        <div class="card">
+          <div class="row">
+            <span style="width:8px;height:8px;border-radius:50%;background:#4fae7c;box-shadow:0 0 0 3px rgba(79,174,124,.2)"></span>
+            <div class="grow"><div class="name">refactor-auth <span class="pill" style="margin-left:4px"><span class="dot blue blink"></span>Working</span></div><div class="meta">Ran <span style="font-family:var(--mono)">cargo test</span> · 14 tools · 3m 42s</div></div>
+            <span class="disc">›</span>
+          </div>
+          <div class="row">
+            <span style="width:8px;height:8px;border-radius:50%;background:#a78bfa"></span>
+            <div class="grow"><div class="name">changelog-draft <span class="pill" style="margin-left:4px"><span class="dot gray"></span>Idle</span></div><div class="meta">Waiting for your next prompt · 2h ago</div></div>
+            <span class="disc">›</span>
+          </div>
+        </div>
+
+        <div class="sec">Workspaces</div>
+        <div class="group" id="ws1">
+          <header data-toggle="ws1"><span class="folder">▤</span><div class="grow"><div class="name">agentdeck-linux</div><div class="meta">6 sessions · updated 12m ago</div></div><span class="pill"><span class="dot orange"></span>1</span><span class="chev">⌄</span></header>
+          <div class="body">
+            <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#4fae7c"></span><div class="grow"><div class="name">refactor-auth</div><div class="meta">…and the token rotation now passes</div></div><span class="pill"><span class="dot blue blink"></span>Working</span><span style="color:var(--orange)">★</span></div>
+            <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#a78bfa"></span><div class="grow"><div class="name">fix-qr-pairing</div><div class="meta">Pairing works over LAN now</div></div><span class="pill"><span class="dot green"></span>Done</span></div>
+            <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#6396cc"></span><div class="grow"><div class="name">mobile-redesign</div><div class="meta">Porting the desktop shell to iPhone</div></div><span class="pill"><span class="dot orange blink"></span>Needs you</span></div>
+            <div class="row"><button class="btn small" style="margin:auto;width:100%">＋ New session</button></div>
+          </div>
+        </div>
+        <div class="group closed" id="ws2">
+          <header data-toggle="ws2"><span class="folder">▤</span><div class="grow"><div class="name">payments-service</div><div class="meta">3 sessions · updated 1h ago</div></div><span class="pill"><span class="dot red"></span>2</span><span class="chev">⌄</span></header>
+          <div class="body"></div>
+        </div>
+      </div>
+      <button class="btn bright fab">＋ New task</button>
+    </div>
+    <div class="scrim" data-close="drawer"></div>
+    <aside class="drawer" id="drawer">
+      <div class="dbrand"><span class="qmark">Q</span><div class="grow"><div style="font-weight:600;letter-spacing:-.01em">QAI</div><div class="subline">kareem's workstation</div></div><button class="icbtn small" data-close="drawer">✕</button></div>
+      <div style="padding:0 14px 12px"><button class="btn primary block">＋ New task</button></div>
+      <div class="sec" style="padding:14px 24px 6px">Get started</div>
+      <div class="navitem on"><span class="ic">⌂</span>Home</div>
+      <div class="sec" style="padding:14px 24px 6px">Products</div>
+      <div class="navitem"><span class="ic">◉</span>Agents</div>
+      <div class="navitem"><span class="ic">◍</span>Browsers</div>
+      <div class="sec" style="padding:14px 24px 6px">Manage</div>
+      <div class="navitem"><span class="ic">≡</span>History<span class="n">142</span></div>
+      <div class="navitem"><span class="ic">▦</span>Usage</div>
+      <div class="navitem"><span class="ic">⚙︎</span>Configuration</div>
+      <div class="sec" style="padding:14px 24px 6px">Recent</div>
+      <div class="navitem"><span class="ic" style="color:#4fae7c">●</span>refactor-auth<span class="n">12m</span></div>
+      <div class="navitem"><span class="ic" style="color:#a78bfa">●</span>changelog-draft<span class="n">2h</span></div>
+      <div class="devcard" style="display:flex;align-items:center;gap:10px"><span class="icbtn small" style="background:rgba(255,255,255,.08)">▭</span><div class="grow"><div style="font:500 12.5px/1.3 -apple-system">kareem@workstation</div><div class="subline" style="color:var(--green)">● Connected · 192.168.1.10</div></div></div>
+    </aside>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Home</b>Translucent bar + large title. <code>☰</code> opens the drawer (try it), Triage answers “what needs me” with inline Allow/Retry/Resume, filter chips, collapsible workspaces with status pills, live-activity cards, floating New task.</figcaption>
+  </figure>
+
+  <!-- ═════════ 2 · CHATS ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow">
+          <button class="icbtn">☰</button>
+          <div class="title">Chats<span style="font:500 12px var(--mono);color:var(--ink3);margin-left:6px">142</span></div>
+          <button class="icbtn accent">＋</button>
+        </div>
+      </div>
+      <div class="scroll">
+        <div class="search"><span>⌕</span>Search 142 conversations</div>
+        <div class="sec" style="padding-top:8px">Today</div>
+        <div class="group" style="margin-top:0">
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#6396cc"></span><div class="grow"><div class="name">mobile-redesign</div><div class="meta">agentdeck-linux</div></div><span class="pill"><span class="dot orange blink"></span>Needs you</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">9:32</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#4fae7c"></span><div class="grow"><div class="name">refactor-auth</div><div class="meta">agentdeck-linux</div></div><span class="pill"><span class="dot blue blink"></span>Working</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">9:04</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#e07a5f"></span><div class="grow"><div class="name">fix-qr-pairing</div><div class="meta">agentdeck-linux</div></div><span class="pill"><span class="dot green"></span>Done</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">8:47</span></div>
+        </div>
+        <div class="sec">Yesterday</div>
+        <div class="group" style="margin-top:0">
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#a78bfa"></span><div class="grow"><div class="name">changelog-draft <span style="color:var(--orange)">★</span></div><div class="meta">payments-service</div></div><span class="pill"><span class="dot gray"></span>Idle</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">21:12</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#d96a8a"></span><div class="grow"><div class="name">stripe-migration</div><div class="meta">payments-service</div></div><span class="pill"><span class="dot red"></span>Failed</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">19:40</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#45b8c2"></span><div class="grow"><div class="name">copy-tuning</div><div class="meta">site</div></div><span class="pill"><span class="dot green"></span>Done</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">17:03</span></div>
+        </div>
+        <div class="sec">Sat, Oct 3</div>
+        <div class="group" style="margin-top:0">
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#4fae7c"></span><div class="grow"><div class="name">docs-refresh</div><div class="meta">site</div></div><span class="pill"><span class="dot orange"></span>Paused</span><span style="font:500 11px var(--mono);color:var(--ink3);width:36px;text-align:right">14:20</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Chats</b>Every conversation, grouped by day (Today / Yesterday / date). Agent hue dot, workspace under the name, status pill, star, time. Search caps the list. ＋ starts a new task.</figcaption>
+  </figure>
+
+  <!-- ═════════ 3 · SESSION ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow" style="gap:8px">
+          <button class="icbtn">‹</button>
+          <div class="title" style="flex:none;max-width:150px">refactor-auth<div style="display:flex;gap:6px;align-items:center;margin-top:2px"><span class="pill" style="height:18px;font-size:10.5px"><span class="dot blue blink"></span>Working</span><span class="subline">Claude · agentdeck-linux</span></div></div>
+          <div style="flex:1"></div>
+          <button class="icbtn small" data-open="ctl">⚙︎</button>
+          <button class="icbtn small" data-open="sess">▤</button>
+          <button class="icbtn small" data-open="acts">⋯</button>
+        </div>
+      </div>
+      <div class="scroll" style="padding-bottom:150px">
+        <div class="chat">
+          <div class="bubble-user">Refactor auth to use the new token rotation, and make sure the tests cover expiry.</div>
+          <div class="msg">I'll start by reading the current auth module and the session store, then thread the rotation through.</div>
+
+          <div class="codecard"><div class="lang">typescript</div><pre>const rotated = await rotateToken(
+  session.refreshToken,
+  { gracePeriodMs: 30_000 },
+)</pre></div>
+
+          <div class="run" id="run1">
+            <div class="head" data-toggle-steps="run1"><span class="dot blue blink"></span><span class="t">Used 4 tools</span><span style="font:11px var(--mono);color:var(--ink3)">12.4s</span><span class="disc">⌄</span></div>
+            <div class="steps">
+              <div class="step"><span class="dot green"></span>Read src/auth/session.ts<span class="dur">0.3s</span></div>
+              <div class="step"><span class="dot green"></span>Edit src/auth/rotate.ts<span class="dur">0.1s</span></div>
+              <div class="step"><span class="dot green"></span>Ran <span style="color:var(--ink)">npm test -- auth</span><span class="dur">9.8s</span></div>
+              <div class="step"><span class="dot red"></span>Ran <span style="color:var(--ink)">npm test -- rotation</span><span class="dur">2.2s</span></div>
+            </div>
+            <div class="foot"><span class="dot blue blink"></span>Working…</div>
+          </div>
+
+          <div class="glow">
+            <div class="gt" style="display:flex;align-items:center"><span>Needs your approval</span><span class="risk" style="margin-left:auto">high risk</span></div>
+            <div class="q" style="margin-top:6px">Delete <span class="inlinecode">migrations/2024_legacy_tokens.sql</span>? It drops the legacy token table.</div>
+            <div class="opt on"><span class="key">A</span><span class="lbl">Yes, delete it</span></div>
+            <div class="opt"><span class="key">B</span><span class="lbl">Keep it, just stop using it</span></div>
+            <input class="custom" placeholder="Or type your own answer…">
+            <div class="checkline"><span class="box">✓</span>Always allow in this session</div>
+            <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" style="flex:1">Confirm</button></div>
+          </div>
+
+          <div class="glow" style="border-color:rgba(255,255,255,.14);background:rgba(255,255,255,.04)">
+            <div class="gt" style="color:var(--ink2)">Plan · proposed</div>
+            <div class="planstep"><span class="ic" style="color:var(--green)">✓</span>Read the auth module</div>
+            <div class="planstep"><span class="ic" style="color:var(--blue)">◐</span>Thread rotation through the session store</div>
+            <div class="planstep"><span class="ic" style="color:var(--ink3)">○</span>Cover expiry in the test matrix</div>
+            <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1">Decline</button><button class="btn primary" style="flex:1">Approve</button></div>
+          </div>
+
+          <div class="resolved"><span style="color:var(--green)">✓</span>Allowed “Yes, delete it” · 2m ago</div>
+          <div class="quiet">📄 modified src/auth/rotate.ts · +42 −7</div>
+          <div class="quiet">↑ 18.4k ↓ 1.2k · $0.31</div>
+          <div class="msg" style="color:var(--ink2)">Rotation is threaded through the store and the expiry tests pass. Remaining: update the docs page.</div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="qchip">Queue: “also update the README” <button>✎</button><button>✕</button></div>
+        <div class="attachrow"><span class="attach">🖼 error-screenshot.png</span></div>
+        <div class="slashmenu">
+          <div class="cmd"><span class="c">/usage</span><span class="d">show token spend</span></div>
+          <div class="cmd"><span class="c">/compact</span><span class="d">condense the context</span></div>
+        </div>
+        <div class="composer">
+          <button class="icbtn">＋</button>
+          <div class="input"><span class="dim">Message Claude…</span></div>
+          <button class="icbtn" style="background:rgba(255,69,58,.16);color:var(--red)">■</button>
+          <button class="icbtn accent">↑</button>
+        </div>
+      </div>
+
+      <!-- controls sheet -->
+      <div class="scrim" data-close="ctl"></div>
+      <div class="sheet" id="ctl">
+        <div class="grab"></div>
+        <div class="shead"><span class="stitle">Model & permissions</span><span class="subline">applies to this session</span></div>
+        <div class="sbody">
+          <div class="card" style="margin:0 0 12px">
+            <div class="kv"><span class="k">Engine</span><span class="v" style="color:var(--ink)">Claude ›</span></div>
+            <div class="kv"><span class="k">Model</span><span><span class="v" style="color:var(--ink);margin-right:8px">Opus 4.2</span><span class="badge-next">Next run</span></span></div>
+            <div class="kv"><span class="k">Reasoning</span><span><span class="v" style="color:var(--ink);margin-right:8px">High</span><span class="badge-live">Live</span></span></div>
+            <div class="kv"><span class="k">Permissions</span><span class="v" style="color:var(--ink)">Ask first ›</span></div>
+          </div>
+          <div class="sec" style="padding:4px 6px 8px">Switch engine</div>
+          <div class="card" style="margin:0 0 6px">
+            <div class="kv"><span class="k"><span class="dot blue" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:8px"></span>Claude <span class="subline" style="margin-left:6px">Opus 4.2 · High</span></span><span class="checkmark-cell">✓</span></div>
+            <div class="kv"><span class="k"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#a78bfa;margin-right:8px"></span>Codex <span class="subline" style="margin-left:6px">gpt-5-codex</span></span></div>
+            <div class="kv"><span class="k"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#e07a5f;margin-right:8px"></span>Grok Build <span class="subline" style="margin-left:6px">grok-3</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- sessions pane -->
+      <div class="scrim" data-close="sess"></div>
+      <div class="sheet-left" id="sess">
+        <div style="padding:60px 18px 10px;font-size:17px;font-weight:600;letter-spacing:-.022em">Sessions</div>
+        <div class="scroll" style="padding-bottom:20px">
+          <div class="row" style="margin:2px 10px;border-radius:12px;background:rgba(10,132,255,.2);box-shadow:inset 0 0 0 1px rgba(10,132,255,.5)"><span style="width:7px;height:7px;border-radius:50%;background:#4fae7c"></span><div class="grow"><div class="name">refactor-auth</div></div><span class="pill"><span class="dot blue blink"></span>Working</span></div>
+          <div class="row" style="margin:2px 10px"><span style="width:7px;height:7px;border-radius:50%;background:#a78bfa"></span><div class="grow"><div class="name">changelog-draft</div></div><span class="pill"><span class="dot gray"></span>Idle</span></div>
+          <div class="row" style="margin:2px 10px"><span style="width:7px;height:7px;border-radius:50%;background:#d96a8a"></span><div class="grow"><div class="name">stripe-migration</div></div><span class="pill"><span class="dot red"></span>Failed</span></div>
+        </div>
+      </div>
+
+      <!-- actions sheet -->
+      <div class="scrim" data-close="acts"></div>
+      <div class="sheet" id="acts">
+        <div class="grab"></div>
+        <div class="sbody" style="padding-top:10px">
+          <div class="card" style="margin:0 0 10px">
+            <div class="kv"><span class="k">★ Star</span></div>
+            <div class="kv"><span class="k">Copy link</span><span class="v">qai://session/…</span></div>
+            <div class="kv"><span class="k">Timeline detail</span><span class="v" style="color:var(--ink)">Detailed ✓</span></div>
+          </div>
+          <div class="card" style="margin:0 0 10px">
+            <div class="kv"><span class="k">Resume</span></div>
+            <div class="kv"><span class="k">Fork a copy</span></div>
+            <div class="kv"><span class="k">Export JSON</span></div>
+            <div class="kv"><span class="k" style="color:var(--orange)">Archive</span></div>
+          </div>
+          <div class="card" style="margin:0 0 10px">
+            <div class="kv"><span class="k" style="color:var(--red)">Delete session</span></div>
+          </div>
+          <button class="btn block" style="margin:0 0 6px">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Session</b>Header: back, title+status+engine, ⚙︎ controls / ▤ sessions / ⋯ actions (all open — try them). Timeline carries every message kind: user bubble, prose, code, foldable tool runs, plan with Approve/Decline, approval with options + custom text + always-allow, resolved state, file & usage rows, errors. Composer: queued message (steer/edit/remove), attachment chip, /commands, stop vs send.</figcaption>
+  </figure>
+
+  <!-- ═════════ 4 · NEW TASK 1 ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="scrim open"></div>
+      <div class="sheet open" style="max-height:100%">
+        <div class="grab"></div>
+        <div class="shead"><button class="icbtn small">✕</button><span class="stitle" style="margin-left:12px">New task</span></div>
+        <div class="steps-dots"><i class="on"></i><i></i></div>
+        <div class="sbody" style="padding-top:6px">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-.03em;padding:6px 6px 4px">Where should it work?</div>
+          <div class="caption-note" style="padding:0 6px 14px">Pick a project, or start in the Inbox for a scratch task.</div>
+          <div class="agentcard on"><span class="folder">▤</span><div class="grow"><div class="name">agentdeck-linux</div><div class="meta">6 sessions · ~/code/agentdeck-linux</div></div></div>
+          <div class="agentcard"><span class="folder">▤</span><div class="grow"><div class="name">payments-service</div><div class="meta">3 sessions · ~/code/payments</div></div></div>
+          <div class="agentcard"><span class="folder">▤</span><div class="grow"><div class="name">site</div><div class="meta">2 sessions · ~/code/site</div></div></div>
+          <div class="agentcard"><span style="width:30px;height:30px;border-radius:9px;background:rgba(120,120,128,.16);display:flex;align-items:center;justify-content:center">▥</span><div class="grow"><div class="name">Inbox</div><div class="meta">no project · files in scratch space</div></div></div>
+          <div class="field mono" style="margin-top:6px">or enter a path…  <span style="color:var(--ink3)">~/code/</span></div>
+          <div style="margin-top:14px"><button class="btn primary block">Next</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>New task · 1 of 2</b>Sheet that opens wherever you are. Recent workspaces with session counts, Inbox for scratch work, free-path entry.</figcaption>
+  </figure>
+
+  <!-- ═════════ 5 · NEW TASK 2 ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="scrim open"></div>
+      <div class="sheet open" style="max-height:100%">
+        <div class="grab"></div>
+        <div class="shead"><button class="icbtn small">‹</button><span class="stitle" style="margin-left:12px">New task</span><span class="pill" style="margin-left:auto">agentdeck-linux</span></div>
+        <div class="steps-dots"><i></i><i class="on"></i></div>
+        <div class="sbody" style="padding-top:6px">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-.03em;padding:6px 6px 10px">Who does it, and on what?</div>
+          <div class="agentcard on"><span class="radio"></span><div class="grow"><div class="name">Claude</div><div class="meta">Opus 4.2 · ACP</div></div><span class="pill"><span class="dot green"></span>Ready</span></div>
+          <div class="agentcard"><span class="radio"></span><div class="grow"><div class="name">Codex</div><div class="meta">gpt-5-codex · ACP</div></div><span class="pill"><span class="dot green"></span>Ready</span></div>
+          <div class="agentcard"><span class="radio"></span><div class="grow"><div class="name">Grok Build</div><div class="meta">not installed</div></div><span class="pill" style="border-color:rgba(255,159,10,.4)"><span class="dot orange"></span>Down</span></div>
+          <div class="field" style="margin-top:14px;min-height:76px"><span style="color:var(--ink)">Draft the changelog for v2.4</span><span class="dim">▍</span></div>
+          <div class="card" style="margin:4px 0 0">
+            <div class="kv"><span class="k">Model</span><span class="v" style="color:var(--ink)">Opus 4.2 ›</span></div>
+            <div class="kv"><span class="k">Reasoning</span><span class="v" style="color:var(--ink)">Medium ›</span></div>
+            <div class="kv"><span class="k">Permissions</span><span class="v" style="color:var(--ink)">Ask first ›</span></div>
+          </div>
+          <div style="margin-top:14px"><button class="btn primary block">Start task</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>New task · 2 of 2</b>Agent choice with live availability, first prompt, and the full config (model / reasoning / permission mode) before the first token.</figcaption>
+  </figure>
+
+  <!-- ═════════ 6 · AGENTS ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow">
+          <button class="icbtn">☰</button><span class="qmark">Q</span>
+          <div class="title">Agents</div>
+          <button class="btn small">Re-scan</button>
+        </div>
+      </div>
+      <div class="scroll">
+        <div class="caption-note" style="padding:12px 20px 0">Providers report themselves — a ready agent can take tasks right now. Unavailable ones say what's missing.</div>
+        <div class="card" style="margin-top:14px">
+          <div class="row"><span class="dot green"></span><div class="grow"><div class="name">Claude <span class="subline" style="margin-left:5px">ACP</span></div><div class="meta">Ready</div></div><span class="pill" style="background:rgba(48,209,88,.13);border-color:rgba(48,209,88,.3);color:var(--green)">Ready</span></div>
+          <div class="row"><span class="dot green"></span><div class="grow"><div class="name">Codex <span class="subline" style="margin-left:5px">ACP</span></div><div class="meta">Ready</div></div><span class="pill" style="background:rgba(48,209,88,.13);border-color:rgba(48,209,88,.3);color:var(--green)">Ready</span></div>
+          <div class="row"><span class="dot orange"></span><div class="grow"><div class="name">Grok Build <span class="subline" style="margin-left:5px">CLI</span></div><div class="meta">Not installed — run <span style="font-family:var(--mono);color:var(--ink2)">brew install grok</span> on the desktop</div></div><span class="pill" style="background:rgba(255,159,10,.13);border-color:rgba(255,159,10,.3);color:var(--orange)">Not installed</span></div>
+          <div class="row"><span class="dot orange"></span><div class="grow"><div class="name">Amp <span class="subline" style="margin-left:5px">CLI</span></div><div class="meta">Auth required — sign in once on the desktop</div></div><span class="pill" style="background:rgba(255,159,10,.13);border-color:rgba(255,159,10,.3);color:var(--orange)">Auth required</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Agents</b>Every provider the daemon sees, ready first, with the remedy spelled out. Re-scan re-detects installed CLIs.</figcaption>
+  </figure>
+
+  <!-- ═════════ 7 · BROWSERS ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow"><button class="icbtn">☰</button><span class="qmark">Q</span><div class="title">Browsers</div></div>
+      </div>
+      <div class="scroll">
+        <div class="caption-note" style="padding:12px 20px 0">Sessions with a workspace project can run the built-in browser engine — the agent drives it through the same tools.</div>
+        <div class="card" style="margin-top:14px">
+          <div class="row"><span class="dot green blink"></span><div class="grow"><div class="name">refactor-auth</div><div class="meta">agentdeck-linux · running on :41233</div></div><button class="btn small danger">Stop</button></div>
+          <div class="row"><span class="dot gray"></span><div class="grow"><div class="name">stripe-migration</div><div class="meta">payments-service · engine idle</div></div><button class="btn small">Start</button></div>
+          <div class="row"><span class="dot gray"></span><div class="grow"><div class="name">copy-tuning</div><div class="meta">site · engine idle</div></div><button class="btn small">Start</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Browsers</b>The CDP fleet view: which session engines are live, Start/Stop per session.</figcaption>
+  </figure>
+
+  <!-- ═════════ 8 · USAGE ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow"><button class="icbtn">☰</button><span class="qmark">Q</span><div class="title">Usage</div></div>
+      </div>
+      <div class="scroll">
+        <div style="display:flex;gap:10px;padding:14px 16px 0">
+          <div class="statcard"><div class="l">Fleet cost</div><div class="v">$14.20</div></div>
+          <div class="statcard"><div class="l">Tokens</div><div class="v">2.1M</div></div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#4fae7c"></span><div class="grow"><div class="name">refactor-auth</div></div><span class="v" style="font:12px var(--mono);color:var(--ink3)">812k</span><span style="font:500 13px var(--mono);width:58px;text-align:right">$5.31</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#d96a8a"></span><div class="grow"><div class="name">stripe-migration</div></div><span class="v" style="font:12px var(--mono);color:var(--ink3)">633k</span><span style="font:500 13px var(--mono);width:58px;text-align:right">$4.02</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#a78bfa"></span><div class="grow"><div class="name">changelog-draft</div></div><span class="v" style="font:12px var(--mono);color:var(--ink3)">421k</span><span style="font:500 13px var(--mono);width:58px;text-align:right">$2.77</span></div>
+          <div class="row"><span style="width:7px;height:7px;border-radius:50%;background:#e07a5f"></span><div class="grow"><div class="name">fix-qr-pairing</div></div><span class="v" style="font:12px var(--mono);color:var(--ink3)">288k</span><span style="font:500 13px var(--mono);width:58px;text-align:right">$2.10</span></div>
+        </div>
+        <div class="caption-note">Scanned from the conversations this device has loaded; totals grow as sessions are opened.</div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Usage</b>Fleet cost + token stat capsules, then per-session rows sorted by spend.</figcaption>
+  </figure>
+
+  <!-- ═════════ 9 · CONFIG ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen">
+      <div class="bar">
+        <div class="barrow"><button class="icbtn">☰</button><span class="qmark">Q</span><div class="title">Configuration</div></div>
+      </div>
+      <div class="scroll">
+        <div class="sec">Machine</div>
+        <div class="card" style="margin-top:0">
+          <div class="row"><span style="width:34px;height:34px;border-radius:10px;background:rgba(48,209,88,.15);display:flex;align-items:center;justify-content:center;color:var(--green)">▭</span><div class="grow"><div class="name">kareem's workstation</div><div class="meta"><span style="color:var(--green)">● Connected</span> · agentdeck v0.1.0 · Linux</div></div><button class="btn small">Copy token</button></div>
+          <div class="kv"><span class="k">Config path</span><span class="v">~/.config/agentdeck/config.toml</span></div>
+          <div class="kv"><span class="k">Endpoints</span><span class="v">● http://192.168.1.10:9120<br>○ https://tunnel.agentdeck.dev/…</span></div>
+        </div>
+        <div class="sec">Integrations</div>
+        <div class="card" style="margin-top:0">
+          <div class="kv"><span class="k">MCP servers</span><span class="v" style="color:var(--ink)">2 · 1 running ›</span></div>
+          <div class="kv"><span class="k">API providers</span><span class="v" style="color:var(--ink)">1 custom ›</span></div>
+          <div class="kv"><span class="k">Daemon settings</span><span class="v" style="color:var(--ink)">41 keys ›</span></div>
+        </div>
+        <div class="sec">About</div>
+        <div class="card" style="margin-top:0">
+          <div class="kv"><span class="k">QAI for iPhone</span><span class="v">v1.0 (214)</span></div>
+          <div class="kv"><span class="k">Documentation</span><span class="v" style="color:var(--blue)">↗</span></div>
+        </div>
+        <div class="sec">Danger zone</div>
+        <div class="card" style="margin-top:0">
+          <div class="kv"><span class="k">Unpair this device</span><span style="color:var(--red);font-weight:600">Unpair ›</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Configuration</b>Grouped inset lists, iOS settings grammar: machine truth (connection, config path, endpoints, token), integrations with disclosure chevrons, about, unpair.</figcaption>
+  </figure>
+
+  <!-- ═════════ 10 · PAIRING ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen" style="justify-content:center">
+      <div style="display:flex;flex-direction:column;flex:1;justify-content:center;padding:20px 0 40px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:26px">
+          <span class="qmark" style="width:58px;height:58px;font:700 30px/58px var(--mono);border-radius:16px">Q</span>
+          <div style="font-size:19px;font-weight:700;letter-spacing:-.025em;margin-top:6px">Pair with your desktop</div>
+          <div style="font-size:13.5px;color:var(--ink2);text-align:center;max-width:280px;line-height:1.45">Open the dashboard, choose <b style="color:var(--ink);font-weight:600">Pair a device</b>, and scan the QR it shows.</div>
+        </div>
+        <div class="viewfinder"><div style="text-align:center;font-size:13px;color:var(--ink3)">▣<br>camera view<br><span style="font-size:11px">(scans the pairing QR)</span></div></div>
+        <div class="divider-lbl">or enter manually</div>
+        <div class="field">Desktop URL · <span style="color:var(--ink)">http://192.168.1.10:9120</span></div>
+        <div class="field mono">Paste the offer JSON from the dashboard…</div>
+        <div style="margin:6px 16px 0"><button class="btn primary block">Pair</button></div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>Pairing</b>The gate screen: live camera viewfinder for the dashboard's QR, with manual URL + offer fallback and an explicit camera-permission state.</figcaption>
+  </figure>
+
+  <!-- ═════════ 11 · STATES ═════════ -->
+  <figure class="frame">
+  <div class="phone"><div class="island"></div>
+    <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i class="batt"></i></span></div>
+    <div class="screen" style="padding:80px 0 0">
+      <div style="padding:0 20px">
+        <div style="font-size:15px;font-weight:700;letter-spacing:-.02em;margin-bottom:14px">System states</div>
+        <div class="notice warn" style="margin:0 0 10px"><span class="dot orange blink"></span>Reconnecting… retrying in 3s<button class="x">✕</button></div>
+        <div class="notice err" style="margin:0 0 16px"><span class="dot red"></span>Turn failed: connection lost<button class="x">✕</button></div>
+
+        <div class="card" style="margin:0 0 16px;border-style:dashed;background:transparent">
+          <div style="padding:18px;text-align:center;color:var(--ink3);font-size:13px">✓ All clear — nothing needs you</div>
+        </div>
+
+        <div class="resolved" style="margin:0 0 10px"><span style="color:var(--green)">✓</span>Answered “Keep it, just stop using it” · 4m ago</div>
+        <div class="glow" style="max-width:none;margin:0 0 10px">
+          <div class="gt">Question</div>
+          <div class="q">Which layout should the home screen use?</div>
+          <div class="opt on"><span class="key">A</span><span class="lbl">Console cards</span></div>
+          <div class="opt"><span class="key">B</span><span class="lbl">Single list</span></div>
+          <div class="opt"><span class="key">C</span><span class="lbl">Let me choose per project</span></div>
+        </div>
+        <div class="resumeline" style="margin:0 0 10px">Session paused by you<button class="btn primary small" style="margin-left:auto">Resume</button></div>
+        <div class="qchip">Steer now ✦</div>
+        <div style="display:flex;gap:8px;margin-top:16px"><button class="icbtn" style="background:rgba(255,69,58,.16);color:var(--red)">■</button><button class="icbtn" style="background:var(--orange);width:74px;border-radius:999px;font-size:12px;font-weight:600">Queue</button></div>
+        <div class="caption-note" style="padding:10px 0 0">Stop (red, while streaming), send (blue), queue (grows to “Queue” while busy), steer pill. Errors/warnings are dismissible strips; the all-clear is a dashed card; questions use the same interactive card as approvals.</div>
+      </div>
+    </div>
+    <div class="homebar"></div>
+  </div>
+  <figcaption><b>States</b>The pieces that only appear when something happens: connection strips, all-clear, resolved approvals, AskUserQuestion cards, resume bar, and the composer's stop / send / queue variants.</figcaption>
+  </figure>
+
+</div>
+
+<script>
+  // Sheets & drawer — one scrim per host screen; opening toggles both.
+  document.querySelectorAll('[data-open]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const t = document.getElementById(el.dataset.open);
+      const scrim = t.previousElementSibling && t.previousElementSibling.classList.contains('scrim') ? t.previousElementSibling : findScrim(t);
+      t.classList.add('open'); scrim && scrim.classList.add('open');
+    });
+  });
+  function findScrim(t) { return t.parentElement.querySelector('.scrim'); }
+  document.querySelectorAll('[data-close]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const t = document.getElementById(el.dataset.close);
+      t.classList.remove('open');
+      const scrim = el.classList.contains('scrim') ? el : findScrim(t);
+      scrim && scrim.classList.remove('open');
+    });
+  });
+  // Collapsibles
+  document.querySelectorAll('[data-toggle]').forEach((el) => {
+    el.addEventListener('click', () => document.getElementById(el.dataset.toggle).classList.toggle('closed'));
+  });
+  // Tool-run expand
+  document.querySelectorAll('[data-toggle-steps]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const card = document.getElementById(el.dataset.toggleSteps);
+      card.querySelector('.steps').classList.toggle('hidden');
+      el.querySelector('.disc').style.transform = card.querySelector('.steps').classList.contains('hidden') ? 'rotate(-90deg)' : '';
+    });
+  });
+  // Approval options (single-select)
+  document.querySelectorAll('.opt').forEach((opt) => {
+    opt.addEventListener('click', () => {
+      const siblings = opt.parentElement.querySelectorAll('.opt');
+      siblings.forEach((s) => s.classList.remove('on'));
+      opt.classList.add('on');
+    });
+  });
+  // Chips single-select
+  document.querySelectorAll('.chips').forEach((row) => {
+    row.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+      row.querySelectorAll('.chip').forEach((x) => x.classList.remove('on'));
+      c.classList.add('on');
+    }));
+  });
+</script>
+</body>
+</html>

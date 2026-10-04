@@ -1,255 +1,122 @@
 /**
- * Navigation.
- *
- * QAI — the desktop's mobile shell, natively.
- * -------------------------------------------
- * ```
- * Pairing ──▶ Main         the projects list: every workspace and what is
- *              │           running inside it. There is NO tab bar — a phone
- *              │           shows one thing at a time, and the sidebar is how
- *              │           you reach anything else.
- *              │
- *              ├─ Sessions  every session, by day, searchable
- *              ├─ Station   the daemon's world: agents, engines, terminals,
- *              │            rooms, MCP, tunnels, usage
- *              └─ Device    this phone: routes, alerts, pairing
- *
- * (root stack, all pushed from the sidebar)
- *   Session          one conversation — the desktop's SessionView, full screen
- *   SessionPanel     that session's workspace rail — deep-linkable full screen
- *   Agents · Browsers · Usage · Providers · Rooms   the machinery, from Station
- *   AgentDetail      one agent in full — rises as a sheet
- *   Mcp · Remote · Daemon
- *
- * There is one configuration surface, the Device tab. The desktop splits its
- * preferences across a page and modals; a phone does not have room for two
- * doors onto the same room.
- * ```
- *
- * Two navigation surfaces, exactly like the desktop's responsive shell:
- *
- * **The drawer** (components/Drawer) is the full AppNav — New task, every
- * destination, the live History list, Quick Access and the device card. It is
- * mounted at the app root and opened from any page's menu button.
- *
- * **The sidebar** is the navigation. It carries every destination — the four
- * top-level pages, the whole machinery, and the live session list — so nothing
- * is reachable "only from that one screen". The bottom bar the app used to
- * carry is gone: on a phone it was six labelled glyphs competing with the
- * content, and the reference this design follows has none.
- *
- * Deep links: every destination is addressable (`qai://` + path), because a
- * notification, a push link and a shared URL all need to land somewhere
- * specific rather than "on the home tab".
+ * nav — five tabs over one stack: Home, History, Agents, Usage, Config,
+ * with Session pushing from the right and Pairing as the gate. Deep links
+ * ride `qai://`.
  */
 
-import * as React from 'react'
-import {
-  DarkTheme,
-  NavigationContainer,
-  useNavigation,
-  type LinkingOptions,
-  type NavigatorScreenParams,
-} from '@react-navigation/native'
+import { DarkTheme, NavigationContainer, type LinkingOptions, type NavigatorScreenParams } from '@react-navigation/native'
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { Chrome } from './ui'
 import * as Linking from 'expo-linking'
 
-import { navigationRef } from './lib/navigationRef'
+import { navigationRef } from '@/lib/navigationRef'
+import { isPaired } from '@/lib/pairing'
+import { color } from './design/tokens'
+import { Bot, Chart, Clock, Home, Sliders } from './design/icons'
 
-import { HomeScreen } from './screens/HomeScreen'
-import { AgentsScreen, AgentDetailScreen } from './screens/AgentsScreen'
-import { BrowsersScreen } from './screens/BrowsersScreen'
-import { HistoryScreen } from './screens/HistoryScreen'
-import { UsageScreen } from './screens/UsageScreen'
-import { ConfigScreen } from './screens/ConfigScreen'
-import { StationScreen } from './screens/StationScreen'
-import { ProvidersScreen } from './screens/ProvidersScreen'
-import { RoomsScreen } from './screens/RoomsScreen'
-import { SessionScreen } from './screens/SessionScreen'
-import { SessionPanelScreen, type PanelTabId } from './screens/SessionPanelScreen'
-import { McpScreen } from './screens/McpScreen'
-import { RemoteScreen } from './screens/RemoteScreen'
-import { DaemonSettingsScreen } from './screens/DaemonSettingsScreen'
-import { PairingScreen } from './screens/PairingScreen'
-import { openNewTask } from './lib/newTask'
-import { isPaired } from './lib/pairing'
-import { palette } from '@app/design/tokens'
+import { HomeScreen } from './screens/Home'
+import { HistoryScreen } from './screens/History'
+import { SessionScreen } from './screens/Session'
+import { AgentsScreen } from './screens/Agents'
+import { UsageScreen } from './screens/Usage'
+import { ConfigScreen } from './screens/Config'
+import { PairScreen } from './screens/Pair'
 
-/** The four destinations, plus the raised Command action between them. */
-export type TabParamList = {
-  Deck: undefined
-  Sessions: undefined
-  Station: undefined
-  Device: undefined
+export type TabList = {
+  Home: undefined
+  History: undefined
+  Agents: undefined
+  Usage: undefined
+  Config: undefined
 }
 
-export type RootStackParamList = {
-  /** The projects list. */
-  Main: NavigatorScreenParams<TabParamList> | undefined
-  Sessions: undefined
-  Station: undefined
-  Device: undefined
-  Session: { sessionId: string; approvalId?: string }
-  Agents: undefined
-  Browsers: undefined
-  Usage: undefined
-  Providers: undefined
-  Rooms: undefined
-  SessionPanel: { sessionId: string; tab?: PanelTabId }
-  AgentDetail: { agentId: string }
-  Mcp: undefined
-  Remote: undefined
-  Daemon: undefined
+export type RootStackParamList = RootStack
+
+export type RootStack = {
+  Tabs: NavigatorScreenParams<TabList>
+  Session: { sessionId: string }
   Pairing: undefined
 }
 
-// The ref lives in its own module so screens and chrome can import it
-// without cycling back through this file. Re-exported for the container below.
 export { navigationRef }
 
-const Stack = createNativeStackNavigator<RootStackParamList>()
+const Stack = createNativeStackNavigator<RootStack>()
+const Tab = createBottomTabNavigator<TabList>()
 
-const linking: LinkingOptions<RootStackParamList> = {
+const linking: LinkingOptions<RootStack> = {
   prefixes: [Linking.createURL('/'), 'qai://'],
   config: {
     screens: {
-      Main: '',
-      // `history` and `config` are the paths this app shipped before the
-      // rename. A saved link or a bookmark from an old build must still land
-      // somewhere sensible, so they are aliases rather than broken routes.
-      Sessions: { path: 'sessions', alias: ['history'] },
-      Station: 'station',
-      Device: { path: 'device', alias: ['config'] },
-      Agents: 'agents',
-      Browsers: 'browsers',
-      Usage: 'usage',
-      Providers: 'providers',
-      Rooms: 'rooms',
+      Tabs: { screens: { Home: '', History: 'history', Agents: 'agents', Usage: 'usage', Config: 'config' } },
       Session: 'session/:sessionId',
-      SessionPanel: 'session/:sessionId/panel',
-      AgentDetail: 'agent/:agentId',
-      Mcp: 'mcp',
-      Remote: 'remote',
-      Daemon: 'daemon',
       Pairing: 'pair',
     },
   },
 }
 
 /**
- * Route to the session (and approval) a notification was about.
- *
- * Called from the notification tap handler, which lives outside the React tree,
- * so it cannot use a hook and has to go through the ref.
+ * The tab bar's chrome. The bar is drawn by the navigator, outside the screen
+ * it floats over, so there is no view to hand a blur target — and a BlurView
+ * with no target renders nothing at all. The mockup's `.chrome` colour is
+ * opaque enough to read as the same bar without the blur.
  */
-export function navigateToAction(data: { sessionId: string; approvalId?: string }): void {
-  if (!navigationRef.isReady()) return
-  navigationRef.navigate('Session', { sessionId: data.sessionId, approvalId: data.approvalId })
+function TabChrome() {
+  return <Chrome />
 }
 
-/** Route to a tab from anywhere below the root stack (drawer, dialog, toast). */
-export function navigateToTab(tab: keyof TabParamList): void {
-  if (!navigationRef.isReady()) return
-  // The projects list IS the root, so it is the only one that is not a push.
-  if (tab === 'Deck') {
-    navigationRef.navigate('Main')
-    return
-  }
-  navigationRef.navigate(tab as never)
-}
-
-/**
- * Open a session from anywhere below the root stack.
- *
- * A session is a ROOT stack screen, pushed over the tabs, while tab screens
- * only know the five tab names — so the navigation has to bubble up to the
- * navigator that owns `Session`.
- */
-export function useOpenSession(): (sessionId: string, approvalId?: string) => void {
-  const navigation = useNavigation()
-  return React.useCallback(
-    (sessionId: string, approvalId?: string) => {
-      const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()
-      // `getParent` is undefined only before the tabs have mounted under the
-      // stack; falling back to the local navigator keeps the call total and
-      // no-ops in that window rather than throwing.
-      const target = parent ?? (navigation as unknown as NativeStackNavigationProp<RootStackParamList>)
-      target.navigate('Session', { sessionId, approvalId })
-    },
-    [navigation],
+function Tabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: color.accent,
+        tabBarInactiveTintColor: color.ink3,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarIconStyle: { marginTop: 6 },
+        tabBarStyle: {
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'transparent',
+          borderTopWidth: 0.5,
+          borderTopColor: color.line,
+          elevation: 0,
+        },
+        tabBarBackground: TabChrome,
+      }}
+    >
+      <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Home', tabBarIcon: ({ color: ink }) => <Home color={ink} stroke={1.6} /> }} />
+      <Tab.Screen name="History" component={HistoryScreen} options={{ title: 'History', tabBarIcon: ({ color: ink }) => <Clock color={ink} stroke={1.6} /> }} />
+      <Tab.Screen name="Agents" component={AgentsScreen} options={{ title: 'Agents', tabBarIcon: ({ color: ink }) => <Bot color={ink} stroke={1.6} /> }} />
+      <Tab.Screen name="Usage" component={UsageScreen} options={{ title: 'Usage', tabBarIcon: ({ color: ink }) => <Chart color={ink} stroke={1.6} /> }} />
+      <Tab.Screen name="Config" component={ConfigScreen} options={{ title: 'Config', tabBarIcon: ({ color: ink }) => <Sliders color={ink} stroke={1.6} /> }} />
+    </Tab.Navigator>
   )
 }
 
-/** Open a session's workspace rail. The desktop's right rail, as a screen. */
-export function useOpenPanel(): (sessionId: string, tab?: PanelTabId) => void {
-  const navigation = useNavigation()
-  return React.useCallback(
-    (sessionId: string, tab?: PanelTabId) => {
-      const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()
-      const target = parent ?? (navigation as unknown as NativeStackNavigationProp<RootStackParamList>)
-      target.navigate('SessionPanel', { sessionId, tab })
-    },
-    [navigation],
-  )
+/** Route to the session a notification was about. */
+export function navigateToSession(data: { sessionId: string }): void {
+  if (!navigationRef.isReady()) return
+  navigationRef.navigate('Session', { sessionId: data.sessionId })
 }
 
-/**
- * The new-task flow is a root-mounted host (components/NewTaskHost) reached
- * through the `lib/newTask` emitter — the same architecture as the drawer and
- * the toasts, so the app's primary verb presents identically from every
- * screen and is never owned (or swallowed) by one.
- */
-export function useNewTask(): (agentId?: string, project?: string) => void {
-  return openNewTask
-}
-
-/** The root surface: the projects list. Everything else is pushed over it. */
-function MainScreen() {
-  return <HomeScreen />
-}
-
-/* ── Screen transitions ───────────────────────────────────────────────────────
- * A session slides from the RIGHT (you went deeper). Reference lookups —
- * agent detail, config surfaces — rise from the BOTTOM as sheets, because they
- * are lookups you dismiss back down, not places you go. Pairing fades: it is a
- * gate, not a destination. */
-
-export function RootNavigator() {
-  // Land on Pairing until a device token exists. Evaluated at render, and App
-  // gates the navigator on credential hydration, so the first paint is right.
-  const initialRouteName = isPaired() ? 'Main' : 'Pairing'
+export function RootNav() {
+  const initial = isPaired() ? 'Tabs' : 'Pairing'
   return (
     <Stack.Navigator
-      initialRouteName={initialRouteName}
+      initialRouteName={initial}
       screenOptions={{
         headerShown: false,
         animation: 'slide_from_right',
         gestureEnabled: true,
-        contentStyle: { backgroundColor: palette.canvas },
+        contentStyle: { backgroundColor: color.bg },
       }}
     >
-      <Stack.Screen name="Main" component={MainScreen} />
-      <Stack.Screen name="Sessions" component={HistoryScreen} />
-      <Stack.Screen name="Station" component={StationScreen} />
-      <Stack.Screen name="Device" component={ConfigScreen} />
+      <Stack.Screen name="Tabs" component={Tabs} options={{ animation: 'fade' }} />
       <Stack.Screen name="Session" component={SessionScreen} />
-      {/* Station's destinations: deeper into the machinery, so they push. */}
-      <Stack.Screen name="Agents" component={AgentsScreen} />
-      <Stack.Screen name="Browsers" component={BrowsersScreen} />
-      <Stack.Screen name="Usage" component={UsageScreen} />
-      <Stack.Screen name="Providers" component={ProvidersScreen} />
-      <Stack.Screen name="Rooms" component={RoomsScreen} />
-      <Stack.Screen name="SessionPanel" component={SessionPanelScreen} options={{ animation: 'slide_from_right' }} />
-      <Stack.Screen name="AgentDetail" component={AgentDetailScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen name="Mcp" component={McpScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen name="Remote" component={RemoteScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen name="Daemon" component={DaemonSettingsScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-      <Stack.Screen
-        name="Pairing"
-        component={PairingScreen}
-        options={{ animation: 'fade', gestureEnabled: false }}
-      />
+      <Stack.Screen name="Pairing" component={PairScreen} options={{ animation: 'fade', gestureEnabled: false }} />
     </Stack.Navigator>
   )
 }
@@ -257,7 +124,7 @@ export function RootNavigator() {
 export function Navigation() {
   return (
     <NavigationContainer ref={navigationRef} theme={DarkTheme} linking={linking}>
-      <RootNavigator />
+      <RootNav />
     </NavigationContainer>
   )
 }
