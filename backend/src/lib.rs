@@ -16,6 +16,7 @@ pub mod policy;
 pub mod tools;
 pub mod providers;
 pub mod protocol;
+pub mod remote;
 pub mod sessions;
 pub mod skills;
 pub mod transcript;

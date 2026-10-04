@@ -13,7 +13,7 @@ import * as Linking from 'expo-linking'
 import { navigationRef } from '@/lib/navigationRef'
 import { isPaired } from '@/lib/pairing'
 import { color } from './design/tokens'
-import { Bot, Chart, Clock, Home, Sliders } from './design/icons'
+import { Bot, Chart, Clock, Home, Monitor, Sliders } from './design/icons'
 
 import { HomeScreen } from './screens/Home'
 import { HistoryScreen } from './screens/History'
@@ -21,6 +21,8 @@ import { SessionScreen } from './screens/Session'
 import { AgentsScreen } from './screens/Agents'
 import { UsageScreen } from './screens/Usage'
 import { ConfigScreen } from './screens/Config'
+import { RemoteScreen } from './screens/Remote'
+import { RemoteViewScreen } from './screens/RemoteView'
 import { PairScreen } from './screens/Pair'
 
 export type TabList = {
@@ -28,6 +30,7 @@ export type TabList = {
   History: undefined
   Agents: undefined
   Usage: undefined
+  Remote: undefined
   Config: undefined
 }
 
@@ -36,6 +39,8 @@ export type RootStackParamList = RootStack
 export type RootStack = {
   Tabs: NavigatorScreenParams<TabList>
   Session: { sessionId: string }
+  /** The live remote screen. `targetKey` is `desktop` | `display:<id>` | `window:<id>`. */
+  RemoteView: { targetKey: string; label: string }
   Pairing: undefined
 }
 
@@ -48,8 +53,9 @@ const linking: LinkingOptions<RootStack> = {
   prefixes: [Linking.createURL('/'), 'qai://'],
   config: {
     screens: {
-      Tabs: { screens: { Home: '', History: 'history', Agents: 'agents', Usage: 'usage', Config: 'config' } },
+      Tabs: { screens: { Home: '', History: 'history', Agents: 'agents', Usage: 'usage', Remote: 'remote', Config: 'config' } },
       Session: 'session/:sessionId',
+      RemoteView: 'remote-view',
       Pairing: 'pair',
     },
   },
@@ -91,6 +97,7 @@ function Tabs() {
       <Tab.Screen name="History" component={HistoryScreen} options={{ title: 'History', tabBarIcon: ({ color: ink }) => <Clock color={ink} stroke={1.6} /> }} />
       <Tab.Screen name="Agents" component={AgentsScreen} options={{ title: 'Agents', tabBarIcon: ({ color: ink }) => <Bot color={ink} stroke={1.6} /> }} />
       <Tab.Screen name="Usage" component={UsageScreen} options={{ title: 'Usage', tabBarIcon: ({ color: ink }) => <Chart color={ink} stroke={1.6} /> }} />
+      <Tab.Screen name="Remote" component={RemoteScreen} options={{ title: 'Portal', tabBarIcon: ({ color: ink }) => <Monitor color={ink} stroke={1.6} /> }} />
       <Tab.Screen name="Config" component={ConfigScreen} options={{ title: 'Config', tabBarIcon: ({ color: ink }) => <Sliders color={ink} stroke={1.6} /> }} />
     </Tab.Navigator>
   )
@@ -116,6 +123,8 @@ export function RootNav() {
     >
       <Stack.Screen name="Tabs" component={Tabs} options={{ animation: 'fade' }} />
       <Stack.Screen name="Session" component={SessionScreen} />
+      {/* Full-bleed: the remote screen owns the whole display, no tab bar. */}
+      <Stack.Screen name="RemoteView" component={RemoteViewScreen} options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="Pairing" component={PairScreen} options={{ animation: 'fade', gestureEnabled: false }} />
     </Stack.Navigator>
   )

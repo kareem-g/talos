@@ -9,6 +9,7 @@ A lightweight, native Linux control surface for AI coding agents. Built with Rus
 - **Multi-Agent Support**: Claude Code, Codex CLI, OpenCode, **Grok Build**, Gemini, Copilot, Kimi, and any Agent Client Protocol (ACP) agent
 - **Control-Station Dashboard**: Browser UI with streaming transcripts, plan/usage/turn-summary cards, diff viewers, and approval cards
 - **Remote Control — Browser and iOS Shell**: Scan a QR with any phone; the paired browser becomes the remote control (installable PWA, offline shell, system attention alerts). The same React bundle ships as a Capacitor iOS shell, built as an unsigned IPA in CI (`.github/workflows/ios-capacitor.yml`) and re-signed with Sideloadly/AltStore
+- **Remote View & Control**: From the QAI phone app, view and control the computer's real desktop, one monitor, or a single application window (App View) — native capture and input on Linux (X11 and Wayland via the desktop portal) and macOS (CoreGraphics), over the paired device token. Adaptive low-latency streaming, a virtual keyboard with sticky modifiers, and a "● Remote Control Active" indicator with one-tap terminate. See [docs/REMOTE_VIEW.md](docs/REMOTE_VIEW.md)
 - **Secure Remote Access**: Built-in Tailscale and Cloudflare tunnel support with one-tap device pairing and revocation
 - **Session Management**: Create, fork, archive, resume, and monitor agent sessions across devices
 - **Git Worktrees**: Isolated branches per session with auto-merge

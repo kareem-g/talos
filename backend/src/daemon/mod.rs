@@ -61,6 +61,14 @@ impl Daemon {
         let pty_manager = Arc::new(PtyManager::new(broadcast.clone()));
         let acp_manager = Arc::new(crate::agents::acp::AcpManager::new(broadcast.clone()));
         let claude_stream = Arc::new(crate::agents::claude_stream::ClaudeStreamManager::new(broadcast.clone()));
+        // Remote view / control. The platform backend is detected once here so a
+        // session never re-probes the display server or the portal.
+        let remote_enabled = self.config.read().await.settings().remote.enabled;
+        let remote = Arc::new(crate::remote::RemoteManager::new(
+            crate::remote::platform::detect(),
+            broadcast.clone(),
+            remote_enabled,
+        ));
         let state = Arc::new(AppState {
             config: Arc::clone(&self.config),
             session_manager: Arc::clone(&session_manager),
@@ -80,6 +88,7 @@ impl Daemon {
             browser_manager: Arc::new(crate::browser::manager::BrowserManager::new()),
             trajectories: Arc::new(crate::trajectory::TrajectoryRecorder::new()),
             push,
+            remote,
         });
 
         // Reconcile sessions left mid-flight by a previous run.

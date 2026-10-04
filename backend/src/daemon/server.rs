@@ -140,6 +140,17 @@ pub async fn start(
         .route("/pair/endpoint", get(crate::api::routes::pairing_endpoint))
         .route("/devices", get(crate::api::routes::list_devices))
         .route("/devices/{id}", delete(crate::api::routes::revoke_device))
+        // Remote view / control. Same handlers as the desktop surface, behind
+        // the device token — a paired phone can discover targets, enable the
+        // gate, preview a screen and terminate a session.
+        .route("/remote/host", get(crate::remote::api::remote_host))
+        .route("/remote/targets", get(crate::remote::api::remote_targets))
+        .route("/remote/permissions", get(crate::remote::api::remote_permissions))
+        .route("/remote/permissions/open", post(crate::remote::api::remote_open_permissions))
+        .route("/remote/enable", post(crate::remote::api::remote_set_enabled))
+        .route("/remote/sessions", get(crate::remote::api::remote_sessions))
+        .route("/remote/sessions/{id}", delete(crate::remote::api::remote_terminate))
+        .route("/remote/snapshot", get(crate::remote::api::remote_snapshot))
         // Settings, including the sections the Configuration screen edits.
         .route("/settings", get(crate::api::routes::get_settings).put(crate::api::routes::update_settings))
         .layer(middleware::from_fn_with_state(state.clone(), crate::api::middleware::auth_middleware));
@@ -151,6 +162,7 @@ pub async fn start(
         // WebSocket
         .route("/ws", get(ws_handler))
         .route("/ws/mobile", get(mobile_ws_handler))
+        .route("/ws/remote", get(remote_ws_handler))
 
         // Sessions
         .route("/api/sessions", get(crate::api::routes::list_sessions))
@@ -244,6 +256,19 @@ pub async fn start(
         .route("/api/tunnel/{kind}/stop", post(crate::api::routes::tunnel_stop))
         .route("/api/tunnel/diagnostics", get(crate::api::routes::tunnel_diagnostics))
         .route("/api/tunnel/endpoints", get(crate::api::routes::tunnel_endpoints))
+
+        // Remote view / control, desktop surface. Unauthenticated like the rest
+        // of `/api/*` because it only ever serves the local browser — which is
+        // the owner at the machine, and the place the terminate control and
+        // session indicator live.
+        .route("/api/remote/host", get(crate::remote::api::remote_host))
+        .route("/api/remote/targets", get(crate::remote::api::remote_targets))
+        .route("/api/remote/permissions", get(crate::remote::api::remote_permissions))
+        .route("/api/remote/permissions/open", post(crate::remote::api::remote_open_permissions))
+        .route("/api/remote/enable", post(crate::remote::api::remote_set_enabled))
+        .route("/api/remote/sessions", get(crate::remote::api::remote_sessions))
+        .route("/api/remote/sessions/{id}", delete(crate::remote::api::remote_terminate))
+        .route("/api/remote/snapshot", get(crate::remote::api::remote_snapshot))
 
         // Pairing
         .route("/api/pair", post(crate::api::routes::initiate_pairing))
@@ -349,4 +374,13 @@ async fn mobile_ws_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     ws.on_upgrade(|socket| crate::websocket::handler::handle_mobile_socket(socket, state))
+}
+
+/// Dedicated remote-view socket. Authenticated in-band with the device token,
+/// exactly like `/ws/mobile`, so there is one auth model and no new port.
+async fn remote_ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| crate::remote::ws::handle_remote_socket(socket, state))
 }

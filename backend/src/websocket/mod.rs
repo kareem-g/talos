@@ -37,6 +37,10 @@ pub enum WsMessage {
     Activity { session_id: String, activity: AgentActivity },
     StateChange { session_id: String, state: String },
     TunnelUpdate { status: String, details: serde_json::Value },
+    /// Remote-control presence: drives the desktop's "● Remote Control Active"
+    /// indicator and the phone's active-session banner. Broadcast whenever a
+    /// session starts, stops, or the enable gate moves.
+    RemoteSessionState { presence: crate::remote::protocol::RemotePresence },
     SessionError { session_id: String, code: String, message: String },
     Error { code: String, message: String },
 }

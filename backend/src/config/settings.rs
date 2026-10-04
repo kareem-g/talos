@@ -6,6 +6,11 @@ pub struct Settings {
     pub server: ServerConfig,
     pub security: SecurityConfig,
     pub tunnel: TunnelConfig,
+    /// Remote view / control policy. Off by default: a paired device must turn
+    /// it on (or the desktop must), which is the "remote-control enabled" state
+    /// the UI shows.
+    #[serde(default)]
+    pub remote: RemoteConfig,
     pub agents: AgentsConfig,
     pub worktree: WorktreeConfig,
     pub mcp: McpConfig,
@@ -14,6 +19,24 @@ pub struct Settings {
     /// Falls back to defaults for configs written before this field existed.
     #[serde(default)]
     pub context_assembly: ContextAssemblyConfig,
+}
+
+/// Remote view / control policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteConfig {
+    /// Master switch. When false no session can start, and turning it off
+    /// terminates any live one.
+    pub enabled: bool,
+    /// When true a new session waits for confirmation on the desktop before
+    /// pixels flow. Off by default: a paired device is already authorized.
+    #[serde(default)]
+    pub require_confirmation: bool,
+}
+
+impl Default for RemoteConfig {
+    fn default() -> Self {
+        Self { enabled: false, require_confirmation: false }
+    }
 }
 
 /// Controls how prompts are enriched before they reach the agent.
@@ -383,6 +406,7 @@ impl Default for Settings {
                     tunnel_id: None,
                 },
             },
+            remote: RemoteConfig::default(),
             agents: AgentsConfig {
                 claude: AgentBinary {
                     path: "claude".to_string(),

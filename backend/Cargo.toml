@@ -70,5 +70,18 @@ crossterm = { workspace = true }
 agentdeck-shared = { path = "../shared" }
 web-push = { version = "0.11", default-features = false }
 
+# Remote view / control. Platform backends live behind `cfg(target_os)` so a
+# Linux build never pulls in the macOS frameworks and vice versa.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["randr", "xtest", "allow-unsafe-code"] }
+zbus = { version = "5", default-features = false, features = ["tokio", "blocking-api"] }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = { version = "0.25", features = ["highsierra", "elcapitan"] }
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
 [dev-dependencies]
 tokio-test = "0.4"

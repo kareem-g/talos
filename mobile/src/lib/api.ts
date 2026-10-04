@@ -14,11 +14,17 @@
 
 import { File } from 'expo-file-system'
 
-import { resolveApiUrl } from './native'
+import { deviceBaseUrl, deviceRoutes, resolveApiUrl, setDeviceBaseUrl } from './native'
 import { storage } from './storage'
 import { persistToken, TOKEN_KEY } from './secureStore'
 import type { Session } from '@/types/session'
 import type { AgentEvent, AgentMessage } from '@/types/protocol'
+import type {
+  PermissionReport,
+  RemoteHostView,
+  RemoteSessionInfo,
+  RemoteTargetsView,
+} from '@/types/remoteView'
 
 /** Thrown for both transport failures and backend error envelopes. */
 export class ApiError extends Error {
@@ -44,27 +50,57 @@ export function setDeviceToken(token: string | null): void {
   void persistToken(token)
 }
 
+/** Per-route connection timeout. A dial that neither answers nor is refused —
+ *  an unreachable tailnet address, a phone that left the LAN — would otherwise
+ *  hang the caller forever and leave every loading state spinning. */
+const ROUTE_TIMEOUT_MS = 12_000
+
+/**
+ * Fetch `path`, trying each origin the daemon advertised in turn.
+ *
+ * The socket already rotates routes when a dial fails; HTTP did not, so a phone
+ * whose active route stopped working failed or hung every request even though
+ * another advertised origin answered. This walks the same ordered list, times
+ * each attempt out, and remembers the origin that actually replied so the socket
+ * and later calls reuse it.
+ */
+async function fetchWithFailover(path: string, init?: RequestInit): Promise<Response> {
+  const routes = deviceRoutes()
+  const origins = routes.length > 0 ? routes : ['']
+  let lastTarget = resolveApiUrl(path)
+  let lastReason = 'no response'
+  for (const origin of origins) {
+    const target = origin ? `${origin}${path.startsWith('/') ? path : `/${path}`}` : resolveApiUrl(path)
+    lastTarget = target
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), ROUTE_TIMEOUT_MS)
+    try {
+      const response = await fetch(target, { ...init, signal: controller.signal })
+      clearTimeout(timer)
+      if (origin && origin !== deviceBaseUrl()) setDeviceBaseUrl(origin)
+      return response
+    } catch (cause) {
+      clearTimeout(timer)
+      lastReason = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+  const opaque = /abort|load failed|failed to fetch|networkerror|network request failed/i.test(lastReason)
+  throw new ApiError(
+    opaque
+      ? `No response from ${lastTarget} — is the daemon reachable? (${lastReason})`
+      : `Request to ${lastTarget} failed: ${lastReason}`,
+    0,
+    'network_error',
+  )
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = deviceToken()
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('Content-Type', 'application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  let response: Response
-  const target = resolveApiUrl(path)
-  try {
-    response = await fetch(target, { ...init, headers })
-  } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : String(cause)
-    const opaque = /load failed|failed to fetch|networkerror|network request failed/i.test(reason)
-    throw new ApiError(
-      opaque
-        ? `No response from ${target} — is the daemon reachable? (${reason})`
-        : `Request to ${target} failed: ${reason}`,
-      0,
-      'network_error',
-    )
-  }
+  const response = await fetchWithFailover(path, { ...init, headers })
 
   const body = await response.text()
   let parsed: unknown = null
@@ -72,7 +108,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       parsed = JSON.parse(body)
     } catch {
-      throw new ApiError(`Malformed response from ${path}`, response.status, 'malformed_response')
+      // The daemon serves the dashboard SPA for any path it does not know, so
+      // an HTML body means the route is missing on that build — an older daemon,
+      // not a broken response. Saying "malformed" sends people to the wrong
+      // place; name the actual cause and the fix.
+      const looksLikeHtml = /^\s*</.test(body)
+      throw new ApiError(
+        looksLikeHtml
+          ? `This daemon build does not have ${path}. It is an older build — rebuild and restart the daemon.`
+          : `Malformed response from ${path}`,
+        response.status,
+        looksLikeHtml ? 'route_missing' : 'malformed_response',
+      )
     }
   }
 
@@ -715,6 +762,37 @@ export const remoteApi = {
     request<{ revoked: boolean }>(`/api/mobile/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
+/**
+ * Remote view / control REST surface.
+ *
+ * Discovery, the enable gate, the live-session list and one-off previews all go
+ * over HTTP; the live stream, input, clipboard and metadata ride the dedicated
+ * `/ws/remote` socket instead (see `lib/remoteView.ts`).
+ */
+export const remoteControlApi = {
+  host: () => request<RemoteHostView>('/api/mobile/remote/host'),
+  targets: () => request<RemoteTargetsView>('/api/mobile/remote/targets'),
+  permissions: () => request<PermissionReport>('/api/mobile/remote/permissions'),
+  openPermissions: () =>
+    request<{ opened: boolean }>('/api/mobile/remote/permissions/open', { method: 'POST' }),
+  enable: (enabled: boolean) =>
+    request<{ enabled: boolean }>('/api/mobile/remote/enable', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  sessions: () =>
+    request<{ sessions: RemoteSessionInfo[]; enabled: boolean }>('/api/mobile/remote/sessions'),
+  terminate: (id: string) =>
+    request<{ terminated: boolean }>(`/api/mobile/remote/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  /** One JPEG as a data URI, for the picker's previews (no socket needed). */
+  snapshot: (target: string, quality = 62, maxWidth = 900) =>
+    request<{ target: unknown; width: number; height: number; data: string }>(
+      `/api/mobile/remote/snapshot?target=${encodeURIComponent(target)}&quality=${quality}&max_width=${maxWidth}`,
+    ),
+}
+
 export const memoryApi = {
   config: (project?: string) =>
     request<{ enabled: boolean; project?: string }>(
@@ -754,8 +832,7 @@ export const syncApi = {
  */
 async function requestDataUri(path: string): Promise<string> {
   const token = deviceToken()
-  const target = resolveApiUrl(path)
-  const response = await fetch(target, {
+  const response = await fetchWithFailover(path, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   })
   if (!response.ok) throw new ApiError(`GET ${path} failed`, response.status)

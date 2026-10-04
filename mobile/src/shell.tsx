@@ -7,7 +7,7 @@ import * as React from 'react'
 import { navigationRef } from '@/lib/navigationRef'
 import { NewTask } from './newtask'
 
-export type Page = 'home' | 'agents' | 'history' | 'usage' | 'config'
+export type Page = 'home' | 'agents' | 'history' | 'usage' | 'portal' | 'config'
 
 type ShellValue = {
   openNewTask: (project?: string) => void
@@ -28,6 +28,7 @@ const TAB_ROUTES: Partial<Record<Page, keyof import('./navigation').TabList>> = 
   history: 'History',
   agents: 'Agents',
   usage: 'Usage',
+  portal: 'Remote',
   config: 'Config',
 }
 

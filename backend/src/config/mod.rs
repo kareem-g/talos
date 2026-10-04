@@ -122,4 +122,8 @@ pub struct AppState {
     /// Web Push delivery to subscribed browsers/phones — pages the user when an
     /// agent finishes, needs approval, or errors, even with the app closed.
     pub push: Arc<crate::notifications::push::PushService>,
+    /// Remote view / control: the live-session registry, the enable gate and the
+    /// platform capture/input backend. One instance per daemon; sessions are
+    /// shared across every viewer attached to them.
+    pub remote: Arc<crate::remote::RemoteManager>,
 }

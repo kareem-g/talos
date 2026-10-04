@@ -422,6 +422,7 @@ async fn trajectory_similarity_finds_and_formats_past_runs() {
                 .await
                 .unwrap()
         },
+        remote: agentdeck_backend::remote::RemoteManager::headless(),
     };
 
     let (found, refs) = find_similar_trajectories(&state, &current, "fix the auth bug", 3, 0.3)

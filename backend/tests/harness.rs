@@ -93,6 +93,7 @@ async fn test_state() -> AppState {
                 .await
                 .unwrap()
         },
+        remote: agentdeck_backend::remote::RemoteManager::headless(),
     }
 }
 

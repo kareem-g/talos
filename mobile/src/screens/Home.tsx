@@ -20,7 +20,7 @@ import type { RootStack } from '../navigation'
 import type { Session } from '@/types/session'
 import { agentHue, color } from '../design/tokens'
 import { MONO, W_SEMI } from '../design/fonts'
-import { ChevronDown, ChevronRight, Folder, Plus, Search, Sliders, Star, Trash } from '../design/icons'
+import { ChevronDown, ChevronRight, Folder, Monitor, Plus, Search, Sliders, Star, Trash } from '../design/icons'
 import { useShell } from '../shell'
 import { Btn, Chip, Dot, Empty, Loader, Pill, Search as SearchWell, Sheet, Tap, Text, haptic, type Tone } from '../ui'
 
@@ -184,6 +184,31 @@ export function HomeScreen() {
             />
           ))}
         </ScrollView>
+
+        {/* Portal — the remote view, reachable from Home with no session open.
+            It is a first-class capability, so it sits above the triage list
+            rather than behind a session or a settings screen. */}
+        <Tap
+          accessibilityRole="button"
+          accessibilityLabel={`Portal — view and control ${desktopName || 'this computer'}`}
+          onPress={() => {
+            void haptic('select')
+            shell.navigate('portal')
+          }}
+          squeeze={0.98}
+          className="mx-4 mt-[14px] flex-row items-center gap-3 rounded-[16px] bg-surface px-4 py-3"
+        >
+          <View className="size-9 shrink-0 items-center justify-center rounded-[10px] bg-accent-tint">
+            <Monitor size={18} color={color.accent} />
+          </View>
+          <View className="min-w-0 flex-1">
+            <Text className="text-[15.5px] font-semibold text-ink">Portal</Text>
+            <Text className="mt-0.5 text-[13px] text-ink-2" numberOfLines={1}>
+              View & control {desktopName || 'this computer'} — desktop and apps
+            </Text>
+          </View>
+          <ChevronRight size={16} color={color.ink3} />
+        </Tap>
 
         {/* Needs you */}
         <View className="mt-[26px] px-4 pb-[9px]">
