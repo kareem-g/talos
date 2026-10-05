@@ -311,6 +311,11 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
   const onScreenCursor = cursor && frame ? { x: viewport.offsetX + cursor.x * viewport.scale, y: viewport.offsetY + cursor.y * viewport.scale } : null
   const zoomed = zoom > 1.01
 
+  const qualityOptions = React.useMemo(
+    () => QUALITY_PRESETS.find((preset) => preset.id === qualityId)?.options ?? DEFAULT_OPTIONS,
+    [qualityId],
+  )
+
   const statePillTone = state === 'connected' ? 'green' : state === 'connecting' || state === 'reconnecting' ? 'orange' : state === 'permission_required' ? 'orange' : 'red'
 
   return (
@@ -325,14 +330,13 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
             }
           }}
         >
-          {frame ? (
-            <Image
-              source={{ uri: `data:image/jpeg;base64,${frame.data}` }}
-              style={{ position: 'absolute', left: viewport.offsetX, top: viewport.offsetY, width: viewport.drawWidth, height: viewport.drawHeight }}
-              resizeMode="stretch"
-              fadeDuration={0}
-            />
-          ) : null}
+          <FrameSurface
+            data={frame?.data ?? null}
+            left={viewport.offsetX}
+            top={viewport.offsetY}
+            width={viewport.drawWidth}
+            height={viewport.drawHeight}
+          />
 
           {onScreenCursor ? (
             <View pointerEvents="none" style={[styles.cursor, { left: onScreenCursor.x - 9, top: onScreenCursor.y - 9 }]} />
@@ -370,7 +374,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
           state={state}
           detail={detail}
           permissions={permissions}
-          onRetry={() => socketRef.current?.connect(target, QUALITY_PRESETS.find((preset) => preset.id === qualityId)?.options ?? DEFAULT_OPTIONS)}
+          onRetry={() => socketRef.current?.retry(target, qualityOptions)}
           onBack={() => navigation.goBack()}
         />
       ) : null}
@@ -505,6 +509,70 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
           ) : null}
         </View>
       </Sheet>
+    </View>
+  )
+}
+
+/* ── Frame surface — double-buffered, so the picture never blinks ─────────── */
+
+/**
+ * Draws the live frame from two alternating layers.
+ *
+ * React Native's `Image` clears to nothing while it decodes a new `source`, and
+ * the viewer changes its source every frame — so a single image visibly blinks
+ * between frames (worse the lower the frame rate on a slow link). Two layers are
+ * kept instead: the new frame is decoded on the hidden one and only swapped in
+ * when it has actually loaded, so the previous frame stays on screen throughout.
+ */
+function FrameSurface({
+  data,
+  left,
+  top,
+  width,
+  height,
+}: {
+  data: string | null
+  left: number
+  top: number
+  width: number
+  height: number
+}) {
+  const [buffers, setBuffers] = React.useState<{ a: string | null; b: string | null }>({ a: null, b: null })
+  const [front, setFront] = React.useState<'a' | 'b'>('a')
+  const frontRef = React.useRef<'a' | 'b'>('a')
+  const lastRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (!data) return
+    const uri = `data:image/jpeg;base64,${data}`
+    if (uri === lastRef.current) return
+    lastRef.current = uri
+    const back: 'a' | 'b' = frontRef.current === 'a' ? 'b' : 'a'
+    setBuffers((previous) => ({ ...previous, [back]: uri }))
+  }, [data])
+
+  const commit = (slot: 'a' | 'b') => () => {
+    if (frontRef.current === slot) return
+    frontRef.current = slot
+    setFront(slot)
+  }
+
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', left, top, width, height, overflow: 'hidden' }}>
+      {(['a', 'b'] as const).map((slot) => {
+        const source = buffers[slot]
+        if (!source) return null
+        return (
+          <Image
+            key={slot}
+            source={{ uri: source }}
+            style={[StyleSheet.absoluteFill, front === slot ? null : styles.frameHidden]}
+            resizeMode="stretch"
+            fadeDuration={0}
+            onLoad={commit(slot)}
+          />
+        )
+      })}
     </View>
   )
 }
@@ -664,6 +732,8 @@ const styles = StyleSheet.create({
     borderColor: color.accent,
     backgroundColor: 'rgba(10, 132, 255, 0.25)',
   },
+  /** The back buffer: decoded but not yet swapped to the front. */
+  frameHidden: { opacity: 0 },
   overlay: {
     position: 'absolute',
     top: 0,

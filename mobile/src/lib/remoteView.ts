@@ -96,12 +96,39 @@ export class RemoteSocket {
     this.sendJson({ type: 'ClipboardSet', payload: { text } })
   }
 
+  /**
+   * Retry a failed stream by starting a **fresh** session.
+   *
+   * Reusing the old session id would rejoin a session whose capture thread has
+   * already exited (that is why it failed), so nothing would ever resume. A new
+   * session is the only way to re-request capture — and on Wayland that is also
+   * what re-opens the compositor's screen-sharing prompt.
+   */
+  retry(target: RemoteTarget, options: StreamOptions): void {
+    this.target = target
+    this.options = options
+    this.sessionId = null
+    this.clearTimers()
+    const previous = this.socket
+    this.socket = null
+    try {
+      previous?.close()
+    } catch {
+      // already closing
+    }
+    this.closedByUs = false
+    this.attempt = 0
+    this.setState('connecting')
+    this.open()
+  }
+
   stop(): void {
     this.closedByUs = true
     this.clearTimers()
     this.sendJson({ type: 'Stop' })
     this.socket?.close()
     this.socket = null
+    this.sessionId = null
     this.setState('idle')
   }
 
@@ -156,6 +183,9 @@ export class RemoteSocket {
     }
 
     socket.onclose = () => {
+      // A superseded socket (we replaced it during a retry) must not clobber the
+      // new connection's state or schedule a competing reconnect.
+      if (this.socket !== socket) return
       this.socket = null
       this.stopKeepalive()
       if (this.closedByUs) {
