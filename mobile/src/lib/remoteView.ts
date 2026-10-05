@@ -196,6 +196,12 @@ export class RemoteSocket {
         } else if (message.payload.code === 'unsupported') {
           this.setState('unsupported', message.payload.message)
         } else if (message.payload.fatal) {
+          // A specific cause (a missing permission, an unsupported platform)
+          // arrives first; the capture loop then emits a generic "capture
+          // stopped" as it exits. Keep the specific reason rather than letting
+          // the generic one replace it — otherwise the user is told "something
+          // went wrong" when the answer is "approve the screen-sharing prompt".
+          if (this.state === 'permission_required' || this.state === 'unsupported') break
           this.setState('error', message.payload.message)
         }
         break
