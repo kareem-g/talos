@@ -185,7 +185,14 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
   /* ── Gestures ─────────────────────────────────────────────────────────── */
 
   const gestures = React.useMemo(() => {
+    // Every gesture runs its callbacks on the JS thread. React Native Gesture
+    // Handler auto-workletizes callbacks when Reanimated is installed, and these
+    // callbacks call JS functions (`send`, `setState`) and mutate refs — all of
+    // which are illegal from a worklet. On Android that is a warning; on iOS it
+    // is a hard crash the moment the viewer mounts. `runOnJS(true)` keeps them
+    // where they belong.
     const pinch = Gesture.Pinch()
+      .runOnJS(true)
       .onBegin(() => {
         pinchBaseRef.current = zoomRef.current
       })
@@ -197,6 +204,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
 
     // Two fingers drag → scroll the remote content.
     const scrollPan = Gesture.Pan()
+      .runOnJS(true)
       .minPointers(2)
       .maxPointers(2)
       .onChange((event) => {
@@ -210,6 +218,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
     // One finger → move the pointer (touch mode) or the local pointer
     // relatively (mouse mode). In drag mode the left button is held.
     const movePan = Gesture.Pan()
+      .runOnJS(true)
       .minPointers(1)
       .maxPointers(1)
       .minDistance(1)
@@ -229,6 +238,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       })
 
     const singleTap = Gesture.Tap()
+      .runOnJS(true)
       .maxDuration(250)
       .maxDistance(12)
       .onEnd((event) => {
@@ -242,6 +252,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       })
 
     const doubleTap = Gesture.Tap()
+      .runOnJS(true)
       .numberOfTaps(2)
       .maxDuration(260)
       .maxDistance(16)
@@ -252,6 +263,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       })
 
     const longPress = Gesture.LongPress()
+      .runOnJS(true)
       .minDuration(420)
       .onStart((event) => {
         void haptic('select')
