@@ -235,6 +235,7 @@ impl RemoteSession {
         };
         let mut active_target: Option<RemoteTarget> = None;
         let mut last_cursor: Option<(i32, i32)> = None;
+        let mut last_error: Option<String> = None;
 
         while !stop.load(Ordering::SeqCst) {
             let target = self.target();
@@ -242,6 +243,7 @@ impl RemoteSession {
 
             // Target change: release the old capture resources and re-arm.
             if active_target.as_ref() != Some(&target) {
+                last_error = None;
                 if let Some(previous) = active_target.as_ref() {
                     let _ = self.backend.end_target(previous);
                 }
@@ -249,6 +251,13 @@ impl RemoteSession {
                     let fatal = matches!(
                         error,
                         RemoteError::PermissionRequired(_) | RemoteError::Unsupported(_)
+                    );
+                    tracing::warn!(
+                        session_id = %self.id,
+                        target = %target.key(),
+                        fatal,
+                        "[AgentDeck][Remote] could not start capture: {}",
+                        error
                     );
                     let _ = self.events.send(SessionEvent::Failed {
                         code: error.code().to_string(),
@@ -271,6 +280,19 @@ impl RemoteSession {
                         error,
                         RemoteError::PermissionRequired(_) | RemoteError::Unsupported(_)
                     );
+                    // Log on change only: capture retries every 200ms and would
+                    // otherwise flood the log with the same line.
+                    let message = error.to_string();
+                    if last_error.as_deref() != Some(message.as_str()) {
+                        tracing::warn!(
+                            session_id = %self.id,
+                            target = %target.key(),
+                            fatal,
+                            "[AgentDeck][Remote] capture failed: {}",
+                            message
+                        );
+                        last_error = Some(message.clone());
+                    }
                     let _ = self.events.send(SessionEvent::Failed {
                         code: error.code().to_string(),
                         message: error.to_string(),

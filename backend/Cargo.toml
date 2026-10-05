@@ -44,7 +44,7 @@ hyper-util = { version = "0.1", features = ["full"] }
 
 # PTY / Process management
 portable-pty = "0.8"
-nix = { version = "0.29", features = ["process", "signal", "term"] }
+nix = { version = "0.29", features = ["process", "signal", "term", "fs"] }
 
 # WebSocket
 tokio-tungstenite = "0.24"
@@ -73,7 +73,7 @@ web-push = { version = "0.11", default-features = false }
 # Remote view / control. Platform backends live behind `cfg(target_os)` so a
 # Linux build never pulls in the macOS frameworks and vice versa.
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.13", features = ["randr", "xtest", "allow-unsafe-code"] }
+x11rb = { version = "0.13", features = ["randr", "xtest", "xfixes", "allow-unsafe-code"] }
 zbus = { version = "5", default-features = false, features = ["tokio", "blocking-api"] }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 

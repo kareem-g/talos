@@ -25,6 +25,7 @@ use std::sync::Mutex;
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{OwnedFd, OwnedObjectPath, OwnedValue, Value};
 
+use super::x11::parent_window_handle;
 use crate::remote::platform::{RemoteBackend, TargetGeometry};
 use crate::remote::protocol::{InputEvent, Modifiers, MouseButton, NamedKey};
 use crate::remote::types::{
@@ -42,8 +43,15 @@ const SOURCE_TYPE_MONITOR: u32 = 1;
 const SOURCE_TYPE_WINDOW: u32 = 2;
 
 /// The consent dialog lives on Start, so only that request waits for a human;
-/// the portal's own bookkeeping requests answer immediately.
-const PORTAL_PROMPT_LONG: std::time::Duration = std::time::Duration::from_secs(120);
+/// the portal's bookkeeping requests (create, select) answer promptly, and a
+/// missed bookkeeping response is tolerated after a short settle.
+const PORTAL_SELECT_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+const PORTAL_PROMPT_LONG: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// How long to stop retrying remote input after a failed negotiation. Input
+/// events arrive continuously; without this one refusal opens a portal session
+/// per pointer move.
+const INPUT_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// One stream the compositor granted: a PipeWire node plus its geometry.
 #[derive(Debug, Clone)]
@@ -106,6 +114,8 @@ pub struct WaylandBackend {
     pipeline: Mutex<Option<Pipeline>>,
     /// Negotiated input session.
     input: Mutex<Option<InputSession>>,
+    /// Last input-negotiation failure and when it happened, for backoff.
+    input_failure: Mutex<Option<(std::time::Instant, String)>>,
     /// Whether `gst-inspect-1.0 pipewiresrc` succeeded at detection time.
     pipewire_available: bool,
 }
@@ -142,6 +152,7 @@ impl WaylandBackend {
             cast: Mutex::new(None),
             pipeline: Mutex::new(None),
             input: Mutex::new(None),
+            input_failure: Mutex::new(None),
             pipewire_available: true,
         })
     }
@@ -199,9 +210,15 @@ impl WaylandBackend {
                 .cloned(),
         };
         stream.ok_or_else(|| {
+            let available: Vec<(u32, u32, u32, u32)> = session
+                .streams
+                .iter()
+                .map(|stream| (stream.node_id, stream.source_type, stream.width, stream.height))
+                .collect();
             RemoteError::Capture(format!(
-                "the portal did not grant a stream for {}",
-                target.key()
+                "the portal did not grant a stream for {} (granted: {:?})",
+                target.key(),
+                available
             ))
         })
     }
@@ -216,17 +233,33 @@ impl WaylandBackend {
             .as_ref()
             .ok_or_else(|| RemoteError::Capture("capture session not negotiated".to_string()))?;
         let fd = std::os::fd::AsRawFd::as_raw_fd(&session.fd);
+        // The PipeWire fd must survive `exec` for the child to inherit it. Rust
+        // opens descriptors close-on-exec by default, so clear FD_CLOEXEC —
+        // otherwise gst-launch starts with an invalid fd and the stream is
+        // silently black (or dead).
+        let _ = nix::fcntl::fcntl(
+            fd,
+            nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+        );
         // Force an exact RGB frame so the reader can slice stdout deterministically.
         let caps = format!(
             "video/x-raw,format=RGB,width={},height={}",
             stream.width, stream.height
         );
         let mut child = Command::new("gst-launch-1.0")
-            .arg("-q")
             .arg("pipewiresrc")
             .arg(format!("fd={fd}"))
             .arg(format!("path={}", stream.node_id))
             .arg("do-timestamp=true")
+            // Compositors hand PipeWire DMA-BUF buffers, which a software
+            // `videoconvert` cannot touch — it yields solid black. `always-copy`
+            // makes the source copy frames into memory first.
+            .arg("always-copy=true")
+            // Re-send the last frame when nothing is changing, so a static
+            // screen still produces frames instead of stalling the reader.
+            .arg("keepalive-time=500")
+            .arg("!")
+            .arg("video/x-raw")
             .arg("!")
             .arg("videoconvert")
             .arg("!")
@@ -238,9 +271,27 @@ impl WaylandBackend {
             .arg("fd=1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| RemoteError::Capture(format!("could not start gst-launch-1.0: {e}")))?;
+        // The child holds its own copy now; keep the descriptor close-on-exec for
+        // any future child so it does not leak.
+        let _ = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC));
+        // GStreamer's own errors (a bad format, a dead PipeWire node, a
+        // negotiation failure) are the only way to know why a stream is wrong;
+        // forward them to the daemon log instead of discarding them.
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                use std::io::BufRead;
+                let reader = std::io::BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    // Logged at info so it is visible without RUST_LOG: these
+                    // lines are the only explanation for a stream that connects
+                    // but shows nothing.
+                    tracing::info!("[AgentDeck][Remote][gst] {}", line);
+                }
+            });
+        }
         let stdout = child
             .stdout
             .take()
@@ -273,15 +324,42 @@ impl WaylandBackend {
             running.stop();
         }
         let spawned = self.spawn_pipeline(&stream)?;
+        tracing::info!(
+            "[AgentDeck][Remote] gst pipeline started for node {} ({}x{})",
+            stream.node_id,
+            stream.width,
+            stream.height
+        );
         *pipeline = Some(spawned);
         Ok(())
     }
 
     /* ── Portal negotiation ─────────────────────────────────────────────── */
 
-    /// Create a ScreenCast session and get its streams + PipeWire fd. This is
-    /// where the compositor shows its consent dialog.
+    /// Create a ScreenCast session and get its streams + PipeWire fd.
+    ///
+    /// When a persistent grant exists (see [`load_restore_token`]) the
+    /// compositor skips its dialog; if that token is stale it is dropped and the
+    /// user is asked once more, rather than failing forever.
     fn negotiate_cast(&self) -> RemoteResult<CastSession> {
+        let had_token = load_restore_token().is_some();
+        match self.negotiate_cast_once() {
+            Ok(session) => Ok(session),
+            Err(error) => {
+                if had_token {
+                    tracing::info!(
+                        "[AgentDeck][Remote] stored screen-share grant was rejected ({}); asking again",
+                        error
+                    );
+                    clear_restore_token();
+                    return self.negotiate_cast_once();
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn negotiate_cast_once(&self) -> RemoteResult<CastSession> {
         let conn = self.connection()?;
         let screencast: Proxy = Proxy::new(conn, PORTAL_DEST, PORTAL_PATH, SCREENCAST_IFACE)
             .map_err(|e| RemoteError::Capture(e.to_string()))?;
@@ -308,23 +386,53 @@ impl WaylandBackend {
         select_options.insert("multiple", Value::from(true));
         select_options.insert("cursor_mode", Value::from(2u32)); // embedded cursor
         select_options.insert("handle_token", Value::from(format!("{token}s")));
-        let _select_reply: OwnedObjectPath = screencast
+        // Ask the compositor to remember this grant (persist_mode 2 = "until
+        // revoked"), so a later session — including one started while nobody is
+        // at the computer — does not need the dialog again.
+        select_options.insert("persist_mode", Value::from(2u32));
+        if let Some(restore) = load_restore_token() {
+            select_options.insert("restore_token", Value::from(restore));
+        }
+        let select_reply: OwnedObjectPath = screencast
             .call("SelectSources", &(session_path.clone(), select_options))
             .map_err(|e| RemoteError::PermissionRequired(format!("SelectSources: {e}")))?;
-        // No wait: the portal processes method calls on a session in order, and
-        // this request's `Response` is one-shot — subscribing late would miss it.
+        // Give the portal a moment to record the selection before Start. Its
+        // response is not reliably emitted, so a timeout here is tolerated — but
+        // Start must not race it, which produced "Sources not selected".
+        if let Err(error) = wait_request(conn, &select_reply, PORTAL_SELECT_SETTLE) {
+            tracing::debug!("[AgentDeck][Remote] SelectSources response: {}", error);
+        }
 
         let mut start_options: HashMap<&str, Value> = HashMap::new();
         start_options.insert("handle_token", Value::from(format!("{token}g")));
-        let start_request: OwnedObjectPath = screencast
-            .call("Start", &(session_path.clone(), "", start_options))
+        let start_reply: OwnedObjectPath = screencast
+            .call(
+                "Start",
+                &(
+                    session_path.clone(),
+                    parent_window_handle().unwrap_or_default(),
+                    start_options,
+                ),
+            )
             .map_err(|e| RemoteError::PermissionRequired(format!("Start: {e}")))?;
-
-        let results = wait_for_request(&start_request, PORTAL_PROMPT_LONG)?;
+        // Start's response is where the dialog is answered and the streams are
+        // delivered, so it is the one wait that must succeed.
+        let results = wait_request(conn, &start_reply, PORTAL_PROMPT_LONG)?;
+        // Remember the grant for next time.
+        if let Some(restore) = string_from(&results, "restore_token") {
+            save_restore_token(&restore);
+        }
         let streams_value = results
             .get("streams")
             .ok_or_else(|| RemoteError::PermissionRequired("the portal returned no streams".to_string()))?;
         let streams = parse_streams(streams_value)?;
+        tracing::info!(
+            "[AgentDeck][Remote] portal grant: {:?}",
+            streams
+                .iter()
+                .map(|stream| (stream.node_id, stream.source_type, stream.width, stream.height))
+                .collect::<Vec<_>>()
+        );
         if streams.is_empty() {
             return Err(RemoteError::PermissionRequired(
                 "screen sharing was not granted".to_string(),
@@ -347,35 +455,81 @@ impl WaylandBackend {
         if cast.is_some() {
             return Ok(());
         }
-        let session = self.negotiate_cast()?;
+        let session = match self.negotiate_cast() {
+            Ok(session) => session,
+            Err(error) => {
+                tracing::warn!(
+                    "[AgentDeck][Remote] screen-share negotiation failed: {}",
+                    error
+                );
+                return Err(error);
+            }
+        };
+        tracing::info!(
+            "[AgentDeck][Remote] screen share granted: {} stream(s)",
+            session.streams.len()
+        );
         *cast = Some(session);
         Ok(())
     }
 
     /// Create (or reuse) a RemoteDesktop session for input.
+    ///
+    /// Input events arrive continuously, so a failed negotiation is backed off
+    /// rather than retried per event — otherwise one refusal spawns a portal
+    /// session per pointer move.
     fn ensure_input(&self) -> RemoteResult<InputSession> {
+        if let Ok(input) = self.input.lock()
+            && let Some(session) = input.as_ref()
         {
-            let input = self
-                .input
-                .lock()
-                .map_err(|_| RemoteError::Input("input lock poisoned".to_string()))?;
-            if let Some(session) = input.as_ref() {
-                return Ok(InputSession {
-                    session_path: session.session_path.clone(),
-                    node_id: session.node_id,
-                });
+            return Ok(InputSession {
+                session_path: session.session_path.clone(),
+                node_id: session.node_id,
+            });
+        }
+        if let Ok(failure) = self.input_failure.lock()
+            && let Some((when, message)) = failure.as_ref()
+            && when.elapsed() < INPUT_RETRY_BACKOFF
+        {
+            return Err(RemoteError::Input(message.clone()));
+        }
+        match self.ensure_input_once() {
+            Ok(session) => {
+                if let Ok(mut failure) = self.input_failure.lock() {
+                    *failure = None;
+                }
+                Ok(session)
+            }
+            Err(error) => {
+                tracing::warn!("[AgentDeck][Remote] remote input unavailable: {}", error);
+                if let Ok(mut failure) = self.input_failure.lock() {
+                    *failure = Some((std::time::Instant::now(), error.to_string()));
+                }
+                Err(error)
             }
         }
-        let proxy: Proxy = Proxy::new(self.connection()?, PORTAL_DEST, PORTAL_PATH, REMOTE_DESKTOP_IFACE)
+    }
+
+    fn ensure_input_once(&self) -> RemoteResult<InputSession> {
+        let conn = self.connection()?;
+        let proxy: Proxy = Proxy::new(conn, PORTAL_DEST, PORTAL_PATH, REMOTE_DESKTOP_IFACE)
             .map_err(|e| RemoteError::Input(e.to_string()))?;
         let token = format!("agentdeck{}", random_token());
         let mut create_options: HashMap<&str, Value> = HashMap::new();
         create_options.insert("session_handle_token", Value::from(token.clone()));
         create_options.insert("handle_token", Value::from(format!("{token}c")));
-        let _reply: OwnedObjectPath = proxy
+        let create_reply: OwnedObjectPath = proxy
             .call("CreateSession", &(create_options))
             .map_err(|e| RemoteError::Input(format!("RemoteDesktop session: {e}")))?;
-        let session_path = portal_object_path(self.connection()?, "session", &token)?;
+        // The RemoteDesktop session only becomes usable once its CreateSession
+        // request has been answered; if no response comes, the deterministic
+        // session path is used instead.
+        let session_path = match wait_request(conn, &create_reply, PORTAL_SELECT_SETTLE) {
+            Ok(results) => string_from(&results, "session_handle")
+                .and_then(|handle| OwnedObjectPath::try_from(handle).ok())
+                .unwrap_or(portal_object_path(conn, "session", &token)?),
+            Err(_) => portal_object_path(conn, "session", &token)?,
+        };
 
         // Keyboard + pointer.
         const DEVICE_KEYBOARD: u32 = 1;
@@ -383,16 +537,36 @@ impl WaylandBackend {
         let mut select_options: HashMap<&str, Value> = HashMap::new();
         select_options.insert("types", Value::from(DEVICE_KEYBOARD | DEVICE_POINTER));
         select_options.insert("handle_token", Value::from(format!("{token}s")));
-        let _select_reply: OwnedObjectPath = proxy
+        // Remember this grant too, so remote input keeps working without the
+        // consent prompt when nobody is at the machine.
+        select_options.insert("persist_mode", Value::from(2u32));
+        if let Some(restore) = load_input_token() {
+            select_options.insert("restore_token", Value::from(restore));
+        }
+        let select_reply: OwnedObjectPath = proxy
             .call("SelectDevices", &(session_path.clone(), select_options))
             .map_err(|e| RemoteError::Input(format!("SelectDevices: {e}")))?;
+        // Devices must be recorded before Start is accepted.
+        if let Err(error) = wait_request(conn, &select_reply, PORTAL_SELECT_SETTLE) {
+            tracing::debug!("[AgentDeck][Remote] SelectDevices response: {}", error);
+        }
 
         let mut start_options: HashMap<&str, Value> = HashMap::new();
         start_options.insert("handle_token", Value::from(format!("{token}g")));
-        let start_request: OwnedObjectPath = proxy
-            .call("Start", &(session_path.clone(), "", start_options))
+        let start_reply: OwnedObjectPath = proxy
+            .call(
+                "Start",
+                &(
+                    session_path.clone(),
+                    parent_window_handle().unwrap_or_default(),
+                    start_options,
+                ),
+            )
             .map_err(|e| RemoteError::Input(format!("RemoteDesktop start: {e}")))?;
-        let results = wait_for_request(&start_request, PORTAL_PROMPT_LONG)?;
+        let results = wait_request(conn, &start_reply, PORTAL_PROMPT_LONG)?;
+        if let Some(restore) = string_from(&results, "restore_token") {
+            save_input_token(&restore);
+        }
         let node_id = results
             .get("streams")
             .and_then(|value| parse_streams(value).ok())
@@ -781,20 +955,96 @@ fn portal_object_path(conn: &Connection, kind: &str, token: &str) -> RemoteResul
         .map_err(|e| RemoteError::Other(format!("bad portal object path: {e}")))
 }
 
-/// Wait for the `Response` signal on a portal request object and return its
-/// result map.
+/// Read a string field out of a portal response map.
+fn string_from(results: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    let value = results.get(key)?;
+    let json = serde_json::to_value(&**value).ok()?;
+    json.as_str().map(str::to_string)
+}
+
+/// Where a portal restore token for `kind` ("screencast" / "remote-desktop")
+/// is kept between runs.
+fn token_path(kind: &str) -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))?;
+    Some(base.join("agentdeck").join(format!("portal-{kind}-token")))
+}
+
+fn load_token(kind: &str) -> Option<String> {
+    let value = std::fs::read_to_string(token_path(kind)?).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn save_token(kind: &str, token: &str) {
+    let Some(path) = token_path(kind) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // The token is a capability: keep it readable only by the user.
+    let _ = std::fs::write(&path, token);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+fn clear_token(kind: &str) {
+    if let Some(path) = token_path(kind) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/* ── The screen-share grant ("auto share") ────────────────────────────────── */
+
+/// The compositor's remembered grant for screen capture, if one was issued.
 ///
-/// The wait runs on its own thread with a bounded timeout: a user who never
-/// answers the compositor's prompt must not leave a capture thread blocked
-/// forever (and with it the session's consent negotiation). Timing out surfaces
-/// a `PermissionRequired` state the client can act on instead.
-fn wait_for_request(request_path: &OwnedObjectPath, timeout: std::time::Duration) -> RemoteResult<HashMap<String, OwnedValue>> {
+/// `<xdg-config>/agentdeck/portal-screencast-token`. With `persist_mode = 2`, a
+/// successful share returns a token that lets a later session start without the
+/// dialog — which is what makes viewing a machine you are away from possible.
+fn load_restore_token() -> Option<String> {
+    load_token("screencast")
+}
+fn save_restore_token(token: &str) {
+    save_token("screencast", token)
+}
+fn clear_restore_token() {
+    clear_token("screencast")
+}
+
+/// The compositor's remembered grant for remote input.
+fn load_input_token() -> Option<String> {
+    load_token("remote-desktop")
+}
+fn save_input_token(token: &str) {
+    save_token("remote-desktop", token)
+}
+
+/// Wait for the `Response` on a portal request path, bounded by `timeout`.
+///
+/// The path is the object the portal *returned* from the call, not one derived
+/// from our handle token: the returned path is authoritative, and deriving it
+/// was what made the wait time out on a request the portal had placed elsewhere.
+fn wait_request(
+    conn: &Connection,
+    request_path: &OwnedObjectPath,
+    timeout: std::time::Duration,
+) -> RemoteResult<HashMap<String, OwnedValue>> {
     let path = request_path.clone();
+    // Subscribe on the connection that *made* the call. A fresh connection has
+    // to register its own match rule with the bus first, and a `Response` that
+    // arrives in that window is lost — which is why an approved dialog could
+    // still time out.
+    let connection = conn.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let outcome = (|| -> RemoteResult<HashMap<String, OwnedValue>> {
-            let connection = Connection::session()
-                .map_err(|e| RemoteError::PermissionRequired(format!("D-Bus session unavailable: {e}")))?;
             let proxy = Proxy::new(&connection, PORTAL_DEST, path.as_str(), REQUEST_IFACE)
                 .map_err(|e| RemoteError::PermissionRequired(e.to_string()))?;
             let mut signals = proxy
@@ -819,10 +1069,11 @@ fn wait_for_request(request_path: &OwnedObjectPath, timeout: std::time::Duration
     });
     rx.recv_timeout(timeout).map_err(|_| {
         RemoteError::PermissionRequired(
-            "the desktop did not answer the screen-sharing prompt in time".to_string(),
+            "the desktop did not answer the portal prompt in time".to_string(),
         )
     })?
 }
+
 
 /// Parse a portal `a(ua{sv})` streams value.
 ///

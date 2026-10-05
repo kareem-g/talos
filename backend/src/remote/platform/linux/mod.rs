@@ -26,7 +26,14 @@ pub struct LinuxBackend {
     wayland: Option<wayland::WaylandBackend>,
     /// True when the compositor session should be driven through the portal.
     prefer_wayland: bool,
+    /// When the portal last failed. While it is recent the portal is skipped and
+    /// the X11 path is used directly, so a broken/absent ScreenCast backend
+    /// costs one failed attempt rather than one per session.
+    wayland_failed: std::sync::Mutex<Option<std::time::Instant>>,
 }
+
+/// How long a portal failure is remembered before trying it again.
+const WAYLAND_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl LinuxBackend {
     pub fn detect() -> Self {
@@ -53,11 +60,32 @@ impl LinuxBackend {
             None
         };
 
-        Self { session_kind, x11, wayland, prefer_wayland }
+        Self { session_kind, x11, wayland, prefer_wayland, wayland_failed: std::sync::Mutex::new(None) }
+    }
+
+    fn mark_wayland_failed(&self) {
+        if let Ok(mut failed) = self.wayland_failed.lock() {
+            *failed = Some(std::time::Instant::now());
+        }
+    }
+
+    fn wayland_recently_failed(&self) -> bool {
+        self.wayland_failed
+            .lock()
+            .ok()
+            .and_then(|failed| *failed)
+            .map(|when| when.elapsed() < WAYLAND_RETRY_AFTER)
+            .unwrap_or(false)
     }
 
     fn wayland_for(&self, target: &crate::remote::types::RemoteTarget) -> Option<&wayland::WaylandBackend> {
         if !self.prefer_wayland {
+            return None;
+        }
+        // A portal that just failed is skipped for a while: on a machine whose
+        // ScreenCast backend cannot show its dialog, every session would
+        // otherwise pay the full prompt timeout before falling back to X11.
+        if self.wayland_recently_failed() {
             return None;
         }
         // Wayland owns the composited desktop and the portal's own window
@@ -182,7 +210,28 @@ impl RemoteBackend for LinuxBackend {
 
     fn capture(&self, target: &crate::remote::types::RemoteTarget) -> crate::remote::types::RemoteResult<crate::remote::types::Frame> {
         if let Some(wayland) = self.wayland_for(target) {
-            return wayland.capture(target);
+            match wayland.capture(target) {
+                Ok(frame) => return Ok(frame),
+                Err(error) => {
+                    self.mark_wayland_failed();
+                    // On a Wayland session the X11 root belongs to XWayland and
+                    // cannot be grabbed (`XGetImage` on it answers BadMatch —
+                    // `xwd -root` fails identically), so a whole screen or
+                    // monitor has no X11 fallback. End the stream with the real
+                    // reason instead of looping on an impossible capture.
+                    tracing::warn!("[AgentDeck][Remote] portal capture failed: {}", error);
+                    if self.prefer_wayland {
+                        return Err(crate::remote::types::RemoteError::Unsupported(
+                            "Monitor and full-desktop capture are unavailable on this Wayland \
+                             session: the compositor's screen-sharing dialog did not appear and \
+                             XWayland does not allow capturing the root screen. Use App View \
+                             (windows) — or restart this computer to reset the GNOME portal and \
+                             try again."
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
         }
         if let Some(x11) = &self.x11 {
             return x11.capture(target);
@@ -193,8 +242,10 @@ impl RemoteBackend for LinuxBackend {
     }
 
     fn geometry(&self, target: &crate::remote::types::RemoteTarget) -> crate::remote::types::RemoteResult<super::TargetGeometry> {
-        if let Some(wayland) = self.wayland_for(target) {
-            return wayland.geometry(target);
+        if let Some(wayland) = self.wayland_for(target)
+            && let Ok(geometry) = wayland.geometry(target)
+        {
+            return Ok(geometry);
         }
         if let Some(x11) = &self.x11 {
             return x11.geometry(target);
@@ -215,10 +266,16 @@ impl RemoteBackend for LinuxBackend {
         if let Some(wayland) = self.wayland_for(target) {
             match wayland.input(target, event) {
                 Ok(()) => return Ok(()),
-                Err(crate::remote::types::RemoteError::Unsupported(_)) => {
-                    // Fall through to X11 when the portal cannot drive input.
+                Err(error) => {
+                    // XTEST still drives X11/XWayland clients, so input keeps
+                    // working even when the portal's RemoteDesktop session
+                    // cannot be established.
+                    tracing::warn!(
+                        "[AgentDeck][Remote] portal input failed ({}); using X11",
+                        error
+                    );
+                    self.mark_wayland_failed();
                 }
-                Err(error) => return Err(error),
             }
         }
         if let Some(x11) = &self.x11 {
@@ -265,7 +322,20 @@ impl RemoteBackend for LinuxBackend {
 
     fn begin_target(&self, target: &crate::remote::types::RemoteTarget) -> crate::remote::types::RemoteResult<()> {
         if let Some(wayland) = self.wayland_for(target) {
-            return wayland.begin_target(target);
+            match wayland.begin_target(target) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    // Not fatal: mark the portal unhealthy and let capture fall
+                    // back to X11 on this very attempt instead of ending the
+                    // session with a permission error.
+                    tracing::warn!(
+                        "[AgentDeck][Remote] portal could not start capture ({}); using X11",
+                        error
+                    );
+                    self.mark_wayland_failed();
+                    return Ok(());
+                }
+            }
         }
         Ok(())
     }

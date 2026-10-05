@@ -15,8 +15,10 @@ use std::sync::Mutex;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::randr::ConnectionExt as RandrExt;
+use x11rb::protocol::xfixes::ConnectionExt as XfixesExt;
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ConnectionExt as XprotoExt, ImageFormat, MapState, Window,
+    Atom, AtomEnum, ConnectionExt as XprotoExt, CreateWindowAux, EventMask, ImageFormat, MapState,
+    Visualid, Window, WindowClass,
 };
 use x11rb::protocol::xtest::ConnectionExt as XTestExt;
 use x11rb::rust_connection::RustConnection;
@@ -341,6 +343,61 @@ impl X11Backend {
         Ok(Frame::new(width, height, rgba, left, top))
     }
 
+    /// Draw the server's own cursor sprite into a captured frame.
+    ///
+    /// `GetImage` never includes the pointer, so without this an X11 view has no
+    /// cursor at all and the client has to fake one. XFixes hands over the real
+    /// cursor image, its hotspot and the position it was captured at, which is
+    /// blended over the frame — the same pointer the machine is showing.
+    fn composite_cursor(&self, frame: &mut Frame) {
+        let Ok(cookie) = self.conn.xfixes_get_cursor_image() else {
+            return;
+        };
+        let Ok(cursor) = cookie.reply() else {
+            return;
+        };
+        let cw = cursor.width as i32;
+        let ch = cursor.height as i32;
+        if cw <= 0 || ch <= 0 {
+            return;
+        }
+        let start_x = cursor.x as i32 - cursor.xhot as i32;
+        let start_y = cursor.y as i32 - cursor.yhot as i32;
+        let image = &cursor.cursor_image;
+        if image.len() < (cw * ch) as usize {
+            return;
+        }
+        for row in 0..ch {
+            let fy = start_y + row - frame.origin_y;
+            if fy < 0 || fy >= frame.height as i32 {
+                continue;
+            }
+            for col in 0..cw {
+                let fx = start_x + col - frame.origin_x;
+                if fx < 0 || fx >= frame.width as i32 {
+                    continue;
+                }
+                // XFixes delivers premultiplied ARGB.
+                let argb = image[(row * cw + col) as usize];
+                let alpha = ((argb >> 24) & 0xff) as u32;
+                if alpha == 0 {
+                    continue;
+                }
+                let src_r = (argb >> 16) & 0xff;
+                let src_g = (argb >> 8) & 0xff;
+                let src_b = argb & 0xff;
+                let index = ((fy as u32 * frame.width + fx as u32) * 4) as usize;
+                let inverse = 255 - alpha;
+                frame.rgba[index] = (src_r + frame.rgba[index] as u32 * inverse / 255).min(255) as u8;
+                frame.rgba[index + 1] =
+                    (src_g + frame.rgba[index + 1] as u32 * inverse / 255).min(255) as u8;
+                frame.rgba[index + 2] =
+                    (src_b + frame.rgba[index + 2] as u32 * inverse / 255).min(255) as u8;
+                frame.rgba[index + 3] = 255;
+            }
+        }
+    }
+
     /// Raw `GetImage` of a drawable's own pixels (used for window capture).
     fn grab_drawable(
         &self,
@@ -466,7 +523,7 @@ impl RemoteBackend for X11Backend {
     }
 
     fn capture(&self, target: &RemoteTarget) -> RemoteResult<Frame> {
-        match target {
+        let mut frame = match target {
             // A window is read from its own drawable, not a crop of the root:
             // that is the native window-level capture, and it avoids BadMatch
             // for a window whose frame sits partly off-screen. The root-region
@@ -504,13 +561,17 @@ impl RemoteBackend for X11Backend {
                     geometry.height as u32,
                     translated.dst_x as i32,
                     translated.dst_y as i32,
-                )
+                )?
             }
             _ => {
                 let (x, y, width, height) = self.target_region(target)?;
-                self.grab_region(x, y, width, height)
+                self.grab_region(x, y, width, height)?
             }
-        }
+        };
+        // The pointer is part of what is on screen; X11 never includes it in a
+        // capture, so it is drawn here as the real sprite.
+        self.composite_cursor(&mut frame);
+        Ok(frame)
     }
 
     fn geometry(&self, target: &RemoteTarget) -> RemoteResult<TargetGeometry> {
@@ -930,6 +991,50 @@ fn clipboard_helper_available() -> bool {
 /// Convenience for tests and callers: is there a usable X display?
 pub fn display_available() -> bool {
     std::env::var_os("DISPLAY").is_some()
+}
+
+/// A portal `parent_window` handle for this process, created once.
+///
+/// `xdg-desktop-portal-gnome` will not show its screen-share dialog for a
+/// caller with no window: it logs "Failed to associate portal window with
+/// parent window" and the request then hangs until it times out, which is
+/// exactly the silent black screen we chased. The portal's `parent_window`
+/// argument takes an `x11:<id>` handle, so a tiny hidden window is parked here
+/// for the life of the process and its id handed to the portal — the same
+/// technique windowless capture tools use to get a dialog to appear.
+pub fn parent_window_handle() -> Option<String> {
+    static PARENT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    PARENT
+        .get_or_init(|| {
+            let (conn, screen_num) = x11rb::connect(None).ok()?;
+            let screen = conn.setup().roots.get(screen_num)?.clone();
+            let window = conn.generate_id().ok()?;
+            let aux = CreateWindowAux::new()
+                .override_redirect(1)
+                .event_mask(EventMask::NO_EVENT);
+            conn.create_window(
+                screen.root_depth,
+                window,
+                screen.root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                // COPY_FROM_PARENT is visual id 0.
+                Visualid::from(0u32),
+                &aux,
+            )
+            .ok()?;
+            conn.map_window(window).ok()?;
+            conn.flush().ok()?;
+            // The window must outlive the portal request, so the connection is
+            // deliberately leaked rather than dropped (which would destroy it).
+            std::mem::forget(conn);
+            Some(format!("x11:{window:x}"))
+        })
+        .clone()
 }
 
 #[cfg(test)]

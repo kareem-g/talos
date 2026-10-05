@@ -5,7 +5,16 @@
  * desktop. Kept pure so it is testable without a device.
  */
 
-import { clampPan, computeViewport, fitScale, screenToFrame, scrollFromDrag } from '../touch'
+import {
+  clampPan,
+  computeViewport,
+  fitScale,
+  frameToScreenRotated,
+  rotatedSize,
+  screenToFrame,
+  screenToFrameRotated,
+  scrollFromDrag,
+} from '../touch'
 
 describe('fitScale', () => {
   it('contains the frame preserving aspect', () => {
@@ -57,5 +66,32 @@ describe('clampPan', () => {
 describe('scrollFromDrag', () => {
   it('passes the delta through with its sign (trackpad convention)', () => {
     expect(scrollFromDrag(3, 7)).toEqual({ dx: 3, dy: 7 })
+  })
+})
+
+describe('rotation', () => {
+  const container = { width: 400, height: 800 }
+  const frame = { width: 1600, height: 900 }
+
+  it('swaps the footprint at 90 and 270', () => {
+    expect(rotatedSize(frame, 0)).toEqual({ width: 1600, height: 900 })
+    expect(rotatedSize(frame, 90)).toEqual({ width: 900, height: 1600 })
+    expect(rotatedSize(frame, 180)).toEqual({ width: 1600, height: 900 })
+    expect(rotatedSize(frame, 270)).toEqual({ width: 900, height: 1600 })
+  })
+
+  it('round-trips a frame point through screen space at every rotation', () => {
+    for (const rotation of [0, 90, 180, 270]) {
+      const screen = frameToScreenRotated(container, frame, rotation, 1, 0, 0, 800, 450)
+      const back = screenToFrameRotated(container, frame, rotation, 1, 0, 0, screen.x, screen.y)
+      expect(Math.abs(back.x - 800)).toBeLessThanOrEqual(1)
+      expect(Math.abs(back.y - 450)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('maps the centre of the screen to the centre of the frame', () => {
+    const back = screenToFrameRotated(container, frame, 90, 1, 0, 0, 200, 400)
+    expect(Math.abs(back.x - 800)).toBeLessThanOrEqual(1)
+    expect(Math.abs(back.y - 450)).toBeLessThanOrEqual(1)
   })
 })

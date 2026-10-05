@@ -134,9 +134,30 @@ The viewer is the screen: gestures map to a real pointer.
 
 The keyboard is a hidden text field plus a sticky‑modifier shortcut bar
 (`CTRL ALT SHIFT CMD`, `ESC`, `TAB`, arrows, `CTRL+C/V/Z`, `⌘C/⌘V/⌘Z`).
-`1:1` / `Fit` and quality presets (Data saver / Balanced / Sharp) are one tap
-away, and rotation reflows the viewport because it is derived from the window
-size each render.
+`1:1` / `Fit`, quality presets (Data saver / Balanced / Sharp) and a rotate
+control (0° → 90° → 180° → 270°, per session) are one tap away, and rotation
+reflows the viewport because it is derived from the window size each render.
+Rotating turns the remote picture without touching the remote machine — input
+coordinates are mapped back through the rotation, so a tap still lands on the
+pixel you touched.
+
+## Persistent sharing ("view while away")
+
+On Wayland, capture is granted by the compositor's own dialog. Asking every time
+makes remote viewing useless when nobody is at the computer, so the ScreenCast
+session requests a **persistent grant** (`persist_mode = 2`) and stores the
+`restore_token` the portal returns:
+
+* `<xdg-config>/agentdeck/portal-screencast-token` — screen capture
+* `<xdg-config>/agentdeck/portal-remote-desktop-token` — remote input
+
+The token is created **after the first approval** and is reused on later
+sessions, so the dialog does not reappear. To revoke it, delete the file (or
+revoke the share in the desktop's screen-sharing indicator); the next session
+will ask once and mint a fresh token. If a stored token is ever rejected, the
+daemon drops it and asks again automatically rather than failing.
+
+X11 needs none of this: capture and input have no per-app consent.
 
 ## Performance
 
@@ -164,7 +185,12 @@ Runtime requirements by platform:
 * **X11** — nothing (pure Rust via `x11rb`); `xclip` (or `xsel`) for clipboard.
 * **Wayland** — `xdg-desktop-portal` with a ScreenCast backend
   (`xdg-desktop-portal-gnome` / `-kde` / `-wlr`) and GStreamer's
-  `pipewiresrc` (`gstreamer1.0-pipewire`); `wl-clipboard` for clipboard.
+  `pipewiresrc` (`gstreamer1.0-pipewire`); `wl-clipboard` for clipboard. The
+  capture pipeline runs `pipewiresrc ! videoconvert ! videoscale ! fdsink` with
+  `always-copy=true` (compositors hand out DMA-BUF buffers, which a software
+  converter renders black) and `keepalive-time=500` (so a static screen still
+  produces frames). The PipeWire fd is made close-on-exec-clear for the child,
+  then restored.
 * **macOS** — grant **Screen Recording** and **Accessibility** in
   System Settings → Privacy & Security. The app detects a missing grant and
   shows the exact path with an **Open settings** button; it never fails

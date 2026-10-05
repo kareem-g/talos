@@ -93,3 +93,84 @@ export function clampPan(
 export function scrollFromDrag(dxScreen: number, dyScreen: number): { dx: number; dy: number } {
   return { dx: dxScreen, dy: dyScreen }
 }
+
+/* ── Rotation ─────────────────────────────────────────────────────────────── */
+
+/** The frame's on-screen footprint for a rotation: 90/270 swap width/height. */
+export function rotatedSize(frame: Size, rotation: number): Size {
+  return rotation % 180 === 0
+    ? { width: frame.width, height: frame.height }
+    : { width: frame.height, height: frame.width }
+}
+
+function rotateVector(x: number, y: number, rotation: number): { x: number; y: number } {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return { x: -y, y: x }
+    case 180:
+      return { x: -x, y: -y }
+    case 270:
+      return { x: y, y: -x }
+    default:
+      return { x, y }
+  }
+}
+
+function rotateVectorInverse(x: number, y: number, rotation: number): { x: number; y: number } {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return { x: y, y: -x }
+    case 180:
+      return { x: -x, y: -y }
+    case 270:
+      return { x: -y, y: x }
+    default:
+      return { x, y }
+  }
+}
+
+/** Screen point → frame pixel when the frame is drawn at `rotation`. */
+export function screenToFrameRotated(
+  container: Size,
+  frame: Size,
+  rotation: number,
+  zoom: number,
+  panX: number,
+  panY: number,
+  x: number,
+  y: number,
+): { x: number; y: number } {
+  const display = computeViewport(container, rotatedSize(frame, rotation), zoom, panX, panY)
+  const cx = display.offsetX + display.drawWidth / 2
+  const cy = display.offsetY + display.drawHeight / 2
+  const back = rotateVectorInverse(x - cx, y - cy, rotation)
+  const unrotated: Viewport = {
+    scale: display.scale,
+    offsetX: cx - (frame.width * display.scale) / 2,
+    offsetY: cy - (frame.height * display.scale) / 2,
+    drawWidth: frame.width * display.scale,
+    drawHeight: frame.height * display.scale,
+  }
+  return screenToFrame(unrotated, frame, cx + back.x, cy + back.y)
+}
+
+/** Frame pixel → screen point when the frame is drawn at `rotation` (the
+ *  remote cursor overlay). */
+export function frameToScreenRotated(
+  container: Size,
+  frame: Size,
+  rotation: number,
+  zoom: number,
+  panX: number,
+  panY: number,
+  fx: number,
+  fy: number,
+): { x: number; y: number } {
+  const display = computeViewport(container, rotatedSize(frame, rotation), zoom, panX, panY)
+  const cx = display.offsetX + display.drawWidth / 2
+  const cy = display.offsetY + display.drawHeight / 2
+  const unrotatedX = cx - (frame.width * display.scale) / 2 + fx * display.scale
+  const unrotatedY = cy - (frame.height * display.scale) / 2 + fy * display.scale
+  const rotated = rotateVector(unrotatedX - cx, unrotatedY - cy, rotation)
+  return { x: cx + rotated.x, y: cy + rotated.y }
+}

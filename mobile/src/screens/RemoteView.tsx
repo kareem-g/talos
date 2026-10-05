@@ -11,13 +11,22 @@
  */
 
 import * as React from 'react'
-import { Image, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native'
+import { Animated, BackHandler, Image, Keyboard, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { clipboardAvailable, getClipboardString, setClipboardString } from '@/lib/clipboard'
 import { RemoteSocket } from '@/lib/remoteView'
-import { clampPan, computeViewport, fitScale, screenToFrame, scrollFromDrag, type Size } from '@/lib/touch'
+import {
+  clampPan,
+  computeViewport,
+  fitScale,
+  frameToScreenRotated,
+  rotatedSize,
+  screenToFrameRotated,
+  scrollFromDrag,
+  type Size,
+} from '@/lib/touch'
 import { haptic } from '@/lib/haptics'
 import {
   DEFAULT_OPTIONS,
@@ -53,10 +62,15 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
   const target = React.useMemo(() => parseTargetKey(route.params.targetKey), [route.params.targetKey])
 
   const [frame, setFrame] = React.useState<RemoteFrame | null>(null)
-  const [cursor, setCursor] = React.useState<{ x: number; y: number } | null>(null)
+  /** A short-lived marker at the last tap, so touch has feedback without a
+   *  fake pointer being drawn over the remote desktop. */
+  const [ripple, setRipple] = React.useState<{ x: number; y: number; key: number } | null>(null)
+  const rippleTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [stats, setStats] = React.useState<RemoteStreamStats | null>(null)
   const [state, setState] = React.useState<RemoteState>('connecting')
   const [detail, setDetail] = React.useState<string | undefined>(undefined)
+  /** The latest non-fatal stream error, shown so a black screen is never silent. */
+  const [streamNotice, setStreamNotice] = React.useState<string | null>(null)
   const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null)
   const [permissions, setPermissions] = React.useState<PermissionReport | null>(null)
   const [host, setHost] = React.useState<HostInfo | null>(null)
@@ -67,6 +81,8 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
 
   const [zoom, setZoom] = React.useState(1)
   const [pan, setPan] = React.useState({ x: 0, y: 0 })
+  /** 0 | 90 | 180 | 270 — how the remote picture is turned on the phone. */
+  const [rotation, setRotation] = React.useState(0)
   const [mouseMode, setMouseMode] = React.useState(false)
   const [dragOn, setDragOn] = React.useState(false)
   const [keyboardOpen, setKeyboardOpen] = React.useState(false)
@@ -79,6 +95,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
   const viewportRef = React.useRef<Size>({ width: 0, height: 0 })
   const zoomRef = React.useRef(1)
   const panRef = React.useRef({ x: 0, y: 0 })
+  const rotationRef = React.useRef(0)
   const modsRef = React.useRef(mods)
   const mouseModeRef = React.useRef(mouseMode)
   const dragRef = React.useRef(dragOn)
@@ -88,41 +105,120 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
 
   React.useEffect(() => void (zoomRef.current = zoom), [zoom])
   React.useEffect(() => void (panRef.current = pan), [pan])
+  React.useEffect(() => void (rotationRef.current = rotation), [rotation])
   React.useEffect(() => void (modsRef.current = mods), [mods])
   React.useEffect(() => void (mouseModeRef.current = mouseMode), [mouseMode])
   React.useEffect(() => void (dragRef.current = dragOn), [dragOn])
   React.useEffect(() => void (longPressRef.current = longPressAction), [longPressAction])
 
+  /* ── Keyboard ─────────────────────────────────────────────────────────── */
+
+  const keyInputRef = React.useRef<TextInput>(null)
+
+  /**
+   * Close the on-screen keyboard for real. The remote keyboard is drawn by the
+   * OS over the bottom bar, so both the toggle and the close control have to be
+   * reachable above it — and the hardware back gesture must dismiss it rather
+   * than leaving the viewer, which is how it previously got stuck open.
+   */
+  const closeKeyboard = React.useCallback(() => {
+    setKeyboardOpen(false)
+    keyInputRef.current?.blur()
+    Keyboard.dismiss()
+  }, [])
+
+  React.useEffect(() => {
+    if (!keyboardOpen) return
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeKeyboard()
+      return true
+    })
+    return () => subscription.remove()
+  }, [keyboardOpen, closeKeyboard])
+
   const send = React.useCallback((event: InputEvent) => {
     socketRef.current?.input(event)
   }, [])
 
-  const currentViewport = React.useCallback(() => {
-    return computeViewport(viewportRef.current, frameSizeRef.current, zoomRef.current, panRef.current.x, panRef.current.y)
+  /** Touch feedback at the point that was touched. */
+  const showRipple = React.useCallback((x: number, y: number) => {
+    if (rippleTimer.current) clearTimeout(rippleTimer.current)
+    setRipple({ x, y, key: Date.now() })
+    rippleTimer.current = setTimeout(() => setRipple(null), 420)
   }, [])
 
-  /** Keep the remote pointer in view when zoomed: pan follows the pointer. */
+  React.useEffect(
+    () => () => {
+      if (rippleTimer.current) clearTimeout(rippleTimer.current)
+    },
+    [],
+  )
+
+  const currentViewport = React.useCallback(() => {
+    return computeViewport(
+      viewportRef.current,
+      rotatedSize(frameSizeRef.current, rotationRef.current),
+      zoomRef.current,
+      panRef.current.x,
+      panRef.current.y,
+    )
+  }, [])
+
+  /** Keep the remote pointer in view when zoomed: nudge the pan only when the
+   *  pointer's drawn position drifts near an edge. Rotation-aware, so a turned
+   *  picture still follows the pointer. */
   const focusOn = React.useCallback((fx: number, fy: number) => {
     const frameSize = frameSizeRef.current
+    const container = viewportRef.current
     if (zoomRef.current <= 1 || frameSize.width === 0) return
-    const scale = fitScale(viewportRef.current, frameSize) * zoomRef.current
-    const next = clampPan(
-      computeViewport(viewportRef.current, frameSize, zoomRef.current, 0, 0),
-      -(fx - frameSize.width / 2) * scale,
-      -(fy - frameSize.height / 2) * scale,
+    const rotation = rotationRef.current
+    const point = frameToScreenRotated(
+      container,
+      frameSize,
+      rotation,
+      zoomRef.current,
+      panRef.current.x,
+      panRef.current.y,
+      fx,
+      fy,
     )
-    setPan(next)
+    const marginX = container.width * 0.22
+    const marginY = container.height * 0.22
+    let dx = 0
+    let dy = 0
+    if (point.x < marginX) dx = marginX - point.x
+    else if (point.x > container.width - marginX) dx = container.width - marginX - point.x
+    if (point.y < marginY) dy = marginY - point.y
+    else if (point.y > container.height - marginY) dy = container.height - marginY - point.y
+    if (dx === 0 && dy === 0) return
+    const nextX = panRef.current.x + dx
+    const nextY = panRef.current.y + dy
+    setPan(
+      clampPan(
+        computeViewport(container, rotatedSize(frameSize, rotation), zoomRef.current, nextX, nextY),
+        nextX,
+        nextY,
+      ),
+    )
   }, [])
 
   const moveTo = React.useCallback(
     (screenX: number, screenY: number) => {
-      const viewport = currentViewport()
-      const point = screenToFrame(viewport, frameSizeRef.current, screenX, screenY)
+      const point = screenToFrameRotated(
+        viewportRef.current,
+        frameSizeRef.current,
+        rotationRef.current,
+        zoomRef.current,
+        panRef.current.x,
+        panRef.current.y,
+        screenX,
+        screenY,
+      )
       send({ kind: 'pointer_move', x: point.x, y: point.y })
       focusOn(point.x, point.y)
       return point
     },
-    [currentViewport, focusOn, send],
+    [focusOn, send],
   )
 
   /* ── Socket lifecycle ─────────────────────────────────────────────────── */
@@ -141,7 +237,9 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
             setPermissions(message.payload.permissions)
             break
           case 'Cursor':
-            setCursor(message.payload.visible ? { x: message.payload.x, y: message.payload.y } : null)
+            // The remote cursor is drawn by the machine itself (embedded in the
+            // Wayland stream, composited into X11 frames), so the phone does not
+            // paint a second one on top.
             break
           case 'StreamStats':
             setStats(message.payload)
@@ -153,6 +251,14 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
           case 'PermissionRequired':
             setPermissions(message.payload.permissions)
             setDetail(message.payload.message)
+            break
+          case 'Error':
+            // Non-fatal stream errors (the capture pipeline failing, a stream
+            // ending) would otherwise leave a connected-but-black screen with no
+            // explanation. Show them.
+            if (!message.payload.fatal) {
+              setStreamNotice(`${message.payload.code}: ${message.payload.message}`)
+            }
             break
           case 'State':
             break
@@ -243,6 +349,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       .maxDistance(12)
       .onEnd((event) => {
         void haptic('light')
+        showRipple(event.x, event.y)
         if (mouseModeRef.current) {
           send({ kind: 'click', button: 'left', count: 1 })
           return
@@ -258,6 +365,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       .maxDistance(16)
       .onEnd((event) => {
         void haptic('light')
+        showRipple(event.x, event.y)
         if (!mouseModeRef.current) moveTo(event.x, event.y)
         send({ kind: 'click', button: 'left', count: 2 })
       })
@@ -283,7 +391,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
       scrollPan,
       Gesture.Race(movePan, Gesture.Exclusive(doubleTap, singleTap), longPress),
     )
-  }, [currentViewport, moveTo, send])
+  }, [currentViewport, moveTo, send, showRipple])
 
   /* ── Keyboard helpers ─────────────────────────────────────────────────── */
 
@@ -307,8 +415,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
   const viewportSize = { width: window.width, height: window.height }
   viewportRef.current = viewportSize
   const frameSize: Size = frame ? { width: frame.width, height: frame.height } : { width: 0, height: 0 }
-  const viewport = computeViewport(viewportSize, frameSize, zoom, pan.x, pan.y)
-  const onScreenCursor = cursor && frame ? { x: viewport.offsetX + cursor.x * viewport.scale, y: viewport.offsetY + cursor.y * viewport.scale } : null
+  const viewport = computeViewport(viewportSize, rotatedSize(frameSize, rotation), zoom, pan.x, pan.y)
   const zoomed = zoom > 1.01
 
   const qualityOptions = React.useMemo(
@@ -336,10 +443,14 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
             top={viewport.offsetY}
             width={viewport.drawWidth}
             height={viewport.drawHeight}
+            rotation={rotation}
+            scale={viewport.scale}
+            frameWidth={frameSize.width}
+            frameHeight={frameSize.height}
           />
 
-          {onScreenCursor ? (
-            <View pointerEvents="none" style={[styles.cursor, { left: onScreenCursor.x - 9, top: onScreenCursor.y - 9 }]} />
+          {ripple ? (
+            <TouchRipple key={ripple.key} x={ripple.x} y={ripple.y} />
           ) : null}
         </View>
       </GestureDetector>
@@ -366,7 +477,27 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
         <IconBtn label="Quality" onPress={() => setQualityOpen(true)}>
           <Text className="text-[11px] font-semibold text-ink-2">{zoomed ? `${zoom.toFixed(1)}×` : 'Fit'}</Text>
         </IconBtn>
+        {/* Keyboard close lives in the top bar: the on-screen keyboard covers the
+            bottom controls, so a close button down there can be unreachable. */}
+        {keyboardOpen ? (
+          <IconBtn label="Close keyboard" onPress={closeKeyboard}>
+            <Close size={18} color={color.ink} />
+          </IconBtn>
+        ) : null}
       </View>
+
+      {/* A connected-but-silent stream (a capture that keeps failing) must not
+          look like a plain black screen. */}
+      {streamNotice && state === 'connected' ? (
+        <View style={[styles.streamNotice, { top: insets.top + 58 }]}>
+          <Text className="min-w-0 flex-1 text-[11.5px] leading-[16px] text-ink-2" numberOfLines={3}>
+            {streamNotice}
+          </Text>
+          <Tap accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => setStreamNotice(null)} hitSlop={8} className="p-1">
+            <Close size={13} color={color.ink3} />
+          </Tap>
+        </View>
+      ) : null}
 
       {/* Non-connected states get a real explanation and an action. */}
       {state !== 'connected' ? (
@@ -401,8 +532,17 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
 
         <View className="flex-row items-center justify-center gap-2">
           <Btn size="sm" kind={mouseMode ? 'primary' : 'plate'} label="Mouse" onPress={() => { void haptic('select'); setMouseMode((value) => !value) }} />
-          <Btn size="sm" kind={keyboardOpen ? 'primary' : 'plate'} label="Keyboard" onPress={() => { void haptic('select'); setKeyboardOpen((value) => !value) }} />
-          <Btn size="sm" kind="plate" label={zoomed ? 'Fit' : '1:1'} onPress={() => { void haptic('select'); setZoom(zoomed ? 1 : Math.min(6, 1 / (fitScale(viewportSize, frameSize) || 1))); setPan({ x: 0, y: 0 }) }} />
+          <Btn size="sm" kind={keyboardOpen ? 'primary' : 'plate'} label="Keyboard" onPress={() => { void haptic('select'); if (keyboardOpen) closeKeyboard(); else setKeyboardOpen(true) }} />
+          <Btn size="sm" kind="plate" label={zoomed ? 'Fit' : '1:1'} onPress={() => { void haptic('select'); setZoom(zoomed ? 1 : Math.min(6, 1 / (fitScale(viewportSize, rotatedSize(frameSize, rotation)) || 1))); setPan({ x: 0, y: 0 }) }} />
+          <Btn
+            size="sm"
+            kind={rotation !== 0 ? 'primary' : 'plate'}
+            label={`${rotation}°`}
+            onPress={() => {
+              void haptic('select')
+              setRotation((value) => (value + 90) % 360)
+            }}
+          />
           <Btn size="sm" kind="plate" label="Edit" onPress={() => { void haptic('select'); setLongPressAction((value) => (value === 'drag' ? 'right_click' : 'drag')) }} />
           <Btn size="sm" kind="plate" label="Clip" onPress={() => { socketRef.current?.clipboardGet(); setClipboardOpen(true) }} />
         </View>
@@ -414,6 +554,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
         {keyboardOpen ? (
           <View className="mt-2 flex-row items-center gap-2 rounded-[12px] bg-field px-3">
             <TextInput
+              ref={keyInputRef}
               autoFocus
               value=""
               onChangeText={(text) => {
@@ -434,7 +575,7 @@ export function RemoteViewScreen({ route, navigation }: { route: { params: { tar
               className="h-10 min-w-0 flex-1 text-[15px] text-ink"
               style={{ paddingVertical: 0 }}
             />
-            <Tap accessibilityRole="button" accessibilityLabel="Close keyboard" hitSlop={touchSlop(30)} onPress={() => setKeyboardOpen(false)} className="p-1">
+            <Tap accessibilityRole="button" accessibilityLabel="Close keyboard" hitSlop={touchSlop(30)} onPress={closeKeyboard} className="p-1">
               <Close size={16} color={color.ink3} />
             </Tap>
           </View>
@@ -530,12 +671,20 @@ function FrameSurface({
   top,
   width,
   height,
+  rotation,
+  scale,
+  frameWidth,
+  frameHeight,
 }: {
   data: string | null
   left: number
   top: number
   width: number
   height: number
+  rotation: number
+  scale: number
+  frameWidth: number
+  frameHeight: number
 }) {
   const [buffers, setBuffers] = React.useState<{ a: string | null; b: string | null }>({ a: null, b: null })
   const [front, setFront] = React.useState<'a' | 'b'>('a')
@@ -566,7 +715,20 @@ function FrameSurface({
           <Image
             key={slot}
             source={{ uri: source }}
-            style={[StyleSheet.absoluteFill, front === slot ? null : styles.frameHidden]}
+            style={[
+              {
+                position: 'absolute',
+                // The image is the frame at its own aspect and scale, centred in
+                // the (possibly rotated) box, then turned about that centre — so
+                // a 90° turn lands exactly in a box of swapped dimensions.
+                width: frameWidth * scale,
+                height: frameHeight * scale,
+                left: (width - frameWidth * scale) / 2,
+                top: (height - frameHeight * scale) / 2,
+                transform: [{ rotate: `${rotation}deg` }],
+              },
+              front === slot ? null : styles.frameHidden,
+            ]}
             resizeMode="stretch"
             fadeDuration={0}
             onLoad={commit(slot)}
@@ -574,6 +736,30 @@ function FrameSurface({
         )
       })}
     </View>
+  )
+}
+
+/* ── Touch ripple ─────────────────────────────────────────────────────────── */
+
+/**
+ * A ring where the finger landed, fading out.
+ *
+ * Native touch feedback instead of a synthetic pointer: the remote cursor is
+ * drawn by the machine itself, so the phone only shows that it registered the
+ * touch.
+ */
+function TouchRipple({ x, y }: { x: number; y: number }) {
+  const progress = React.useRef(new Animated.Value(0)).current
+  React.useEffect(() => {
+    Animated.timing(progress, { toValue: 1, duration: 420, useNativeDriver: true }).start()
+  }, [progress])
+  const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.35] })
+  const opacity = progress.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 1, 0] })
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.ripple, { left: x - 22, top: y - 22, opacity, transform: [{ scale }] }]}
+    />
   )
 }
 
@@ -723,14 +909,26 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     backgroundColor: 'rgba(10, 10, 12, 0.86)',
   },
-  cursor: {
+  streamNotice: {
     position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(90, 62, 8, 0.94)',
+  },
+  ripple: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 2,
     borderColor: color.accent,
-    backgroundColor: 'rgba(10, 132, 255, 0.25)',
+    backgroundColor: 'rgba(10, 132, 255, 0.18)',
   },
   /** The back buffer: decoded but not yet swapped to the front. */
   frameHidden: { opacity: 0 },
